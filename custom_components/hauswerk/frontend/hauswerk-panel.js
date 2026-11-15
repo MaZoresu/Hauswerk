@@ -1,6 +1,6 @@
-/* Hauswerk – Panel für Home Assistant (Module: Heizen; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
+/* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.13.0";
+const VERSION = "0.14.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -90,7 +90,7 @@ const WEATHER = {
 };
 /** Widgets der Startseite: Name, Symbol, Farbe, Beschreibung; go = Ansicht öffnen, pop = Einstellung, config = Entitäten wählen. */
 const WIDGETS = {
-  heat: { name: "Heizen", icon: "mdi:radiator", c: "#fb923c", text: "Ø-Temperatur, Kurzurteil, heizende Räume, offene Fenster und Heizstunden heute", go: "overview" },
+  heat: { name: "Heizwerk", icon: "mdi:radiator", c: "#fb923c", text: "Ø-Temperatur, Kurzurteil, heizende Räume, offene Fenster und Heizstunden heute", go: "overview" },
   presence: { name: "Anwesenheit", icon: "mdi:home-account", c: "#34d399", text: "Zu Hause, Abwesend, Urlaub sowie Gäste, Party und Eco mit einem Tipp umschalten", pop: "presence" },
   weather: { name: "Wetter", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", text: "Wetterlage, Außentemperatur, Wind und Luftfeuchte", pop: "weather" },
   rooms: { name: "Räume", icon: "mdi:floor-plan", c: "#2dd4bf", text: "Alle Räume als kleine Kacheln mit Temperatur und Betriebsart", size: "l", go: "overview" },
@@ -152,8 +152,9 @@ const PLAN_PRESETS = {
     ],
   },
 };
-// Modul-Reiter (Aufbau wie in der Haussteuerung): Start + nummerierte Module, Einstellungen oben rechts.
-// Alles rund ums Heizen liegt im Modul „Heizen“ mit eigener Unterleiste.
+// Aufbau: Start = Hauswerk-Dashboard mit den Widgets aller Module, dann die Module als Reiter,
+// zentrale Hauswerk-Einstellungen (gelten für alle Module) hinter dem Zahnrad oben rechts.
+// Alles rund ums Heizen liegt im Modul „Heizwerk“ mit eigener Unterleiste und eigenen Einstellungen.
 const HEAT_VIEWS = [
   { id: "overview", slug: "raeume", name: "Räume", icon: "mdi:radiator" },
   { id: "plans", slug: "heizplaene", name: "Heizpläne", icon: "mdi:calendar-clock", hidden: true }, // über Einstellungen › Heizpläne
@@ -161,14 +162,16 @@ const HEAT_VIEWS = [
   { id: "report", slug: "bericht", name: "Bericht", icon: "mdi:chart-bar" },
   { id: "settings", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
 ];
-const MODULES = [{ id: "heizen", no: 1, name: "Heizen", icon: "mdi:radiator", views: HEAT_VIEWS.map((v) => v.id) }];
+const MODULES = [{ id: "heizen", no: 1, name: "Heizwerk", icon: "mdi:radiator", views: HEAT_VIEWS.map((v) => v.id) }];
 // Geplante Module: nur ausgegraut angezeigt, noch ohne Funktion.
 const COMING = [
   { name: "Rollladen", icon: "mdi:window-shutter" },
   { name: "Licht", icon: "mdi:lightbulb-outline" },
   { name: "Garten", icon: "mdi:flower-outline" },
 ];
-const SLUGS = { start: "start", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])) };
+const SLUGS = { start: "start", house: "einstellungen", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])) };
+// Pop-ups, die zu den zentralen Hauswerk-Einstellungen gehören (alle anderen gehören zu Heizwerk)
+const HOUSE_POPS = ["presence", "vacation", "weather", "access"];
 const DEFAULT_VIEW = "start";
 
 const esc = (v) =>
@@ -381,6 +384,8 @@ class HauswerkPanel extends HTMLElement {
       const slug = `heizen/${parts[2] || "raeume"}`;
       return Object.keys(SLUGS).find((k) => SLUGS[k] === slug) || "overview";
     }
+    // /hauswerk/einstellungen = zentrale Hauswerk-Einstellungen
+    if (parts[1] === "einstellungen") return "house";
     // alte Adressen (/hauswerk/raeume …) weiter verstehen
     const old = HEAT_VIEWS.find((v) => v.slug === parts[1]);
     return old ? old.id : DEFAULT_VIEW;
@@ -388,8 +393,9 @@ class HauswerkPanel extends HTMLElement {
 
   _setView(view, push = true) {
     if (this._tab === "plans" && view !== "plans" && this._plan?.dirty && !confirm("Ungespeicherte Änderungen am Heizplan verwerfen?")) return;
+    if (view !== this._tab) this._setQuery = "";
     this._tab = view;
-    if (view === "settings") this._settings = null;
+    if (view === "settings" || view === "house") this._settings = null;
     // Adresse nur innerhalb von Home Assistant ändern (nicht in der Vorschau-Datei)
     if (push && location.pathname.startsWith(this._base)) {
       history.pushState(null, "", `${this._base}/${SLUGS[view]}${view === "room" ? `/${encodeURIComponent(this._roomId)}` : ""}`);
@@ -409,21 +415,23 @@ class HauswerkPanel extends HTMLElement {
     if (chips)
       chips.innerHTML =
         this._data && !this._error
-          ? (["start", "overview", "room"].includes(this._tab) ? "" : this._chipsHtml()) + (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "")
+          ? (["start", "overview", "room", "house"].includes(this._tab) ? "" : this._chipsHtml()) + (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "")
           : "";
   }
 
-  /** Untere Leiste fürs Handy: Start · Räume · Bericht · Einstellungen. */
+  /** Untere Leiste fürs Handy: Start · Module · Einstellungen (Unterseiten eines Moduls über seine Unterleiste). */
   _bnavHtml() {
     const f = this._data ? this._facts() : null;
     const on = (ids) => (ids.includes(this._tab) ? "on" : "");
     const item = (tab, ids, icon, label, badge = "") =>
       `<button class="bn ${on(ids)}" data-action="tab" data-tab="${tab}"><span class="bi"><ha-icon icon="${icon}"></ha-icon>${badge}</span><span>${label}</span></button>`;
     return [
-      item("start", ["start"], "mdi:home-outline", "Start"),
-      item("overview", ["overview", "room"], "mdi:radiator", "Räume", f && (f.open || f.heating) ? `<em class="${f.open ? "warn" : ""}">${f.open || f.heating}</em>` : ""),
-      item("report", ["report"], "mdi:chart-bar", "Bericht"),
-      item("settings", ["settings", "plans"], "mdi:tune-variant", "Einstellungen"),
+      item("start", ["start"], "mdi:view-dashboard-outline", "Start"),
+      ...MODULES.map((m) =>
+        item(m.views.includes(this._tab) ? this._tab : m.views[0], m.views, m.icon, m.name,
+          m.id === "heizen" && f && (f.open || f.heating) ? `<em class="${f.open ? "warn" : ""}">${f.open || f.heating}</em>` : "")
+      ),
+      item("house", ["house"], "mdi:cog-outline", "Einstellungen"),
     ].join("");
   }
 
@@ -478,7 +486,7 @@ class HauswerkPanel extends HTMLElement {
     const mod = MODULES.find((m) => m.views.includes(this._tab));
     const sub = HEAT_VIEWS.find((v) => v.id === this._tab);
     const roomName = this._tab === "room" ? this._data?.rooms?.[this._roomId]?.name : null;
-    const title = mod ? `${mod.name}${roomName ? ` · ${roomName}` : sub ? ` · ${sub.name}` : ""}` : "Start";
+    const title = mod ? `${mod.name}${roomName ? ` · ${roomName}` : sub ? ` · ${sub.name}` : ""}` : this._tab === "house" ? "Einstellungen" : "Start";
     const f = this._data ? this._facts() : null;
     const badge = (id) => {
       if (!f || id !== "heizen") return "";
@@ -505,10 +513,11 @@ class HauswerkPanel extends HTMLElement {
             return `<button class="bell ${warn ? "warn" : h.length ? "info" : ""}" data-action="hints-open" title="${h.length ? `${h.length} Hinweis${h.length > 1 ? "e" : ""}` : "Keine Hinweise"}" aria-label="Hinweise">
               <ha-icon icon="${h.length ? "mdi:bell-badge-outline" : "mdi:bell-outline"}"></ha-icon>${warn ? `<em>${warn}</em>` : h.length ? "<i></i>" : ""}</button>`;
           })()}
+          ${this._data ? `<button class="bell gear ${this._tab === "house" ? "on" : ""}" data-action="tab" data-tab="house" title="Hauswerk-Einstellungen (für alle Module)" aria-label="Einstellungen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
         </div>
       </div>
       <nav class="mtabs">
-        ${tab("start", "Start", "mdi:home-outline", "start")}
+        ${tab("start", "Start", "mdi:view-dashboard-outline", "start")}
         ${MODULES.map((m) => tab(m.id, m.name, m.icon, mod?.id === m.id ? this._tab : m.views[0])).join("")}
         ${COMING.map(soon).join("")}
       </nav>`;
@@ -568,7 +577,7 @@ class HauswerkPanel extends HTMLElement {
     // Hintergrund passend zum Bereich: Startseite oder Heizen
     this.setAttribute("view", MODULES[0].views.includes(this._tab) ? "heat" : "start");
     if (!this._data) return;
-    const view = { start: this._viewStart, overview: this._viewOverview, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom }[this._tab] || this._viewStart;
+    const view = { start: this._viewStart, house: this._viewHouse, overview: this._viewOverview, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom }[this._tab] || this._viewStart;
     main.innerHTML = view.call(this);
   }
 
@@ -1247,7 +1256,7 @@ class HauswerkPanel extends HTMLElement {
     return `
       <div class="chart-wrap">
         <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}${bars}${labels}</svg>
-        ${anyData ? "" : `<div class="chart-note">Noch keine Werte. Hauswerk zählt ab jetzt jede Minute mit.</div>`}
+        ${anyData ? "" : `<div class="chart-note">Noch keine Werte. Heizwerk zählt ab jetzt jede Minute mit.</div>`}
       </div>
       <div class="legend">
         <span class="muted">${hoursMode ? "Stunden" : "Minuten"}</span>
@@ -1264,7 +1273,7 @@ class HauswerkPanel extends HTMLElement {
           ${mini ? `<b class="rm-name">${esc(room.name)}</b>` : `<div class="room-t"><h4>${esc(room.name)}</h4><small>noch nicht eingerichtet</small></div>`}
         </div>
         <div class="setup-b">
-          ${mini ? "" : `<p><ha-icon icon="mdi:thermostat-box"></ha-icon>Ordne ein Thermostat zu – dann regelt Hauswerk diesen Raum.</p>`}
+          ${mini ? "" : `<p><ha-icon icon="mdi:thermostat-box"></ha-icon>Ordne ein Thermostat zu – dann regelt Heizwerk diesen Raum.</p>`}
           ${this._admin ? `<button class="secondary" data-action="room-edit" data-id="${room.id}" data-rtab="devices"><ha-icon icon="mdi:link-variant-plus"></ha-icon>Geräte zuordnen</button>` : `<p class="muted small">Noch nicht eingerichtet</p>`}
         </div>
       </article>`;
@@ -1408,7 +1417,7 @@ class HauswerkPanel extends HTMLElement {
       </div>`;
   }
 
-  /** Verlauf der letzten 24 h aus dem Recorder (Soll-Sensor von Hauswerk, sonst das Thermostat). */
+  /** Verlauf der letzten 24 h aus dem Recorder (Soll-Sensor von Heizwerk, sonst das Thermostat). */
   _history(room) {
     this._hist = this._hist || {};
     const h = this._hist[room.id];
@@ -1734,7 +1743,7 @@ class HauswerkPanel extends HTMLElement {
           <div class="field"><span><ha-icon icon="mdi:calendar"></ha-icon> Kalender</span>${this._picker("plan_calendar", plan.calendar ? [plan.calendar] : [])}</div>
           <label class="field"><span><ha-icon icon="mdi:text-search"></ha-icon> Nur Termine mit diesen Wörtern (mit Komma getrennt, leer = alle)</span>
             <input type="text" maxlength="200" data-plankw value="${esc(plan.keyword || "")}" placeholder="z. B. Homeoffice, Heizen" ${dis}></label>
-          <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Läuft ein Termin, heizen alle Räume mit diesem Plan auf Komfort, sonst Eco – vor dem nächsten Termin wird vorgeheizt. Ganztägige Termine zählen nicht. Neue oder geänderte Termine übernimmt Hauswerk innerhalb von 5 Minuten.</p>
+          <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Läuft ein Termin, heizen alle Räume mit diesem Plan auf Komfort, sonst Eco – vor dem nächsten Termin wird vorgeheizt. Ganztägige Termine zählen nicht. Neue oder geänderte Termine übernimmt Heizwerk innerhalb von 5 Minuten.</p>
           ${err ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>Kalender nicht lesbar: ${esc(err)}</p>` : ""}
           ${events ? `
           <div class="lbl">Nächste Komfortzeiten</div>
@@ -1743,7 +1752,7 @@ class HauswerkPanel extends HTMLElement {
             return `<div class="ev ${on ? "live" : ""}"><ha-icon icon="${on ? "mdi:fire" : "mdi:calendar-clock"}"></ha-icon>
               <span class="grow"><b>${esc(e.summary || "Termin")}</b><small>${when(e.start)} – ${hhmm(e.end)}</small></span>${on ? `<em class="badge ok">JETZT</em>` : ""}</div>`;
           }).join("") : `<p class="muted small">In den nächsten 8 Tagen kein passender Termin – die Räume bleiben auf Eco.</p>`}</div>`
-          : plan.calendar ? `<p class="muted small"><ha-icon icon="mdi:content-save-outline"></ha-icon>Nach dem Speichern zeigt Hauswerk hier die nächsten Termine.</p>` : ""}
+          : plan.calendar ? `<p class="muted small"><ha-icon icon="mdi:content-save-outline"></ha-icon>Nach dem Speichern zeigt Heizwerk hier die nächsten Termine.</p>` : ""}
         </section>
         ${saveBar}`;
     }
@@ -1979,19 +1988,37 @@ class HauswerkPanel extends HTMLElement {
     return type === "flaeche" ? p.lead_floor ?? 120 : p.lead_radiator ?? 15;
   }
 
-  /** Alle Einstellungen als Zeilen: Gruppe, Symbol, Titel und der aktuelle Stand. */
-  _settingRows() {
+  /** Einstellungen als Zeilen: scope "house" = Hauswerk (gilt für alle Module), "heat" = nur Heizwerk. */
+  _settingRows(scope) {
     const p = this._data.settings;
     const s = this._status || {};
     const rooms = this._rooms();
     const plans = this._planList();
     const persons = (p.persons || []).length;
     const d = (iso) => new Date(iso).toLocaleDateString("de-DE", { day: "numeric", month: "short" });
-    const vac = {
-      off: "Nur von Hand",
-      period: p.vacation_from && p.vacation_to ? `${d(p.vacation_from)} – ${d(p.vacation_to)}` : "Zeitraum – keiner eingetragen",
-      calendar: p.vacation_calendar ? `Kalender ${this._entityName(p.vacation_calendar)}` : "Kalender – keiner gewählt",
-    }[p.vacation_source || "period"];
+    if (scope === "house") {
+      const vac = {
+        off: "Nur von Hand",
+        period: p.vacation_from && p.vacation_to ? `${d(p.vacation_from)} – ${d(p.vacation_to)}` : "Zeitraum – keiner eingetragen",
+        calendar: p.vacation_calendar ? `Kalender ${this._entityName(p.vacation_calendar)}` : "Kalender – keiner gewählt",
+      }[p.vacation_source || "period"];
+      const n = this._widgets().length;
+      return [
+        { g: "Haus", id: "presence", icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit",
+          sum: persons ? `${persons} Person${persons > 1 ? "en" : ""} · abwesend nach ${p.away_delay} Min.${p.arrive_delay ? ` · zu Hause nach ${p.arrive_delay} Min.` : ""}` : "Noch keine Personen gewählt",
+          warn: !persons, words: "personen abwesend heimweg nähe entfernung gäste" },
+        { g: "Haus", id: "vacation", icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub", sum: vac, on: s.vacation, words: "kalender zeitraum stichwort ferien reise" },
+        { g: "Haus", id: "weather", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter",
+          sum: `${p.weather_entity ? this._entityName(p.weather_entity) : "automatisch"}${p.outside_sensor ? ` · Außen: ${this._entityName(p.outside_sensor)}` : ""}`, words: "wetter außentemperatur sensor prognose" },
+        { g: "Startseite", start: true, icon: "mdi:view-dashboard-edit-outline", c: "#2dd4bf", title: "Widgets",
+          sum: `${n} Widget${n === 1 ? "" : "s"} · für alle Benutzer gleich`, words: "start dashboard widget übersicht anpassen" },
+        ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => v === "settings") || m.views[0], icon: m.icon, c: "#fb923c", title: m.name,
+          sum: `${rooms.length} ${rooms.length === 1 ? "Raum" : "Räume"} · Heizpläne, Vorheizen, Saison und mehr`, words: "heizen heizung räume module" })),
+        ...COMING.map((m) => ({ g: "Module", soon: true, icon: m.icon, c: "#94a3b8", title: m.name, sum: "Kommt später", words: `${m.name.toLowerCase()} module` })),
+        { g: "System", id: "access", icon: "mdi:shield-account-outline", c: "#94a3b8", title: "Berechtigungen",
+          sum: p.allow_users ? "Alle Benutzer dürfen ändern" : "Nur Administratoren dürfen ändern", words: "admin benutzer rechte tablet speichern" },
+      ];
+    }
     const season = {
       off: "Immer Heizperiode",
       auto: `Sommerpause ab ${fmt(p.summer_temp ?? 16)} °C außen`,
@@ -2003,12 +2030,12 @@ class HauswerkPanel extends HTMLElement {
     const shared = rooms.filter((r) => !r.schedule_entity && this._data.plans?.[r.plan_id]).length;
     const away = p.away_action === "off" ? "Thermostate aus" : p.away_mode === "offset" ? `${fmt(p.away_offset)} K kühler` : `höchstens ${fmt(p.away_temp)} °C`;
     const rows = [
-      { g: "Haus", id: "presence", icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit",
-        sum: persons ? `${persons} Person${persons > 1 ? "en" : ""} · ${away} nach ${p.away_delay} Min.` : "Noch keine Personen gewählt", warn: !persons, words: "personen abwesend heimweg nähe entfernung gäste" },
-      { g: "Haus", id: "vacation", icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub", sum: `${vac} · ${fmt(p.vacation_temp)} °C`, on: s.vacation, words: "kalender zeitraum stichwort ferien reise" },
-      { g: "Haus", id: "season", icon: s.summer ? "mdi:weather-sunny" : "mdi:snowflake-thermometer", c: "#facc15", title: "Saison", sum: season + (s.summer ? " · gerade Sommerpause" : ""), words: "sommer sommerpause heizperiode außentemperatur" },
-      { g: "Haus", id: "weather", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter",
-        sum: `${p.weather_entity ? this._entityName(p.weather_entity) : "automatisch"}${p.outside_sensor ? ` · Außen: ${this._entityName(p.outside_sensor)}` : ""}`, words: "wetter außentemperatur sensor banner" },
+      { g: "Hauswerk", go: "house", icon: "mdi:home-cog-outline", c: "#2dd4bf", title: "Zentrale Einstellungen",
+        sum: "Anwesenheit, Urlaub, Wetter und Berechtigungen gelten für alle Module", words: "anwesenheit urlaub wetter personen berechtigungen zentral" },
+      { g: "Heizen", id: "absence", icon: "mdi:home-export-outline", c: "#94a3b8", title: "Abwesenheit & Urlaub",
+        sum: `Abwesend: ${away} · Urlaub: ${fmt(p.vacation_temp)} °C${Number(p.long_away_days) > 0 ? ` · nach ${p.long_away_days} Tagen Frostschutz` : ""}`,
+        on: s.vacation || s.away, words: "abwesend urlaub absenken temperatur frostschutz lange" },
+      { g: "Heizen", id: "season", icon: s.summer ? "mdi:weather-sunny" : "mdi:snowflake-thermometer", c: "#facc15", title: "Saison", sum: season + (s.summer ? " · gerade Sommerpause" : ""), words: "sommer sommerpause heizperiode außentemperatur" },
       { g: "Heizen", id: "plans", icon: "mdi:calendar-clock", c: "#60a5fa", title: "Heizpläne",
         sum: plans.length ? `${plans.length} gemeinsame${plans.length === 1 ? "r Plan" : " Pläne"} · ${shared} von ${rooms.length} Räumen nutzen sie` : "Noch kein gemeinsamer Plan", go: "plans", words: "zeitplan komfortzeit kalender import vorlage" },
       { g: "Heizen", id: "preheat", icon: "mdi:clock-fast", c: "#fb923c", title: "Vorheizen", sum: pre + (own ? ` · ${own} ${own > 1 ? "Räume" : "Raum"} mit eigener Einstellung` : ""), words: "lernen lernend fest aus vorlauf aufheizen" },
@@ -2020,35 +2047,51 @@ class HauswerkPanel extends HTMLElement {
       ...rooms.map((r) => ({ g: "Räume", room: r, icon: roomIcon(r), c: this._roomColor(r.id), title: r.name,
         sum: `${TYPES[r.type].label} · ${(r.climates || []).length}× Thermostat · ${this._planLabel(r)}`, off: r.enabled === false, words: "raum thermostat" })),
     ];
-    rows.push({ g: "System", id: "access", icon: "mdi:shield-account-outline", c: "#94a3b8", title: "Berechtigungen",
-      sum: p.allow_users ? "Alle Benutzer dürfen ändern" : "Nur Administratoren dürfen ändern", words: "admin benutzer rechte tablet speichern" });
     if (!rooms.length) rows.push({ g: "Räume", newRoom: true, icon: "mdi:plus", c: "#2dd4bf", title: "Raum anlegen", sum: "Thermostate, Fenster und Sensoren zuordnen", words: "raum neu" });
     return rows;
   }
 
+  /** Einstellungen des Moduls Heizwerk. */
   _viewSettings() {
-    return `
-      <div class="setsearch search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-action="set-search" placeholder="Einstellung suchen …" value="${esc(this._setQuery || "")}" autocomplete="off"></div>
-      <div id="set-list">${this._settingsList()}</div>`;
+    return this._settingsPage("heat");
   }
 
-  _settingsList() {
+  /** Zentrale Hauswerk-Einstellungen: gelten für alle Module. */
+  _viewHouse() {
+    return this._settingsPage("house");
+  }
+
+  _settingsPage(scope) {
+    const intro = scope === "house"
+      ? `<p class="muted small setintro"><ha-icon icon="mdi:home-cog-outline"></ha-icon>Diese Einstellungen gelten für ganz Hauswerk und alle Module. Was nur das Heizen betrifft, steht unter <button class="link inline" data-action="tab" data-tab="settings">Heizwerk › Einstellungen</button>.</p>`
+      : "";
+    return `
+      ${intro}
+      <div class="setsearch search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-action="set-search" placeholder="Einstellung suchen …" value="${esc(this._setQuery || "")}" autocomplete="off"></div>
+      <div id="set-list">${this._settingsList(scope)}</div>`;
+  }
+
+  _settingsList(scope = this._tab === "house" ? "house" : "heat") {
     const q = (this._setQuery || "").toLowerCase().trim();
-    const rows = this._settingRows().filter((r) => !q || `${r.g} ${r.title} ${r.sum} ${r.words}`.toLowerCase().includes(q));
+    const rows = this._settingRows(scope).filter((r) => !q || `${r.g} ${r.title} ${r.sum} ${r.words}`.toLowerCase().includes(q));
     if (!rows.length) return `<section class="card empty small"><p>Nichts gefunden für „${esc(q)}“.</p></section>`;
     const row = (r) => {
-      const attrs = r.room
-        ? `data-action="room-edit" data-id="${r.room.id}" ${this._admin ? "" : "disabled"}`
-        : r.newRoom
-          ? `data-action="room-new" ${this._admin ? "" : "disabled"}`
-          : r.go
-            ? `data-action="tab" data-tab="${r.go}"`
-            : `data-action="pop-open" data-pop="${r.id}"`;
+      const attrs = r.soon
+        ? "disabled"
+        : r.room
+          ? `data-action="room-edit" data-id="${r.room.id}" ${this._admin ? "" : "disabled"}`
+          : r.newRoom
+            ? `data-action="room-new" ${this._admin ? "" : "disabled"}`
+            : r.start
+              ? `data-action="start-edit" ${this._admin ? "" : "disabled"}`
+              : r.go
+                ? `data-action="tab" data-tab="${r.go}"`
+                : `data-action="pop-open" data-pop="${r.id}"`;
       return `
-        <button class="srow ${r.warn ? "warn" : ""} ${r.off ? "off" : ""}" ${attrs}>
+        <button class="srow ${r.warn ? "warn" : ""} ${r.off || r.soon ? "off" : ""}" ${attrs}>
           <span class="sr-ic" style="--c:${r.c}"><ha-icon icon="${esc(r.icon)}"></ha-icon></span>
-          <span class="sr-t"><b>${esc(r.title)}${r.on ? ` <em class="badge ok">AKTIV</em>` : ""}${r.off ? ` <em class="badge">AUTOMATIK AUS</em>` : ""}</b><small>${esc(r.sum)}</small></span>
-          <ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon>
+          <span class="sr-t"><b>${esc(r.title)}${r.on ? ` <em class="badge ok">AKTIV</em>` : ""}${r.off ? ` <em class="badge">AUTOMATIK AUS</em>` : ""}${r.soon ? ` <em class="badge">BALD</em>` : ""}</b><small>${esc(r.sum)}</small></span>
+          ${r.soon ? "" : `<ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon>`}
         </button>`;
     };
     return [...new Set(rows.map((r) => r.g))]
@@ -2121,24 +2164,16 @@ class HauswerkPanel extends HTMLElement {
     switch (id) {
       case "presence":
         return {
-          icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit", sub: "Gilt für das ganze Haus",
+          icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit", sub: "Hauswerk · gilt für alle Module",
           body: `
             <div class="field"><span><ha-icon icon="mdi:account-multiple-outline"></ha-icon> Wer wohnt hier?</span>${this._picker("persons", p.persons || [])}</div>
-            <p class="muted small">Sind alle gewählten Personen weg, senkt Hauswerk nach der Wartezeit ab. Ohne Personen gibt es kein automatisches „Abwesend“.</p>
-            ${head("mdi:home-export-outline", "Wenn niemand da ist")}
-            <div class="field">${segs("away_action", [["lower", "Absenken", "mdi:thermometer-chevron-down"], ["off", "Thermostate aus", "mdi:power"]], "lower")}</div>
-            ${(p.away_action || "lower") === "lower" ? `
-            <div class="field">${segs("away_mode", [["temp", "Auf höchstens …", "mdi:thermometer"], ["offset", "Um … kühler", "mdi:arrow-down-thin"]], "temp")}</div>
-            ${(p.away_mode || "temp") === "offset"
-              ? `<label class="field narrow"><span>Absenkung</span><div class="unit"><input type="number" step="0.5" min="0" max="10" data-set="away_offset" value="${p.away_offset ?? 2}" ${dis}><i>K</i></div></label>`
-              : `<div class="field"><span>Höchstens</span>${this._stepper("set", "away_temp", p.away_temp)}</div>`}` : ""}
+            <p class="muted small">Sind alle gewählten Personen weg, gilt das Haus nach der Wartezeit als „Abwesend“. Ohne Personen gibt es kein automatisches „Abwesend“. Was dann passiert, legt jedes Modul selbst fest – fürs Heizen unter Heizwerk › Einstellungen › Abwesenheit & Urlaub.</p>
             <div class="row2">
-              <label class="field"><span><ha-icon icon="mdi:logout"></ha-icon> Absenken nach dem Gehen</span>${minutes("away_delay", 10)}</label>
-              <label class="field"><span><ha-icon icon="mdi:login"></ha-icon> Normal heizen nach dem Heimkommen</span>${minutes("arrive_delay", 0)}</label>
+              <label class="field"><span><ha-icon icon="mdi:logout"></ha-icon> Abwesend nach dem Gehen</span>${minutes("away_delay", 10)}</label>
+              <label class="field"><span><ha-icon icon="mdi:login"></ha-icon> Wieder zu Hause nach dem Heimkommen</span>${minutes("arrive_delay", 0)}</label>
             </div>
-            <label class="field narrow"><span><ha-icon icon="mdi:snowflake-thermometer"></ha-icon> Frostschutz, wenn so lange niemand da war (0 = nie)</span><div class="unit"><input type="number" step="1" min="0" max="60" data-set="long_away_days" value="${p.long_away_days ?? 0}" ${dis}><i>Tage</i></div></label>
-            ${head("mdi:map-marker-radius-outline", "Auf dem Heimweg vorheizen")}
-            <p class="muted small">Entfernungs-Sensoren, z. B. aus der Integration „Nähe“. Ist jemand näher als die Grenze, gilt das Haus schon als bewohnt.</p>
+            ${head("mdi:map-marker-radius-outline", "Auf dem Heimweg")}
+            <p class="muted small">Entfernungs-Sensoren, z. B. aus der Integration „Nähe“. Ist jemand näher als die Grenze, gilt das Haus schon als bewohnt – Heizwerk heizt dann zum Beispiel schon vor.</p>
             <div class="row2">
               <div class="field"><span>Entfernungs-Sensoren</span>${this._picker("proximity_sensors", p.proximity_sensors || [])}</div>
               <label class="field"><span>Näher als (0 = aus)</span><div class="unit"><input type="number" step="0.5" min="0" max="200" data-set="proximity_km" value="${p.proximity_km ?? 0}" ${dis}><i>km</i></div></label>
@@ -2146,14 +2181,30 @@ class HauswerkPanel extends HTMLElement {
             <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Gäste, Party und Eco schaltest du direkt in der Hausmodus-Leiste auf der Startseite. Präsenzmelder einzelner Räume stehen am Raum unter „Geräte“.</p>`,
         };
 
+      case "absence":
+        return {
+          icon: "mdi:home-export-outline", c: "#94a3b8", title: "Abwesenheit & Urlaub", sub: "Heizwerk · was die Heizung tut, wenn niemand da ist",
+          body: `
+            <p class="muted small"><ha-icon icon="mdi:home-cog-outline"></ha-icon>Wer zu Hause ist und wann Urlaub ist, stellst du zentral ein: <button class="link inline" data-action="settings-go" data-sub="presence">Anwesenheit</button> · <button class="link inline" data-action="settings-go" data-sub="vacation">Urlaub</button></p>
+            ${head("mdi:home-export-outline", "Wenn niemand da ist")}
+            <div class="field">${segs("away_action", [["lower", "Absenken", "mdi:thermometer-chevron-down"], ["off", "Thermostate aus", "mdi:power"]], "lower")}</div>
+            ${(p.away_action || "lower") === "lower" ? `
+            <div class="field">${segs("away_mode", [["temp", "Auf höchstens …", "mdi:thermometer"], ["offset", "Um … kühler", "mdi:arrow-down-thin"]], "temp")}</div>
+            ${(p.away_mode || "temp") === "offset"
+              ? `<label class="field narrow"><span>Absenkung</span><div class="unit"><input type="number" step="0.5" min="0" max="10" data-set="away_offset" value="${p.away_offset ?? 2}" ${dis}><i>K</i></div></label>`
+              : `<div class="field"><span>Höchstens</span>${this._stepper("set", "away_temp", p.away_temp)}</div>`}` : ""}
+            <label class="field narrow"><span><ha-icon icon="mdi:snowflake-thermometer"></ha-icon> Frostschutz, wenn so lange niemand da war (0 = nie)</span><div class="unit"><input type="number" step="1" min="0" max="60" data-set="long_away_days" value="${p.long_away_days ?? 0}" ${dis}><i>Tage</i></div></label>
+            ${head("mdi:palm-tree", "Im Urlaub")}
+            <div class="field"><span>Temperatur im Urlaub (alle Räume)</span>${this._stepper("set", "vacation_temp", p.vacation_temp)}</div>`,
+        };
+
       case "vacation": {
         const src = p.vacation_source || "period";
         const saved = this._data.settings;
         const events = src === "calendar" && saved.vacation_calendar === p.vacation_calendar && saved.vacation_keywords === p.vacation_keywords ? s.vacation_events || [] : null;
         return {
-          icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub", sub: "Gilt für das ganze Haus",
+          icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub", sub: "Hauswerk · gilt für alle Module",
           body: `
-            <div class="field"><span>Temperatur im Urlaub (alle Räume)</span>${this._stepper("set", "vacation_temp", p.vacation_temp)}</div>
             <div class="field"><span>Urlaub automatisch erkennen</span>${segs("vacation_source", [["off", "Aus", "mdi:close-circle-outline"], ["period", "Zeitraum", "mdi:calendar-range"], ["calendar", "HA-Kalender", "mdi:calendar-search"]], "period")}</div>
             ${src === "period" ? `
             <div class="row2">
@@ -2173,7 +2224,8 @@ class HauswerkPanel extends HTMLElement {
                 <span class="grow"><b>${esc(e.summary || "Termin")}</b><small>${date(e.start)} – ${date(new Date(e.end).getTime() - 1)}</small></span>${new Date(e.start) <= new Date() ? `<em class="badge ok">JETZT</em>` : ""}</div>`).join("") : `<p class="muted small">In den nächsten 4 Monaten kein passender Termin.</p>`}</div>`
             : `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Nach dem Speichern zeigt Hauswerk hier die gefundenen Termine.</p>`}` : ""}
             ${src === "off" ? `<p class="muted small">Urlaub nur von Hand.</p>` : ""}
-            <p class="muted small"><ha-icon icon="mdi:gesture-tap"></ha-icon>Von Hand geht es immer: „Urlaub“ in der Hausmodus-Leiste oder <code>switch.hauswerk_urlaub</code> für Automationen.</p>`,
+            <p class="muted small"><ha-icon icon="mdi:gesture-tap"></ha-icon>Von Hand geht es immer: „Urlaub“ in der Hausmodus-Leiste oder <code>switch.hauswerk_urlaub</code> für Automationen.</p>
+            <p class="muted small"><ha-icon icon="mdi:radiator"></ha-icon>Die Temperatur im Urlaub stellst du unter <button class="link inline" data-action="settings-go" data-sub="absence">Heizwerk › Abwesenheit & Urlaub</button> ein.</p>`,
         };
       }
 
@@ -2203,7 +2255,7 @@ class HauswerkPanel extends HTMLElement {
         return {
           icon: "mdi:clock-fast", c: "#fb923c", title: "Vorheizen", sub: "Für alle Räume – je Raum änderbar",
           body: `
-            <p class="muted">Damit ein Raum zu Beginn der Komfortzeit schon warm ist, heizt Hauswerk vorher los.</p>
+            <p class="muted">Damit ein Raum zu Beginn der Komfortzeit schon warm ist, heizt Heizwerk vorher los.</p>
             <div class="field">${segs("preheat_mode", [["smart", "Lernen", "mdi:brain"], ["fixed", "Feste Zeit", "mdi:timer-outline"], ["off", "Aus", "mdi:timer-off-outline"]], "fixed")}</div>
             ${mode === "fixed" ? `
             <div class="row2">
@@ -2212,7 +2264,7 @@ class HauswerkPanel extends HTMLElement {
             </div>
             <p class="muted small">So viele Minuten vor Beginn der Komfortzeit geht es los. Fußbodenheizungen brauchen deutlich länger.</p>` : ""}
             ${mode === "smart" ? `
-            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Hauswerk misst bei jedem Aufheizen, wie viele Grad pro Stunde ein Raum schafft, und startet so früh, dass er pünktlich warm ist – mit 15 % Reserve. Höchstens ${this._data.defaults.heizkoerper.preheat_max} Min. (Heizkörper) bzw. ${this._data.defaults.flaeche.preheat_max} Min. (Fläche) vorher; je Raum änderbar.</p>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Heizwerk misst bei jedem Aufheizen, wie viele Grad pro Stunde ein Raum schafft, und startet so früh, dass er pünktlich warm ist – mit 15 % Reserve. Höchstens ${this._data.defaults.heizkoerper.preheat_max} Min. (Heizkörper) bzw. ${this._data.defaults.flaeche.preheat_max} Min. (Fläche) vorher; je Raum änderbar.</p>
             <div class="lbl">Gelernt</div>
             <div class="evlist">${rooms.map((r) => {
               const rs = st[r.id] || {};
@@ -2323,7 +2375,7 @@ class HauswerkPanel extends HTMLElement {
 
       case "weather":
         return {
-          icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter", sub: "Für das Banner in der Raumübersicht",
+          icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter", sub: "Hauswerk · für Startseite, Widgets und alle Module",
           body: `
             <div class="field"><span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon> Wetter-Entität (leer = erste gefundene)</span>${this._picker("weather_entity", p.weather_entity ? [p.weather_entity] : [])}</div>
             <div class="field"><span><ha-icon icon="mdi:thermometer"></ha-icon> Außentemperatur (leer = vom Wetter)</span>${this._picker("outside_sensor", p.outside_sensor ? [p.outside_sensor] : [])}</div>
@@ -2332,9 +2384,9 @@ class HauswerkPanel extends HTMLElement {
 
       case "access":
         return {
-          icon: "mdi:shield-account-outline", c: "#94a3b8", title: "Berechtigungen",
+          icon: "mdi:shield-account-outline", c: "#94a3b8", title: "Berechtigungen", sub: "Hauswerk · gilt für alle Module",
           body: `
-            <p class="muted">Wer darf Einstellungen, Räume und Heizpläne ändern? Temperatur ±, Boost und „Zurück zum Plan“ dürfen immer alle.</p>
+            <p class="muted">Wer darf Einstellungen, Widgets, Räume und Heizpläne ändern? Temperatur ±, Boost und „Zurück zum Plan“ dürfen immer alle.</p>
             <label class="check"><span><b>Alle Benutzer dürfen ändern</b><small>Sinnvoll z. B. für ein Wand-Tablet mit eigenem Benutzer ohne Admin-Rechte.</small></span>
               <span class="switch"><input type="checkbox" data-set="allow_users" ${p.allow_users ? "checked" : ""} ${this._data.user_admin ? "" : "disabled"}><span></span></span></label>
             ${this._data.user_admin ? "" : `<p class="muted small"><ha-icon icon="mdi:lock-outline"></ha-icon>Das kann nur ein Administrator umstellen.</p>`}`,
@@ -2465,7 +2517,7 @@ class HauswerkPanel extends HTMLElement {
           <div class="field"><span><ha-icon icon="mdi:leaf"></ha-icon> Eco</span>${this._stepper("dlg", "eco", r.eco)}</div>
         </div>
         ${this._schedField(r, segs)}
-        ${check("enabled", "mdi:robot-outline", "Automatik aktiv", "Aus: Hauswerk lässt die Thermostate dieses Raums in Ruhe.", { on: r.enabled !== false })}`,
+        ${check("enabled", "mdi:robot-outline", "Automatik aktiv", "Aus: Heizwerk lässt die Thermostate dieses Raums in Ruhe.", { on: r.enabled !== false })}`,
 
       devices: () => `
         <div class="field"><span><ha-icon icon="mdi:thermostat"></ha-icon> Thermostate</span>${this._picker("climates", r.climates || [])}</div>
@@ -2474,7 +2526,7 @@ class HauswerkPanel extends HTMLElement {
           <div class="field"><span><ha-icon icon="mdi:thermometer"></ha-icon> Raumtemperatur</span>${this._picker("temp_sensor", r.temp_sensor ? [r.temp_sensor] : [])}</div>
           <div class="field"><span><ha-icon icon="mdi:water-percent"></ha-icon> Luftfeuchte</span>${this._picker("humidity_sensor", r.humidity_sensor ? [r.humidity_sensor] : [])}</div>
         </div>
-        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Raumtemperatur und Luftfeuchte sind optional. Ohne Raumsensor nutzt Hauswerk den Messwert der Thermostate.</p>
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Raumtemperatur und Luftfeuchte sind optional. Ohne Raumsensor nutzt Heizwerk den Messwert der Thermostate.</p>
         <div class="sub-h"><ha-icon icon="mdi:motion-sensor"></ha-icon>Präsenzmelder im Raum <span class="muted small">· optional</span></div>
         <div class="field">${this._picker("presence_sensor", r.presence_sensor ? [r.presence_sensor] : [])}</div>
         ${r.presence_sensor ? `
@@ -2486,7 +2538,7 @@ class HauswerkPanel extends HTMLElement {
           <label class="field"><span><ha-icon icon="mdi:account-arrow-left-outline"></ha-icon> Leer nach</span>${num("presence_off", "Min.", 1, 'min="0" max="240"')}</label>
         </div>
         <div class="field"><span><ha-icon icon="mdi:calendar-clock"></ha-icon> Nur berücksichtigen, solange an (optional)</span>${this._picker("presence_schedule", r.presence_schedule ? [r.presence_schedule] : [])}</div>` : `<p class="muted small">Mit Präsenzmelder bleibt der Raum während der Komfortzeit auf Eco, solange niemand darin ist.</p>`}
-        <p class="muted small"><ha-icon icon="mdi:home-account"></ha-icon>Wer zu Hause ist (Personen, Abwesend, Urlaub), gilt für das ganze Haus: Einstellungen › Anwesenheit.</p>`,
+        <p class="muted small"><ha-icon icon="mdi:home-account"></ha-icon>Wer zu Hause ist (Personen, Abwesend, Urlaub), gilt für das ganze Haus: Hauswerk › Einstellungen › Anwesenheit.</p>`,
 
       window: () => `
         ${hint}
@@ -2518,7 +2570,7 @@ class HauswerkPanel extends HTMLElement {
         <div class="row2">
           <label class="field"><span><ha-icon icon="mdi:plus-minus-variant"></ha-icon> Fester Ausgleich am Thermostat</span>${num("target_offset", "K", 0.5, 'min="-5" max="5"')}</label>
         </div>
-        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Regelt ein Thermostat dauerhaft zu kalt, z. B. +1 K: Hauswerk schickt dann 1 K mehr als den Sollwert.</p>
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Regelt ein Thermostat dauerhaft zu kalt, z. B. +1 K: Heizwerk schickt dann 1 K mehr als den Sollwert.</p>
         ${check("calibration", "mdi:tune-vertical-variant", "Thermostat kalibrieren", "Setzt den Temperatur-Offset am Gerät (number-Entität mit „calibration“ oder „offset“ im Namen), damit es wie der Raumsensor misst. Ersetzt das Nachführen.", { disabled: !r.temp_sensor })}
         ${r.calibration ? `<div class="field"><span>Offset-Entität (leer = automatisch suchen)</span>${this._picker("calibration_entities", r.calibration_entities || [])}</div>` : ""}
         ${check("valve_control", "mdi:valve", "Ventil direkt steuern", "Für Thermostate mit Ventil-Entität (number mit „valve“ oder „position“ im Namen): Öffnung nach Abstand zum Soll.")}
@@ -2583,7 +2635,7 @@ class HauswerkPanel extends HTMLElement {
     const example = rate ? Math.round((2 / rate) * 60 * 1.15 + 5) : null;
     return `
       <div class="sub-h"><ha-icon icon="mdi:clock-fast"></ha-icon>Vorheizen</div>
-      <p class="muted small">Damit der Raum zu Beginn einer Komfortzeit schon warm ist, heizt Hauswerk vorher los.</p>
+      <p class="muted small">Damit der Raum zu Beginn einer Komfortzeit schon warm ist, heizt Heizwerk vorher los.</p>
       <div class="field">
         ${segs("preheat-mode", r.preheat_mode || "", [["", `Wie alle Räume (${label[global]})`, "mdi:home-outline"], ["smart", "Lernen", "mdi:brain"], ["fixed", "Feste Zeit", "mdi:timer-outline"], ["off", "Aus", "mdi:timer-off-outline"]])}
       </div>
@@ -2598,7 +2650,7 @@ class HauswerkPanel extends HTMLElement {
             </div>
           </div>
         </div>
-        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Hauswerk misst bei jedem Aufheizen, wie viele Grad pro Stunde der Raum schafft, und rechnet daraus die Startzeit aus – mit 15 % Reserve.</p>` : ""}
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Heizwerk misst bei jedem Aufheizen, wie viele Grad pro Stunde der Raum schafft, und rechnet daraus die Startzeit aus – mit 15 % Reserve.</p>` : ""}
       ${mode === "fixed" ? `
         <div class="row2">
           <label class="field"><span><ha-icon icon="mdi:timer-outline"></ha-icon> Vorheizen vor Komfortbeginn</span>
@@ -2623,7 +2675,7 @@ class HauswerkPanel extends HTMLElement {
       ${src === "own" ? `<p class="muted small">Die Zeiten bearbeitest du unter Heizpläne › Räume › ${esc(r.name || "dieser Raum")}.</p>` : ""}
       ${src === "entity" ? `
       <div class="field"><span>Zeitplan oder Kalender (an bzw. Termin = Komfort, sonst Eco)</span>${this._picker("schedule_entity", r.schedule_entity ? [r.schedule_entity] : [])}</div>
-      <p class="muted small">Bei einem Kalender heizt Hauswerk vor dem nächsten Termin vor.</p>` : ""}`;
+      <p class="muted small">Bei einem Kalender heizt Heizwerk vor dem nächsten Termin vor.</p>` : ""}`;
   }
   // ------------------------------------------------------------ Entitätsauswahl
   _entityName(id) {
@@ -3225,8 +3277,13 @@ class HauswerkPanel extends HTMLElement {
         break;
       }
       case "settings-go":
-        this._setView("settings");
+        // zentrale Pop-ups unter Hauswerk-Einstellungen, alle anderen unter Heizwerk › Einstellungen
+        this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : "settings");
         if (el.dataset.sub) this._openPop(el.dataset.sub);
+        break;
+      case "start-edit":
+        this._wEdit = true;
+        this._setView("start");
         break;
       case "set-seg":
         this._settings[el.dataset.key] = el.dataset.v;
@@ -3766,6 +3823,8 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .bell ha-icon { --mdc-icon-size:22px; }
 .bell.warn { color:#f59e0b; }
 .bell em { position:absolute; top:-5px; right:-5px; min-width:18px; height:18px; padding:0 5px; box-sizing:border-box; border-radius:99px; background:#f59e0b; color:#1f1300; font-style:normal; font-size:11px; font-weight:800; display:grid; place-items:center; }
+.bell.on { color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, var(--card)); }
+.setintro { display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin:0 2px 12px; }
 .bell i { position:absolute; top:7px; right:8px; width:8px; height:8px; border-radius:50%; background:var(--accent); }
 .hstrip { all:unset; cursor:pointer; box-sizing:border-box; width:100%; display:flex; align-items:center; gap:10px; padding:10px 14px; margin-bottom:14px; border-radius:14px; font-size:13.5px;
   background:color-mix(in srgb, #f59e0b 12%, var(--card)); border:1px solid color-mix(in srgb, #f59e0b 35%, transparent); }
@@ -4096,7 +4155,9 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
   .bn em { position:absolute; top:-3px; right:6px; min-width:16px; height:16px; padding:0 4px; box-sizing:border-box; border-radius:99px; font-style:normal; font-size:10px; font-weight:800; display:grid; place-items:center; background:#fb923c; color:#1f1300; }
   .bn em.warn { background:#22d3ee; color:#001b20; }
   .app { padding-bottom:calc(84px + env(safe-area-inset-bottom)); }
-  .mtabs, .heatnav { display:none !important; }
+  .mtabs { display:none !important; }
+  .heatnav { margin-bottom:12px; }
+  .hnav { padding:9px 10px; font-size:13px; }
   .top { padding-bottom:6px; }
   :host .top.slim .bar { display:flex; min-height:44px; }
   :host .top.slim .ttl { display:flex; order:2; flex:1; }
