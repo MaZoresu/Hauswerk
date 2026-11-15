@@ -118,7 +118,12 @@ class Haus:
             stored = {"settings": taken}
             if taken:
                 _LOGGER.info("Übernehme zentrale Einstellungen (%s) aus Heizwerk", ", ".join(sorted(taken)))
-        self.settings.update(stored.get("settings") or {})
+        current = dict(stored.get("settings") or {})
+        # Später in den Kern gewanderte Einstellungen (z. B. Feiertage) aus Heizwerk nachholen
+        for key, value in (legacy or {}).items():
+            if key in HOUSE_KEYS and key not in current:
+                current[key] = value
+        self.settings.update(current)
         # Heimweg-Grenze früher in Kilometern, jetzt in Metern
         old_km = self.settings.pop("proximity_km", None)
         if old_km and not self.settings.get("proximity_m"):

@@ -300,9 +300,9 @@ def test_fenster_erkennung_duschen_feiertag_wetter(hw):
         hass.set("binary_sensor.arbeitstag", "off", name="Arbeitstag")  # Feiertag
         hass.set("sensor.aussen", "-5.0", name="Außen")
         log, haus, ctl = await _setup(hw, hass)
-        await haus.async_save_settings({"outside_sensor": "sensor.aussen"})
-        await ctl.async_save_settings({"workday_entity": "binary_sensor.arbeitstag", "workday_as": 6,
-                                       "preheat_weather": True, "preheat_mode": "fixed", "lead_radiator": 20})
+        await haus.async_save_settings({"outside_sensor": "sensor.aussen",
+                                        "workday_entity": "binary_sensor.arbeitstag", "workday_as": 6})
+        await ctl.async_save_settings({"preheat_weather": True, "preheat_mode": "fixed", "lead_radiator": 20})
         # Werktags 05:30–08:00, sonntags erst ab 09:00
         await ctl.async_save_room({"id": "bad", "name": "Bad", "type": "heizkoerper", "comfort": 22, "eco": 18,
                                    "climates": ["climate.bad"], "windows": [], "temp_sensor": "sensor.bad_t",
@@ -366,3 +366,20 @@ def test_benachrichtigungsart(hw):
     log = asyncio.run(run())
     whys = [e.get("why", "") for e in log.entries if e["cat"] == "notify"]
     assert any("nur Protokoll" in w for w in whys) and any("wichtig gesendet" in w for w in whys)
+
+
+def test_feiertage_wandern_in_den_kern(hw):
+    """0.19 speicherte die Feiertage bei Heizwerk; ab 0.20 gehören sie zum Kern (Anwesenheit)."""
+    async def run():
+        STORES.clear()
+        STORES[hw.const.HOUSE_STORAGE_KEY] = {"settings": {"persons": ["person.jens"]}}
+        STORES[hw.const.STORAGE_KEY] = {"settings": {"frost_temp": 6.5, "workday_entity": "binary_sensor.arbeitstag",
+                                                     "workday_as": 5}, "rooms": {}}
+        _, haus, ctl = await _setup(hw, Hass())
+        return haus, ctl
+
+    haus, ctl = asyncio.run(run())
+    assert haus.settings["workday_entity"] == "binary_sensor.arbeitstag" and haus.settings["workday_as"] == 5
+    assert haus.settings["persons"] == ["person.jens"]
+    assert "workday_entity" not in ctl.settings and ctl.settings["frost_temp"] == 6.5
+    assert "workday_entity" not in STORES[hw.const.STORAGE_KEY]["settings"]

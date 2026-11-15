@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.20.0";
+const VERSION = "0.20.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2211,8 +2211,8 @@ class HauswerkPanel extends HTMLElement {
       const n = this._widgets().length;
       return [
         { g: "Haus", id: "presence", icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit",
-          sum: persons ? `${persons} Person${persons > 1 ? "en" : ""} · abwesend nach ${p.away_delay} Min.${p.arrive_delay ? ` · zu Hause nach ${p.arrive_delay} Min.` : ""}` : "Noch keine Personen gewählt",
-          warn: !persons, words: "personen abwesend heimweg nähe entfernung gäste" },
+          sum: persons ? `${persons} Person${persons > 1 ? "en" : ""} · abwesend nach ${p.away_delay} Min.${p.arrive_delay ? ` · zu Hause nach ${p.arrive_delay} Min.` : ""}${p.workday_entity ? " · Feiertage erkannt" : ""}` : "Noch keine Personen gewählt",
+          warn: !persons, words: "personen abwesend heimweg nähe entfernung gäste feiertag arbeitstag workday wochenende" },
         { g: "Haus", id: "vacation", icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub", sum: vac, on: s.vacation, words: "kalender zeitraum stichwort ferien reise" },
         { g: "Haus", id: "weather", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter",
           sum: `${p.weather_entity ? this._entityName(p.weather_entity) : "Wetter automatisch"}${p.outside_sensor ? ` · Außen: ${this._entityName(p.outside_sensor)}` : ""} · Kälte < ${fmt(p.cold_snap_temp ?? 0)} °C · Sturm ab ${fmt(p.storm_kmh ?? 70, 0)} km/h`,
@@ -2257,9 +2257,6 @@ class HauswerkPanel extends HTMLElement {
       { g: "Heizen", id: "plans", icon: "mdi:calendar-clock", c: "#60a5fa", title: "Heizpläne",
         sum: plans.length ? `${plans.length} gemeinsame${plans.length === 1 ? "r Plan" : " Pläne"} · ${shared} von ${rooms.length} Räumen nutzen sie` : "Noch kein gemeinsamer Plan", go: "plans", words: "zeitplan komfortzeit kalender import vorlage" },
       { g: "Heizen", id: "preheat", icon: "mdi:clock-fast", c: "#fb923c", title: "Vorheizen", sum: pre + (own ? ` · ${own} ${own > 1 ? "Räume" : "Raum"} mit eigener Einstellung` : ""), words: "lernen lernend fest aus vorlauf aufheizen" },
-      { g: "Heizen", id: "holiday", icon: "mdi:calendar-star", c: "#f472b6", title: "Feiertage",
-        sum: p.workday_entity ? `${this._entityName(p.workday_entity)} · wie ${Number(p.workday_as ?? 6) === 5 ? "Samstag" : "Sonntag"}${rooms.some((r) => s.rooms?.[r.id]?.holiday) ? " · heute Feiertag" : ""}` : "Aus – Feiertage wie normale Werktage",
-        words: "feiertag arbeitstag workday wochenende brückentag" },
       { g: "Heizen", id: "vent", icon: "mdi:weather-windy", c: "#22d3ee", title: "Lüften & Schimmelschutz",
         sum: Number(p.vent_rh ?? 65) > 0 ? `Hinweis ab ${p.vent_rh ?? 65} % Luftfeuchte · ${hum} ${hum === 1 ? "Raum" : "Räume"} mit Feuchtesensor` : "Aus",
         words: "lüften feucht schimmel taupunkt bad dusche luftfeuchte" },
@@ -2572,6 +2569,13 @@ class HauswerkPanel extends HTMLElement {
               ${row("guest", "Gäste da", "nicht absenken, auch wenn alle Bewohner weg sind", sw("guest"),
                 "Solange Gäste da sind, gilt das Haus nie als abwesend – auch wenn alle gewählten Personen unterwegs sind.")}
             </div>
+            ${head("mdi:calendar-star", "Feiertage")}
+            <div class="wxsrcs">
+              <div class="wxsrc">${row("holi", "Arbeitstag-Sensor", p.workday_entity ? `Feiertage wie ${Number(p.workday_as ?? 6) === 5 ? "Samstag" : "Sonntag"}${Object.values(st.rooms || {}).some((x) => x.holiday) ? " · heute Feiertag" : ""}` : "aus – Feiertage wie normale Werktage", "",
+                "Mit dem Sensor der Home-Assistant-Integration „Arbeitstag“ (Workday) erkennt Hauswerk Feiertage: Ist er an einem Werktag aus, gelten die Zeiten des Wochenendes – in Heizwerk für alle Heizpläne, später auch für Rollläden und Licht. Zeitpläne und Kalender aus Home Assistant bleiben unverändert. Noch keinen Sensor? Unter Geräte & Dienste die Integration „Arbeitstag“ für dein Bundesland hinzufügen.")}
+              <div class="wxr-pk">${this._picker("workday_entity", p.workday_entity ? [p.workday_entity] : [])}
+                ${p.workday_entity ? `<div class="field"><span>An Feiertagen wie am</span>${segs("workday_as", [["5", "Samstag", "mdi:calendar-weekend"], ["6", "Sonntag", "mdi:calendar-weekend-outline"]], "6")}</div>` : ""}</div></div>
+            </div>
             ${head("mdi:map-marker-radius-outline", "Auf dem Heimweg")}
             <div class="wxrows">
               ${row("near", "Näher als", "gilt schon als zu Hause (0 = aus)", `<div class="unit"><input type="number" step="50" min="0" max="50000" data-set="proximity_m" value="${Math.round(p.proximity_m ?? 0)}" ${dis}><i>m</i></div>`,
@@ -2735,16 +2739,6 @@ class HauswerkPanel extends HTMLElement {
             <p class="muted small"><ha-icon icon="mdi:text-box-search-outline"></ha-icon>Jede Nachricht steht auch im <button class="link inline" data-action="tab" data-tab="log">Protokoll</button> unter „Nachrichten“ – mit dem Hinweis, ob sie gesendet oder zurückgehalten wurde.</p>`,
         };
       }
-
-      case "holiday":
-        return {
-          icon: "mdi:calendar-star", c: "#f472b6", title: "Feiertage", sub: "Heizwerk · Heizpläne an Feiertagen wie am Wochenende",
-          body: `
-            <p class="muted">Mit dem Sensor der Home-Assistant-Integration „Arbeitstag“ (Workday) erkennt Heizwerk Feiertage. Ist der Sensor an einem Werktag aus, gelten die Zeiten des Wochenendes – in allen Heizplänen.</p>
-            <div class="field"><span><ha-icon icon="mdi:calendar-check"></ha-icon> Arbeitstag-Sensor</span>${this._picker("workday_entity", p.workday_entity ? [p.workday_entity] : [])}</div>
-            ${p.workday_entity ? `<div class="field"><span>An Feiertagen heizen wie am</span>${segs("workday_as", [["5", "Samstag", "mdi:calendar-weekend"], ["6", "Sonntag", "mdi:calendar-weekend-outline"]], "6")}</div>` : ""}
-            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Noch keinen Sensor? In Home Assistant unter Geräte & Dienste die Integration „Arbeitstag“ für dein Bundesland hinzufügen. Zeitpläne und Kalender aus Home Assistant (statt Heizplan) bleiben unverändert.</p>`,
-        };
 
       case "vent": {
         const withHum = rooms.filter((r) => r.humidity_sensor);

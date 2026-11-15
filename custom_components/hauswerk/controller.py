@@ -188,7 +188,7 @@ class Heizen:
             self._state_unsub = None
         ids: set[str] = set()
         for entity_id in (self.haus.settings.get("outside_sensor"), self.settings.get("season_entity"),
-                          self.settings.get("workday_entity")):
+                          self.haus.settings.get("workday_entity")):
             if entity_id:
                 ids.add(entity_id)
         for room in self.rooms.values():
@@ -833,12 +833,13 @@ class Heizen:
         out_temp, out_rh = self.haus.outside_air()
         self._lead_factor = weather_lead_factor(out_temp) if self.settings.get("preheat_weather") else 1.0
         # Feiertag laut Sensor „Arbeitstag“: Heizpläne wie am Wochenende
-        workday_state = self.hass.states.get(self.settings.get("workday_entity") or "")
+        hs = self.haus.settings
+        workday_state = self.hass.states.get(hs.get("workday_entity") or "")
         workday = None if workday_state is None or workday_state.state not in ("on", "off") else workday_state.state == "on"
-        plan_min = holiday_week_minute(week_min, workday, int(self.settings.get("workday_as") or 6))
+        plan_min = holiday_week_minute(week_min, workday, int(hs.get("workday_as") or 6))
         holiday = plan_min != week_min
         self._flip("holiday", holiday, "Feiertag – Heizpläne wie am Wochenende", None, "season",
-                   f"{self._name(self.settings['workday_entity'])} ist aus" if holiday else None)
+                   f"{self._name(hs['workday_entity'])} ist aus" if holiday else None)
         party = bool(self.settings.get("party"))
 
         summer_mode = self.settings.get("summer_mode") or "off"

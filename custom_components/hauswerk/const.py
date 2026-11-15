@@ -72,6 +72,9 @@ HOUSE_DEFAULTS = {
     "guest": False,            # Gästemodus: nie abwesend
     "proximity_sensors": [],   # Entfernungs-Sensoren (z. B. aus der Integration „Nähe“)
     "proximity_m": 0,          # Heimweg: näher als so viele Meter = schon zu Hause (0 = aus)
+    # Feiertage: Sensor „Arbeitstag“ (workday); aus an einem Werktag = Zeitpläne wie an workday_as
+    "workday_entity": None,       # binary_sensor.* der Integration „Arbeitstag“
+    "workday_as": 6,              # 5 = wie Samstag, 6 = wie Sonntag
     # Urlaub: der Schalter "vacation" gilt immer, dazu automatisch per Zeitraum oder Kalender
     "vacation": False,
     "vacation_source": "period",  # off | period | calendar
@@ -139,9 +142,6 @@ HEAT_DEFAULTS = {
     "lead_radiator": 15,          # Minuten bei fester Zeit, Heizkörper
     "lead_floor": 120,            # Minuten bei fester Zeit, Flächenheizung
     "preheat_weather": False,     # Vorlaufzeit nach Außentemperatur anpassen (kälter = früher)
-    # Feiertage: Sensor „Arbeitstag“ (workday); aus an einem Werktag = Zeiten von workday_as
-    "workday_entity": None,       # binary_sensor.* der Integration „Arbeitstag“
-    "workday_as": 6,              # 5 = wie Samstag, 6 = wie Sonntag
     # Lüften: Hinweis, wenn drinnen ab dieser Luftfeuchte und draußen trockenere Luft (0 = aus)
     "vent_rh": 65,
 }
