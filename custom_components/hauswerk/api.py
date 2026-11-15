@@ -10,7 +10,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, LOG_DAYS, MODULE_HEATING, MODULE_LOG
+from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_HEATING, MODULE_HOUSE, MODULE_LOG
 from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, parse_hm
 
 
@@ -188,6 +188,16 @@ def _ctl(hass: HomeAssistant):
     return (hass.data.get(DOMAIN) or {}).get(MODULE_HEATING)
 
 
+def _haus(hass: HomeAssistant):
+    return (hass.data.get(DOMAIN) or {}).get(MODULE_HOUSE)
+
+
+def _settings(hass: HomeAssistant) -> dict:
+    """Alle Einstellungen, wie das Panel sie sieht: zentral (Kern) und Heizwerk."""
+    haus, ctl = _haus(hass), _ctl(hass)
+    return {**(haus.settings if haus else {}), **(ctl.settings if ctl else {})}
+
+
 def _log(hass: HomeAssistant):
     return (hass.data.get(DOMAIN) or {}).get(MODULE_LOG)
 
@@ -201,8 +211,8 @@ def _may_edit(hass: HomeAssistant, connection) -> bool:
     """Admins immer; andere Benutzer nur, wenn ein Admin es in den Einstellungen erlaubt hat."""
     if connection.user.is_admin:
         return True
-    ctl = _ctl(hass)
-    return bool(ctl and ctl.settings.get("allow_users"))
+    haus = _haus(hass)
+    return bool(haus and haus.settings.get("allow_users"))
 
 
 def require_editor(func):
@@ -235,7 +245,7 @@ def ws_get(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(
         msg["id"],
         {
-            "settings": ctl.settings,
+            "settings": _settings(hass),
             "rooms": ctl.rooms,
             "plans": ctl.plans,
             # Soll-Sensor je Raum (für den Verlauf auf der Raumseite)
@@ -322,8 +332,16 @@ async def ws_settings_save(hass: HomeAssistant, connection, msg) -> None:
         return
     if not connection.user.is_admin:
         settings.pop("allow_users", None)  # die Freigabe selbst ändern nur Admins
-    await ctl.async_save_settings(settings, by=_who(connection))
-    connection.send_result(msg["id"], ctl.settings)
+    # Zentrale Einstellungen an den Kern, der Rest an Heizwerk
+    house = {k: v for k, v in settings.items() if k in HOUSE_KEYS}
+    heat = {k: v for k, v in settings.items() if k not in HOUSE_KEYS}
+    if house:
+        await _haus(hass).async_save_settings(house, by=_who(connection))
+    if heat:
+        await ctl.async_save_settings(heat, by=_who(connection))
+    elif house:
+        await ctl.async_evaluate()
+    connection.send_result(msg["id"], _settings(hass))
 
 
 @websocket_api.websocket_command(

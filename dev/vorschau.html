@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hauswerk – Vorschau</title>
+<style>body{margin:0}</style></head>
+<!--
+  Vorschau des Panels ohne Home Assistant: einfach im Browser öffnen (Doppelklick genügt).
+  Zustände, Räume, Pläne, Wetter und Protokoll sind erfunden; Speichern wirkt nur bis zum Neuladen.
+  Navigiert wird über die Menüs im Panel; die Browser-Adresse ändert sich dabei nicht.
+  Symbole (ha-icon) gibt es nur in Home Assistant; hier bleiben die Kacheln dafür leer.
+-->
+<body>
+<script>
+// Simuliertes Home Assistant für eine Sichtprüfung des Panels
+const now = new Date().toISOString();
+const st = (state, attributes = {}) => ({ state, attributes, last_changed: now, last_updated: now });
+const states = {
+  "person.jens": st("home", { friendly_name: "Jens" }),
+  "person.julia": st("not_home", { friendly_name: "Julia", latitude: 51.3432, longitude: 12.3742 }),
+  "zone.arbeit": st("0", { friendly_name: "Arbeit", latitude: 51.30, longitude: 12.40 }),
+  "sensor.wohnzimmer_temperatur": st("20.6", { friendly_name: "Wohnzimmer Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
+  "sensor.bad_temperatur": st("21.9", { friendly_name: "Bad Klima Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
+  "sensor.kueche_temperatur": st("unavailable", { friendly_name: "Küche Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
+  "binary_sensor.wohnzimmer_fenster": st("off", { friendly_name: "Wohnzimmer Fenster links", device_class: "window" }),
+  "binary_sensor.flur_bewegung": st("off", { friendly_name: "Flur Bewegung", device_class: "motion" }),
+  "climate.wohnzimmer": st("heat", { friendly_name: "Thermostat Wohnzimmer", current_temperature: 20.4, temperature: 21, hvac_action: "heating" }),
+  "climate.bad": st("heat", { friendly_name: "Thermostat Bad", current_temperature: 22.1, temperature: 22 }),
+  "binary_sensor.fenster_bad": st("off", { friendly_name: "Fenster Bad", device_class: "window" }),
+  "weather.home": st("cloudy", { friendly_name: "OpenWeatherMap", temperature: 6.1, apparent_temperature: 3.2, humidity: 81, wind_speed: 14.6, wind_gust_speed: 31, wind_speed_unit: "km/h", supported_features: 3 }),
+  "sensor.garten_temp": st("6.4", { friendly_name: "Wetterstation Garten Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
+  "zone.home": st("0", { latitude: 51.34, longitude: 12.37 }),
+  "sun.sun": st("below_horizon", { elevation: -30, rising: false, next_rising: "2026-11-16T06:25:00Z", next_setting: "2026-11-16T15:21:00Z" }),
+};
+const settings = {
+  frost_temp: 7, away_temp: 17, away_delay: 10, vacation_temp: 15, vacation: false, persons: ["person.jens", "person.julia"], arrive_delay: 0,
+  guest: false, party: false, proximity_sensors: [], proximity_m: 0, home_zone: "zone.home", summer_mode: "off", summer_temp: 16, summer_action: "off",
+  liming: false, liming_day: 0, liming_time: "10:00", liming_minutes: 5, boost_minutes: 30, away_mode: "temp", away_offset: 2,
+  away_action: "lower", long_away_days: 0, eco_force: false, summer_fallback: "keep", calibration_interval: 10,
+  vacation_source: "period", vacation_keywords: "Urlaub, Ferien", preheat_mode: "fixed", lead_radiator: 15, lead_floor: 120,
+  allow_users: false, weather_entity: null, start_widgets: null,
+  look_theme: "auto", look_accent: null, look_background: "pattern", look_header_weather: true, look_header_clock: false, cold_snap_temp: 0, storm_kmh: 70, home_zone: "zone.home", proximity_m: 500,
+};
+const rooms = {
+  a1: { id: "a1", name: "Wohnzimmer", type: "heizkoerper", comfort: 21, eco: 18, climates: ["climate.wohnzimmer"], windows: [], enabled: true,
+    schedule: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "06:00", end: "22:00" }] },
+  b2: { id: "b2", name: "Bad", type: "flaeche", comfort: 22, eco: 19, climates: ["climate.bad"], windows: ["binary_sensor.fenster_bad"], enabled: true,
+    schedule: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "05:30", end: "08:00" }] },
+};
+const status = {
+  rooms: {
+    a1: { mode: "komfort", mode_label: "Komfort", target: 21, room_temp: 20.4, heating: true, humidity: 48, next_change: 120 },
+    b2: { mode: "eco", mode_label: "Eco", target: 20, room_temp: 21.8, heating: false, humidity: 66, next_change: 300 },
+  },
+  away: false, vacation: false, summer: false, outside_temp: 6.5, plan_events: {}, plan_errors: {},
+};
+const defaults = { heizkoerper: { window_delay: 60, pause_mode: "frost", lead_min: 15, preheat_max: 90 }, flaeche: { window_delay: 900, pause_mode: "frost", lead_min: 120, preheat_max: 240 } };
+const report = (days) => Object.fromEntries(Object.keys(rooms).map((id) => [id, Array.from({ length: days }, (_, i) => ({
+  date: new Date(Date.now() - (days - 1 - i) * 864e5).toISOString().slice(0, 10), heat_min: 60 + i * 7, pause_min: 5, comfort_min: 300, openings: 1, avg_temp: 20.5 }))]));
+window.wsLog = [];
+const areas = { wz: { area_id: "wz", name: "Wohnzimmer" }, bad: { area_id: "bad", name: "Bad" }, kueche: { area_id: "kueche", name: "Küche" }, garten: { area_id: "garten", name: "Garten" } };
+const devices = { d1: { id: "d1", area_id: "wz" }, d2: { id: "d2", area_id: "bad" } };
+const entities = {
+  "climate.wohnzimmer": { entity_id: "climate.wohnzimmer", device_id: "d1" }, "sensor.wohnzimmer_temperatur": { device_id: "d1" },
+  "binary_sensor.wohnzimmer_fenster": { area_id: "wz" }, "climate.bad": { device_id: "d2" }, "sensor.bad_temperatur": { device_id: "d2" },
+  "binary_sensor.fenster_bad": { area_id: "bad" }, "sensor.kueche_temperatur": { area_id: "kueche" }, "sensor.garten_temp": { area_id: "garten" },
+};
+const hass = {
+  states, areas, devices, entities, themes: { darkMode: false }, user: { is_admin: true },
+  callWS: async (msg) => {
+    wsLog.push(msg.type);
+    if (msg.type === "hauswerk/heizen/get") return { settings, rooms, plans: {}, target_sensors: {}, status, defaults, modes: {}, is_admin: true, user_admin: true };
+    if (msg.type === "hauswerk/heizen/report") return report(msg.days);
+    if (msg.type === "hauswerk/heizen/settings/save") return Object.assign(settings, msg.settings);
+    if (msg.type === "history/history_during_period") return {};
+    if (msg.type === "hauswerk/log/get") {
+      const T = (m) => Date.now() / 1000 - m * 60;
+      return { days: 14, entries: [
+        { ts: T(26 * 60), cat: "settings", title: "Einstellungen geändert", why: "Frostschutz, Darstellung · Panel · von Jens" },
+        { ts: T(95), cat: "presence", title: "Wieder jemand zu Hause", why: "Zu Hause: Jens" },
+        { ts: T(80), cat: "target", room: "a1", title: "Start: Ziel 21,0 °C", why: "Komfort – Komfortzeit laut eigenem Heizplan" },
+        { ts: T(80), cat: "command", room: "a1", title: "Thermostat Wohnzimmer → 21,0 °C", why: "Ziel 21,0 °C · Komfort" },
+        { ts: T(42), cat: "window", room: "b2", title: "Fenster Bad geöffnet" },
+        { ts: T(41), cat: "window", room: "b2", title: "Fensterpause beginnt", why: "Fenster Bad offen · Thermostate auf Frostschutz" },
+        { ts: T(41), cat: "target", room: "b2", title: "Ziel 7,0 °C", why: "Fenster offen" },
+        { ts: T(20), cat: "health", room: "b2", title: "Thermostat Bad nicht erreichbar", why: "climate.bad · Zustand unavailable" },
+        { ts: T(6), cat: "manual", room: "a1", title: "Boost für 30 Min.", why: "bis 21:00 · im Panel · von Jens" },
+      ] };
+    }
+    throw new Error("unbekannt: " + msg.type);
+  },
+  callService: async () => {},
+  connection: { subscribeMessage: (cb, msg) => { wsLog.push(msg.type); return Promise.resolve(() => {}); } },
+};
+</script>
+<script src="../custom_components/hauswerk/frontend/hauswerk-panel.js"></script>
+<script>
+const el = document.createElement("hauswerk-panel");
+el.panel = { url_path: "hauswerk" };
+el.narrow = window.innerWidth < 700;
+document.body.appendChild(el);
+el.hass = hass;
+</script>
+</body></html>

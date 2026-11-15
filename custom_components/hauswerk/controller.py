@@ -1,4 +1,7 @@
-"""Hauswerk-Modul Heizen: Regelung, Speicher und Statistik."""
+"""Hauswerk-Modul Heizwerk: Regelung, Speicher und Statistik.
+
+Anwesenheit, Urlaub und Außentemperatur kommen aus dem Hauswerk-Kern (core.Haus).
+"""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -8,7 +11,7 @@ from typing import Any
 import uuid
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -22,9 +25,9 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CALENDAR_REFRESH,
-    DEFAULT_SETTINGS,
+    HEAT_DEFAULTS,
+    HOUSE_KEYS,
     LEGACY_STORAGE_KEY,
-    SETTING_LABELS,
     SIGNAL_ROOMS,
     SIGNAL_UPDATE,
     STATS_DAYS,
@@ -42,9 +45,7 @@ from .logic import (
     calibration_offset,
     compensated,
     compute_target,
-    distance_km,
     events_to_blocks,
-    is_vacation,
     keyword_match,
     keywords,
     learn_rate,
@@ -60,7 +61,8 @@ from .logic import (
     week_minute,
     window_paused,
 )
-from .log import Protokoll
+from .core import Haus, async_calendar_events, parse_when
+from .log import Protokoll, log_settings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,14 +85,17 @@ def _float(value: Any) -> float | None:
 class Heizen:
     """Modul Heizen: hält Räume, Einstellungen und Laufzeitzustand und regelt die Thermostate."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, log: Protokoll) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, log: Protokoll, haus: Haus) -> None:
         self.hass = hass
         self.entry = entry
+        # Hauswerk-Kern: Anwesenheit, Urlaub, Wetter
+        self.haus = haus
+        self.loaded_settings: dict[str, Any] = {}
         # Protokoll von Hauswerk: Entscheidungen, Fenster, Geräte, Befehle und Änderungen
         self.log = log
         self._flags: dict[str, Any] = {}
         self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
-        self.settings: dict[str, Any] = dict(DEFAULT_SETTINGS)
+        self.settings: dict[str, Any] = dict(HEAT_DEFAULTS)
         self.rooms: dict[str, dict[str, Any]] = {}
         self.stats: dict[str, dict[str, dict[str, float]]] = {}
         # Thermostate, die Hauswerk wegen offener Fenster ausgeschaltet hat (-> vorheriger Modus).
@@ -100,11 +105,6 @@ class Heizen:
         self.heat_rates: dict[str, float] = {}
         # Gemeinsame Heizpläne, die Räume über plan_id nutzen.
         self.plans: dict[str, dict[str, Any]] = {}
-        # Urlaub aus dem Kalender: läuft gerade einer, und die nächsten Termine fürs Panel
-        self._cal_vacation = False
-        self._cal_events: list[dict[str, Any]] = []
-        self._cal_error: str | None = None
-        self._cal_at = 0.0
         # Gemeinsame Pläne, die einem Kalender folgen: Termine der nächsten Tage je Plan
         self._plan_events: dict[str, list[dict[str, Any]]] = {}
         self._plan_errors: dict[str, str] = {}
@@ -114,9 +114,6 @@ class Heizen:
         self._state_unsub: Callable[[], None] | None = None
         self._pending_eval: Callable[[], None] | None = None
         self._subscribers: set[Callable[[dict], None]] = set()
-        self._was_away = False
-        self._away_for = 0.0
-        self._approaching = False
         self._summer = False
         self._liming = False
 
@@ -131,11 +128,9 @@ class Heizen:
                 stored = legacy
                 await self._store.async_save(legacy)
         stored = stored or {}
-        self.settings.update(stored.get("settings") or {})
-        # Heimweg-Grenze früher in Kilometern, jetzt in Metern
-        old_km = self.settings.pop("proximity_km", None)
-        if old_km and not self.settings.get("proximity_m"):
-            self.settings["proximity_m"] = float(old_km) * 1000
+        # Alle gespeicherten Einstellungen merken: der Hauswerk-Kern übernimmt daraus beim ersten Start seine
+        self.loaded_settings = dict(stored.get("settings") or {})
+        self.settings.update({k: v for k, v in self.loaded_settings.items() if k in HEAT_DEFAULTS})
         self.rooms = stored.get("rooms") or {}
         self.stats = stored.get("stats") or {}
         self.turned_off = stored.get("turned_off") or {}
@@ -161,7 +156,8 @@ class Heizen:
             async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1))
         )
         self._track_entities()
-        await self._async_refresh_calendar(force=True)
+        # Änderungen von Anwesenheit, Urlaub und zentralen Einstellungen
+        self._unsubs.append(self.haus.subscribe(self._schedule_eval))
         await self._async_refresh_plan_calendars(force=True)
         await self.async_evaluate()
 
@@ -181,11 +177,10 @@ class Heizen:
         if self._state_unsub:
             self._state_unsub()
             self._state_unsub = None
-        ids: set[str] = set(self.settings.get("persons") or [])
-        ids.update(self.settings.get("proximity_sensors") or [])
-        for key in ("outside_sensor", "season_entity"):
-            if self.settings.get(key):
-                ids.add(self.settings[key])
+        ids: set[str] = set()
+        for entity_id in (self.haus.settings.get("outside_sensor"), self.settings.get("season_entity")):
+            if entity_id:
+                ids.add(entity_id)
         for room in self.rooms.values():
             ids.update(room.get("climates") or [])
             ids.update(room.get("windows") or [])
@@ -224,26 +219,6 @@ class Heizen:
         if message:
             self.log.add(cat, message, why)
 
-    def _home_state(self) -> str:
-        """Zustand einer Person, die in der gewählten Wohnungs-Zone ist („home“ oder der Zonenname)."""
-        zone = self.settings.get("home_zone") or "zone.home"
-        if zone == "zone.home":
-            return STATE_HOME
-        state = self.hass.states.get(zone)
-        return state.name if state is not None else STATE_HOME
-
-    def _presence_why(self) -> str:
-        if self.settings.get("presence_force") == "away":
-            return "von Hand auf Abwesend gesetzt"
-        if self.settings.get("guest"):
-            return "Gäste-Modus"
-        home = [
-            self._name(p)
-            for p in self.settings.get("persons") or []
-            if (s := self.hass.states.get(p)) is not None and s.state == self._home_state()
-        ]
-        return f"Zu Hause: {', '.join(home)}" if home else "Alle Personen unterwegs"
-
     def _reason(self, room: dict, result: dict, upcoming: tuple[int, float] | None) -> str:
         """Kurze Begründung für eine Betriebsart im Protokoll."""
         mode = result["mode"]
@@ -260,7 +235,7 @@ class Heizen:
             mins = upcoming[0] if upcoming else result.get("next_change")
             return f"Komfort beginnt in {mins} Min." if mins else "Komfort beginnt bald"
         if mode in ("abwesend", "frost"):
-            return self._presence_why()
+            return self.haus.presence_why()
         if mode in ("manuell", "boost") and result.get("override_until"):
             until = dt_util.parse_datetime(result["override_until"])
             return f"bis {dt_util.as_local(until).strftime('%H:%M')}" if until else ""
@@ -305,22 +280,21 @@ class Heizen:
         await self.async_evaluate()
 
     async def async_save_settings(self, settings: dict[str, Any], by: str | None = None) -> None:
+        settings = {k: v for k, v in settings.items() if k in HEAT_DEFAULTS}
         changed = [k for k, v in settings.items() if self.settings.get(k) != v]
-        if changed:
-            labels = list(dict.fromkeys(SETTING_LABELS.get(k, k) for k in changed))
-            only = changed[0]
-            if len(changed) == 1 and isinstance(settings[only], bool):
-                title = f"{labels[0]} {'an' if settings[only] else 'aus'}"
-            else:
-                title = "Einstellungen geändert"
-            source = f"Panel{self._by(by)}" if by else "Home Assistant (Schalter oder Automation)"
-            self.log.add("settings", title, f"{', '.join(labels)} · {source}")
+        if not changed:
+            return
+        log_settings(self.log, settings, changed, by)
         self.settings.update(settings)
         self._save()
         self._track_entities()
-        if any(k in settings for k in ("vacation_source", "vacation_calendar", "vacation_keywords")):
-            await self._async_refresh_calendar(force=True)
         await self.async_evaluate()
+
+    def drop_house_settings(self) -> None:
+        """Nach der Übernahme durch den Kern: zentrale Einstellungen nicht mehr bei Heizwerk speichern."""
+        if any(k in self.loaded_settings for k in HOUSE_KEYS):
+            self._save()
+        self.loaded_settings = {}
 
     # ------------------------------------------------------------ Gemeinsame Heizpläne
     async def async_save_plan(self, plan: dict[str, Any], by: str | None = None) -> dict[str, Any]:
@@ -351,59 +325,10 @@ class Heizen:
 
     # ------------------------------------------------------------ Kalender
     def _parse_when(self, value: Any):
-        """Termin-Zeitpunkt aus dem Kalender: Datum (ganztägig) oder Datum mit Uhrzeit, lokal."""
-        if value is None:
-            return None, False
-        text = str(value)
-        if len(text) == 10:  # ganztägig: "2026-12-20"
-            day = dt_util.parse_date(text)
-            return (dt_util.start_of_local_day(day) if day else None), True
-        when = dt_util.parse_datetime(text)
-        if when is not None and when.tzinfo is None:
-            when = when.replace(tzinfo=dt_util.get_default_time_zone())
-        return (dt_util.as_local(when) if when else None), False
+        return parse_when(value)
 
     async def _async_events(self, entity_id: str, start, end) -> list[dict[str, Any]]:
-        response = await self.hass.services.async_call(
-            "calendar",
-            "get_events",
-            {"entity_id": entity_id, "start_date_time": start.isoformat(), "end_date_time": end.isoformat()},
-            blocking=True,
-            return_response=True,
-        )
-        return list(((response or {}).get(entity_id) or {}).get("events") or [])
-
-    async def _async_refresh_calendar(self, force: bool = False) -> None:
-        """Urlaubskalender lesen: läuft ein passender Termin, und welche kommen als Nächstes."""
-        now_ts = dt_util.utcnow().timestamp()
-        if not force and now_ts - self._cal_at < CALENDAR_REFRESH:
-            return
-        self._cal_at = now_ts
-        cal = self.settings.get("vacation_calendar")
-        if (self.settings.get("vacation_source") or "period") != "calendar" or not cal:
-            self._cal_vacation, self._cal_events, self._cal_error = False, [], None
-            return
-        now = dt_util.now()
-        try:
-            events = await self._async_events(cal, now - timedelta(days=1), now + timedelta(days=120))
-        except Exception as err:  # noqa: BLE001 - Kalender weg/defekt: letzten Stand behalten
-            self._cal_error = str(err) or type(err).__name__
-            _LOGGER.warning("Urlaubskalender %s nicht lesbar: %s", cal, err)
-            return
-        words = keywords(self.settings.get("vacation_keywords"))
-        active, upcoming = False, []
-        for ev in events:
-            if not keyword_match(ev.get("summary"), words):
-                continue
-            start, _ = self._parse_when(ev.get("start"))
-            end, _ = self._parse_when(ev.get("end"))
-            if start is None or end is None or end <= now:
-                continue
-            if start <= now:
-                active = True
-            upcoming.append({"summary": ev.get("summary"), "start": start.isoformat(), "end": end.isoformat()})
-        upcoming.sort(key=lambda e: e["start"])
-        self._cal_vacation, self._cal_events, self._cal_error = active, upcoming[:5], None
+        return await async_calendar_events(self.hass, entity_id, start, end)
 
     async def _async_refresh_plan_calendars(self, force: bool = False) -> None:
         """Termine der Kalender-Pläne für die nächsten 8 Tage lesen (Termin = Komfortzeit).
@@ -516,13 +441,8 @@ class Heizen:
             rt = self._rt(room_id)
             out[room_id] = dict(rt.get("result") or {})
         return {
+            **self.haus.status(),
             "rooms": out,
-            "away": self._was_away,
-            "approaching": self._approaching,
-            "presence_force": self.settings.get("presence_force"),
-            "vacation": is_vacation(self.settings, dt_util.now().date().isoformat(), self._cal_vacation),
-            "vacation_events": self._cal_events,
-            "vacation_calendar_error": self._cal_error,
             "plan_events": {
                 pid: [
                     {"summary": e["summary"], "start": dt_util.utc_from_timestamp(e["start"]).isoformat(), "end": dt_util.utc_from_timestamp(e["end"]).isoformat()}
@@ -531,13 +451,11 @@ class Heizen:
                 for pid, evs in self._plan_events.items()
             },
             "plan_errors": self._plan_errors,
-            "guest": bool(self.settings.get("guest")),
             "party": bool(self.settings.get("party")),
             "summer": self._summer,
             "liming": self._liming,
             "eco_force": bool(self.settings.get("eco_force")),
             "long_away": getattr(self, "_long_away", False),
-            "outside_temp": self._state_float(self.settings.get("outside_sensor")),
         }
 
     def _state_float(self, entity_id: str | None) -> float | None:
@@ -620,12 +538,6 @@ class Heizen:
                     async_call_later(self.hass, delay + 1, self._async_delayed_eval)
             rt["windows_open"] = is_open
 
-        if entity_id in (self.settings.get("persons") or []):
-            for key in ("away_delay", "arrive_delay"):
-                delay = int(self.settings.get(key) or 0) * 60
-                if delay:
-                    async_call_later(self.hass, delay + 1, self._async_delayed_eval)
-
         self._schedule_eval()
 
     def _detect_manual_change(self, entity_id: str, old, new, now: float) -> None:
@@ -671,7 +583,6 @@ class Heizen:
         await self.async_evaluate()
 
     async def _async_tick(self, _now=None) -> None:
-        await self._async_refresh_calendar()
         await self._async_refresh_plan_calendars()
         await self.async_evaluate()
         self._record_stats()
@@ -721,52 +632,6 @@ class Heizen:
         if room_temp is None or target is None:
             return False
         return room_temp < target - 0.2
-
-    def _is_away(self) -> bool:
-        """Abwesenheit mit Wartezeit beim Gehen und beim Heimkommen, Gästen und Annäherung."""
-        self._approaching = False
-        self._away_for = 0.0
-        if self.settings.get("presence_force") == "away":
-            return True
-        if self.settings.get("guest"):
-            return False
-        persons = self.settings.get("persons") or []
-        if not persons:
-            return False
-        states = [self.hass.states.get(p) for p in persons]
-        known = [s for s in states if s is not None and s.state not in BAD_STATES]
-        if not known:
-            return False
-        now = dt_util.utcnow().timestamp()
-        home_state = self._home_state()
-        home = [s for s in known if s.state == home_state]
-        if home:
-            # Erst nach der Wartezeit beim Heimkommen wieder "zu Hause"
-            # (es zählt die Person, die schon am längsten da ist).
-            arrive = int(self.settings.get("arrive_delay") or 0) * 60
-            longest = max(now - s.last_changed.timestamp() for s in home)
-            return self._was_away and longest < arrive
-        delay = int(self.settings.get("away_delay") or 0) * 60
-        last_left = max(s.last_changed.timestamp() for s in known)
-        away = now - last_left >= delay
-        self._away_for = now - last_left  # Sekunden, seit die letzte Person gegangen ist
-        if away and self._near_home():
-            self._approaching = True
-            return False
-        return away
-
-    def _near_home(self) -> bool:
-        limit = float(self.settings.get("proximity_m") or 0) / 1000  # Meter -> km
-        if limit <= 0:
-            return False
-        for entity_id in self.settings.get("proximity_sensors") or []:
-            state = self.hass.states.get(entity_id)
-            if state is None or state.state in BAD_STATES:
-                continue
-            km = distance_km(_float(state.state), state.attributes.get("unit_of_measurement"))
-            if km is not None and km <= limit:
-                return True
-        return False
 
     def _effective_room(self, room: dict) -> dict:
         """Raum mit gemeinsamem Heizplan und Komfort-/Eco-Temperatur aus Helfer-Entitäten, falls gewählt."""
@@ -912,9 +777,10 @@ class Heizen:
         now_local = dt_util.now()
         now = dt_util.utcnow().timestamp()
         week_min = week_minute(now_local.weekday(), now_local.hour, now_local.minute)
-        away = self._is_away()
-        self._was_away = away
-        vacation = is_vacation(self.settings, now_local.date().isoformat(), self._cal_vacation)
+        self.haus.update()
+        away = self.haus.away
+        vacation = self.haus.vacation
+        outside = self.haus.outside_temp()
         party = bool(self.settings.get("party"))
 
         summer_mode = self.settings.get("summer_mode") or "off"
@@ -922,7 +788,7 @@ class Heizen:
             self._summer = True
         elif summer_mode == "auto":
             self._summer = summer_state(
-                self._state_float(self.settings.get("outside_sensor")),
+                outside,
                 float(self.settings.get("summer_temp") or 16),
                 self._summer,
                 fallback=self.settings.get("summer_fallback") or "keep",
@@ -938,7 +804,7 @@ class Heizen:
             self._summer = False
         force_eco = bool(self.settings.get("eco_force"))
         long_days = float(self.settings.get("long_away_days") or 0)
-        long_away = away and long_days > 0 and self._away_for >= long_days * 86400
+        long_away = away and long_days > 0 and self.haus.away_for >= long_days * 86400
         self._long_away = long_away
         # Entkalken im Sommer – oder immer, wenn so eingestellt bzw. keine Sommerpause genutzt wird.
         self._liming = liming_active(self.settings, week_min) and (
@@ -946,15 +812,8 @@ class Heizen:
         )
 
         # Wechsel der Hauszustände ins Protokoll
-        outside = self._state_float(self.settings.get("outside_sensor"))
-        self._flip("away", away, "Niemand mehr zu Hause – abwesend", "Wieder jemand zu Hause", "presence", self._presence_why())
-        self._flip("approaching", self._approaching, "Jemand ist auf dem Heimweg", None, "presence",
-                   f"näher als {float(self.settings.get('proximity_m') or 0):.0f} m – es wird schon geheizt")
         self._flip("long_away", long_away, "Lange niemand da – Frostschutz", None, "presence",
-                   f"seit {self._away_for / 86400:.1f} Tagen".replace(".", ","))
-        self._flip("vacation", vacation, "Urlaub beginnt", "Urlaub endet", "presence",
-                   {"calendar": "laut Kalender", "period": "laut Zeitraum"}.get(self.settings.get("vacation_source") or "period", "")
-                   if not self.settings.get("vacation") else "Schalter Urlaub")
+                   f"seit {self.haus.away_for / 86400:.1f} Tagen".replace(".", ","))
         self._flip("summer", self._summer, "Sommerpause beginnt", "Heizperiode beginnt", "season",
                    f"außen {self._t(outside)} °C · Heizgrenze {self._t(float(self.settings.get('summer_temp') or 16))} °C"
                    if summer_mode == "auto" else {"on": "von Hand", "entity": "laut Entität"}.get(summer_mode, ""))

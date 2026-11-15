@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, MODULE_HEATING
+from .const import DOMAIN, MODULE_HEATING, MODULE_HOUSE
 from .entity import HauswerkEntity, RoomEntity, setup_room_entities
 
 
@@ -16,10 +16,12 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     ctl = hass.data[DOMAIN][MODULE_HEATING]
+    haus = hass.data[DOMAIN][MODULE_HOUSE]
     async_add_entities(
         [
-            SettingSwitch(ctl, "vacation", "hauswerk_vacation", "Hauswerk Urlaub", "mdi:palm-tree"),
-            SettingSwitch(ctl, "guest", "hauswerk_guest", "Hauswerk Gäste", "mdi:account-group-outline"),
+            # Urlaub und Gäste gelten für ganz Hauswerk (Kern), der Rest für Heizwerk
+            SettingSwitch(haus, "vacation", "hauswerk_vacation", "Hauswerk Urlaub", "mdi:palm-tree"),
+            SettingSwitch(haus, "guest", "hauswerk_guest", "Hauswerk Gäste", "mdi:account-group-outline"),
             SettingSwitch(ctl, "party", "hauswerk_party", "Hauswerk Party", "mdi:party-popper"),
             SettingSwitch(ctl, "liming", "hauswerk_liming", "Hauswerk Entkalken", "mdi:water-sync"),
             SettingSwitch(ctl, "eco_force", "hauswerk_eco_force", "Hauswerk Eco erzwingen", "mdi:leaf"),
@@ -31,7 +33,7 @@ async def async_setup_entry(
 
 
 class SettingSwitch(HauswerkEntity, SwitchEntity):
-    """Schaltet eine globale Einstellung (Urlaub, Gäste, Party, Entkalken)."""
+    """Schaltet eine Einstellung des Kerns (Urlaub, Gäste) oder von Heizwerk (Party, Entkalken, Eco)."""
 
     def __init__(self, controller, key: str, unique_id: str, name: str, icon: str) -> None:
         super().__init__(controller)

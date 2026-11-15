@@ -27,7 +27,7 @@ Hauswerk ersetzt die frühere Integration „Heizwerk“. Räume, Heizpläne, Ei
 3. Home Assistant neu starten.
 4. Automationen und Dashboards auf die neuen Entitäten umstellen: aus `switch.heizwerk_…` wird `switch.hauswerk_…`, aus `sensor.heizwerk_…` wird `sensor.hauswerk_…`.
 
-> **Hinweis:** `dev/vorschau.html` (Panel-Vorschau mit simuliertem Home Assistant) und die ursprünglichen Tests sind in diesem Stand noch nicht enthalten. `tests/test_logic.py` wurde neu geschrieben.
+> **Prüfung:** Bei jedem Push laufen auf GitHub die Tests, hassfest und die HACS-Prüfung (Workflow „Prüfen“).
 
 # Modul Heizwerk
 
@@ -136,17 +136,24 @@ Danach kann **Warm genug** einen Raum noch abschalten (außer beim Boost).
 
 ```
 custom_components/hauswerk/
-  __init__.py       Einstieg, Panel, Module (hass.data["hauswerk"]["heizen"])
+  __init__.py       Einstieg, Panel, Module (hass.data["hauswerk"]: "log", "haus", "heizen")
+  core.py           Hauswerk-Kern für alle Module: Anwesenheit, Urlaub (auch Kalender), Wetter, Darstellung,
+                    Widgets, Berechtigungen (config/.storage/hauswerk.haus)
   logic.py          Modul Heizwerk: Regel-Logik ohne Home-Assistant-Abhängigkeit (getestet)
   controller.py     Modul Heizwerk: Speicher, Zustandsüberwachung, Ansteuerung der Thermostate, Statistik
   log.py            Protokoll für alle Module (config/.storage/hauswerk.protokoll, 14 Tage)
   api.py            WebSocket-Befehle fürs Panel (hauswerk/heizen/get, /subscribe, /room/save …, hauswerk/log/get, /subscribe)
   sensor.py, switch.py, entity.py
   frontend/hauswerk-panel.js   Panel als Web-Komponente, ohne Build-Schritt
-tests/test_logic.py             python -m pytest tests
+tests/test_logic.py             Regel-Logik
+tests/test_smoke.py             Kern, Heizwerk und Protokoll mit nachgebautem Home Assistant
 dev/vorschau.html               Panel mit simuliertem Home Assistant im Browser ansehen
+.github/workflows/ci.yml        Prüfen bei jedem Push: pytest, hassfest, HACS
+.github/workflows/release.yml   Release, sobald sich die Version in manifest.json ändert
 ```
 
-Für die Vorschau den Projektordner mit einem beliebigen Webserver ausliefern (z. B. `python -m http.server`) und `/dev/vorschau.html` öffnen.
+Tests: `pip install pytest`, dann im Projektordner `python -m pytest tests` (Home Assistant wird nicht gebraucht).
 
-Die Daten des Moduls Heizwerk liegen in `config/.storage/hauswerk.heizen`.
+Vorschau: `dev/vorschau.html` direkt im Browser öffnen. Alle Daten sind erfunden, Speichern wirkt nur bis zum Neuladen.
+
+Speicher: zentrale Einstellungen in `config/.storage/hauswerk.haus`, Daten des Moduls Heizwerk in `config/.storage/hauswerk.heizen`. Beim ersten Start mit 0.18 übernimmt der Kern Anwesenheit, Urlaub, Wetter, Darstellung, Widgets und Berechtigungen automatisch aus den bisherigen Heizwerk-Einstellungen.

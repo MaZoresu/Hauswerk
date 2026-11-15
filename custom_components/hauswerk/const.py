@@ -7,6 +7,9 @@ NAME = "Hauswerk"
 # Module von Hauswerk. Jedes Modul liegt unter hass.data[DOMAIN][<modul>]
 # und hat seinen eigenen Speicher.
 MODULE_HEATING = "heizen"
+# Hauswerk-Kern: zentrale Einstellungen und Hauszustände (Anwesenheit, Urlaub, Wetter)
+MODULE_HOUSE = "haus"
+HOUSE_STORAGE_KEY = f"{DOMAIN}.{MODULE_HOUSE}"
 
 STORAGE_KEY = f"{DOMAIN}.{MODULE_HEATING}"
 STORAGE_VERSION = 1
@@ -52,61 +55,71 @@ PLATFORMS = ["sensor", "switch"]
 
 STATS_DAYS = 60
 
-DEFAULT_SETTINGS = {
-    "frost_temp": 7.0,
-    "away_temp": 17.0,
-    "away_delay": 10,          # Minuten, bis "abwesend" greift
-    "vacation_temp": 15.0,
-    "vacation": False,
-    "vacation_from": None,     # "YYYY-MM-DD"
-    "vacation_to": None,
+# Zentrale Einstellungen von Hauswerk (gelten für alle Module, Speicher hauswerk.haus)
+HOUSE_DEFAULTS = {
+    # Anwesenheit
     "persons": [],             # person.* / device_tracker.*
-    "presence_force": None,    # None = automatisch, "away" = von Hand abwesend
-    "arrive_delay": 0,         # Minuten nach dem Heimkommen, bis wieder normal geheizt wird
-    "guest": False,            # Gästemodus: nie abwesend
-    "party": False,            # Party: alle Räume auf Komfort
-    "proximity_sensors": [],   # Entfernungs-Sensoren (z. B. aus der Proximity-Integration)
-    "proximity_m": 0,          # Unterwegs nach Hause: näher als so viele Meter = schon zu Hause (0 = aus)
     "home_zone": "zone.home",  # Zone, in der eine Person als zu Hause gilt
-    "summer_mode": "off",      # off | auto | on
-    "outside_sensor": None,    # Außentemperatur für die Sommerpause
-    "summer_temp": 16.0,       # Ab dieser Außentemperatur Sommerpause
+    "away_delay": 10,          # Minuten, bis "abwesend" greift
+    "arrive_delay": 0,         # Minuten nach dem Heimkommen, bis wieder "zu Hause" gilt
+    "presence_force": None,    # None = automatisch, "away" = von Hand abwesend
+    "guest": False,            # Gästemodus: nie abwesend
+    "proximity_sensors": [],   # Entfernungs-Sensoren (z. B. aus der Integration „Nähe“)
+    "proximity_m": 0,          # Heimweg: näher als so viele Meter = schon zu Hause (0 = aus)
+    # Urlaub: der Schalter "vacation" gilt immer, dazu automatisch per Zeitraum oder Kalender
+    "vacation": False,
+    "vacation_source": "period",  # off | period | calendar
+    "vacation_from": None,        # "YYYY-MM-DD"
+    "vacation_to": None,
+    "vacation_calendar": None,    # calendar.* bei vacation_source "calendar"
+    "vacation_keywords": "Urlaub, Ferien",  # Termine mit diesen Wörtern im Titel zählen
+    # Wetter
+    "weather_entity": None,       # weather.* (leer = erste gefundene)
+    "outside_sensor": None,       # eigene Außentemperatur statt Wetterdienst
+    "cold_snap_temp": 0.0,        # Kälteeinbruch: Tiefstwert der nächsten 3 Tage darunter
+    "storm_kmh": 70.0,            # Sturm: Böen der nächsten 24 Stunden ab dieser Stärke
+    # Startseite, Darstellung, Berechtigungen
+    "start_widgets": None,        # Widgets der Startseite (None = Grundauswahl im Panel)
+    "look_theme": "auto",         # auto = wie Home Assistant | light | dark
+    "look_accent": None,          # "#rrggbb" oder None = Türkis
+    "look_background": "pattern", # pattern = Muster | daytime = Kopfzeile nach Tageszeit | plain = schlicht
+    "look_header_weather": True,  # Außentemperatur und Wetter oben rechts
+    "look_header_clock": False,   # Uhrzeit oben rechts (z. B. für Wand-Tablets)
+    "allow_users": False,         # auch Nicht-Admins dürfen Einstellungen, Räume und Pläne ändern
+}
+HOUSE_KEYS = frozenset(HOUSE_DEFAULTS)
+
+# Einstellungen des Moduls Heizwerk (Speicher hauswerk.heizen)
+HEAT_DEFAULTS = {
+    "frost_temp": 7.0,
+    "away_action": "lower",    # lower = absenken | off = Thermostate aus, solange niemand da ist
+    "away_mode": "temp",       # temp = höchstens away_temp | offset = um away_offset absenken
+    "away_temp": 17.0,
+    "away_offset": 2.0,        # °C
+    "long_away_days": 0,       # nach so vielen Tagen ohne Personen auf Frostschutz (0 = nie)
+    "vacation_temp": 15.0,
+    "party": False,            # Party: alle Räume auf Komfort
+    "eco_force": False,        # alle Räume auf Eco erzwingen
+    "summer_mode": "off",      # off | auto | on | entity
+    "summer_temp": 16.0,       # Heizgrenze: ab dieser Außentemperatur Sommerpause
     "summer_action": "off",    # off = Thermostate aus | frost = Frostschutz
+    "summer_fallback": "keep", # Außensensor fehlt: keep | heat | summer
+    "season_entity": None,     # Heizperiode aus einer Entität (an = heizen) bei summer_mode "entity"
     "liming": False,           # Entkalkungsschutz einmal pro Woche
     "liming_day": 0,           # 0 = Montag
     "liming_time": "10:00",
     "liming_minutes": 5,
     "liming_winter": False,    # auch während der Heizperiode entkalken
     "boost_minutes": 30,
-    "away_mode": "temp",       # temp = höchstens away_temp | offset = um away_offset absenken
-    "away_offset": 2.0,        # °C
-    "away_action": "lower",    # lower = absenken | off = Thermostate aus, solange niemand da ist
-    "long_away_days": 0,       # nach so vielen Tagen ohne Personen auf Frostschutz (0 = nie)
-    "eco_force": False,        # alle Räume auf Eco erzwingen
-    "season_entity": None,     # Heizperiode aus einer Entität (an = heizen) bei summer_mode "entity"
-    "summer_fallback": "keep", # Außensensor fehlt: keep | heat | summer
     "calibration_interval": 10,  # Minuten zwischen zwei Kalibrierungen
-    # Urlaub: Quelle für den automatischen Urlaub (der Schalter "vacation" gilt immer)
-    "vacation_source": "period",  # off | period | calendar
-    "vacation_calendar": None,    # calendar.* bei vacation_source "calendar"
-    "vacation_keywords": "Urlaub, Ferien",  # Termine mit diesen Wörtern im Titel zählen
     # Vorheizen für alle Räume (je Raum änderbar)
     "preheat_mode": "fixed",      # smart = lernend | fixed = feste Zeit | off = aus
     "lead_radiator": 15,          # Minuten bei fester Zeit, Heizkörper
     "lead_floor": 120,            # Minuten bei fester Zeit, Flächenheizung
-    "allow_users": False,         # auch Nicht-Admins dürfen Einstellungen, Räume und Pläne ändern
-    "weather_entity": None,       # weather.* für das Banner (leer = erste gefundene)
-    "start_widgets": None,        # Widgets der Startseite (None = Grundauswahl im Panel)
-    # Darstellung des Panels (für alle Benutzer; die Größe merkt sich jedes Gerät selbst)
-    "look_theme": "auto",         # auto = wie Home Assistant | light | dark
-    "look_accent": None,          # "#rrggbb" oder None = Türkis
-    "look_background": "pattern", # pattern = Muster | daytime = Kopfzeile nach Tageszeit | plain = schlicht
-    "look_header_weather": True,  # Außentemperatur und Wetter oben rechts
-    "look_header_clock": False,   # Uhrzeit oben rechts (z. B. für Wand-Tablets)
-    # Wetter-Hinweise
-    "cold_snap_temp": 0.0,        # Kälteeinbruch: Tiefstwert der nächsten 3 Tage darunter
-    "storm_kmh": 70.0,            # Sturm: Böen der nächsten 24 Stunden ab dieser Stärke
 }
+
+# Alle Einstellungen zusammen (so sieht sie das Panel)
+DEFAULT_SETTINGS = {**HOUSE_DEFAULTS, **HEAT_DEFAULTS}
 
 CALENDAR_REFRESH = 300  # Sekunden zwischen zwei Abfragen des Urlaubskalenders
 

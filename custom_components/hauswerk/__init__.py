@@ -2,6 +2,7 @@
 
 Module:
 - Heizwerk (intern „heizen“): raumweise Heizungsregelung mit Fensterpause, Heizplänen und Anwesenheit
+- Kern (core.py): Anwesenheit, Urlaub, Wetter, Darstellung – gilt für alle Module
 - Protokoll: was wann warum entschieden wurde (für alle Module)
 - Rollladen, Licht, Garten: geplant
 """
@@ -19,6 +20,7 @@ from . import api
 from .const import (
     DOMAIN,
     MODULE_HEATING,
+    MODULE_HOUSE,
     MODULE_LOG,
     NAME,
     PANEL_COMPONENT,
@@ -28,6 +30,7 @@ from .const import (
     STATIC_URL,
 )
 from .controller import Heizen
+from .core import Haus
 from .log import Protokoll
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,13 +65,19 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     log = Protokoll(hass)
     await log.async_load()
-    heating = Heizen(hass, entry, log)
+    # Hauswerk-Kern zuerst anlegen, Heizwerk nutzt ihn; beim ersten Start übernimmt der Kern
+    # Anwesenheit, Urlaub, Wetter und Darstellung aus den bisherigen Einstellungen von Heizwerk.
+    haus = Haus(hass, log)
+    heating = Heizen(hass, entry, log, haus)
     await heating.async_load()
-    hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HEATING: heating}
+    await haus.async_load(legacy=heating.loaded_settings)
+    heating.drop_house_settings()
+    hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HOUSE: haus, MODULE_HEATING: heating}
 
     api.async_register(hass)
     await _async_register_panel(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await haus.async_start()
     await heating.async_start()
     return True
 
@@ -77,7 +86,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         modules: dict = hass.data.pop(DOMAIN)
-        for module in modules.values():
-            await module.async_stop()
+        # Module zuerst, Kern und Protokoll zuletzt
+        for key in [k for k in modules if k not in (MODULE_HOUSE, MODULE_LOG)] + [MODULE_HOUSE, MODULE_LOG]:
+            if key in modules:
+                await modules[key].async_stop()
         frontend.async_remove_panel(hass, PANEL_URL)
     return unloaded

@@ -1,0 +1,47 @@
+name: Prüfen
+
+# Bei jedem Push und Pull Request: Tests, hassfest (Home-Assistant-Prüfung) und HACS-Prüfung
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install pytest
+      - name: Logik- und Rauchtests
+        run: python -m pytest -q tests
+      - name: Python-Syntax aller Dateien
+        run: python -m compileall -q custom_components
+      - name: Versionen gleich (manifest.json und Panel)
+        run: |
+          M=$(jq -r .version custom_components/hauswerk/manifest.json)
+          P=$(grep -oP 'const VERSION = "\K[^"]+' custom_components/hauswerk/frontend/hauswerk-panel.js)
+          echo "manifest $M · Panel $P"
+          test "$M" = "$P"
+
+  hassfest:
+    name: hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: integration
+          ignore: brands

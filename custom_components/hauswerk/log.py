@@ -9,10 +9,22 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import LOG_DAYS, LOG_MAX, LOG_STORAGE_KEY
+from .const import LOG_DAYS, LOG_MAX, LOG_STORAGE_KEY, SETTING_LABELS
 
 # Kategorien (das Panel zeigt sie als Filter)
 CATEGORIES = ("presence", "season", "target", "window", "manual", "health", "command", "settings")
+
+
+def log_settings(log: "Protokoll", settings: dict[str, Any], changed: list[str], by: str | None) -> None:
+    """Geänderte Einstellungen ins Protokoll: „Urlaub an“ bzw. „Einstellungen geändert“ mit Quelle."""
+    labels = list(dict.fromkeys(SETTING_LABELS.get(k, k) for k in changed))
+    only = changed[0]
+    if len(changed) == 1 and isinstance(settings[only], bool):
+        title = f"{labels[0]} {'an' if settings[only] else 'aus'}"
+    else:
+        title = "Einstellungen geändert"
+    source = f"Panel · von {by}" if by else "Home Assistant (Schalter oder Automation)"
+    log.add("settings", title, f"{', '.join(labels)} · {source}")
 
 
 class Protokoll:
