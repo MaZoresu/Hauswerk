@@ -96,7 +96,7 @@ class Heizen:
         # Thermostate, die Hauswerk wegen offener Fenster ausgeschaltet hat (-> vorheriger Modus).
         # Wird gespeichert, damit sie nach einem Neustart wieder eingeschaltet werden.
         self.turned_off: dict[str, str] = {}
-        # Gelernte Aufheizgeschwindigkeit je Raum in K/h (für das lernende Vorheizen).
+        # Gelernte Aufheizgeschwindigkeit je Raum in °C pro Stunde (für das lernende Vorheizen).
         self.heat_rates: dict[str, float] = {}
         # Gemeinsame Heizpläne, die Räume über plan_id nutzen.
         self.plans: dict[str, dict[str, Any]] = {}
@@ -132,6 +132,10 @@ class Heizen:
                 await self._store.async_save(legacy)
         stored = stored or {}
         self.settings.update(stored.get("settings") or {})
+        # Heimweg-Grenze früher in Kilometern, jetzt in Metern
+        old_km = self.settings.pop("proximity_km", None)
+        if old_km and not self.settings.get("proximity_m"):
+            self.settings["proximity_m"] = float(old_km) * 1000
         self.rooms = stored.get("rooms") or {}
         self.stats = stored.get("stats") or {}
         self.turned_off = stored.get("turned_off") or {}
@@ -220,6 +224,14 @@ class Heizen:
         if message:
             self.log.add(cat, message, why)
 
+    def _home_state(self) -> str:
+        """Zustand einer Person, die in der gewählten Wohnungs-Zone ist („home“ oder der Zonenname)."""
+        zone = self.settings.get("home_zone") or "zone.home"
+        if zone == "zone.home":
+            return STATE_HOME
+        state = self.hass.states.get(zone)
+        return state.name if state is not None else STATE_HOME
+
     def _presence_why(self) -> str:
         if self.settings.get("presence_force") == "away":
             return "von Hand auf Abwesend gesetzt"
@@ -228,7 +240,7 @@ class Heizen:
         home = [
             self._name(p)
             for p in self.settings.get("persons") or []
-            if (s := self.hass.states.get(p)) is not None and s.state == STATE_HOME
+            if (s := self.hass.states.get(p)) is not None and s.state == self._home_state()
         ]
         return f"Zu Hause: {', '.join(home)}" if home else "Alle Personen unterwegs"
 
@@ -726,7 +738,8 @@ class Heizen:
         if not known:
             return False
         now = dt_util.utcnow().timestamp()
-        home = [s for s in known if s.state == STATE_HOME]
+        home_state = self._home_state()
+        home = [s for s in known if s.state == home_state]
         if home:
             # Erst nach der Wartezeit beim Heimkommen wieder "zu Hause"
             # (es zählt die Person, die schon am längsten da ist).
@@ -743,7 +756,7 @@ class Heizen:
         return away
 
     def _near_home(self) -> bool:
-        limit = float(self.settings.get("proximity_km") or 0)
+        limit = float(self.settings.get("proximity_m") or 0) / 1000  # Meter -> km
         if limit <= 0:
             return False
         for entity_id in self.settings.get("proximity_sensors") or []:
@@ -936,7 +949,7 @@ class Heizen:
         outside = self._state_float(self.settings.get("outside_sensor"))
         self._flip("away", away, "Niemand mehr zu Hause – abwesend", "Wieder jemand zu Hause", "presence", self._presence_why())
         self._flip("approaching", self._approaching, "Jemand ist auf dem Heimweg", None, "presence",
-                   f"näher als {self._t(float(self.settings.get('proximity_km') or 0))} km – es wird schon geheizt")
+                   f"näher als {float(self.settings.get('proximity_m') or 0):.0f} m – es wird schon geheizt")
         self._flip("long_away", long_away, "Lange niemand da – Frostschutz", None, "presence",
                    f"seit {self._away_for / 86400:.1f} Tagen".replace(".", ","))
         self._flip("vacation", vacation, "Urlaub beginnt", "Urlaub endet", "presence",
@@ -1125,7 +1138,7 @@ class Heizen:
                 await self.hass.services.async_call(
                     "number", "set_value", {"entity_id": number_id, "value": new}
                 )
-                self.log.add("command", f"{self._name(number_id)} → Offset {self._t(new)} K",
+                self.log.add("command", f"{self._name(number_id)} → Offset {self._t(new)} °C",
                              f"Raumsensor {self._t(room_temp)} °C", room.get("id"), room.get("name"))
             return
 

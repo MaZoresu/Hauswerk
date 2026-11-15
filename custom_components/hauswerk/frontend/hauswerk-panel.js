@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.16.0";
+const VERSION = "0.17.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -65,8 +65,8 @@ const trend = (temp, target) => {
   if (temp == null || target == null) return null;
   const d = temp - target;
   if (Math.abs(d) < 0.3) return { i: "mdi:thermometer-check", c: "#34d399", t: "am Soll" };
-  if (d < 0) return { i: "mdi:thermometer-chevron-up", c: "#fb923c", t: `${fmt(-d)} K unter Soll` };
-  return { i: "mdi:thermometer-chevron-down", c: "#60a5fa", t: `${fmt(d)} K über Soll` };
+  if (d < 0) return { i: "mdi:thermometer-chevron-up", c: "#fb923c", t: `${fmt(-d)} °C unter Soll` };
+  return { i: "mdi:thermometer-chevron-down", c: "#60a5fa", t: `${fmt(d)} °C über Soll` };
 };
 const humidityInfo = (h) =>
   h == null ? null : h >= 65 ? { i: "mdi:water-alert", c: "#f59e0b", t: "feucht – lüften" } : h <= 35 ? { i: "mdi:water-off-outline", c: "#f59e0b", t: "trocken" } : { i: "mdi:water-percent", c: "var(--muted)", t: "" };
@@ -126,6 +126,41 @@ const PICKERS = {
   presence_schedule: { scope: "room", multi: false, domains: ["schedule", "input_boolean", "binary_sensor"] },
   calibration_entities: { scope: "room", multi: true, domains: ["number"] },
   valve_entities: { scope: "room", multi: true, domains: ["number"] },
+};
+// Entitätssuche: Wörter im Namen, die zum Feld passen, und passende Geräteklassen
+const PICK_HINTS = {
+  climates: ["thermostat", "heizung", "heizkörper", "heizkoerper", "trv", "climate"],
+  windows: ["fenster", "tür", "tuer", "window", "door", "kontakt"],
+  temp_sensor: ["temperatur", "temp"],
+  humidity_sensor: ["feucht", "humid"],
+  presence_sensor: ["präsenz", "praesenz", "bewegung", "motion", "presence", "occupancy"],
+  outside_sensor: ["außen", "aussen", "outdoor", "garten", "wetter", "balkon", "terrasse"],
+  proximity_sensors: ["entfernung", "distance", "nähe", "proximity", "abstand"],
+  calibration_entities: ["calibration", "offset", "kalibrier"],
+  valve_entities: ["valve", "ventil", "position", "opening"],
+  comfort_entity: ["komfort", "comfort"],
+  eco_entity: ["eco", "absenk"],
+  season_entity: ["heizperiode", "heizsaison", "winter"],
+  schedule_entity: ["heiz", "zeitplan", "schedule"],
+  vacation_calendar: ["urlaub", "familie", "ferien"],
+};
+const PICK_CLASSES = {
+  windows: ["window", "door", "opening", "garage_door"],
+  presence_sensor: ["occupancy", "motion", "presence"],
+  proximity_sensors: ["distance"],
+  temp_sensor: ["temperature"],
+  humidity_sensor: ["humidity"],
+  outside_sensor: ["temperature"],
+};
+const DC_LABEL = {
+  temperature: "Temperatur", humidity: "Feuchte", window: "Fenster", door: "Tür", opening: "Öffnung", garage_door: "Garagentor",
+  motion: "Bewegung", occupancy: "Belegung", presence: "Präsenz", distance: "Entfernung", battery: "Batterie", power: "Leistung",
+};
+const DOMAIN_LABEL = {
+  climate: "Thermostat", binary_sensor: "Binärsensor", sensor: "Sensor", cover: "Abdeckung", number: "Zahl", input_number: "Zahl-Helfer",
+  input_boolean: "Schalter-Helfer", switch: "Schalter", schedule: "Zeitplan", calendar: "Kalender", person: "Person", device_tracker: "Tracker",
+  weather: "Wetter", light: "Licht", script: "Skript", scene: "Szene", button: "Knopf", input_button: "Knopf-Helfer", fan: "Lüfter",
+  lock: "Schloss", media_player: "Medienplayer", input_select: "Auswahl", counter: "Zähler",
 };
 const PLAN_PRESETS = {
   berufstaetig: {
@@ -249,6 +284,16 @@ class HauswerkPanel extends HTMLElement {
   }
   get hass() {
     return this._hass;
+  }
+
+  /** Einstellungs-Zeile: Titel mit „?“, Unterzeile, Wert oder Bedienelement rechts (ctl = Bedienelement, am Handy volle Breite). */
+  _setRow(key, title, sub, value, text, ctl = false) {
+    const on = !!this._help?.[key];
+    return `
+      <div class="wxr ${ctl ? "ctl" : ""}">
+        <div class="wxr-l"><b>${title}<button class="qm ${on ? "on" : ""}" data-action="help" data-k="${key}" aria-label="Erklärung zu ${title}">?</button></b>${sub ? `<small>${sub}</small>` : ""}${on ? `<p class="wxr-h">${text}</p>` : ""}</div>
+        <div class="wxr-v">${value}</div>
+      </div>`;
   }
 
   /** Darstellung anwenden: aus den gespeicherten Einstellungen oder (Vorschau) aus dem offenen Pop-up. */
@@ -441,10 +486,7 @@ class HauswerkPanel extends HTMLElement {
       root.addEventListener("click", (e) => this._onClick(e));
       root.addEventListener("input", (e) => this._onInput(e));
       root.addEventListener("change", (e) => this._onInput(e, true));
-      root.addEventListener("focusin", (e) => {
-        const input = e.target.closest?.("[data-picker-input]");
-        if (input) this._showPickList(input);
-      });
+
     }
   }
 
@@ -816,10 +858,13 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Bekannte Personen mit Ort und Entfernung zu Hause (GPS der Person, sonst Entfernungs-Sensor). */
-  _people() {
+  _people(idsArg = null, zoneArg = null) {
     const st = this._hass.states;
-    const ids = (this._data.settings.persons || []).length ? this._data.settings.persons : Object.keys(st).filter((e) => e.startsWith("person."));
-    const home = st["zone.home"]?.attributes || {};
+    const ids = idsArg || ((this._data.settings.persons || []).length ? this._data.settings.persons : Object.keys(st).filter((e) => e.startsWith("person.")));
+    const zoneId = zoneArg || this._data.settings.home_zone || "zone.home";
+    const home = st[zoneId]?.attributes || st["zone.home"]?.attributes || {};
+    // Zustand einer Person in der Wohnung: „home“ bei zone.home, sonst der Name der Zone
+    const homeState = zoneId === "zone.home" ? "home" : st[zoneId]?.attributes?.friendly_name || "home";
     const rad = (d) => (d * Math.PI) / 180;
     const km = (a) => {
       if (a.latitude == null || home.latitude == null) return null;
@@ -842,10 +887,11 @@ class HauswerkPanel extends HTMLElement {
             .find((e) => e.includes(slug) || (st[e]?.attributes?.friendly_name || "").toLowerCase().includes(name.toLowerCase()));
           if (sensor) dist = toKm(parseFloat(st[sensor].state), st[sensor].attributes.unit_of_measurement);
         }
-        const home_ = s.state === "home";
+        const home_ = s.state === homeState;
         const zone = !home_ && s.state !== "not_home" && !["unknown", "unavailable"].includes(s.state) ? st[`zone.${s.state}`]?.attributes?.friendly_name || s.state : null;
         const where = home_ ? "zu Hause" : zone || (["unknown", "unavailable"].includes(s.state) ? "unbekannt" : "unterwegs");
-        const distTxt = home_ || dist == null ? "" : dist < 1 ? `${Math.round(dist * 1000)} m` : `${fmt(dist, dist < 10 ? 1 : 0)} km`;
+        // Abstand in Metern (erst ab 10 km in Kilometern)
+        const distTxt = home_ || dist == null ? "" : dist < 10 ? `${(Math.round((dist * 1000) / 10) * 10).toLocaleString("de-DE")} m` : `${fmt(dist, 0)} km`;
         return { id, name, home: home_, where, dist, distTxt, pic: a.entity_picture || null };
       })
       .filter(Boolean)
@@ -1278,7 +1324,7 @@ class HauswerkPanel extends HTMLElement {
       home: persons
         ? `Heizpläne laufen normal · abwesend nach ${settings.away_delay} Min. ohne Personen`
         : `Heizpläne laufen normal · <button class="link inline" data-action="settings-go" data-sub="presence">Personen wählen</button>, damit Abwesenheit erkannt wird`,
-      abwesend: `${s.long_away ? `Lange niemand da – Frostschutz ${fmt(settings.frost_temp)} °C` : settings.away_action === "off" ? "Thermostate aus" : settings.away_mode === "offset" ? `Alle Räume ${fmt(settings.away_offset)} K kühler` : `Alle Räume höchstens ${fmt(settings.away_temp)} °C`} · ${s.presence_force ? "von Hand gesetzt" : "endet, wenn jemand heimkommt"}`,
+      abwesend: `${s.long_away ? `Lange niemand da – Frostschutz ${fmt(settings.frost_temp)} °C` : settings.away_action === "off" ? "Thermostate aus" : settings.away_mode === "offset" ? `Alle Räume ${fmt(settings.away_offset)} °C kühler` : `Alle Räume höchstens ${fmt(settings.away_temp)} °C`} · ${s.presence_force ? "von Hand gesetzt" : "endet, wenn jemand heimkommt"}`,
       urlaub: (() => {
         // Ende des Urlaubs: aus dem laufenden Kalendertermin oder dem eingetragenen Zeitraum
         const src = settings.vacation_source || "period";
@@ -1431,7 +1477,7 @@ class HauswerkPanel extends HTMLElement {
       if (mode === "vorheizen") {
         const mins = s.comfort_in ?? s.next_change;
         const at = mins != null ? new Date(Date.now() + mins * 60000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : null;
-        return `<div class="room-note pre"><ha-icon icon="${s.preheat_mode === "smart" ? "mdi:brain" : "mdi:clock-fast"}"></ha-icon><span>Heizt vor${at ? ` – ${fmt(s.target)} °C ab ${at}` : ""}${s.preheat_mode === "smart" && s.heat_rate ? `<small> · ${fmt(s.heat_rate)} K/h</small>` : ""}</span></div>`;
+        return `<div class="room-note pre"><ha-icon icon="${s.preheat_mode === "smart" ? "mdi:brain" : "mdi:clock-fast"}"></ha-icon><span>Heizt vor${at ? ` – ${fmt(s.target)} °C ab ${at}` : ""}${s.preheat_mode === "smart" && s.heat_rate ? `<small> · ${fmt(s.heat_rate)} °C/h</small>` : ""}</span></div>`;
       }
       if (mode === "warm") return `<div class="room-note warmn"><ha-icon icon="mdi:thermometer-check"></ha-icon>Warm genug – aus, bis unter ${fmt(s.target)} °C</div>`;
       return "";
@@ -1512,7 +1558,7 @@ class HauswerkPanel extends HTMLElement {
     const settings = [
       kv("Komfort / Eco", `${fmt(room.comfort)} / ${fmt(room.eco)} °C`),
       kv("Heizplan", esc(this._planLabel(room))),
-      kv("Vorheizen", preMode === "smart" ? `lernend${s.heat_rate ? ` · ${fmt(s.heat_rate)} K/h` : ""}` : preMode === "off" ? "aus" : `${room.lead_min ?? this._leadFor(room.type)} Min.`),
+      kv("Vorheizen", preMode === "smart" ? `lernend${s.heat_rate ? ` · ${fmt(s.heat_rate)} °C/h` : ""}` : preMode === "off" ? "aus" : `${room.lead_min ?? this._leadFor(room.type)} Min.`),
       kv("Fensterpause nach", `${room.window_delay ?? d.window_delay ?? 0} s`),
       kv("Bei offenem Fenster", (room.pause_mode || d.pause_mode) === "off" ? "aus" : `${fmt(room.window_temp ?? set.frost_temp)} °C`),
       kv("Automatik", room.enabled === false ? "aus" : "an"),
@@ -2160,7 +2206,7 @@ class HauswerkPanel extends HTMLElement {
     const pre = { smart: "Lernend", fixed: `Feste Zeit · ${this._leadFor("heizkoerper")} / ${this._leadFor("flaeche")} Min.`, off: "Aus" }[p.preheat_mode || "fixed"];
     const own = rooms.filter((r) => r.preheat_mode).length;
     const shared = rooms.filter((r) => !r.schedule_entity && this._data.plans?.[r.plan_id]).length;
-    const away = p.away_action === "off" ? "Thermostate aus" : p.away_mode === "offset" ? `${fmt(p.away_offset)} K kühler` : `höchstens ${fmt(p.away_temp)} °C`;
+    const away = p.away_action === "off" ? "Thermostate aus" : p.away_mode === "offset" ? `${fmt(p.away_offset)} °C kühler` : `höchstens ${fmt(p.away_temp)} °C`;
     const rows = [
       { g: "Hauswerk", go: "house", icon: "mdi:home-cog-outline", c: "#2dd4bf", title: "Zentrale Einstellungen",
         sum: "Anwesenheit, Urlaub, Wetter und Berechtigungen gelten für alle Module", words: "anwesenheit urlaub wetter personen berechtigungen zentral" },
@@ -2431,24 +2477,57 @@ class HauswerkPanel extends HTMLElement {
     const date = (iso, time = false) =>
       new Date(iso).toLocaleString("de-DE", time ? { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" } : { weekday: "short", day: "numeric", month: "short" });
     switch (id) {
-      case "presence":
+      case "presence": {
+        const S = this._hass.states;
+        const st = this._status || {};
+        const persons = [...new Set(Object.keys(S).filter((e) => e.startsWith("person.")).concat(p.persons || []))];
+        const chosen = new Set(p.persons || []);
+        const zones = Object.keys(S).filter((e) => e.startsWith("zone.")).sort((a, b) => (a === "zone.home" ? -1 : b === "zone.home" ? 1 : a.localeCompare(b)));
+        const people = new Map(this._people(persons, p.home_zone || "zone.home").map((x) => [x.id, x]));
+        const state = st.vacation
+          ? ["mdi:palm-tree", "Urlaub", "#34d399"]
+          : p.presence_force === "away"
+            ? ["mdi:home-export-outline", "Abwesend – von Hand", "#94a3b8"]
+            : st.away
+              ? ["mdi:home-export-outline", "Niemand da", "#94a3b8"]
+              : st.approaching
+                ? ["mdi:home-import-outline", "Jemand kommt heim", "#14b8a6"]
+                : ["mdi:home-account", (p.persons || []).length ? "Jemand da" : "Keine Personen gewählt", (p.persons || []).length ? "#14b8a6" : "#f59e0b"];
+        const chip = (id) => {
+          const x = people.get(id);
+          const txt = !x ? "fehlt" : x.home ? "da" : x.distTxt || x.where;
+          return `<button class="pchip ${chosen.has(id) ? "on" : ""} ${x?.home ? "home" : ""}" data-action="person-toggle" data-id="${esc(id)}" aria-pressed="${chosen.has(id)}" ${dis}><i></i>${esc(x?.name || this._entityName(id))} · ${esc(txt)}</button>`;
+        };
+        const step = (key, def) =>
+          `<div class="mstep"><button data-action="min-step" data-key="${key}" data-d="-5" aria-label="5 Minuten weniger" ${dis}>−</button><b>${p[key] ?? def} min</b><button data-action="min-step" data-key="${key}" data-d="5" aria-label="5 Minuten mehr" ${dis}>+</button></div>`;
+        const row = (k, title, sub, value, text, ctl) => this._setRow(k, title, sub, value, text, ctl);
         return {
-          icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit", sub: "Hauswerk · gilt für alle Module",
+          icon: "mdi:home-account", c: "#8b5cf6", title: "Anwesenheit", sub: "Hauswerk · gilt für alle Module",
           body: `
-            <div class="field"><span><ha-icon icon="mdi:account-multiple-outline"></ha-icon> Wer wohnt hier?</span>${this._picker("persons", p.persons || [])}</div>
-            <p class="muted small">Sind alle gewählten Personen weg, gilt das Haus nach der Wartezeit als „Abwesend“. Ohne Personen gibt es kein automatisches „Abwesend“. Was dann passiert, legt jedes Modul selbst fest – fürs Heizen unter Heizwerk › Einstellungen › Abwesenheit & Urlaub.</p>
-            <div class="row2">
-              <label class="field"><span><ha-icon icon="mdi:logout"></ha-icon> Abwesend nach dem Gehen</span>${minutes("away_delay", 10)}</label>
-              <label class="field"><span><ha-icon icon="mdi:login"></ha-icon> Wieder zu Hause nach dem Heimkommen</span>${minutes("arrive_delay", 0)}</label>
+            <span class="pstate" style="--c:${state[2]}"><ha-icon icon="${state[0]}"></ha-icon>${state[1]}</span>
+            <div class="wxrows">
+              ${row("who", "Wer wohnt hier?", "Tippen zum Aus- und Abwählen", `<div class="pchips">${persons.map(chip).join("") || `<span class="muted small">Keine Personen in Home Assistant</span>`}</div>`,
+                "Gewählte Personen zählen, sobald sie in der Wohnung sind (über die Ortung ihres Handys in Home Assistant). Sind alle weg, gilt das Haus nach der Wartezeit als abwesend. Ohne gewählte Personen gibt es kein automatisches „Abwesend“.", true)}
+              ${row("zone", "Wohnung (Zone)", "wo „zu Hause“ ist", `<select data-set="home_zone" ${dis}>${zones.map((z) => `<option value="${esc(z)}" ${(p.home_zone || "zone.home") === z ? "selected" : ""}>${esc(z === "zone.home" && this._entityName(z) === z ? "Home (Zuhause)" : this._entityName(z))}</option>`).join("")}</select>`,
+                "Die Zone aus Home Assistant, in der eine Person als zu Hause gilt – meist „Home“. Abstände rechnet Hauswerk zur Mitte dieser Zone.", true)}
+              ${row("delay", "Absenken nach", "damit kurze Wege nichts auslösen", step("away_delay", 10),
+                "Erst wenn alle gewählten Personen so lange weg sind, gilt das Haus als abwesend. Was dann passiert, legt jedes Modul fest – fürs Heizen unter Heizwerk › Abwesenheit & Urlaub.")}
+              ${row("arrive", "Zu Hause nach", "nach dem Heimkommen", step("arrive_delay", 0),
+                "So lange nach dem Heimkommen bleibt es noch bei „abwesend“ – z. B. damit ein kurzer Zwischenstopp nicht gleich alles hochheizt. 0 = sofort.")}
+              ${row("vac", "Urlaub", "von Hand – bleibt an, bis du ihn ausschaltest", sw("vacation"),
+                "Schaltet Urlaub für alle Module. Automatisch per Zeitraum oder Kalender: Hauswerk › Einstellungen › Urlaub.")}
+              ${row("guest", "Gäste da", "nicht absenken, auch wenn alle Bewohner weg sind", sw("guest"),
+                "Solange Gäste da sind, gilt das Haus nie als abwesend – auch wenn alle gewählten Personen unterwegs sind.")}
             </div>
             ${head("mdi:map-marker-radius-outline", "Auf dem Heimweg")}
-            <p class="muted small">Entfernungs-Sensoren, z. B. aus der Integration „Nähe“. Ist jemand näher als die Grenze, gilt das Haus schon als bewohnt – Heizwerk heizt dann zum Beispiel schon vor.</p>
-            <div class="row2">
-              <div class="field"><span>Entfernungs-Sensoren</span>${this._picker("proximity_sensors", p.proximity_sensors || [])}</div>
-              <label class="field"><span>Näher als (0 = aus)</span><div class="unit"><input type="number" step="0.5" min="0" max="200" data-set="proximity_km" value="${p.proximity_km ?? 0}" ${dis}><i>km</i></div></label>
+            <div class="wxrows">
+              ${row("near", "Näher als", "gilt schon als zu Hause (0 = aus)", `<div class="unit"><input type="number" step="50" min="0" max="50000" data-set="proximity_m" value="${Math.round(p.proximity_m ?? 0)}" ${dis}><i>m</i></div>`,
+                "Ist eine Person näher als dieser Abstand zur Wohnung, gilt das Haus schon als bewohnt – Heizwerk heizt dann zum Beispiel schon vor. Der Abstand kommt aus der Ortung der Person oder aus einem Entfernungs-Sensor.", true)}
             </div>
-            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Gäste, Party und Eco schaltest du direkt in der Hausmodus-Leiste auf der Startseite. Präsenzmelder einzelner Räume stehen am Raum unter „Geräte“.</p>`,
+            <div class="field"><span>Entfernungs-Sensoren (optional, z. B. aus der Integration „Nähe“)</span>${this._picker("proximity_sensors", p.proximity_sensors || [])}</div>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Party und Eco schaltest du in der Hausmodus-Leiste auf der Startseite. Präsenzmelder einzelner Räume stehen am Raum unter „Geräte“.</p>`,
         };
+      }
 
       case "absence":
         return {
@@ -2460,7 +2539,7 @@ class HauswerkPanel extends HTMLElement {
             ${(p.away_action || "lower") === "lower" ? `
             <div class="field">${segs("away_mode", [["temp", "Auf höchstens …", "mdi:thermometer"], ["offset", "Um … kühler", "mdi:arrow-down-thin"]], "temp")}</div>
             ${(p.away_mode || "temp") === "offset"
-              ? `<label class="field narrow"><span>Absenkung</span><div class="unit"><input type="number" step="0.5" min="0" max="10" data-set="away_offset" value="${p.away_offset ?? 2}" ${dis}><i>K</i></div></label>`
+              ? `<label class="field narrow"><span>Absenkung</span><div class="unit"><input type="number" step="0.5" min="0" max="10" data-set="away_offset" value="${p.away_offset ?? 2}" ${dis}><i>°C</i></div></label>`
               : `<div class="field"><span>Höchstens</span>${this._stepper("set", "away_temp", p.away_temp)}</div>`}` : ""}
             <label class="field narrow"><span><ha-icon icon="mdi:snowflake-thermometer"></ha-icon> Frostschutz, wenn so lange niemand da war (0 = nie)</span><div class="unit"><input type="number" step="1" min="0" max="60" data-set="long_away_days" value="${p.long_away_days ?? 0}" ${dis}><i>Tage</i></div></label>
             ${head("mdi:palm-tree", "Im Urlaub")}
@@ -2502,7 +2581,7 @@ class HauswerkPanel extends HTMLElement {
         return {
           icon: "mdi:weather-sunny", c: "#facc15", title: "Saison", sub: "Heizperiode oder Sommerpause – für alle Räume",
           body: `
-            <p class="muted">In der Sommerpause bleiben die Thermostate aus. Zurück in den Heizbetrieb geht es 1 K unter der Schwelle.</p>
+            <p class="muted">In der Sommerpause bleiben die Thermostate aus. Zurück in den Heizbetrieb geht es 1 °C unter der Schwelle.</p>
             <div class="field"><span>Sommerpause</span>${segs("summer_mode", [["off", "Nie", "mdi:close-circle-outline"], ["auto", "Nach Außentemperatur", "mdi:thermometer-auto"], ["entity", "Nach Entität", "mdi:toggle-switch-outline"], ["on", "Jetzt an", "mdi:weather-sunny"]], "off")}</div>
             ${p.summer_mode === "auto" ? `
             <div class="row2">
@@ -2537,7 +2616,7 @@ class HauswerkPanel extends HTMLElement {
             <div class="lbl">Gelernt</div>
             <div class="evlist">${rooms.map((r) => {
               const rs = st[r.id] || {};
-              return `<div class="ev"><ha-icon icon="${esc(roomIcon(r))}"></ha-icon><span class="grow"><b>${esc(r.name)}</b><small>${rs.heat_rate ? `${fmt(rs.heat_rate)} K/h${rs.learned ? " · gelernt" : " · Startwert"}` : "noch nichts gemessen"}</small></span>
+              return `<div class="ev"><ha-icon icon="${esc(roomIcon(r))}"></ha-icon><span class="grow"><b>${esc(r.name)}</b><small>${rs.heat_rate ? `${fmt(rs.heat_rate)} °C/h${rs.learned ? " · gelernt" : " · Startwert"}` : "noch nichts gemessen"}</small></span>
                 ${rs.learned && this._admin ? `<button class="link tiny" data-action="preheat-reset" data-id="${r.id}"><ha-icon icon="mdi:restore"></ha-icon>neu lernen</button>` : ""}</div>`;
             }).join("") || `<p class="muted small">Noch keine Räume.</p>`}</div>` : ""}
             ${mode === "off" ? `<p class="muted small">Räume heizen erst zu Beginn der Komfortzeit los.</p>` : ""}
@@ -2697,7 +2776,7 @@ class HauswerkPanel extends HTMLElement {
             <div class="wxrows">
               ${row("limit", "Heizgrenze", p.summer_mode === "auto" ? "darunter gilt die Heizsaison" : "nur bei Saison „Nach Außentemperatur“",
                 `<button class="link" data-action="settings-go" data-sub="season">${fmt(p.summer_temp ?? 16)} °C</button>`,
-                "Ab dieser Außentemperatur macht Heizwerk Sommerpause (1 K Hysterese). Einstellbar unter Heizwerk › Einstellungen › Saison.")}
+                "Ab dieser Außentemperatur macht Heizwerk Sommerpause (1 °C Hysterese). Einstellbar unter Heizwerk › Einstellungen › Saison.")}
               ${row("cold", "Kälteeinbruch", "Vorhersage unter diesem Wert", num("cold_snap_temp", 0, -30, 25, 0.5, "°C"),
                 "Sagt die Vorhersage der nächsten 3 Tage einen Tiefstwert unter dieser Grenze voraus, erscheint ein Hinweis unter der Glocke.", true)}
               ${row("storm", "Sturm", "Böen ab dieser Stärke", num("storm_kmh", 70, 20, 200, 5, "km/h"),
@@ -2879,7 +2958,7 @@ class HauswerkPanel extends HTMLElement {
         ${ex ? `
         <div class="sub-h"><ha-icon icon="mdi:school-outline"></ha-icon>Experte</div>
         <div class="row2">
-          <label class="field"><span><ha-icon icon="mdi:arrow-collapse-down"></ha-icon> Höchstens absenken um</span>${num("max_setback", "K", 0.5, 'min="0" max="15"')}</label>
+          <label class="field"><span><ha-icon icon="mdi:arrow-collapse-down"></ha-icon> Höchstens absenken um</span>${num("max_setback", "°C", 0.5, 'min="0" max="15"')}</label>
           <label class="field"><span><ha-icon icon="mdi:window-open-variant"></ha-icon> Temperatur bei offenem Fenster</span><div class="unit"><input type="number" step="0.5" min="5" max="30" data-room="window_temp" value="${r.window_temp ?? ""}" placeholder="${fmt(this._data.settings.frost_temp)}"><i>°C</i></div></label>
         </div>
         ${check("min_instead_of_off", "mdi:thermometer-low", "Kleinste Temperatur statt Ausschalten", "Für Thermostate, die sich nicht zuverlässig aus- und wieder einschalten lassen.")}` : expertHint(["resume_delay", "max_setback", "window_temp", "min_instead_of_off"])}`,
@@ -2887,29 +2966,29 @@ class HauswerkPanel extends HTMLElement {
       control: () => `
         ${check("manual_device", "mdi:hand-back-right-outline", "Am Gerät gedreht übernehmen", "Dreht jemand am Thermostat selbst, gilt der Wert bis zur nächsten Planänderung.", { on: r.allow_manual !== false && r.manual_device !== false })}
         ${check("manual_ui", "mdi:cellphone-cog", "In Home Assistant geändert übernehmen", "Ändert jemand das Thermostat in Home Assistant oder der App, gilt der Wert bis zur nächsten Planänderung.", { on: r.allow_manual !== false && r.manual_ui !== false })}
-        ${r.type === "heizkoerper" ? check("compensation", "mdi:thermometer-plus", "Nach Raumsensor nachführen", "Misst das Thermostat am Heizkörper zu warm, wird der Sollwert um die Differenz (max. 4 K) angehoben.", { disabled: !r.temp_sensor }) : ""}
+        ${r.type === "heizkoerper" ? check("compensation", "mdi:thermometer-plus", "Nach Raumsensor nachführen", "Misst das Thermostat am Heizkörper zu warm, wird der Sollwert um die Differenz (max. 4 °C) angehoben.", { disabled: !r.temp_sensor }) : ""}
         ${r.type === "heizkoerper" && !r.temp_sensor ? `<p class="muted small"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>Nachführen braucht einen Raumsensor (Reiter Geräte).</p>` : ""}
         ${ex ? `
         <div class="sub-h"><ha-icon icon="mdi:school-outline"></ha-icon>Experte</div>
         ${hint}
         <div class="row2">
-          <label class="field"><span><ha-icon icon="mdi:plus-minus-variant"></ha-icon> Fester Ausgleich am Thermostat</span>${num("target_offset", "K", 0.5, 'min="-5" max="5"')}</label>
+          <label class="field"><span><ha-icon icon="mdi:plus-minus-variant"></ha-icon> Fester Ausgleich am Thermostat</span>${num("target_offset", "°C", 0.5, 'min="-5" max="5"')}</label>
         </div>
-        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Regelt ein Thermostat dauerhaft zu kalt, z. B. +1 K: Heizwerk schickt dann 1 K mehr als den Sollwert.</p>
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Regelt ein Thermostat dauerhaft zu kalt, z. B. +1 °C: Heizwerk schickt dann 1 °C mehr als den Sollwert.</p>
         ${check("calibration", "mdi:tune-vertical-variant", "Thermostat kalibrieren", "Setzt den Temperatur-Offset am Gerät (number-Entität mit „calibration“ oder „offset“ im Namen), damit es wie der Raumsensor misst. Ersetzt das Nachführen.", { disabled: !r.temp_sensor })}
         ${r.calibration ? `<div class="field"><span>Offset-Entität (leer = automatisch suchen)</span>${this._picker("calibration_entities", r.calibration_entities || [])}</div>` : ""}
         ${check("valve_control", "mdi:valve", "Ventil direkt steuern", "Für Thermostate mit Ventil-Entität (number mit „valve“ oder „position“ im Namen): Öffnung nach Abstand zum Soll.")}
         ${r.valve_control ? `
         <div class="row2">
-          <label class="field"><span>Ganz offen ab</span>${num("valve_diff", "K unter Soll", 0.1, 'min="0.2" max="5"')}</label>
+          <label class="field"><span>Ganz offen ab</span>${num("valve_diff", "°C unter Soll", 0.1, 'min="0.2" max="5"')}</label>
           <label class="field"><span>Höchstens öffnen</span>${num("valve_max", "%", 5, 'min="10" max="100"')}</label>
         </div>
         <div class="field"><span>Ventil-Entität (leer = automatisch suchen)</span>${this._picker("valve_entities", r.valve_entities || [])}</div>` : ""}
         <div class="sub-h"><ha-icon icon="mdi:chart-bell-curve-cumulative"></ha-icon>Feinregelung <span class="muted small">· 0 = aus</span></div>
         <div class="row3">
-          <label class="field"><span><ha-icon icon="mdi:thermometer-check"></ha-icon> Aus ab Soll +</span>${num("off_above", "K", 0.1, 'min="0" max="5"')}</label>
-          <label class="field"><span><ha-icon icon="mdi:arrow-expand-vertical"></ha-icon> Übersteuern ab</span>${num("aggressive_range", "K", 0.1, 'min="0" max="5"')}</label>
-          <label class="field"><span><ha-icon icon="mdi:plus-minus-variant"></ha-icon> Übersteuern um</span>${num("aggressive_offset", "K", 0.5, 'min="0" max="5"')}</label>
+          <label class="field"><span><ha-icon icon="mdi:thermometer-check"></ha-icon> Aus ab Soll +</span>${num("off_above", "°C", 0.1, 'min="0" max="5"')}</label>
+          <label class="field"><span><ha-icon icon="mdi:arrow-expand-vertical"></ha-icon> Übersteuern ab</span>${num("aggressive_range", "°C", 0.1, 'min="0" max="5"')}</label>
+          <label class="field"><span><ha-icon icon="mdi:plus-minus-variant"></ha-icon> Übersteuern um</span>${num("aggressive_offset", "°C", 0.5, 'min="0" max="5"')}</label>
         </div>
         <p class="muted small">Übersteuern stellt das Thermostat höher bzw. tiefer, solange der Raum weit vom Soll entfernt ist – träge Thermostate reagieren so schneller.</p>
         <div class="sub-h"><ha-icon icon="mdi:tune-vertical"></ha-icon>Komfort und Eco aus Helfern</div>
@@ -2969,8 +3048,8 @@ class HauswerkPanel extends HTMLElement {
           ${ex ? `<label class="field"><span><ha-icon icon="mdi:timer-alert-outline"></ha-icon> Höchstens vorher</span>${num("preheat_max", "Min.", 10, 'min="10" max="600"')}</label>` : ""}
           <div class="field"><span><ha-icon icon="mdi:speedometer"></ha-icon> Aufheizgeschwindigkeit</span>
             <div class="learn ${learned ? "ok" : ""}">
-              <b>${rate ? `${fmt(rate)} K/h` : "–"}</b>
-              <small>${!r.id ? "wird nach dem Speichern gelernt" : learned ? `gelernt · 2 K wärmer ≈ ${example} min` : `Startwert · lernt beim nächsten Aufheizen`}</small>
+              <b>${rate ? `${fmt(rate)} °C/h` : "–"}</b>
+              <small>${!r.id ? "wird nach dem Speichern gelernt" : learned ? `gelernt · 2 °C wärmer ≈ ${example} min` : `Startwert · lernt beim nächsten Aufheizen`}</small>
               ${learned && this._admin ? `<button class="link tiny" data-action="preheat-reset" data-id="${r.id}"><ha-icon icon="mdi:restore"></ha-icon>neu lernen</button>` : ""}
             </div>
           </div>
@@ -3007,67 +3086,186 @@ class HauswerkPanel extends HTMLElement {
     return this._hass.states[id]?.attributes?.friendly_name || id;
   }
 
-  _picker(field, selected) {
-    const cfg = PICKERS[field];
-    const dis = this._admin ? "" : "disabled";
-    return `
-      <div class="picker" data-picker="${field}">
-        ${selected.length ? `<div class="chips">
-          ${selected
-            .map((id) => {
-              const st = this._hass.states[id];
-              const val = st ? `${st.state}${st.attributes.unit_of_measurement ? " " + st.attributes.unit_of_measurement : ""}` : "nicht gefunden";
-              return `<span class="echip ${st ? "" : "missing"}" title="${esc(id)}">${esc(this._entityName(id))}<em>${esc(val)}</em>${
-                this._admin ? `<button data-action="pick-remove" data-field="${field}" data-id="${esc(id)}" title="Entfernen">×</button>` : ""
-              }</span>`;
-            })
-            .join("")}
-        </div>` : ""}
-        ${cfg.multi || !selected.length ? `<div class="search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-picker-input="${field}" placeholder="${cfg.multi ? "Name oder Entität suchen …" : "Suchen …"}" autocomplete="off" ${dis}></div>` : ""}
-        <div class="pick-list" hidden></div>
-      </div>`;
+  /** Zustand der Entitätssuche je Feld: Reiter, Suchtext, Filter, aufgeklappt. */
+  _pkState(field) {
+    this._pk = this._pk || {};
+    return (this._pk[field] = this._pk[field] || { tab: "suggest", q: "", dom: "", avail: false, open: false });
   }
 
+  /** Raum einer Entität aus Home Assistant (der Entität selbst, sonst ihres Geräts). */
+  _areaOf(id) {
+    const ent = this._hass.entities?.[id];
+    const areaId = ent?.area_id || (ent?.device_id ? this._hass.devices?.[ent.device_id]?.area_id : null);
+    return areaId ? this._hass.areas?.[areaId]?.name || null : null;
+  }
+
+  _fmtState(st) {
+    if (!st) return "nicht gefunden";
+    if (["unavailable", "unknown"].includes(st.state)) return "nicht erreichbar";
+    const a = st.attributes || {};
+    const domain = st.entity_id?.split(".")[0];
+    if (domain === "climate") {
+      const mode = { heat: "Heizen", off: "Aus", auto: "Auto", heat_cool: "Auto", cool: "Kühlen" }[st.state] || st.state;
+      return a.current_temperature != null ? `${fmt(a.current_temperature)} °C · ${mode}` : mode;
+    }
+    if (domain === "binary_sensor" || domain === "input_boolean" || domain === "switch") {
+      const on = st.state === "on";
+      const dc = a.device_class;
+      if (["window", "door", "opening", "garage_door"].includes(dc)) return on ? "offen" : "zu";
+      if (["motion", "occupancy", "presence"].includes(dc)) return on ? "erkannt" : "frei";
+      return on ? "an" : "aus";
+    }
+    if (domain === "person" || domain === "device_tracker") return st.state === "home" ? "zu Hause" : st.state === "not_home" ? "unterwegs" : st.state;
+    const u = st.attributes.unit_of_measurement;
+    const n = Number(st.state);
+    return `${st.state !== "" && isFinite(n) ? n.toLocaleString("de-DE", { maximumFractionDigits: 2 }) : st.state}${u ? ` ${u}` : ""}`;
+  }
+
+  /** Auswahlfeld: gewählte Entitäten als Karten, darunter die Suche mit Vorschlägen, nach Raum und Filter. */
+  _picker(field, selected) {
+    const cfg = PICKERS[field];
+    const S = this._pkState(field);
+    const open = this._admin && (S.open || !selected.length);
+    const cards = selected
+      .map((id) => {
+        const st = this._hass.states[id];
+        const area = this._areaOf(id);
+        return `
+        <div class="pk-sel ${st ? "" : "missing"}">
+          <button class="pk-sel-b" ${this._admin && !cfg.multi ? `data-action="pk-open" data-field="${field}" title="Ändern"` : "disabled"}>
+            <b>${esc(this._entityName(id))}</b><small>${esc(id)} · ${esc(this._fmtState(st))}${area ? ` · ${esc(area)}` : ""}</small>
+          </button>
+          ${this._admin ? `<button class="pk-x" data-action="pick-remove" data-field="${field}" data-id="${esc(id)}" title="Entfernen" aria-label="Entfernen"><ha-icon icon="mdi:close"></ha-icon></button>` : ""}
+        </div>`;
+      })
+      .join("");
+    const more = this._admin && selected.length && !open
+      ? `<button class="pk-add" data-action="pk-open" data-field="${field}"><ha-icon icon="${cfg.multi ? "mdi:plus" : "mdi:swap-horizontal"}"></ha-icon>${cfg.multi ? "Weitere hinzufügen" : "Andere wählen"}</button>`
+      : "";
+    const box = open
+      ? `<div class="pk-box">
+          <div class="search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-picker-input="${field}" placeholder="Suchen: Name, Raum, Entität …" value="${esc(S.q)}" autocomplete="off"></div>
+          <div class="pk-tabs">${[["suggest", "Vorschläge"], ["area", "Nach Raum"], ["filter", "Filter"]]
+            .map(([k, l]) => `<button class="${S.tab === k ? "on" : ""}" data-action="pk-tab" data-field="${field}" data-v="${k}">${l}</button>`)
+            .join("")}</div>
+          <div class="pk-body">${this._pickerList(field)}</div>
+          ${selected.length ? `<button class="link tiny pk-close" data-action="pk-open" data-field="${field}">Fertig</button>` : ""}
+        </div>`
+      : "";
+    return `<div class="picker" data-picker="${field}">${cards}${more}${box}</div>`;
+  }
+
+  /** Kandidaten mit Bewertung: passt die Geräteklasse, der Name, der Raum? */
   _candidates(field, query) {
     const cfg = PICKERS[field];
+    const S = this._pkState(field);
     const selected = this._pickerValue(field);
-    const q = (query || "").toLowerCase().trim();
+    const words = (query || "").toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const room = cfg.scope === "room" ? this._dialog?.room : null;
+    const roomWords = (room?.name || "").toLowerCase().split(/[\s\-_.:]+/).filter((w) => w.length > 2);
+    const hints = PICK_HINTS[field] || [];
+    const classes = PICK_CLASSES[field] || [];
     const list = [];
     for (const [id, st] of Object.entries(this._hass.states)) {
       const domain = id.split(".")[0];
-      if (!cfg.domains.includes(domain) || selected.includes(id)) continue;
+      if (!cfg.domains.includes(domain)) continue;
+      const sel = selected.includes(id);
+      if (sel && cfg.multi) continue;
+      const a = st.attributes || {};
+      const dc = a.device_class;
+      const unit = a.unit_of_measurement;
       if (cfg.deviceClass) {
-        const dc = st.attributes.device_class;
-        const unit = st.attributes.unit_of_measurement;
-        const ok = dc === cfg.deviceClass || (cfg.deviceClass === "temperature" && unit === "°C") || (cfg.deviceClass === "humidity" && unit === "%");
+        const ok = dc === cfg.deviceClass || (cfg.deviceClass === "temperature" && ["°C", "°F"].includes(unit)) || (cfg.deviceClass === "humidity" && unit === "%");
         if (!ok) continue;
       }
-      if (field === "windows" && domain === "binary_sensor") {
-        const dc = st.attributes.device_class;
-        if (dc && !["window", "door", "opening", "garage_door"].includes(dc) && !q) continue;
+      const name = a.friendly_name || id;
+      const area = this._areaOf(id);
+      const hay = `${name} ${id} ${area || ""}`.toLowerCase();
+      if (words.length && !words.every((w) => hay.includes(w))) continue;
+      if (S.dom && S.dom !== domain && S.dom !== dc) continue;
+      const bad = ["unavailable", "unknown"].includes(st.state);
+      if (S.avail && bad && !sel) continue;
+      let score = 35;
+      const why = [];
+      if (sel) why.push("jetzt gewählt");
+      if (classes.includes(dc) || (field === "persons" && domain === "person")) score += 20;
+      if (hints.some((h) => hay.includes(h))) {
+        score += 15;
+        why.push("Name passt");
       }
-      if (field === "presence_sensor" && !q && !["occupancy", "motion", "presence"].includes(st.attributes.device_class)) continue;
-      if (field === "proximity_sensors" && !q && !["distance"].includes(st.attributes.device_class) && !/distan|entfern/.test(id)) continue;
-      const name = st.attributes.friendly_name || id;
-      if (q && !name.toLowerCase().includes(q) && !id.includes(q)) continue;
-      list.push({ id, name, state: st.state });
+      if (roomWords.length && roomWords.some((w) => hay.includes(w))) {
+        score += 20;
+        why.push(area && roomWords.some((w) => area.toLowerCase().includes(w)) ? "Raum passt" : "passt zum Raum");
+      }
+      if (area) why.push(area);
+      if (unit) why.push(unit);
+      else if (dc) why.push(DC_LABEL[dc] || dc);
+      if (bad) {
+        score -= 25;
+        why.push("nicht erreichbar");
+      } else score += 5;
+      if (sel) score += 10;
+      list.push({ id, name, area, domain, dc, bad, sel, why, val: this._fmtState(st), score: Math.max(5, Math.min(99, score)) });
     }
-    return list.sort((a, b) => a.name.localeCompare(b.name, "de")).slice(0, 40);
+    return list.sort((x, y) => y.sel - x.sel || y.score - x.score || x.name.localeCompare(y.name, "de"));
   }
 
-  _showPickList(input) {
-    const field = input.dataset.pickerInput;
-    const list = input.closest(".picker").querySelector(".pick-list");
-    const items = this._candidates(field, input.value);
-    list.innerHTML = items.length
-      ? items
-          .map(
-            (it) =>
-              `<button class="pick-item" data-action="pick-add" data-field="${field}" data-id="${esc(it.id)}"><span>${esc(it.name)}</span><small>${esc(it.id)} · ${esc(it.state)}</small></button>`
-          )
-          .join("")
-      : `<div class="pick-empty">Nichts gefunden</div>`;
-    list.hidden = false;
+  /** Inhalt des gewählten Reiters (wird beim Tippen allein neu gezeichnet, damit das Suchfeld den Fokus behält). */
+  _pickerList(field) {
+    const S = this._pkState(field);
+    const cfg = PICKERS[field];
+    const all = this._candidates(field, S.q);
+    const card = (c) => `
+      <div class="pk-card ${c.sel ? "sel" : ""}">
+        <b>${esc(c.name)}</b><span class="pk-v">${esc(c.val)}</span>
+        <small>${esc(c.id)}</small>
+        <span class="pk-why"><em class="${c.score >= 75 ? "hi" : ""}">${c.score} %</em>${esc(c.why.join(" · "))}</span>
+        ${c.sel ? `<span class="pk-ok">ist gewählt</span>` : `<button class="pk-pick" data-action="pick-add" data-field="${field}" data-id="${esc(c.id)}">Passt</button>`}
+      </div>`;
+    const row = (c) => `
+      <div class="pk-row ${c.sel ? "sel" : ""} ${c.bad ? "bad" : ""}">
+        <span class="grow"><b>${esc(c.name)}</b><small>${esc(c.id)}${c.area && S.tab !== "area" ? ` · ${esc(c.area)}` : ""}</small></span>
+        <span class="pk-v">${esc(c.val)}</span>
+        ${c.sel ? `<span class="pk-mini on">gewählt</span>` : `<button class="pk-mini" data-action="pick-add" data-field="${field}" data-id="${esc(c.id)}">Wählen</button>`}
+      </div>`;
+    if (!all.length) return `<div class="pk-empty">Nichts gefunden${S.q ? ` für „${esc(S.q)}“` : ""}${S.dom || S.avail ? " – Filter zurücksetzen?" : ""}.</div>`;
+    if (S.tab === "area") {
+      const groups = new Map();
+      for (const c of all.slice(0, 150)) {
+        const k = c.area || "";
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k).push(c);
+      }
+      const keys = [...groups.keys()].sort((a, b) => (!a ? 1 : !b ? -1 : a.localeCompare(b, "de")));
+      return `<div class="pk-scroll">${keys
+        .map((k) => `<div class="pk-group">${esc(k || "Ohne Raum")} <span>${groups.get(k).length}</span></div>${groups.get(k).map(row).join("")}`)
+        .join("")}</div>`;
+    }
+    if (S.tab === "filter") {
+      const counts = {};
+      for (const c of this._candidates(field, "")) if (c.dc) counts[c.dc] = (counts[c.dc] || 0) + 1;
+      const opts = [
+        ...(cfg.domains.length > 1 ? cfg.domains.map((d) => [d, DOMAIN_LABEL[d] || d]) : []),
+        ...Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([dc]) => [dc, DC_LABEL[dc] || dc]),
+      ];
+      return `
+        <div class="pk-chips">
+          ${opts.map(([v, l]) => `<button class="${S.dom === v ? "on" : ""}" data-action="pk-dom" data-field="${field}" data-v="${esc(v)}">${esc(l)}</button>`).join("")}
+          <button class="${S.avail ? "on" : ""}" data-action="pk-avail" data-field="${field}">Nur erreichbare</button>
+        </div>
+        <div class="pk-scroll">${all.slice(0, 80).map(row).join("")}${all.length > 80 ? `<div class="pk-empty">… ${all.length - 80} weitere – Suche eingrenzen</div>` : ""}</div>`;
+    }
+    const top = all.slice(0, S.q ? 8 : 3);
+    const rest = all.length - top.length;
+    return `
+      <div class="pk-list">${top.map(card).join("")}</div>
+      ${rest > 0 ? `<div class="pk-foot">${rest} weitere passende · <button class="link" data-action="pk-tab" data-field="${field}" data-v="area">Nach Raum suchen</button> · <button class="link" data-action="pk-tab" data-field="${field}" data-v="filter">Filtern</button></div>` : ""}`;
+  }
+
+  /** Auswahlfeld an Ort und Stelle neu zeichnen. */
+  _rerenderPicker(field) {
+    const el = this.shadowRoot.querySelector(`[data-picker="${field}"]`);
+    if (el) el.outerHTML = this._picker(field, this._pickerValue(field));
   }
 
   _pickerTarget(field) {
@@ -3101,19 +3299,17 @@ class HauswerkPanel extends HTMLElement {
       this._refreshSettings();
       return;
     }
-    const el = this.shadowRoot.querySelector(`[data-picker="${field}"]`);
-    if (el) {
-      el.outerHTML = this._picker(field, values);
-      const input = this.shadowRoot.querySelector(`[data-picker-input="${field}"]`);
-      if (input && cfg.multi) input.focus();
-    }
+    this._rerenderPicker(field);
   }
 
   // ------------------------------------------------------------ Ereignisse
   _onInput(e, isChange = false) {
     const t = e.target;
     if (t.dataset.pickerInput) {
-      this._showPickList(t);
+      const field = t.dataset.pickerInput;
+      this._pkState(field).q = t.value;
+      const body = t.closest(".picker")?.querySelector(".pk-body");
+      if (body) body.innerHTML = this._pickerList(field);
       return;
     }
     if (t.dataset.room && this._dialog) {
@@ -3189,8 +3385,8 @@ class HauswerkPanel extends HTMLElement {
       else if (t.type === "number") {
         if (t.value !== "") this._settings[key] = Number(t.value); // leer = alten Wert behalten
       } else this._settings[key] = t.value || null;
-      // Andere Wetterquelle: Werte im Pop-up sofort aktualisieren
-      if (isChange && ["weather_entity", "outside_sensor"].includes(key)) this._refreshSettings();
+      // Andere Wetterquelle oder Zone: Werte im Pop-up sofort aktualisieren
+      if (isChange && ["weather_entity", "outside_sensor", "home_zone"].includes(key)) this._refreshSettings();
       const bar = this.shadowRoot.getElementById("set-save");
       if (bar) bar.hidden = !this._settingsDirty();
       return;
@@ -3531,8 +3727,33 @@ class HauswerkPanel extends HTMLElement {
           this._renderMain();
         }
         break;
+      case "pk-open": {
+        const S = this._pkState(el.dataset.field);
+        S.open = !S.open;
+        this._rerenderPicker(el.dataset.field);
+        if (S.open) this.shadowRoot.querySelector(`[data-picker-input="${el.dataset.field}"]`)?.focus();
+        break;
+      }
+      case "pk-tab":
+        this._pkState(el.dataset.field).tab = el.dataset.v;
+        this._rerenderPicker(el.dataset.field);
+        break;
+      case "pk-dom": {
+        const S = this._pkState(el.dataset.field);
+        S.dom = S.dom === el.dataset.v ? "" : el.dataset.v;
+        this._rerenderPicker(el.dataset.field);
+        break;
+      }
+      case "pk-avail":
+        this._pkState(el.dataset.field).avail = !this._pkState(el.dataset.field).avail;
+        this._rerenderPicker(el.dataset.field);
+        break;
       case "pick-add": {
         const field = el.dataset.field;
+        // Nach der Wahl: Einzelfeld zuklappen, Suche zurücksetzen
+        const S = this._pkState(field);
+        S.q = "";
+        if (!PICKERS[field].multi) S.open = false;
         const values = PICKERS[field].multi ? [...this._pickerValue(field), el.dataset.id] : [el.dataset.id];
         this._setPickerValue(field, values);
         break;
@@ -3620,6 +3841,20 @@ class HauswerkPanel extends HTMLElement {
         this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : "settings");
         if (el.dataset.sub) this._openPop(el.dataset.sub);
         break;
+      case "person-toggle": {
+        const list = new Set(this._settings.persons || []);
+        if (list.has(el.dataset.id)) list.delete(el.dataset.id);
+        else list.add(el.dataset.id);
+        this._settings.persons = [...list];
+        this._refreshSettings();
+        break;
+      }
+      case "min-step": {
+        const k = el.dataset.key;
+        this._settings[k] = Math.min(240, Math.max(0, Number(this._settings[k] ?? 0) + Number(el.dataset.d)));
+        this._refreshSettings();
+        break;
+      }
       case "help":
         this._help = { ...(this._help || {}), [el.dataset.k]: !this._help?.[el.dataset.k] };
         this._renderPop();
@@ -4154,6 +4389,69 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .search { position:relative; }
 .search ha-icon { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--muted); }
 .search input { padding-left:38px; }
+/* Entitätssuche: gewählte Karten, Vorschläge mit Trefferquote, nach Raum, Filter */
+.picker { display:grid; grid-template-columns:minmax(0, 1fr); gap:8px; min-width:0; }
+.pk-sel { display:flex; align-items:center; gap:6px; padding:3px 6px 3px 3px; border-radius:16px; border:2px solid color-mix(in srgb, var(--accent) 65%, transparent); background:color-mix(in srgb, var(--accent) 6%, var(--card)); }
+.pk-sel.missing { border-color:color-mix(in srgb, #f87171 60%, transparent); }
+.pk-sel-b { all:unset; cursor:pointer; flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; padding:8px 10px; }
+.pk-sel-b[disabled] { cursor:default; }
+.pk-sel-b b { font-size:15px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pk-sel-b small { font-size:12.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pk-x { all:unset; cursor:pointer; width:36px; height:36px; flex:none; border-radius:10px; display:grid; place-items:center; color:var(--muted); }
+.pk-x:hover { background:var(--card2); color:var(--text); }
+.pk-add { all:unset; cursor:pointer; justify-self:start; display:inline-flex; align-items:center; gap:6px; color:var(--accent); font-weight:600; font-size:14px; padding:2px; }
+.pk-box { display:grid; grid-template-columns:minmax(0, 1fr); min-width:0; gap:10px; padding:12px; border-radius:18px; border:1px solid var(--line2); background:var(--card); }
+.pk-tabs { display:grid; grid-template-columns:repeat(3, 1fr); gap:2px; padding:3px; border-radius:14px; border:1px solid var(--line2); }
+.pk-tabs button { all:unset; cursor:pointer; text-align:center; padding:9px 4px; border-radius:11px; font-weight:600; font-size:14px; color:var(--muted); }
+.pk-tabs button.on { background:var(--accent); color:var(--ink); }
+.pk-list { display:grid; gap:8px; }
+.pk-card { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:3px 12px; padding:12px 14px; border-radius:14px; border:1px solid var(--line2); }
+.pk-card.sel { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.pk-card b { font-size:15px; overflow-wrap:anywhere; }
+.pk-card .pk-v { font-weight:700; font-size:14px; white-space:nowrap; text-align:right; }
+.pk-card small { grid-column:1 / -1; color:var(--muted); font-size:12.5px; overflow-wrap:anywhere; }
+.pk-why { grid-column:1 / -1; display:flex; align-items:center; flex-wrap:wrap; gap:4px 8px; margin-top:2px; font-size:12.5px; color:var(--muted); }
+.pk-why em { font-style:normal; font-weight:800; font-size:12px; padding:1px 8px; border-radius:99px; background:var(--card2); color:var(--text); }
+.pk-why em.hi { background:#34d399; color:#04211d; }
+.pk-pick { all:unset; cursor:pointer; grid-column:1 / -1; text-align:center; margin-top:8px; padding:9px; border-radius:12px; border:1px solid var(--line2); font-weight:700; font-size:15px; }
+.pk-pick:hover { border-color:var(--accent); color:var(--accent); }
+.pk-ok { grid-column:1 / -1; text-align:right; margin-top:6px; font-size:13px; color:var(--muted); }
+.pk-foot { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:13.5px; color:var(--muted); }
+.pk-foot .link { font-size:13.5px; }
+.pk-scroll { max-height:340px; overflow:auto; margin-right:-6px; padding-right:6px; }
+.pk-group { display:flex; justify-content:space-between; font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding:12px 2px 4px; }
+.pk-group span { font-weight:600; letter-spacing:0; }
+.pk-row { display:flex; align-items:center; gap:10px; padding:8px 2px; border-top:1px solid var(--line); }
+.pk-row .grow { min-width:0; }
+.pk-row b { display:block; font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pk-row small { display:block; font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pk-row .pk-v { font-size:13px; font-weight:600; white-space:nowrap; }
+.pk-row.bad .pk-v { color:#f87171; }
+.pk-mini { all:unset; cursor:pointer; flex:none; padding:6px 12px; border-radius:10px; border:1px solid var(--line2); font-weight:700; font-size:13px; }
+.pk-mini:hover { border-color:var(--accent); color:var(--accent); }
+.pk-mini.on { cursor:default; border-color:var(--accent); color:var(--accent); }
+.pk-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.pk-chips button { all:unset; cursor:pointer; padding:6px 12px; border-radius:99px; border:1px solid var(--line2); font-size:13px; font-weight:600; color:var(--muted); }
+.pk-chips button.on { color:var(--text); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--card)); }
+.pk-empty { padding:10px 2px; color:var(--muted); font-size:13.5px; }
+.pk-close { justify-self:end; }
+/* Anwesenheit */
+.pstate { display:inline-flex; align-items:center; gap:7px; margin-bottom:12px; padding:7px 14px; border-radius:99px; font-weight:700; font-size:14px; color:var(--ct); background:color-mix(in srgb, var(--c) 14%, transparent); }
+.pchips { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }
+.pchip { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:7px; padding:8px 14px; border-radius:99px; font-weight:700; font-size:14px; color:var(--muted); background:var(--card); border:1px dashed var(--line2); }
+.pchip i { width:9px; height:9px; border-radius:50%; background:var(--line2); }
+.pchip.on { color:var(--text); border:1px solid transparent; background:color-mix(in srgb, #f59e0b 14%, var(--card)); }
+.pchip.on i { background:#f59e0b; }
+.pchip.on.home { --c:#14b8a6; color:var(--ct); background:color-mix(in srgb, #14b8a6 16%, var(--card)); }
+.pchip.on.home i { background:#14b8a6; }
+.pchip[disabled] { cursor:default; }
+.mstep { display:inline-flex; align-items:center; gap:4px; padding:4px; border-radius:99px; background:var(--card); border:1px solid var(--line); }
+.mstep button { all:unset; cursor:pointer; width:38px; height:38px; border-radius:50%; display:grid; place-items:center; font-size:20px; font-weight:700; color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, transparent); }
+.mstep button[disabled] { cursor:default; opacity:.5; }
+.mstep b { min-width:72px; text-align:center; font-size:16px; }
+@media (max-width:600px) {
+  .wxr.ctl .pchips { justify-content:flex-start; }
+}
 .pick-list { position:absolute; left:0; right:0; top:100%; margin-top:6px; max-height:270px; overflow:auto; z-index:10; background:var(--card2); border:1px solid var(--line2); border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.5); padding:4px; }
 .pick-item { all:unset; cursor:pointer; display:flex; flex-direction:column; padding:9px 12px; width:100%; box-sizing:border-box; border-radius:10px; }
 .pick-item:hover { background:color-mix(in srgb, var(--accent) 14%, transparent); }

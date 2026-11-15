@@ -22,7 +22,7 @@ LOG_MAX = 6000
 # Namen der Einstellungen fürs Protokoll
 SETTING_LABELS = {
     "persons": "Personen", "away_delay": "Abwesend nach", "arrive_delay": "Zu Hause nach",
-    "proximity_sensors": "Entfernungs-Sensoren", "proximity_km": "Heimweg-Grenze",
+    "proximity_sensors": "Entfernungs-Sensoren", "proximity_m": "Heimweg-Grenze", "home_zone": "Wohnung (Zone)",
     "presence_force": "Anwesenheit von Hand", "guest": "Gäste", "party": "Party", "eco_force": "Eco erzwingen",
     "vacation": "Urlaub", "vacation_source": "Urlaub-Quelle", "vacation_from": "Urlaub von", "vacation_to": "Urlaub bis",
     "vacation_calendar": "Urlaubskalender", "vacation_keywords": "Urlaub-Stichworte", "vacation_temp": "Urlaubstemperatur",
@@ -66,7 +66,8 @@ DEFAULT_SETTINGS = {
     "guest": False,            # Gästemodus: nie abwesend
     "party": False,            # Party: alle Räume auf Komfort
     "proximity_sensors": [],   # Entfernungs-Sensoren (z. B. aus der Proximity-Integration)
-    "proximity_km": 0,         # Unterwegs nach Hause ab dieser Entfernung = schon zu Hause (0 = aus)
+    "proximity_m": 0,          # Unterwegs nach Hause: näher als so viele Meter = schon zu Hause (0 = aus)
+    "home_zone": "zone.home",  # Zone, in der eine Person als zu Hause gilt
     "summer_mode": "off",      # off | auto | on
     "outside_sensor": None,    # Außentemperatur für die Sommerpause
     "summer_temp": 16.0,       # Ab dieser Außentemperatur Sommerpause
@@ -78,7 +79,7 @@ DEFAULT_SETTINGS = {
     "liming_winter": False,    # auch während der Heizperiode entkalken
     "boost_minutes": 30,
     "away_mode": "temp",       # temp = höchstens away_temp | offset = um away_offset absenken
-    "away_offset": 2.0,        # K
+    "away_offset": 2.0,        # °C
     "away_action": "lower",    # lower = absenken | off = Thermostate aus, solange niemand da ist
     "long_away_days": 0,       # nach so vielen Tagen ohne Personen auf Frostschutz (0 = nie)
     "eco_force": False,        # alle Räume auf Eco erzwingen
