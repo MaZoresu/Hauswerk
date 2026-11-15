@@ -10,7 +10,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, MODULE_HEATING
+from .const import DOMAIN, LOG_DAYS, MODULE_HEATING, MODULE_LOG
 from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, parse_hm
 
 
@@ -163,6 +163,9 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("look_background"): vol.In(["pattern", "daytime", "plain"]),
         vol.Optional("look_header_weather"): bool,
         vol.Optional("look_header_clock"): bool,
+        # Wetter-Hinweise
+        vol.Optional("cold_snap_temp"): vol.All(vol.Coerce(float), vol.Range(min=-30, max=25)),
+        vol.Optional("storm_kmh"): vol.All(vol.Coerce(float), vol.Range(min=20, max=200)),
     },
     extra=vol.REMOVE_EXTRA,
 )
@@ -182,6 +185,15 @@ PLAN_SCHEMA = vol.Schema(
 
 def _ctl(hass: HomeAssistant):
     return (hass.data.get(DOMAIN) or {}).get(MODULE_HEATING)
+
+
+def _log(hass: HomeAssistant):
+    return (hass.data.get(DOMAIN) or {}).get(MODULE_LOG)
+
+
+def _who(connection) -> str | None:
+    """Name des Benutzers fürs Protokoll."""
+    return getattr(connection.user, "name", None)
 
 
 def _may_edit(hass: HomeAssistant, connection) -> bool:
@@ -271,7 +283,7 @@ async def ws_room_save(hass: HomeAssistant, connection, msg) -> None:
         return
     if room.get("id") and room["id"] not in ctl.rooms:
         room["id"] = None
-    saved = await ctl.async_save_room(room)
+    saved = await ctl.async_save_room(room, by=_who(connection))
     connection.send_result(msg["id"], saved)
 
 
@@ -284,7 +296,7 @@ async def ws_room_delete(hass: HomeAssistant, connection, msg) -> None:
     ctl = _ctl(hass)
     if ctl is None:
         return _not_ready(connection, msg)
-    await ctl.async_delete_room(msg["room_id"])
+    await ctl.async_delete_room(msg["room_id"], by=_who(connection))
     connection.send_result(msg["id"])
 
 
@@ -309,7 +321,7 @@ async def ws_settings_save(hass: HomeAssistant, connection, msg) -> None:
         return
     if not connection.user.is_admin:
         settings.pop("allow_users", None)  # die Freigabe selbst ändern nur Admins
-    await ctl.async_save_settings(settings)
+    await ctl.async_save_settings(settings, by=_who(connection))
     connection.send_result(msg["id"], ctl.settings)
 
 
@@ -330,7 +342,7 @@ async def ws_override(hass: HomeAssistant, connection, msg) -> None:
     if msg["room_id"] not in ctl.rooms:
         connection.send_error(msg["id"], "not_found", "Raum nicht gefunden")
         return
-    await ctl.async_set_override(msg["room_id"], msg.get("temp"), msg.get("hours"), msg["boost"])
+    await ctl.async_set_override(msg["room_id"], msg.get("temp"), msg.get("hours"), msg["boost"], by=_who(connection))
     connection.send_result(msg["id"])
 
 
@@ -360,6 +372,8 @@ async def ws_preheat_reset(hass: HomeAssistant, connection, msg) -> None:
         return _not_ready(connection, msg)
     ctl.heat_rates.pop(msg["room_id"], None)
     ctl._save()
+    ctl.log.add("settings", "Aufheizgeschwindigkeit vergessen", f"wird neu gelernt · von {_who(connection)}",
+                msg["room_id"], (ctl.rooms.get(msg["room_id"]) or {}).get("name"))
     await ctl.async_evaluate()
     connection.send_result(msg["id"])
 
@@ -381,7 +395,7 @@ async def ws_plan_save(hass: HomeAssistant, connection, msg) -> None:
         return
     if plan.get("id") and plan["id"] not in ctl.plans:
         plan["id"] = None
-    connection.send_result(msg["id"], await ctl.async_save_plan(plan))
+    connection.send_result(msg["id"], await ctl.async_save_plan(plan, by=_who(connection)))
 
 
 @websocket_api.websocket_command(
@@ -393,7 +407,7 @@ async def ws_plan_delete(hass: HomeAssistant, connection, msg) -> None:
     ctl = _ctl(hass)
     if ctl is None:
         return _not_ready(connection, msg)
-    await ctl.async_delete_plan(msg["plan_id"])
+    await ctl.async_delete_plan(msg["plan_id"], by=_who(connection))
     connection.send_result(msg["id"], {"rooms": ctl.rooms, "plans": ctl.plans})
 
 
@@ -420,6 +434,32 @@ async def ws_calendar_import(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"], {"blocks": blocks})
 
 
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/log/get"})
+@callback
+def ws_log_get(hass: HomeAssistant, connection, msg) -> None:
+    """Protokoll der letzten Tage (alle Module)."""
+    log = _log(hass)
+    if log is None:
+        return _not_ready(connection, msg)
+    connection.send_result(msg["id"], {"entries": log.entries, "days": LOG_DAYS})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/log/subscribe"})
+@callback
+def ws_log_subscribe(hass: HomeAssistant, connection, msg) -> None:
+    """Neue Protokoll-Einträge live ans Panel schicken."""
+    log = _log(hass)
+    if log is None:
+        return _not_ready(connection, msg)
+
+    @callback
+    def forward(entry: dict) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], entry))
+
+    connection.subscriptions[msg["id"]] = log.subscribe(forward)
+    connection.send_result(msg["id"])
+
+
 COMMANDS = (
     ws_get,
     ws_subscribe,
@@ -432,6 +472,8 @@ COMMANDS = (
     ws_plan_save,
     ws_plan_delete,
     ws_calendar_import,
+    ws_log_get,
+    ws_log_subscribe,
 )
 
 

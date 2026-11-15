@@ -49,11 +49,14 @@ Heizwerk                    Modul Heizen
   └─ Einstellungen          /hauswerk/heizen/einstellungen  (nur Heizwerk, Heizpläne darunter)
 Rollladen · Licht · Garten  geplant, ausgegraut
 ⚙ Einstellungen            /hauswerk/einstellungen  (zentral, für alle Module)
+  └─ Protokoll              /hauswerk/protokoll  (was wann warum entschieden wurde)
 🔔 Hinweise                 Pop-up mit allem, was zu beheben oder gut zu wissen ist
 ```
 
 - **Start (Dashboard von Hauswerk):** Zustand des Hauses und frei wählbare **Widgets** aus allen Modulen: Heizwerk, Anwesenheit (mit Personen, Ort und Entfernung nach Hause), Wetter, Räume, Shortcuts (Szenen, Skripte, Schalter, Lichter), Fenster, Komfortzeiten, Heizdauer, Werte (beliebige Sensoren) und Wetterprognose (nächste Stunden oder Tage, Frost-Hinweis). Über „Anpassen“ hinzufügen, verschieben, umbenennen, entfernen und in drei Größen stellen: **klein** (nur das Wichtigste), **mittel** (Kennzahlen bzw. Liste) und **groß** (volle Breite mit allen Einzelheiten) – gilt für alle Benutzer.
-- **Zentrale Einstellungen (Zahnrad oben rechts):** gelten für ganz Hauswerk und alle Module – **Anwesenheit** (Personen, Wartezeiten beim Gehen und Heimkommen, Entfernungs-Sensoren), **Urlaub** (von Hand, Zeitraum oder Kalender mit Stichworten), **Wetter** (Wetter-Entität, Außensensor), **Darstellung**, **Widgets** der Startseite, **Module** im Überblick und **Berechtigungen**.
+- **Zentrale Einstellungen (Zahnrad oben rechts):** gelten für ganz Hauswerk und alle Module – **Anwesenheit** (Personen, Wartezeiten beim Gehen und Heimkommen, Entfernungs-Sensoren), **Urlaub** (von Hand, Zeitraum oder Kalender mit Stichworten), **Wetter**, **Darstellung**, **Widgets** der Startseite, **Module** im Überblick, **Protokoll** und **Berechtigungen**.
+- **Wetter:** Wetterquelle und Außentemperatur (eigene Wetterstation statt Wetterdienst) wählen; dazu die aktuellen Werte (Wetterlage, gefühlte Temperatur, Feuchte, Wind, Sonne, Sonnenauf- und -untergang) und Grenzwerte: **Heizgrenze** (aus Heizwerk › Saison), **Kälteeinbruch** (Tiefstwert der nächsten 3 Tage) und **Sturm** (Böen der nächsten 24 Stunden). Wird eine Grenze erreicht, erscheint ein Hinweis unter der Glocke. Jede Zeile erklärt sich per „?“.
+- **Protokoll:** was wann warum entschieden wurde, 14 Tage lang und live – Anwesenheit, Saison (Sommerpause, Entkalken), Ziel & Heizung je Raum mit Begründung, Fenster, Von Hand (Thermostat, Home Assistant, Panel, Boost), Geräte (nicht/wieder erreichbar), Thermostat-Befehle und Einstellungen (mit Benutzer). Filter nach Raum und Kategorie (je Gerät gemerkt, Thermostat-Befehle standardmäßig aus) und Suche.
 - **Darstellung:** Design (wie Home Assistant, hell oder dunkel), Akzentfarbe (Auswahl oder eigene Farbe, auch fürs Logo), Hintergrund (Muster, **Tageszeit** – die Kopfzeile zeigt Nacht, Sonnenaufgang, Tag oder Sonnenuntergang nach `sun.sun` – oder schlicht) sowie Wetter und Uhrzeit oben rechts. Änderungen sind im Pop-up sofort als Vorschau zu sehen und gelten nach dem Speichern für alle. Die **Größe** (kompakt, normal, groß) merkt sich jedes Gerät selbst, z. B. groß auf dem Wand-Tablet.
 - **Heizwerk › Einstellungen:** nur was das Heizen betrifft – **Abwesenheit & Urlaub** (welche Temperatur, wenn niemand da ist oder Urlaub ist; Frostschutz nach langer Abwesenheit), **Saison**, **Heizpläne**, **Vorheizen**, **Frostschutz**, **Boost**, **Entkalkungsschutz**, **Kalibrierung** und die **Räume**. Ganz oben führt ein Eintrag zu den zentralen Einstellungen.
 - Beide Einstellungsseiten sind Listen mit Suche; ein Tipp öffnet die Einzelheiten als Pop-up.
@@ -135,7 +138,8 @@ custom_components/hauswerk/
   __init__.py       Einstieg, Panel, Module (hass.data["hauswerk"]["heizen"])
   logic.py          Modul Heizwerk: Regel-Logik ohne Home-Assistant-Abhängigkeit (getestet)
   controller.py     Modul Heizwerk: Speicher, Zustandsüberwachung, Ansteuerung der Thermostate, Statistik
-  api.py            WebSocket-Befehle fürs Panel (hauswerk/heizen/get, /subscribe, /room/save …)
+  log.py            Protokoll für alle Module (config/.storage/hauswerk.protokoll, 14 Tage)
+  api.py            WebSocket-Befehle fürs Panel (hauswerk/heizen/get, /subscribe, /room/save …, hauswerk/log/get, /subscribe)
   sensor.py, switch.py, entity.py
   frontend/hauswerk-panel.js   Panel als Web-Komponente, ohne Build-Schritt
 tests/test_logic.py             python -m pytest tests

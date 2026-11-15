@@ -1,7 +1,8 @@
 """Hauswerk: Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel.
 
 Module:
-- Heizen: raumweise Heizungsregelung mit Fensterpause, Heizplänen und Anwesenheit
+- Heizwerk (intern „heizen“): raumweise Heizungsregelung mit Fensterpause, Heizplänen und Anwesenheit
+- Protokoll: was wann warum entschieden wurde (für alle Module)
 - Rollladen, Licht, Garten: geplant
 """
 from __future__ import annotations
@@ -18,6 +19,7 @@ from . import api
 from .const import (
     DOMAIN,
     MODULE_HEATING,
+    MODULE_LOG,
     NAME,
     PANEL_COMPONENT,
     PANEL_ICON,
@@ -26,6 +28,7 @@ from .const import (
     STATIC_URL,
 )
 from .controller import Heizen
+from .log import Protokoll
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,9 +60,11 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    heating = Heizen(hass, entry)
+    log = Protokoll(hass)
+    await log.async_load()
+    heating = Heizen(hass, entry, log)
     await heating.async_load()
-    hass.data[DOMAIN] = {MODULE_HEATING: heating}
+    hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HEATING: heating}
 
     api.async_register(hass)
     await _async_register_panel(hass)

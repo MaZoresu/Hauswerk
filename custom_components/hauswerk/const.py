@@ -13,6 +13,33 @@ STORAGE_VERSION = 1
 # Speicher der früheren Einzel-Integration „Heizwerk“, wird beim ersten Start übernommen
 LEGACY_STORAGE_KEY = "heizwerk.data"
 
+# Protokoll (für alle Module): hass.data[DOMAIN][MODULE_LOG]
+MODULE_LOG = "log"
+LOG_STORAGE_KEY = f"{DOMAIN}.protokoll"
+LOG_DAYS = 14
+LOG_MAX = 6000
+
+# Namen der Einstellungen fürs Protokoll
+SETTING_LABELS = {
+    "persons": "Personen", "away_delay": "Abwesend nach", "arrive_delay": "Zu Hause nach",
+    "proximity_sensors": "Entfernungs-Sensoren", "proximity_km": "Heimweg-Grenze",
+    "presence_force": "Anwesenheit von Hand", "guest": "Gäste", "party": "Party", "eco_force": "Eco erzwingen",
+    "vacation": "Urlaub", "vacation_source": "Urlaub-Quelle", "vacation_from": "Urlaub von", "vacation_to": "Urlaub bis",
+    "vacation_calendar": "Urlaubskalender", "vacation_keywords": "Urlaub-Stichworte", "vacation_temp": "Urlaubstemperatur",
+    "away_temp": "Abwesend-Temperatur", "away_mode": "Abwesend-Art", "away_offset": "Abwesend-Absenkung",
+    "away_action": "Abwesend-Verhalten", "long_away_days": "Lange Abwesenheit",
+    "summer_mode": "Sommerpause", "summer_temp": "Heizgrenze", "summer_action": "Sommerpause-Verhalten",
+    "summer_fallback": "Ersatz bei Sensorausfall", "season_entity": "Heizperiode-Entität",
+    "outside_sensor": "Außentemperatur", "weather_entity": "Wetterquelle",
+    "cold_snap_temp": "Kälteeinbruch", "storm_kmh": "Sturm",
+    "frost_temp": "Frostschutz", "boost_minutes": "Boost-Dauer", "liming": "Entkalken", "liming_day": "Entkalken",
+    "liming_time": "Entkalken", "liming_minutes": "Entkalken", "liming_winter": "Entkalken",
+    "preheat_mode": "Vorheizen", "lead_radiator": "Vorheizen", "lead_floor": "Vorheizen",
+    "calibration_interval": "Kalibrierung", "allow_users": "Berechtigungen", "start_widgets": "Widgets",
+    "look_theme": "Darstellung", "look_accent": "Darstellung", "look_background": "Darstellung",
+    "look_header_weather": "Darstellung", "look_header_clock": "Darstellung",
+}
+
 PANEL_URL = "hauswerk"
 PANEL_COMPONENT = "hauswerk-panel"
 PANEL_ICON = "mdi:home-automation"
@@ -75,6 +102,9 @@ DEFAULT_SETTINGS = {
     "look_background": "pattern", # pattern = Muster | daytime = Kopfzeile nach Tageszeit | plain = schlicht
     "look_header_weather": True,  # Außentemperatur und Wetter oben rechts
     "look_header_clock": False,   # Uhrzeit oben rechts (z. B. für Wand-Tablets)
+    # Wetter-Hinweise
+    "cold_snap_temp": 0.0,        # Kälteeinbruch: Tiefstwert der nächsten 3 Tage darunter
+    "storm_kmh": 70.0,            # Sturm: Böen der nächsten 24 Stunden ab dieser Stärke
 }
 
 CALENDAR_REFRESH = 300  # Sekunden zwischen zwei Abfragen des Urlaubskalenders

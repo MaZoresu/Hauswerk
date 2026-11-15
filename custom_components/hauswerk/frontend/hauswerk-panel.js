@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.15.0";
+const VERSION = "0.16.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -169,7 +169,7 @@ const COMING = [
   { name: "Licht", icon: "mdi:lightbulb-outline" },
   { name: "Garten", icon: "mdi:flower-outline" },
 ];
-const SLUGS = { start: "start", house: "einstellungen", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])) };
+const SLUGS = { start: "start", house: "einstellungen", log: "protokoll", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])) };
 // Pop-ups, die zu den zentralen Hauswerk-Einstellungen gehören (alle anderen gehören zu Heizwerk)
 const HOUSE_POPS = ["presence", "vacation", "weather", "access", "look"];
 // Akzentfarben der Darstellung: [gespeicherter Wert (null = Standard), Name, Anzeigefarbe]
@@ -177,6 +177,17 @@ const ACCENTS = [
   [null, "Türkis", "#14b8a6"], ["#0ea5e9", "Himmelblau"], ["#3b82f6", "Blau"], ["#8b5cf6", "Violett"],
   ["#ec4899", "Pink"], ["#f43f5e", "Rot"], ["#f59e0b", "Orange"], ["#84cc16", "Grün"],
 ];
+// Kategorien des Protokolls (Filter-Chips); off = standardmäßig ausgeblendet
+const LOG_CATS = {
+  presence: { name: "Anwesenheit", icon: "mdi:home-account", c: "#8b5cf6" },
+  season: { name: "Saison", icon: "mdi:sun-snowflake-variant", c: "#f97316" },
+  target: { name: "Ziel & Heizung", icon: "mdi:thermometer-auto", c: "#14b8a6" },
+  window: { name: "Fenster", icon: "mdi:window-open-variant", c: "#3b82f6" },
+  manual: { name: "Von Hand", icon: "mdi:hand-back-right-outline", c: "#a78bfa" },
+  health: { name: "Geräte", icon: "mdi:heart-pulse", c: "#f43f5e" },
+  command: { name: "Thermostat-Befehle", icon: "mdi:access-point", c: "#94a3b8", off: true },
+  settings: { name: "Einstellungen", icon: "mdi:cog-outline", c: "#64748b" },
+};
 const SKIES = [["night", "Nacht"], ["dawn", "Sonnenaufgang"], ["day", "Tag"], ["dusk", "Sonnenuntergang"]];
 const DEFAULT_VIEW = "start";
 
@@ -333,6 +344,10 @@ class HauswerkPanel extends HTMLElement {
       this._unsub.then((u) => u()).catch(() => {});
       this._unsub = null;
     }
+    // Protokoll beim nächsten Öffnen neu laden
+    if (this._logUnsub) this._logUnsub.then((u) => u()).catch(() => {});
+    this._logUnsub = null;
+    this._log = null;
   }
 
   async _init() {
@@ -456,6 +471,7 @@ class HauswerkPanel extends HTMLElement {
     }
     // /hauswerk/einstellungen = zentrale Hauswerk-Einstellungen
     if (parts[1] === "einstellungen") return "house";
+    if (parts[1] === "protokoll") return "log";
     // alte Adressen (/hauswerk/raeume …) weiter verstehen
     const old = HEAT_VIEWS.find((v) => v.slug === parts[1]);
     return old ? old.id : DEFAULT_VIEW;
@@ -485,7 +501,7 @@ class HauswerkPanel extends HTMLElement {
     if (chips)
       chips.innerHTML =
         this._data && !this._error
-          ? (["start", "overview", "room", "house"].includes(this._tab) ? "" : this._chipsHtml()) + (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "")
+          ? (["start", "overview", "room", "house", "log"].includes(this._tab) ? "" : this._chipsHtml()) + (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "")
           : "";
   }
 
@@ -501,7 +517,7 @@ class HauswerkPanel extends HTMLElement {
         item(m.views.includes(this._tab) ? this._tab : m.views[0], m.views, m.icon, m.name,
           m.id === "heizen" && f && (f.open || f.heating) ? `<em class="${f.open ? "warn" : ""}">${f.open || f.heating}</em>` : "")
       ),
-      item("house", ["house"], "mdi:cog-outline", "Einstellungen"),
+      item("house", ["house", "log"], "mdi:cog-outline", "Einstellungen"),
     ].join("");
   }
 
@@ -548,6 +564,7 @@ class HauswerkPanel extends HTMLElement {
     }
     if (s.vacation_calendar_error) add("warn", "mdi:calendar-alert", "Urlaubskalender nicht lesbar", s.vacation_calendar_error, "settings-go", { sub: "vacation" });
     for (const [pid, err] of Object.entries(s.plan_errors || {})) add("warn", "mdi:calendar-alert", `Kalender von Plan „${this._data.plans?.[pid]?.name || pid}“ nicht lesbar`, err, "plan-sel", { kind: "plan", id: pid });
+    for (const x of this._wxAlerts()) add("info", x.icon, x.text, x.sub, "settings-go", { sub: "weather" });
     if (!(set.persons || []).length) add("info", "mdi:account-question-outline", "Keine Personen gewählt", "Ohne Personen gibt es kein automatisches „Abwesend“", "settings-go", { sub: "presence" });
     return out.sort((a, b) => (a.lvl === b.lvl ? 0 : a.lvl === "warn" ? -1 : 1));
   }
@@ -556,7 +573,7 @@ class HauswerkPanel extends HTMLElement {
     const mod = MODULES.find((m) => m.views.includes(this._tab));
     const sub = HEAT_VIEWS.find((v) => v.id === this._tab);
     const roomName = this._tab === "room" ? this._data?.rooms?.[this._roomId]?.name : null;
-    const title = mod ? `${mod.name}${roomName ? ` · ${roomName}` : sub ? ` · ${sub.name}` : ""}` : this._tab === "house" ? "Einstellungen" : "Start";
+    const title = mod ? `${mod.name}${roomName ? ` · ${roomName}` : sub ? ` · ${sub.name}` : ""}` : this._tab === "house" ? "Einstellungen" : this._tab === "log" ? "Protokoll" : "Start";
     const f = this._data ? this._facts() : null;
     const badge = (id) => {
       if (!f || id !== "heizen") return "";
@@ -584,7 +601,7 @@ class HauswerkPanel extends HTMLElement {
             return `<button class="bell ${warn ? "warn" : h.length ? "info" : ""}" data-action="hints-open" title="${h.length ? `${h.length} Hinweis${h.length > 1 ? "e" : ""}` : "Keine Hinweise"}" aria-label="Hinweise">
               <ha-icon icon="${h.length ? "mdi:bell-badge-outline" : "mdi:bell-outline"}"></ha-icon>${warn ? `<em>${warn}</em>` : h.length ? "<i></i>" : ""}</button>`;
           })()}
-          ${this._data ? `<button class="bell gear ${this._tab === "house" ? "on" : ""}" data-action="tab" data-tab="house" title="Hauswerk-Einstellungen (für alle Module)" aria-label="Einstellungen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
+          ${this._data ? `<button class="bell gear ${["house", "log"].includes(this._tab) ? "on" : ""}" data-action="tab" data-tab="house" title="Hauswerk-Einstellungen (für alle Module)" aria-label="Einstellungen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
         </div>
       </div>
       <nav class="mtabs">
@@ -649,7 +666,7 @@ class HauswerkPanel extends HTMLElement {
     // Hintergrund passend zum Bereich: Startseite oder Heizen
     this.setAttribute("view", MODULES[0].views.includes(this._tab) ? "heat" : "start");
     if (!this._data) return;
-    const view = { start: this._viewStart, house: this._viewHouse, overview: this._viewOverview, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom }[this._tab] || this._viewStart;
+    const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom }[this._tab] || this._viewStart;
     main.innerHTML = view.call(this);
   }
 
@@ -984,6 +1001,43 @@ class HauswerkPanel extends HTMLElement {
     return `<div class="wsplit"><div>${bars}${foot}</div><div class="wlist">${per
       .map(({ r, h }) => `<div class="wrow"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><span class="grow"><b>${esc(r.name)}</b><span class="hbar"><i style="width:${(h / top) * 100}%; background:${this._roomColor(r.id)}"></i></span></span><em>${fmt(h)} h</em></div>`)
       .join("")}</div></div>`;
+  }
+
+  /** Kälteeinbruch und Sturm aus der Vorhersage (Grenzen unter Hauswerk › Einstellungen › Wetter). */
+  _wxAlerts() {
+    const p = this._data?.settings || {};
+    const S = this._hass?.states || {};
+    const id = p.weather_entity || Object.keys(S).find((e) => e.startsWith("weather."));
+    const st = id && S[id];
+    if (!st || !this._hass.connection) return [];
+    const feat = Number(st.attributes.supported_features || 0);
+    const out = [];
+    const day = (iso) => new Date(iso).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" });
+    const cold = Number(p.cold_snap_temp ?? 0);
+    if (feat & 1) {
+      const fc = this._forecast(id, "daily");
+      const low = (fc?.list || []).slice(0, 3).map((x) => ({ t: x.templow ?? x.temperature, at: x.datetime })).filter((x) => x.t != null)
+        .reduce((a, b) => (a && a.t <= b.t ? a : b), null);
+      if (low && low.t < cold) out.push({ icon: "mdi:snowflake-alert", text: `Kälteeinbruch: bis ${fmt(low.t)} °C`, sub: `${day(low.at)} · Grenze ${fmt(cold)} °C` });
+    }
+    const kmh = (v, u) => (v == null ? null : u === "m/s" ? v * 3.6 : u === "mph" ? v * 1.609 : u === "kn" ? v * 1.852 : v);
+    const u = st.attributes.wind_speed_unit || "km/h";
+    const limit = Number(p.storm_kmh ?? 70);
+    let gust = kmh(st.attributes.wind_gust_speed ?? null, u);
+    let at = null;
+    if (feat & 2) {
+      const fc = this._forecast(id, "hourly");
+      for (const x of (fc?.list || []).filter((x) => new Date(x.datetime) - Date.now() < 24 * 3600e3)) {
+        const v = kmh(x.wind_gust_speed ?? x.wind_speed ?? null, u);
+        if (v != null && (gust == null || v > gust)) {
+          gust = v;
+          at = x.datetime;
+        }
+      }
+    }
+    if (gust != null && gust >= limit)
+      out.push({ icon: "mdi:weather-windy", text: `Sturm: Böen bis ${fmt(gust, 0)} km/h`, sub: `${at ? `${day(at)}, ${new Date(at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : "jetzt"} · Grenze ${fmt(limit, 0)} km/h` });
+    return out;
   }
 
   /** Prognose einer weather-Entität abonnieren (wie die Wetterkarte von Home Assistant). */
@@ -2081,7 +2135,8 @@ class HauswerkPanel extends HTMLElement {
           warn: !persons, words: "personen abwesend heimweg nähe entfernung gäste" },
         { g: "Haus", id: "vacation", icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub", sum: vac, on: s.vacation, words: "kalender zeitraum stichwort ferien reise" },
         { g: "Haus", id: "weather", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter",
-          sum: `${p.weather_entity ? this._entityName(p.weather_entity) : "automatisch"}${p.outside_sensor ? ` · Außen: ${this._entityName(p.outside_sensor)}` : ""}`, words: "wetter außentemperatur sensor prognose" },
+          sum: `${p.weather_entity ? this._entityName(p.weather_entity) : "Wetter automatisch"}${p.outside_sensor ? ` · Außen: ${this._entityName(p.outside_sensor)}` : ""} · Kälte < ${fmt(p.cold_snap_temp ?? 0)} °C · Sturm ab ${fmt(p.storm_kmh ?? 70, 0)} km/h`,
+          warn: this._wxAlerts().length > 0, words: "wetter außentemperatur sensor prognose sonne kälteeinbruch sturm frost heizgrenze" },
         { g: "Darstellung", id: "look", icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung",
           sum: `${{ auto: "Wie Home Assistant", light: "Hell", dark: "Dunkel" }[p.look_theme || "auto"]} · Akzent ${(ACCENTS.find(([v]) => v === (p.look_accent || null)) || [0, "eigene Farbe"])[1]} · Hintergrund ${{ pattern: "Muster", daytime: "Tageszeit", plain: "schlicht" }[p.look_background || "pattern"]}`,
           words: "design farbe akzent hell dunkel hintergrund tageszeit himmel uhr uhrzeit wetter kopfzeile größe tablet" },
@@ -2090,6 +2145,8 @@ class HauswerkPanel extends HTMLElement {
         ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => v === "settings") || m.views[0], icon: m.icon, c: "#fb923c", title: m.name,
           sum: `${rooms.length} ${rooms.length === 1 ? "Raum" : "Räume"} · Heizpläne, Vorheizen, Saison und mehr`, words: "heizen heizung räume module" })),
         ...COMING.map((m) => ({ g: "Module", soon: true, icon: m.icon, c: "#94a3b8", title: m.name, sum: "Kommt später", words: `${m.name.toLowerCase()} module` })),
+        { g: "System", go: "log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll",
+          sum: "Was wann warum entschieden wurde · 14 Tage", words: "protokoll log verlauf ereignisse warum debug" },
         { g: "System", id: "access", icon: "mdi:shield-account-outline", c: "#94a3b8", title: "Berechtigungen",
           sum: p.allow_users ? "Alle Benutzer dürfen ändern" : "Nur Administratoren dürfen ändern", words: "admin benutzer rechte tablet speichern" },
       ];
@@ -2124,6 +2181,141 @@ class HauswerkPanel extends HTMLElement {
     ];
     if (!rooms.length) rows.push({ g: "Räume", newRoom: true, icon: "mdi:plus", c: "#2dd4bf", title: "Raum anlegen", sum: "Thermostate, Fenster und Sensoren zuordnen", words: "raum neu" });
     return rows;
+  }
+
+  // ------------------------------------------------------------ Protokoll (Hauswerk › Einstellungen › Protokoll)
+  /** Einträge laden und neue live empfangen (einmal je geöffnetem Panel). */
+  _logInit() {
+    if (this._log) return;
+    this._log = { loading: true, entries: [] };
+    this._hass
+      .callWS({ type: "hauswerk/log/get" })
+      .then((r) => {
+        this._log = { entries: r.entries || [], days: r.days || 14, live: false, at: Date.now() };
+        this._logUnsub = this._hass.connection.subscribeMessage(
+          (e) => {
+            this._log.entries.push(e);
+            this._log.at = Date.now();
+            if (this._tab === "log") this._renderLogList();
+          },
+          { type: "hauswerk/log/subscribe" }
+        );
+        this._logUnsub.then(() => {
+          this._log.live = true;
+          if (this._tab === "log") this._renderLogList();
+        }).catch(() => {});
+        if (this._tab === "log") this._renderMain();
+      })
+      .catch((err) => {
+        this._log = { error: err?.message || "Protokoll nicht verfügbar", entries: [] };
+        if (this._tab === "log") this._renderMain();
+      });
+  }
+
+  /** Eingeschaltete Kategorien (je Gerät gemerkt). */
+  _logCats() {
+    if (!this._logCatSet) {
+      let list = null;
+      try {
+        list = JSON.parse(localStorage.getItem("hauswerk.protokoll.kategorien") || "null");
+      } catch (e) {
+        list = null;
+      }
+      this._logCatSet = new Set(Array.isArray(list) ? list : Object.keys(LOG_CATS).filter((k) => !LOG_CATS[k].off));
+    }
+    return this._logCatSet;
+  }
+
+  _viewLog() {
+    this._logInit();
+    const L = this._log || {};
+    const cats = this._logCats();
+    const rooms = this._rooms();
+    const sel = this._logRoom || "";
+    const back = `<button class="link back" data-action="tab" data-tab="house"><ha-icon icon="mdi:chevron-left"></ha-icon>Einstellungen</button>`;
+    return `
+      ${back}
+      <section class="card lg">
+        <div class="lg-head">
+          <span class="lg-ic"><ha-icon icon="mdi:text-box-search-outline"></ha-icon></span>
+          <div class="grow"><h2>Protokoll</h2><small>Was wann warum entschieden wurde · ${L.days || 14} Tage</small></div>
+          <span class="lg-live ${L.live ? "on" : ""}" id="lg-live">${this._logLiveHtml()}</span>
+        </div>
+        <div class="lg-chips">${[["", "Alle Räume", "#94a3b8"], ...rooms.map((r) => [r.id, r.name, this._roomColor(r.id)])]
+          .map(([id, name, c]) => `<button class="lg-room ${sel === id ? "on" : ""}" style="--c:${c}" data-action="log-room" data-id="${id}"><i></i>${esc(name)}</button>`)
+          .join("")}</div>
+        <div class="lg-chips">${Object.entries(LOG_CATS)
+          .map(([k, d]) => `<button class="lg-cat ${cats.has(k) ? "on" : ""}" style="--c:${d.c}" data-action="log-cat" data-k="${k}" aria-pressed="${cats.has(k)}"><ha-icon icon="${d.icon}"></ha-icon>${d.name}</button>`)
+          .join("")}</div>
+        <div class="search lg-search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-action="log-search" placeholder="Suchen … (z. B. Fenster, Boost, Offset)" value="${esc(this._logQuery || "")}" autocomplete="off"></div>
+        <div id="log-list">${this._logList()}</div>
+      </section>`;
+  }
+
+  _logLiveHtml() {
+    const L = this._log || {};
+    const time = L.at ? new Date(L.at).toLocaleTimeString("de-DE") : "";
+    return `<i></i>${L.live ? "live" : L.error ? "getrennt" : "verbinde …"}${time ? ` · ${time}` : ""}`;
+  }
+
+  /** Nur Liste und Live-Anzeige neu zeichnen (Suchfeld behält den Fokus). */
+  _renderLogList() {
+    const list = this.shadowRoot.getElementById("log-list");
+    if (list) list.innerHTML = this._logList();
+    const live = this.shadowRoot.getElementById("lg-live");
+    if (live) {
+      live.innerHTML = this._logLiveHtml();
+      live.classList.toggle("on", !!this._log?.live);
+    }
+  }
+
+  _logList() {
+    const L = this._log || {};
+    if (L.loading) return `<div class="chart-empty"><div class="spinner"></div></div>`;
+    if (L.error) return `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>${esc(L.error)}</p>`;
+    const cats = this._logCats();
+    const room = this._logRoom || "";
+    const q = (this._logQuery || "").toLowerCase().trim();
+    const rooms = this._data.rooms || {};
+    const roomName = (e) => rooms[e.room]?.name || e.rn || "";
+    const hits = [];
+    for (let i = L.entries.length - 1; i >= 0; i--) {
+      const e = L.entries[i];
+      if (!cats.has(e.cat) && LOG_CATS[e.cat]) continue;
+      if (room && e.room !== room) continue;
+      if (q && !`${e.title} ${e.why || ""} ${roomName(e)} ${LOG_CATS[e.cat]?.name || ""}`.toLowerCase().includes(q)) continue;
+      hits.push(e);
+    }
+    if (!hits.length)
+      return `<section class="empty small"><ha-icon icon="mdi:text-box-remove-outline"></ha-icon><p>${L.entries.length ? "Keine Einträge für diese Auswahl." : "Noch keine Einträge – ab jetzt protokolliert Hauswerk jede Entscheidung."}</p></section>`;
+    const limit = this._logLimit || 200;
+    const today = new Date().toDateString();
+    const yesterday = new Date(Date.now() - 864e5).toDateString();
+    let html = "";
+    let lastDay = null;
+    for (const e of hits.slice(0, limit)) {
+      const d = new Date(e.ts * 1000);
+      const ds = d.toDateString();
+      if (ds !== lastDay) {
+        lastDay = ds;
+        html += `<div class="lg-day">${ds === today ? "Heute" : ds === yesterday ? "Gestern" : d.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })}</div>`;
+      }
+      const def = LOG_CATS[e.cat] || { icon: "mdi:information-outline", c: "#94a3b8" };
+      const rn = roomName(e);
+      const rc = rooms[e.room] ? this._roomColor(e.room) : "#94a3b8";
+      const lead = ["settings", "command", "health"].includes(e.cat) ? "Details" : "Warum";
+      html += `
+        <div class="lg-row">
+          <time>${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</time>
+          <span class="lg-i" style="--c:${def.c}" title="${esc(def.name || "")}"><ha-icon icon="${def.icon}"></ha-icon></span>
+          <div class="lg-b">
+            <div class="lg-t">${rn ? `<span class="lg-badge" style="--c:${rc}">${esc(rn)}</span>` : ""}<b>${esc(e.title)}</b></div>
+            ${e.why ? `<p><b>${lead}:</b> ${esc(e.why)}</p>` : ""}
+          </div>
+        </div>`;
+    }
+    if (hits.length > limit) html += `<button class="secondary wide lg-more" data-action="log-more">Ältere anzeigen (${hits.length - limit} weitere)</button>`;
+    return html;
   }
 
   /** Einstellungen des Moduls Heizwerk. */
@@ -2450,49 +2642,68 @@ class HauswerkPanel extends HTMLElement {
         };
       }
 
-      case "weather":
+      case "weather": {
+        const S = this._hass.states;
+        const weathers = Object.keys(S).filter((e) => e.startsWith("weather.")).sort();
+        const temps = Object.keys(S)
+          .filter((e) => e.startsWith("sensor.") && (S[e].attributes.device_class === "temperature" || S[e].attributes.unit_of_measurement === "°C"))
+          .sort((a, b) => this._entityName(a).localeCompare(this._entityName(b), "de"));
+        const wid = p.weather_entity || weathers[0];
+        const w = wid ? S[wid] : null;
+        const a = w?.attributes || {};
+        const sun = S["sun.sun"];
+        const sa = sun?.attributes || {};
+        const label = (WEATHER[w?.state] || [null, w?.state || "–"])[1];
+        const own = p.outside_sensor && S[p.outside_sensor] ? parseFloat(S[p.outside_sensor].state) : null;
+        const tNow = own ?? a.temperature;
+        const hhmm = (iso) => (iso ? new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : "–");
+        const unit = a.wind_speed_unit || "km/h";
+        const help = this._help || {};
+        const row = (key, title, sub, value, text, ctl = false) => `
+          <div class="wxr ${ctl ? "ctl" : ""}">
+            <div class="wxr-l"><b>${title}<button class="qm ${help[key] ? "on" : ""}" data-action="help" data-k="${key}" aria-label="Erklärung zu ${title}">?</button></b>${sub ? `<small>${sub}</small>` : ""}${help[key] ? `<p class="wxr-h">${text}</p>` : ""}</div>
+            <div class="wxr-v">${value}</div>
+          </div>`;
+        const sel = (key, list, empty) =>
+          `<select data-set="${key}" ${dis}><option value="">${empty}</option>${list
+            .map((id) => `<option value="${esc(id)}" ${p[key] === id ? "selected" : ""}>${esc(this._entityName(id))}</option>`)
+            .join("")}</select>`;
+        const num = (key, def, min, max, step, u) =>
+          `<div class="unit"><input type="number" step="${step}" min="${min}" max="${max}" data-set="${key}" value="${p[key] ?? def}" ${dis}><i>${u}</i></div>`;
+        const alerts = this._wxAlerts();
         return {
           icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter", sub: "Hauswerk · für Startseite, Widgets und alle Module",
           body: `
-            <div class="field"><span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon> Wetter-Entität (leer = erste gefundene)</span>${this._picker("weather_entity", p.weather_entity ? [p.weather_entity] : [])}</div>
-            <div class="field"><span><ha-icon icon="mdi:thermometer"></ha-icon> Außentemperatur (leer = vom Wetter)</span>${this._picker("outside_sensor", p.outside_sensor ? [p.outside_sensor] : [])}</div>
-            <p class="muted small">Der Außensensor wird auch für die Sommerpause nach Außentemperatur genutzt.</p>`,
-        };
-
-      case "look": {
-        const acc = p.look_accent || null;
-        const known = ACCENTS.some(([v]) => v === acc);
-        const bg = p.look_background || "pattern";
-        const now = this._skyPhase();
-        const size = this._lookSize();
-        const bgText = {
-          pattern: "Dezentes Muster je Bereich: Glut und aufsteigende Wärme bei Heizwerk, Punkte auf der Startseite.",
-          daytime: "Die Kopfzeile folgt dem Sonnenstand (sun.sun, sonst der Uhrzeit): Nacht, Sonnenaufgang, Tag und Sonnenuntergang.",
-          plain: "Ruhiger, einfarbiger Hintergrund – gut für Wand-Tablets.",
-        }[bg];
-        return {
-          icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung", sub: "Hauswerk · für alle Module und Benutzer",
-          body: `
-            ${head("mdi:theme-light-dark", "Design")}
-            <div class="field">${segs("look_theme", [["auto", "Wie Home Assistant", "mdi:home-assistant"], ["light", "Hell", "mdi:white-balance-sunny"], ["dark", "Dunkel", "mdi:weather-night"]], "auto")}</div>
-            ${head("mdi:palette-outline", "Akzentfarbe")}
-            <div class="swatches">
-              ${ACCENTS.map(([v, name, show]) => `<button class="sw ${acc === v ? "on" : ""}" style="--c:${show || v}" data-action="look-accent" data-v="${v || ""}" title="${name}" aria-label="${name}" ${dis}></button>`).join("")}
-              <label class="sw custom ${known ? "" : "on"}" style="--c:${known ? "#94a3b8" : acc}" title="Eigene Farbe"><input type="color" data-look-color value="${known ? "#14b8a6" : acc}" aria-label="Eigene Farbe" ${dis}></label>
-              <span class="muted small">Eigene</span>
+            <div class="wxrows">
+              ${row("src", "Wetterquelle", "Quelle für Wetterlage, Vorhersage und Hinweise", sel("weather_entity", weathers, weathers.length ? "Automatisch" : "Keine gefunden"),
+                "Die Wetter-Entität (z. B. OpenWeatherMap, Met.no) liefert Wetterlage, Vorhersage, Wind und Luftfeuchte. Leer = die erste gefundene.", true)}
+              ${row("out", "Außentemperatur von", "eigene Wetterstation statt Wetterdienst – die Vorhersage kommt weiterhin vom Wetterdienst", sel("outside_sensor", temps, "Vom Wetterdienst"),
+                "Ein eigener Temperatursensor misst meist genauer als der Wetterdienst. Heizwerk nutzt ihn auch für die Sommerpause nach Außentemperatur.", true)}
             </div>
-            ${head("mdi:image-filter-hdr", "Hintergrund")}
-            <div class="field">${segs("look_background", [["pattern", "Muster", "mdi:texture-box"], ["daytime", "Tageszeit", "mdi:weather-sunset"], ["plain", "Schlicht", "mdi:square-rounded-outline"]], "pattern")}</div>
-            <p class="muted small">${bgText}</p>
-            ${bg === "daytime" ? `<div class="skies">${SKIES.map(([k, l]) => `<div class="skyc"><div class="sky ${k === now ? "on" : ""}" style="background:var(--sky-${k})">${k === now ? "<em>jetzt</em>" : ""}</div><small>${l}</small></div>`).join("")}</div>` : ""}
-            ${head("mdi:page-layout-header", "Kopfzeile")}
-            <label class="check"><span><b>Wetter anzeigen</b><small>Außentemperatur und Wetterlage oben rechts. Die Quelle stellst du unter Hauswerk › Wetter ein.</small></span>${sw("look_header_weather")}</label>
-            <label class="check"><span><b>Uhrzeit anzeigen</b><small>Praktisch für Wand-Tablets. Auf dem Handy ausgeblendet.</small></span>${sw("look_header_clock")}</label>
-            ${head("mdi:cellphone-cog", "Auf diesem Gerät")}
-            <div class="field"><span>Größe</span><div class="segs small">${[["s", "Kompakt", "mdi:format-font-size-decrease"], ["m", "Normal", "mdi:format-size"], ["l", "Groß", "mdi:format-font-size-increase"]]
-              .map(([v, l, i]) => `<button class="seg ${size === v ? "on" : ""}" data-action="look-size" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${l}</button>`)
-              .join("")}</div></div>
-            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Die Größe gilt nur für dieses Gerät und sofort – z. B. größer auf dem Wand-Tablet, kompakter am Handy. Alles andere gilt nach dem Speichern für alle.</p>`,
+            ${head("mdi:clock-outline", "Jetzt")}
+            ${w ? `
+            <div class="wxrows">
+              ${row("now", "Aktuell", a.apparent_temperature != null ? `gefühlt ${fmt(a.apparent_temperature)} °C` : own != null ? "Temperatur von der eigenen Station" : "", `${esc(label)} · ${fmt(tNow)} °C`,
+                "Wetterlage laut Wetterdienst, Temperatur von der eigenen Station (falls gewählt). „Gefühlt“ berücksichtigt Wind und Feuchte.")}
+              ${row("hum", "Feuchte", "", a.humidity != null ? `${fmt(a.humidity, 0)} %` : "–", "Relative Luftfeuchte draußen laut Wetterdienst.")}
+              ${row("wind", "Wind", a.wind_gust_speed != null ? `Böen ${fmt(a.wind_gust_speed)} ${esc(unit)}` : "", a.wind_speed != null ? `${fmt(a.wind_speed)} ${esc(unit)}` : "–",
+                "Mittlere Windgeschwindigkeit laut Wetterdienst; Böen, falls der Dienst sie liefert.")}
+              ${row("sun", "Sonne", sun ? `Höhe ${fmt(sa.elevation)}°` : "sun.sun fehlt", sun ? (sun.state === "above_horizon" ? "über dem Horizont" : "unter dem Horizont") : "–",
+                "Aus der Home-Assistant-Integration „Sonne“ (sun.sun). Hauswerk nutzt sie für die Darstellung nach Tageszeit – künftig auch für Rollläden.")}
+              ${row("rise", "Sonnenaufgang", "nächster Sonnenaufgang", hhmm(sa.next_rising), "Nächster Sonnenaufgang laut sun.sun.")}
+              ${row("set", "Sonnenuntergang", "nächster Sonnenuntergang", hhmm(sa.next_setting), "Nächster Sonnenuntergang laut sun.sun.")}
+            </div>` : `<p class="note warn"><ha-icon icon="mdi:weather-cloudy-alert"></ha-icon>Keine Wetter-Entität gefunden – z. B. die Integration „Met.no“ oder „OpenWeatherMap“ einrichten.</p>`}
+            ${head("mdi:alert-outline", "Grenzwerte")}
+            <div class="wxrows">
+              ${row("limit", "Heizgrenze", p.summer_mode === "auto" ? "darunter gilt die Heizsaison" : "nur bei Saison „Nach Außentemperatur“",
+                `<button class="link" data-action="settings-go" data-sub="season">${fmt(p.summer_temp ?? 16)} °C</button>`,
+                "Ab dieser Außentemperatur macht Heizwerk Sommerpause (1 K Hysterese). Einstellbar unter Heizwerk › Einstellungen › Saison.")}
+              ${row("cold", "Kälteeinbruch", "Vorhersage unter diesem Wert", num("cold_snap_temp", 0, -30, 25, 0.5, "°C"),
+                "Sagt die Vorhersage der nächsten 3 Tage einen Tiefstwert unter dieser Grenze voraus, erscheint ein Hinweis unter der Glocke.", true)}
+              ${row("storm", "Sturm", "Böen ab dieser Stärke", num("storm_kmh", 70, 20, 200, 5, "km/h"),
+                "Erwartet die Vorhersage der nächsten 24 Stunden Böen (oder Wind) ab dieser Stärke, erscheint ein Hinweis unter der Glocke.", true)}
+            </div>
+            ${alerts.length ? `<div class="lbl">Gerade aktiv</div><div class="evlist">${alerts.map((x) => `<div class="ev live"><ha-icon icon="${x.icon}"></ha-icon><span class="grow"><b>${esc(x.text)}</b><small>${esc(x.sub)}</small></span></div>`).join("")}</div>` : ""}`,
         };
       }
 
@@ -2916,6 +3127,12 @@ class HauswerkPanel extends HTMLElement {
       if (["name", "valve_control", "calibration"].includes(key) && isChange) this._renderDialog();
       return;
     }
+    if (t.dataset.action === "log-search") {
+      this._logQuery = t.value;
+      this._logLimit = 200;
+      this._renderLogList();
+      return;
+    }
     if (t.dataset.action === "set-search") {
       // nur die Liste neu zeichnen, damit das Suchfeld den Fokus behält
       this._setQuery = t.value;
@@ -2972,6 +3189,8 @@ class HauswerkPanel extends HTMLElement {
       else if (t.type === "number") {
         if (t.value !== "") this._settings[key] = Number(t.value); // leer = alten Wert behalten
       } else this._settings[key] = t.value || null;
+      // Andere Wetterquelle: Werte im Pop-up sofort aktualisieren
+      if (isChange && ["weather_entity", "outside_sensor"].includes(key)) this._refreshSettings();
       const bar = this.shadowRoot.getElementById("set-save");
       if (bar) bar.hidden = !this._settingsDirty();
       return;
@@ -3009,7 +3228,7 @@ class HauswerkPanel extends HTMLElement {
     const el = e.target.closest?.("[data-action]");
     if (!el) return;
     const a = el.dataset.action;
-    if (["room-toggle", "plan-preset", "adv", "hmode", "room-plan", "set-search"].includes(a)) {
+    if (["room-toggle", "plan-preset", "adv", "hmode", "room-plan", "set-search", "log-search"].includes(a)) {
       if (a === "adv" && this._dialog) setTimeout(() => (this._dialog.advanced = el.open), 0);
       return;
     }
@@ -3400,6 +3619,32 @@ class HauswerkPanel extends HTMLElement {
         // zentrale Pop-ups unter Hauswerk-Einstellungen, alle anderen unter Heizwerk › Einstellungen
         this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : "settings");
         if (el.dataset.sub) this._openPop(el.dataset.sub);
+        break;
+      case "help":
+        this._help = { ...(this._help || {}), [el.dataset.k]: !this._help?.[el.dataset.k] };
+        this._renderPop();
+        break;
+      case "log-room":
+        this._logRoom = el.dataset.id || "";
+        this._logLimit = 200;
+        this._renderMain();
+        break;
+      case "log-cat": {
+        const cats = this._logCats();
+        if (cats.has(el.dataset.k)) cats.delete(el.dataset.k);
+        else cats.add(el.dataset.k);
+        try {
+          localStorage.setItem("hauswerk.protokoll.kategorien", JSON.stringify([...cats]));
+        } catch (err) {
+          /* ohne Speicher: gilt bis zum Neuladen */
+        }
+        this._logLimit = 200;
+        this._renderMain();
+        break;
+      }
+      case "log-more":
+        this._logLimit = (this._logLimit || 200) + 300;
+        this._renderLogList();
         break;
       case "look-accent":
         this._settings.look_accent = el.dataset.v || null;
@@ -4458,6 +4703,61 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
   .hclock + .hwx { border:none; padding:0; }
   .hinfo { padding:0 9px; height:38px; font-size:14px; }
   .skies { grid-template-columns:repeat(2, 1fr); }
+}
+/* Wetter: Zeilen mit Wert rechts und Erklärung per „?“ */
+.wxrows { display:grid; gap:2px; margin-bottom:6px; }
+.wxr { display:flex; align-items:center; gap:14px; padding:12px 14px; border-radius:14px; }
+.wxr:nth-child(odd) { background:var(--card2); }
+.wxr-l { flex:1; min-width:0; }
+.wxr-l b { display:flex; align-items:center; gap:8px; font-size:15px; font-weight:600; }
+.wxr-l small { display:block; color:var(--muted); font-size:12.5px; margin-top:2px; line-height:1.35; }
+.wxr-h { margin:8px 0 0 !important; font-size:12.5px; line-height:1.45; color:var(--text) !important; padding:8px 10px; border-radius:10px; background:color-mix(in srgb, var(--accent) 10%, var(--card)); }
+.wxr-v { flex:none; max-width:55%; text-align:right; font-weight:700; font-size:15px; }
+.wxr-v select { max-width:260px; font-weight:600; }
+.wxr-v .unit { justify-content:flex-end; }
+.wxr-v .unit input { width:96px; text-align:right; font-weight:700; }
+.wxr-v .link { font-size:15px; }
+.qm { all:unset; cursor:pointer; width:22px; height:22px; flex:none; border-radius:50%; border:1.5px solid var(--line2); display:grid; place-items:center; font-size:12px; font-weight:700; color:var(--muted); }
+.qm:hover, .qm.on { border-color:var(--accent); color:var(--accent); }
+@media (max-width:600px) {
+  .wxr { flex-wrap:wrap; gap:8px 12px; }
+  .wxr.ctl .wxr-v { width:100%; max-width:none; }
+  .wxr.ctl .wxr-v select { max-width:none; width:100%; }
+}
+/* Protokoll */
+.card.lg { padding:20px 22px; }
+.lg-head { display:flex; align-items:flex-start; gap:12px; margin-bottom:16px; }
+.lg-ic { width:44px; height:44px; flex:none; border-radius:14px; display:grid; place-items:center; background:var(--card2); color:var(--muted); }
+.lg-ic ha-icon { --mdc-icon-size:24px; }
+.lg-head h2 { margin:0 0 2px; font-size:20px; }
+.lg-head small { color:var(--muted); font-size:13px; }
+.lg-live { display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:600; color:var(--muted); white-space:nowrap; padding-top:4px; font-variant-numeric:tabular-nums; }
+.lg-live i { width:10px; height:10px; border-radius:50%; background:var(--line2); }
+.lg-live.on i { background:#22c55e; box-shadow:0 0 0 3px color-mix(in srgb, #22c55e 25%, transparent); }
+.lg-chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.lg-room, .lg-cat { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:7px; padding:8px 14px; border-radius:99px; font-size:14px; font-weight:600;
+  color:var(--muted); background:color-mix(in srgb, var(--c) 7%, var(--card)); border:1px solid color-mix(in srgb, var(--c) 16%, transparent); opacity:.62; }
+.lg-room i { width:8px; height:8px; border-radius:50%; background:var(--c); }
+.lg-cat ha-icon { --mdc-icon-size:17px; color:var(--ct); }
+.lg-room.on, .lg-cat.on { opacity:1; color:var(--text); background:color-mix(in srgb, var(--c) 15%, var(--card)); border-color:color-mix(in srgb, var(--c) 38%, transparent); }
+.lg-search { margin:4px 0 6px; }
+.lg-day { font-size:12px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); padding:18px 0 8px; border-bottom:1px solid var(--line); }
+.lg-row { display:grid; grid-template-columns:48px 40px minmax(0, 1fr); gap:12px; padding:12px 0; border-bottom:1px solid var(--line); align-items:start; }
+.lg-row time { font-size:13.5px; font-weight:600; color:var(--muted); padding-top:10px; font-variant-numeric:tabular-nums; }
+.lg-i { width:40px; height:40px; border-radius:12px; display:grid; place-items:center; background:color-mix(in srgb, var(--c) 15%, transparent); color:var(--ct); }
+.lg-i ha-icon { --mdc-icon-size:21px; }
+.lg-t { display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; padding-top:2px; }
+.lg-t b { font-size:15px; font-weight:700; }
+.lg-badge { font-size:12px; font-weight:600; padding:2px 9px; border-radius:99px; color:var(--ct); background:color-mix(in srgb, var(--c) 14%, transparent); }
+.lg-b p { margin:4px 0 0; font-size:13.5px; color:var(--muted); line-height:1.45; overflow-wrap:anywhere; }
+.lg-b p b { color:var(--text); font-weight:600; }
+.lg-more { margin-top:14px; box-sizing:border-box; }
+@media (max-width:600px) {
+  .card.lg { padding:14px; }
+  .lg-row { grid-template-columns:40px 34px minmax(0, 1fr); gap:10px; }
+  .lg-i { width:34px; height:34px; border-radius:10px; }
+  .lg-row time { padding-top:7px; font-size:12.5px; }
+  .lg-room, .lg-cat { padding:7px 11px; font-size:13px; }
 }
 .toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:11px 20px; border-radius:12px; z-index:30; font-size:14px; font-weight:600; box-shadow:0 10px 30px rgba(0,0,0,.4); }
 

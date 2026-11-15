@@ -24,6 +24,7 @@ from .const import (
     CALENDAR_REFRESH,
     DEFAULT_SETTINGS,
     LEGACY_STORAGE_KEY,
+    SETTING_LABELS,
     SIGNAL_ROOMS,
     SIGNAL_UPDATE,
     STATS_DAYS,
@@ -59,6 +60,7 @@ from .logic import (
     week_minute,
     window_paused,
 )
+from .log import Protokoll
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -81,9 +83,12 @@ def _float(value: Any) -> float | None:
 class Heizen:
     """Modul Heizen: hält Räume, Einstellungen und Laufzeitzustand und regelt die Thermostate."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, log: Protokoll) -> None:
         self.hass = hass
         self.entry = entry
+        # Protokoll von Hauswerk: Entscheidungen, Fenster, Geräte, Befehle und Änderungen
+        self.log = log
+        self._flags: dict[str, Any] = {}
         self._store: Store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self.settings: dict[str, Any] = dict(DEFAULT_SETTINGS)
         self.rooms: dict[str, dict[str, Any]] = {}
@@ -188,11 +193,80 @@ class Heizen:
                 self.hass, sorted(ids), self._on_state_change
             )
 
+    # ------------------------------------------------------------ Protokoll-Hilfen
+    def _name(self, entity_id: str) -> str:
+        state = self.hass.states.get(entity_id)
+        return state.name if state is not None else entity_id
+
+    @staticmethod
+    def _t(value: float | None) -> str:
+        return "–" if value is None else f"{value:.1f}".replace(".", ",")
+
+    @staticmethod
+    def _hm(ts: float) -> str:
+        return dt_util.as_local(dt_util.utc_from_timestamp(ts)).strftime("%H:%M")
+
+    @staticmethod
+    def _by(by: str | None) -> str:
+        return f" · von {by}" if by else ""
+
+    def _flip(self, key: str, value: Any, on: str | None, off: str | None, cat: str, why: str | None = None) -> None:
+        """Wechsel eines Hauszustands protokollieren (nicht beim ersten Durchlauf nach dem Start)."""
+        old = self._flags.get(key)
+        self._flags[key] = value
+        if old is None or old == value:
+            return
+        message = on if value else off
+        if message:
+            self.log.add(cat, message, why)
+
+    def _presence_why(self) -> str:
+        if self.settings.get("presence_force") == "away":
+            return "von Hand auf Abwesend gesetzt"
+        if self.settings.get("guest"):
+            return "Gäste-Modus"
+        home = [
+            self._name(p)
+            for p in self.settings.get("persons") or []
+            if (s := self.hass.states.get(p)) is not None and s.state == STATE_HOME
+        ]
+        return f"Zu Hause: {', '.join(home)}" if home else "Alle Personen unterwegs"
+
+    def _reason(self, room: dict, result: dict, upcoming: tuple[int, float] | None) -> str:
+        """Kurze Begründung für eine Betriebsart im Protokoll."""
+        mode = result["mode"]
+        if mode in ("komfort", "eco"):
+            plan = self.plans.get(room.get("plan_id") or "")
+            if room.get("schedule_entity"):
+                src = self._name(room["schedule_entity"])
+            elif plan is not None:
+                src = f"Plan „{plan.get('name')}“"
+            else:
+                src = "eigenem Heizplan"
+            return f"{'Komfortzeit' if mode == 'komfort' else 'keine Komfortzeit'} laut {src}"
+        if mode == "vorheizen":
+            mins = upcoming[0] if upcoming else result.get("next_change")
+            return f"Komfort beginnt in {mins} Min." if mins else "Komfort beginnt bald"
+        if mode in ("abwesend", "frost"):
+            return self._presence_why()
+        if mode in ("manuell", "boost") and result.get("override_until"):
+            until = dt_util.parse_datetime(result["override_until"])
+            return f"bis {dt_util.as_local(until).strftime('%H:%M')}" if until else ""
+        if mode == "warm":
+            return f"Raum hat {self._t(result.get('room_temp'))} °C"
+        if mode in ("leer", "belegt"):
+            return "Präsenzmelder"
+        if mode == "eco_fix":
+            return "Eco erzwingen ist an"
+        if mode == "sommer":
+            return "Sommerpause, Thermostate " + ("aus" if result.get("hvac_off") else "auf Frostschutz")
+        return ""
+
     # ------------------------------------------------------------ Änderungen
     def new_room_id(self) -> str:
         return uuid.uuid4().hex[:8]
 
-    async def async_save_room(self, room: dict[str, Any]) -> dict[str, Any]:
+    async def async_save_room(self, room: dict[str, Any], by: str | None = None) -> dict[str, Any]:
         room_id = room.get("id") or self.new_room_id()
         room["id"] = room_id
         is_new = room_id not in self.rooms
@@ -201,10 +275,14 @@ class Heizen:
         self._track_entities()
         if is_new:
             async_dispatcher_send(self.hass, SIGNAL_ROOMS)
+        self.log.add("settings", "Raum angelegt" if is_new else "Raum geändert", f"Panel{self._by(by)}", room_id, room.get("name"))
         await self.async_evaluate()
         return room
 
-    async def async_delete_room(self, room_id: str) -> None:
+    async def async_delete_room(self, room_id: str, by: str | None = None) -> None:
+        name = (self.rooms.get(room_id) or {}).get("name")
+        if name:
+            self.log.add("settings", f"Raum „{name}“ gelöscht", f"Panel{self._by(by)}")
         self.rooms.pop(room_id, None)
         self.runtime.pop(room_id, None)
         self.stats.pop(room_id, None)
@@ -214,7 +292,17 @@ class Heizen:
         async_dispatcher_send(self.hass, SIGNAL_ROOMS)
         await self.async_evaluate()
 
-    async def async_save_settings(self, settings: dict[str, Any]) -> None:
+    async def async_save_settings(self, settings: dict[str, Any], by: str | None = None) -> None:
+        changed = [k for k, v in settings.items() if self.settings.get(k) != v]
+        if changed:
+            labels = list(dict.fromkeys(SETTING_LABELS.get(k, k) for k in changed))
+            only = changed[0]
+            if len(changed) == 1 and isinstance(settings[only], bool):
+                title = f"{labels[0]} {'an' if settings[only] else 'aus'}"
+            else:
+                title = "Einstellungen geändert"
+            source = f"Panel{self._by(by)}" if by else "Home Assistant (Schalter oder Automation)"
+            self.log.add("settings", title, f"{', '.join(labels)} · {source}")
         self.settings.update(settings)
         self._save()
         self._track_entities()
@@ -223,18 +311,22 @@ class Heizen:
         await self.async_evaluate()
 
     # ------------------------------------------------------------ Gemeinsame Heizpläne
-    async def async_save_plan(self, plan: dict[str, Any]) -> dict[str, Any]:
+    async def async_save_plan(self, plan: dict[str, Any], by: str | None = None) -> dict[str, Any]:
         plan_id = plan.get("id") or self.new_room_id()
+        is_new = plan_id not in self.plans
         plan["id"] = plan_id
         self.plans[plan_id] = plan
+        self.log.add("settings", f"Heizplan „{plan.get('name')}“ {'angelegt' if is_new else 'geändert'}", f"Panel{self._by(by)}")
         self._save()
         await self._async_refresh_plan_calendars(force=True)
         await self.async_evaluate()
         return plan
 
-    async def async_delete_plan(self, plan_id: str) -> None:
+    async def async_delete_plan(self, plan_id: str, by: str | None = None) -> None:
         """Plan löschen; Räume, die ihn nutzen, behalten seine Zeiten als eigenen Plan."""
         plan = self.plans.pop(plan_id, None)
+        if plan:
+            self.log.add("settings", f"Heizplan „{plan.get('name')}“ gelöscht", f"Panel{self._by(by)}")
         self._plan_events.pop(plan_id, None)
         self._plan_errors.pop(plan_id, None)
         for room in self.rooms.values():
@@ -363,13 +455,15 @@ class Heizen:
     async def async_set_room_enabled(self, room_id: str, enabled: bool) -> None:
         if room_id in self.rooms:
             self.rooms[room_id]["enabled"] = enabled
+            self.log.add("settings", f"Automatik {'an' if enabled else 'aus'}", "Home Assistant (Schalter oder Automation)", room_id, self.rooms[room_id].get("name"))
             self._save()
             await self.async_evaluate()
 
     async def async_set_override(
-        self, room_id: str, temp: float | None, hours: float | None, boost: bool = False
+        self, room_id: str, temp: float | None, hours: float | None, boost: bool = False, by: str | None = None
     ) -> None:
         rt = self._rt(room_id)
+        name = (self.rooms.get(room_id) or {}).get("name")
         if boost:
             minutes = float(self.settings.get("boost_minutes") or 30)
             rt["override"] = {
@@ -377,8 +471,10 @@ class Heizen:
                 "until": dt_util.utcnow().timestamp() + minutes * 60,
                 "boost": True,
             }
+            self.log.add("manual", f"Boost für {minutes:.0f} Min.", f"bis {self._hm(rt['override']['until'])} · im Panel{self._by(by)}", room_id, name)
         elif temp is None:
             rt["override"] = None
+            self.log.add("manual", "Zurück zum Plan", f"im Panel{self._by(by)}", room_id, name)
         else:
             until = None
             if hours:
@@ -388,6 +484,7 @@ class Heizen:
                 minutes = result.get("next_change")
                 until = dt_util.utcnow().timestamp() + (minutes or 240) * 60
             rt["override"] = {"temp": round(float(temp), 1), "until": until}
+            self.log.add("manual", f"Von Hand: {self._t(rt['override']['temp'])} °C", f"im Panel · gilt bis {self._hm(until)}{self._by(by)}", room_id, name)
         await self.async_evaluate()
 
     # ------------------------------------------------------------ Abonnements fürs Panel
@@ -475,10 +572,32 @@ class Heizen:
         if entity_id.startswith("climate.") and new is not None and old is not None:
             self._detect_manual_change(entity_id, old, new, now)
 
+        # Geräte nicht mehr bzw. wieder erreichbar
+        if new is not None and old is not None and (new.state in BAD_STATES) != (old.state in BAD_STATES):
+            lost = new.state in BAD_STATES
+            seen: set[str] = set()
+            for key in ("climates", "windows", "temp_sensor", "humidity_sensor", "presence_sensor"):
+                for room_id in self._room_for(entity_id, key):
+                    if room_id in seen:
+                        continue
+                    seen.add(room_id)
+                    self.log.add(
+                        "health",
+                        f"{new.name} {'nicht erreichbar' if lost else 'wieder erreichbar'}",
+                        f"{entity_id} · Zustand {new.state}",
+                        room_id,
+                        self.rooms[room_id].get("name"),
+                    )
+
         for room_id in self._room_for(entity_id, "windows"):
             room = self.rooms[room_id]
             rt = self._rt(room_id)
             is_open = self._windows_open_since(room)[0] is not None
+            if new is not None and old is not None and new.state not in BAD_STATES and old.state not in BAD_STATES:
+                was = old.state.lower() in WINDOW_OPEN_STATES
+                now_open = new.state.lower() in WINDOW_OPEN_STATES
+                if was != now_open:
+                    self.log.add("window", f"{new.name} {'geöffnet' if now_open else 'geschlossen'}", None, room_id, room.get("name"))
             if is_open and not rt["windows_open"]:
                 self._stat(room_id)["open"] += 1
                 delay = room_setting(room, "window_delay") or 0
@@ -522,6 +641,13 @@ class Heizen:
             minutes = (rt.get("result") or {}).get("next_change") or 240
             rt["override"] = {"temp": round(new_t - offset, 1), "until": now + minutes * 60}
             _LOGGER.debug("Manuelle Änderung in %s: %.1f °C", room.get("name"), new_t)
+            self.log.add(
+                "manual",
+                f"Von Hand: {self._t(rt['override']['temp'])} °C",
+                f"{'in Home Assistant geändert' if from_ui else 'am Thermostat gedreht'} ({new.name}) · gilt bis {self._hm(rt['override']['until'])}",
+                room_id,
+                room.get("name"),
+            )
 
     @callback
     def _schedule_eval(self) -> None:
@@ -806,6 +932,22 @@ class Heizen:
             self._summer or bool(self.settings.get("liming_winter")) or summer_mode == "off"
         )
 
+        # Wechsel der Hauszustände ins Protokoll
+        outside = self._state_float(self.settings.get("outside_sensor"))
+        self._flip("away", away, "Niemand mehr zu Hause – abwesend", "Wieder jemand zu Hause", "presence", self._presence_why())
+        self._flip("approaching", self._approaching, "Jemand ist auf dem Heimweg", None, "presence",
+                   f"näher als {self._t(float(self.settings.get('proximity_km') or 0))} km – es wird schon geheizt")
+        self._flip("long_away", long_away, "Lange niemand da – Frostschutz", None, "presence",
+                   f"seit {self._away_for / 86400:.1f} Tagen".replace(".", ","))
+        self._flip("vacation", vacation, "Urlaub beginnt", "Urlaub endet", "presence",
+                   {"calendar": "laut Kalender", "period": "laut Zeitraum"}.get(self.settings.get("vacation_source") or "period", "")
+                   if not self.settings.get("vacation") else "Schalter Urlaub")
+        self._flip("summer", self._summer, "Sommerpause beginnt", "Heizperiode beginnt", "season",
+                   f"außen {self._t(outside)} °C · Heizgrenze {self._t(float(self.settings.get('summer_temp') or 16))} °C"
+                   if summer_mode == "auto" else {"on": "von Hand", "entity": "laut Entität"}.get(summer_mode, ""))
+        self._flip("liming", self._liming, "Entkalken: alle Ventile auf", "Entkalken beendet", "season",
+                   f"{int(self.settings.get('liming_minutes') or 5)} Min. Entkalkungsschutz")
+
         for room_id, stored_room in list(self.rooms.items()):
             room = self._effective_room(stored_room)
             rt = self._rt(room_id)
@@ -819,6 +961,18 @@ class Heizen:
                 float(room_setting(room, "window_delay") or 0),
                 float(room_setting(room, "resume_delay") or 0),
             )
+            if paused != rt["paused"]:
+                if paused:
+                    rt["pause_at"] = now
+                    names = [
+                        self._name(w) for w in room.get("windows") or []
+                        if (s := self.hass.states.get(w)) is not None and s.state.lower() in WINDOW_OPEN_STATES
+                    ]
+                    why = f"{', '.join(names) or 'Fenster'} offen · Thermostate " + ("aus" if room_setting(room, "pause_mode") == "off" else "auf Frostschutz")
+                    self.log.add("window", "Fensterpause beginnt", why, room_id, room.get("name"))
+                else:
+                    mins = int((now - rt.get("pause_at", now)) // 60)
+                    self.log.add("window", "Fensterpause endet", f"alle Fenster zu · Pause dauerte {mins} Min.", room_id, room.get("name"))
             rt["paused"] = paused
 
             override = rt.get("override")
@@ -875,6 +1029,25 @@ class Heizen:
                 heating=self._is_heating(room, room_temp, result["target"]),
             )
             rt["result"] = result
+            # Entscheidung protokollieren, sobald sich Betriebsart oder Ziel ändern
+            current = (result["mode"], result["target"], result["hvac_off"])
+            before = rt.get("logged")
+            if before != current:
+                rt["logged"] = current
+                if result["target"] is None:
+                    what = "Automatik aus"
+                elif result["hvac_off"]:
+                    what = "Thermostate aus"
+                else:
+                    what = f"Ziel {self._t(result['target'])} °C"
+                reason = self._reason(room, result, upcoming)
+                self.log.add(
+                    "target",
+                    ("Start: " if before is None else "") + what,
+                    MODES[result["mode"]] + (f" – {reason}" if reason else ""),
+                    room_id,
+                    room.get("name"),
+                )
             try:
                 await self._apply(room, rt, result, room_temp, now)
             except Exception:  # noqa: BLE001 - ein defektes Thermostat soll die anderen nicht stoppen
@@ -889,7 +1062,7 @@ class Heizen:
         if result["target"] is None:  # Automatik aus
             for entity_id in room.get("climates") or []:
                 if entity_id in self.turned_off:
-                    await self._restore_mode(entity_id)
+                    await self._restore_mode(entity_id, room)
             return
         for entity_id in room.get("climates") or []:
             state = self.hass.states.get(entity_id)
@@ -899,7 +1072,7 @@ class Heizen:
             if result["hvac_off"] and room.get("min_instead_of_off"):
                 # Statt Ausschalten auf die kleinste Temperatur des Thermostats stellen.
                 if entity_id in self.turned_off:
-                    await self._restore_mode(entity_id)
+                    await self._restore_mode(entity_id, room)
                 low = dict(result, target=MIN_TEMP)
                 await self._set_temperature(room, rt, low, room_temp, now, entity_id)
                 await self._set_valve(room, rt, low, room_temp, now, entity_id)
@@ -912,10 +1085,11 @@ class Heizen:
                     await self.hass.services.async_call(
                         "climate", "set_hvac_mode", {"entity_id": entity_id, "hvac_mode": "off"}
                     )
+                    self.log.add("command", f"{self._name(entity_id)} → aus", MODES[result["mode"]], room.get("id"), room.get("name"))
                 continue
 
             if entity_id in self.turned_off:
-                await self._restore_mode(entity_id)
+                await self._restore_mode(entity_id, room)
             elif state.state == "off":
                 continue  # vom Nutzer ausgeschaltet: respektieren
 
@@ -951,6 +1125,8 @@ class Heizen:
                 await self.hass.services.async_call(
                     "number", "set_value", {"entity_id": number_id, "value": new}
                 )
+                self.log.add("command", f"{self._name(number_id)} → Offset {self._t(new)} K",
+                             f"Raumsensor {self._t(room_temp)} °C", room.get("id"), room.get("name"))
             return
 
     async def _set_valve(
@@ -983,13 +1159,17 @@ class Heizen:
             await self.hass.services.async_call(
                 "number", "set_value", {"entity_id": number_id, "value": value}
             )
+            self.log.add("command", f"{self._name(number_id)} → Ventil {value:.0f} %",
+                         MODES[result["mode"]], room.get("id"), room.get("name"))
 
-    async def _restore_mode(self, entity_id: str) -> None:
+    async def _restore_mode(self, entity_id: str, room: dict | None = None) -> None:
         previous = self.turned_off.pop(entity_id, None) or "heat"
         self._save()
         await self.hass.services.async_call(
             "climate", "set_hvac_mode", {"entity_id": entity_id, "hvac_mode": previous}
         )
+        room = room or {}
+        self.log.add("command", f"{self._name(entity_id)} → wieder {previous}", "vorheriger Modus nach der Pause", room.get("id"), room.get("name"))
 
     async def _set_temperature(
         self, room: dict, rt: dict, result: dict, room_temp: float | None, now: float, entity_id: str
@@ -1032,6 +1212,9 @@ class Heizen:
         await self.hass.services.async_call(
             "climate", "set_temperature", {"entity_id": entity_id, "temperature": value}
         )
+        extra = f" · gesendet {self._t(value)} °C (Ausgleich)" if abs(value - result["target"]) >= 0.05 else ""
+        self.log.add("command", f"{self._name(entity_id)} → {self._t(value)} °C",
+                     f"Ziel {self._t(result['target'])} °C · {MODES[result['mode']]}{extra}", room.get("id"), room.get("name"))
 
     # ------------------------------------------------------------ Statistik
     def _stat(self, room_id: str) -> dict[str, float]:
