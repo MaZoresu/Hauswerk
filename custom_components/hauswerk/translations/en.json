@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hauswerk",
+        "description": "Set up Hauswerk. Its modules (starting with heating: rooms, schedules and settings) are managed afterwards in the \"Hauswerk\" sidebar panel."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Hauswerk is already set up."
+    }
+  }
+}

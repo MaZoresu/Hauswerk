@@ -1,4 +1,4 @@
-"""WebSocket-Befehle für das Heizwerk-Panel."""
+"""WebSocket-Befehle für das Hauswerk-Panel."""
 from __future__ import annotations
 
 from functools import wraps
@@ -10,7 +10,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN
+from .const import DOMAIN, MODULE_HEATING
 from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, parse_hm
 
 
@@ -175,7 +175,7 @@ PLAN_SCHEMA = vol.Schema(
 
 
 def _ctl(hass: HomeAssistant):
-    return hass.data.get(DOMAIN)
+    return (hass.data.get(DOMAIN) or {}).get(MODULE_HEATING)
 
 
 def _may_edit(hass: HomeAssistant, connection) -> bool:
@@ -204,10 +204,10 @@ def require_editor(func):
 
 
 def _not_ready(connection, msg) -> None:
-    connection.send_error(msg["id"], "not_ready", "Heizwerk ist nicht eingerichtet")
+    connection.send_error(msg["id"], "not_ready", "Hauswerk ist nicht eingerichtet")
 
 
-@websocket_api.websocket_command({vol.Required("type"): "heizwerk/get"})
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/heizen/get"})
 @callback
 def ws_get(hass: HomeAssistant, connection, msg) -> None:
     ctl = _ctl(hass)
@@ -221,7 +221,7 @@ def ws_get(hass: HomeAssistant, connection, msg) -> None:
             "plans": ctl.plans,
             # Soll-Sensor je Raum (für den Verlauf auf der Raumseite)
             "target_sensors": {
-                room_id: er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"heizwerk_{room_id}_target")
+                room_id: er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"hauswerk_{room_id}_target")
                 for room_id in ctl.rooms
             },
             "status": ctl.status(),
@@ -233,7 +233,7 @@ def ws_get(hass: HomeAssistant, connection, msg) -> None:
     )
 
 
-@websocket_api.websocket_command({vol.Required("type"): "heizwerk/subscribe"})
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/heizen/subscribe"})
 @callback
 def ws_subscribe(hass: HomeAssistant, connection, msg) -> None:
     ctl = _ctl(hass)
@@ -250,7 +250,7 @@ def ws_subscribe(hass: HomeAssistant, connection, msg) -> None:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "heizwerk/room/save", vol.Required("room"): dict}
+    {vol.Required("type"): "hauswerk/heizen/room/save", vol.Required("room"): dict}
 )
 @require_editor
 @websocket_api.async_response
@@ -270,7 +270,7 @@ async def ws_room_save(hass: HomeAssistant, connection, msg) -> None:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "heizwerk/room/delete", vol.Required("room_id"): str}
+    {vol.Required("type"): "hauswerk/heizen/room/delete", vol.Required("room_id"): str}
 )
 @require_editor
 @websocket_api.async_response
@@ -283,7 +283,7 @@ async def ws_room_delete(hass: HomeAssistant, connection, msg) -> None:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "heizwerk/settings/save", vol.Required("settings"): dict}
+    {vol.Required("type"): "hauswerk/heizen/settings/save", vol.Required("settings"): dict}
 )
 @require_editor
 @websocket_api.async_response
@@ -309,7 +309,7 @@ async def ws_settings_save(hass: HomeAssistant, connection, msg) -> None:
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "heizwerk/override",
+        vol.Required("type"): "hauswerk/heizen/override",
         vol.Required("room_id"): str,
         vol.Optional("temp"): vol.Any(None, TEMP),
         vol.Optional("hours"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0.25, max=72))),
@@ -330,7 +330,7 @@ async def ws_override(hass: HomeAssistant, connection, msg) -> None:
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "heizwerk/report",
+        vol.Required("type"): "hauswerk/heizen/report",
         vol.Optional("days", default=7): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
     }
 )
@@ -343,7 +343,7 @@ def ws_report(hass: HomeAssistant, connection, msg) -> None:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "heizwerk/preheat/reset", vol.Required("room_id"): str}
+    {vol.Required("type"): "hauswerk/heizen/preheat/reset", vol.Required("room_id"): str}
 )
 @require_editor
 @websocket_api.async_response
@@ -359,7 +359,7 @@ async def ws_preheat_reset(hass: HomeAssistant, connection, msg) -> None:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "heizwerk/plan/save", vol.Required("plan"): dict}
+    {vol.Required("type"): "hauswerk/heizen/plan/save", vol.Required("plan"): dict}
 )
 @require_editor
 @websocket_api.async_response
@@ -379,7 +379,7 @@ async def ws_plan_save(hass: HomeAssistant, connection, msg) -> None:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "heizwerk/plan/delete", vol.Required("plan_id"): str}
+    {vol.Required("type"): "hauswerk/heizen/plan/delete", vol.Required("plan_id"): str}
 )
 @require_editor
 @websocket_api.async_response
@@ -393,7 +393,7 @@ async def ws_plan_delete(hass: HomeAssistant, connection, msg) -> None:
 
 @websocket_api.websocket_command(
     {
-        vol.Required("type"): "heizwerk/calendar/import",
+        vol.Required("type"): "hauswerk/heizen/calendar/import",
         vol.Required("entity_id"): vol.All(str, vol.Match(r"^calendar\.[a-z0-9_]+$")),
         vol.Optional("keyword"): _opt(vol.All(str, vol.Length(max=200))),
         vol.Optional("days", default=7): vol.All(vol.Coerce(int), vol.Range(min=1, max=14)),

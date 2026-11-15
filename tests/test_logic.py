@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 
 # logic.py direkt laden, ohne das Paket (und damit Home Assistant) zu importieren
-_PATH = Path(__file__).resolve().parents[1] / "custom_components" / "heizwerk" / "logic.py"
-_spec = importlib.util.spec_from_file_location("heizwerk_logic", _PATH)
+_PATH = Path(__file__).resolve().parents[1] / "custom_components" / "hauswerk" / "logic.py"
+_spec = importlib.util.spec_from_file_location("hauswerk_logic", _PATH)
 L = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(L)
 

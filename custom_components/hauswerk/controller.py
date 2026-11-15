@@ -1,4 +1,4 @@
-"""Regelung, Speicher und Statistik von Heizwerk."""
+"""Hauswerk-Modul Heizen: Regelung, Speicher und Statistik."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -23,6 +23,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CALENDAR_REFRESH,
     DEFAULT_SETTINGS,
+    LEGACY_STORAGE_KEY,
     SIGNAL_ROOMS,
     SIGNAL_UPDATE,
     STATS_DAYS,
@@ -77,8 +78,8 @@ def _float(value: Any) -> float | None:
         return None
 
 
-class Heizwerk:
-    """Hält Räume, Einstellungen und Laufzeitzustand und regelt die Thermostate."""
+class Heizen:
+    """Modul Heizen: hält Räume, Einstellungen und Laufzeitzustand und regelt die Thermostate."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
@@ -87,7 +88,7 @@ class Heizwerk:
         self.settings: dict[str, Any] = dict(DEFAULT_SETTINGS)
         self.rooms: dict[str, dict[str, Any]] = {}
         self.stats: dict[str, dict[str, dict[str, float]]] = {}
-        # Thermostate, die Heizwerk wegen offener Fenster ausgeschaltet hat (-> vorheriger Modus).
+        # Thermostate, die Hauswerk wegen offener Fenster ausgeschaltet hat (-> vorheriger Modus).
         # Wird gespeichert, damit sie nach einem Neustart wieder eingeschaltet werden.
         self.turned_off: dict[str, str] = {}
         # Gelernte Aufheizgeschwindigkeit je Raum in K/h (für das lernende Vorheizen).
@@ -116,7 +117,15 @@ class Heizwerk:
 
     # ------------------------------------------------------------ Speicher
     async def async_load(self) -> None:
-        stored = await self._store.async_load() or {}
+        stored = await self._store.async_load()
+        if stored is None:
+            # Erster Start als Hauswerk: Daten der früheren Integration „Heizwerk“ übernehmen
+            legacy = await Store(self.hass, STORAGE_VERSION, LEGACY_STORAGE_KEY).async_load()
+            if legacy:
+                _LOGGER.info("Übernehme Räume und Einstellungen aus %s", LEGACY_STORAGE_KEY)
+                stored = legacy
+                await self._store.async_save(legacy)
+        stored = stored or {}
         self.settings.update(stored.get("settings") or {})
         self.rooms = stored.get("rooms") or {}
         self.stats = stored.get("stats") or {}

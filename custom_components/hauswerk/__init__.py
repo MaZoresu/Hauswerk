@@ -1,4 +1,9 @@
-"""Heizwerk: Raumweise Heizungsregelung mit Fensterpause, Heizplänen und Anwesenheit."""
+"""Hauswerk: Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel.
+
+Module:
+- Heizen: raumweise Heizungsregelung mit Fensterpause, Heizplänen und Anwesenheit
+- Rollladen, Licht, Garten: geplant
+"""
 from __future__ import annotations
 
 import logging
@@ -12,6 +17,7 @@ from homeassistant.core import HomeAssistant
 from . import api
 from .const import (
     DOMAIN,
+    MODULE_HEATING,
     NAME,
     PANEL_COMPONENT,
     PANEL_ICON,
@@ -19,12 +25,12 @@ from .const import (
     PLATFORMS,
     STATIC_URL,
 )
-from .controller import Heizwerk
+from .controller import Heizen
 
 _LOGGER = logging.getLogger(__name__)
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "frontend")
-PANEL_FILE = "heizwerk-panel.js"
+PANEL_FILE = "hauswerk-panel.js"
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
@@ -51,21 +57,22 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    controller = Heizwerk(hass, entry)
-    await controller.async_load()
-    hass.data[DOMAIN] = controller
+    heating = Heizen(hass, entry)
+    await heating.async_load()
+    hass.data[DOMAIN] = {MODULE_HEATING: heating}
 
     api.async_register(hass)
     await _async_register_panel(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    await controller.async_start()
+    await heating.async_start()
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
-        controller: Heizwerk = hass.data.pop(DOMAIN)
-        await controller.async_stop()
+        modules: dict = hass.data.pop(DOMAIN)
+        for module in modules.values():
+            await module.async_stop()
         frontend.async_remove_panel(hass, PANEL_URL)
     return unloaded

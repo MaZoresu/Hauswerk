@@ -8,21 +8,21 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
-from .entity import HeizwerkEntity, RoomEntity, setup_room_entities
+from .const import DOMAIN, MODULE_HEATING
+from .entity import HauswerkEntity, RoomEntity, setup_room_entities
 
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    ctl = hass.data[DOMAIN]
+    ctl = hass.data[DOMAIN][MODULE_HEATING]
     async_add_entities(
         [
-            SettingSwitch(ctl, "vacation", "heizwerk_vacation", "Heizwerk Urlaub", "mdi:palm-tree"),
-            SettingSwitch(ctl, "guest", "heizwerk_guest", "Heizwerk Gäste", "mdi:account-group-outline"),
-            SettingSwitch(ctl, "party", "heizwerk_party", "Heizwerk Party", "mdi:party-popper"),
-            SettingSwitch(ctl, "liming", "heizwerk_liming", "Heizwerk Entkalken", "mdi:water-sync"),
-            SettingSwitch(ctl, "eco_force", "heizwerk_eco_force", "Heizwerk Eco erzwingen", "mdi:leaf"),
+            SettingSwitch(ctl, "vacation", "hauswerk_vacation", "Hauswerk Urlaub", "mdi:palm-tree"),
+            SettingSwitch(ctl, "guest", "hauswerk_guest", "Hauswerk Gäste", "mdi:account-group-outline"),
+            SettingSwitch(ctl, "party", "hauswerk_party", "Hauswerk Party", "mdi:party-popper"),
+            SettingSwitch(ctl, "liming", "hauswerk_liming", "Hauswerk Entkalken", "mdi:water-sync"),
+            SettingSwitch(ctl, "eco_force", "hauswerk_eco_force", "Hauswerk Eco erzwingen", "mdi:leaf"),
         ]
     )
     setup_room_entities(
@@ -30,7 +30,7 @@ async def async_setup_entry(
     )
 
 
-class SettingSwitch(HeizwerkEntity, SwitchEntity):
+class SettingSwitch(HauswerkEntity, SwitchEntity):
     """Schaltet eine globale Einstellung (Urlaub, Gäste, Party, Entkalken)."""
 
     def __init__(self, controller, key: str, unique_id: str, name: str, icon: str) -> None:
@@ -56,11 +56,11 @@ class RoomAutoSwitch(RoomEntity, SwitchEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"heizwerk_{self.room_id}_auto"
+        return f"hauswerk_{self.room_id}_auto"
 
     @property
     def name(self) -> str:
-        return f"Heizwerk {self.room.get('name', self.room_id)} Automatik"
+        return f"Hauswerk {self.room.get('name', self.room_id)} Automatik"
 
     @property
     def is_on(self) -> bool:

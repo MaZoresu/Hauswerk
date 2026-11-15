@@ -1,16 +1,22 @@
-"""Konstanten für Heizwerk."""
+"""Konstanten für Hauswerk."""
 from __future__ import annotations
 
-DOMAIN = "heizwerk"
-NAME = "Heizwerk"
+DOMAIN = "hauswerk"
+NAME = "Hauswerk"
 
-STORAGE_KEY = f"{DOMAIN}.data"
+# Module von Hauswerk. Jedes Modul liegt unter hass.data[DOMAIN][<modul>]
+# und hat seinen eigenen Speicher.
+MODULE_HEATING = "heizen"
+
+STORAGE_KEY = f"{DOMAIN}.{MODULE_HEATING}"
 STORAGE_VERSION = 1
+# Speicher der früheren Einzel-Integration „Heizwerk“, wird beim ersten Start übernommen
+LEGACY_STORAGE_KEY = "heizwerk.data"
 
-PANEL_URL = "heizwerk"
-PANEL_COMPONENT = "heizwerk-panel"
-PANEL_ICON = "mdi:radiator"
-STATIC_URL = "/heizwerk_static"
+PANEL_URL = "hauswerk"
+PANEL_COMPONENT = "hauswerk-panel"
+PANEL_ICON = "mdi:home-automation"
+STATIC_URL = "/hauswerk_static"
 
 SIGNAL_UPDATE = f"{DOMAIN}_update"
 SIGNAL_ROOMS = f"{DOMAIN}_rooms"

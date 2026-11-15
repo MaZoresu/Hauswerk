@@ -30,11 +30,11 @@ class TargetSensor(RoomEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"heizwerk_{self.room_id}_target"
+        return f"hauswerk_{self.room_id}_target"
 
     @property
     def name(self) -> str:
-        return f"Heizwerk {self.room.get('name', self.room_id)} Soll"
+        return f"Hauswerk {self.room.get('name', self.room_id)} Soll"
 
     @property
     def native_value(self) -> float | None:
@@ -63,11 +63,11 @@ class HeatTimeSensor(RoomEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"heizwerk_{self.room_id}_heat_today"
+        return f"hauswerk_{self.room_id}_heat_today"
 
     @property
     def name(self) -> str:
-        return f"Heizwerk {self.room.get('name', self.room_id)} Heizdauer heute"
+        return f"Hauswerk {self.room.get('name', self.room_id)} Heizdauer heute"
 
     @property
     def native_value(self) -> int:

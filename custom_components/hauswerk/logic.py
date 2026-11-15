@@ -1,4 +1,4 @@
-"""Reine Regel-Logik von Heizwerk (ohne Home-Assistant-Abhängigkeit, testbar)."""
+"""Regel-Logik des Hauswerk-Moduls Heizen (ohne Home-Assistant-Abhängigkeit, testbar)."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -29,7 +29,7 @@ TYPE_DEFAULTS: dict[str, dict[str, Any]] = {
         "valve_max": 100,          # % maximale Ventilöffnung
         "preheat_mode": "fixed",   # fixed = feste Vorlaufzeit | smart = lernt die Aufheizgeschwindigkeit
         "preheat_max": 90,         # Minuten, höchstens so früh wird lernend vorgeheizt
-        "heat_rate": 2.0,          # K pro Stunde, Startwert bis Heizwerk den Raum kennt
+        "heat_rate": 2.0,          # K pro Stunde, Startwert bis Hauswerk den Raum kennt
     },
     TYPE_FLOOR: {
         "window_delay": 900,

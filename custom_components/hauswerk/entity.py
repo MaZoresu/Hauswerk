@@ -1,4 +1,4 @@
-"""Gemeinsame Hilfen für die Heizwerk-Entitäten."""
+"""Gemeinsame Hilfen für die Hauswerk-Entitäten."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -10,14 +10,14 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, SIGNAL_ROOMS, SIGNAL_UPDATE
-from .controller import Heizwerk
+from .const import DOMAIN, MODULE_HEATING, SIGNAL_ROOMS, SIGNAL_UPDATE
+from .controller import Heizen
 
 
-class HeizwerkEntity(Entity):
+class HauswerkEntity(Entity):
     _attr_should_poll = False
 
-    def __init__(self, controller: Heizwerk) -> None:
+    def __init__(self, controller: Heizen) -> None:
         self.controller = controller
 
     async def async_added_to_hass(self) -> None:
@@ -26,8 +26,8 @@ class HeizwerkEntity(Entity):
         )
 
 
-class RoomEntity(HeizwerkEntity):
-    def __init__(self, controller: Heizwerk, room_id: str) -> None:
+class RoomEntity(HauswerkEntity):
+    def __init__(self, controller: Heizen, room_id: str) -> None:
         super().__init__(controller)
         self.room_id = room_id
 
@@ -48,10 +48,10 @@ def setup_room_entities(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
-    factory: Callable[[Heizwerk, str], list[RoomEntity]],
+    factory: Callable[[Heizen, str], list[RoomEntity]],
 ) -> None:
     """Legt für jeden Raum Entitäten an und entfernt sie, wenn der Raum gelöscht wird."""
-    controller: Heizwerk = hass.data[DOMAIN]
+    controller: Heizen = hass.data[DOMAIN][MODULE_HEATING]
     known: dict[str, list[RoomEntity]] = {}
 
     @callback

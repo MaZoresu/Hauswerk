@@ -1,4 +1,4 @@
-"""Einrichtung von Heizwerk. Räume und Heizpläne werden im Panel gepflegt."""
+"""Einrichtung von Hauswerk. Räume und Heizpläne werden im Panel gepflegt."""
 from __future__ import annotations
 
 from typing import Any
@@ -10,7 +10,7 @@ from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from .const import DOMAIN, NAME
 
 
-class HeizwerkConfigFlow(ConfigFlow, domain=DOMAIN):
+class HauswerkConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:

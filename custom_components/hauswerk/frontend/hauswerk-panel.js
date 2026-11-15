@@ -1,9 +1,9 @@
-// Heizwerk – Ersatz-Panel (Wiederherstellung).
+// Hauswerk – Ersatz-Panel (Wiederherstellung), zeigt das Modul Heizen.
 // Schlichte Raumübersicht mit ±0,5 °C und Boost über die WebSocket-API.
 // Das vollständige Original-Panel (Widgets, Raumseite, Einstellungen, Hinweise)
 // war nicht unter den gesicherten Dateien und sollte diese Datei ersetzen.
 
-class HeizwerkPanel extends HTMLElement {
+class HauswerkPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -24,11 +24,11 @@ class HeizwerkPanel extends HTMLElement {
 
   async _init() {
     try {
-      this._data = await this._hass.callWS({ type: "heizwerk/get" });
+      this._data = await this._hass.callWS({ type: "hauswerk/heizen/get" });
       this._status = this._data.status;
       this._unsub = await this._hass.connection.subscribeMessage(
         (status) => { this._status = status; this._render(); },
-        { type: "heizwerk/subscribe" }
+        { type: "hauswerk/heizen/subscribe" }
       );
     } catch (err) {
       this._error = err.message || String(err);
@@ -42,7 +42,7 @@ class HeizwerkPanel extends HTMLElement {
 
   async _override(roomId, delta, boost = false) {
     const r = (this._status.rooms || {})[roomId] || {};
-    const msg = { type: "heizwerk/override", room_id: roomId, boost };
+    const msg = { type: "hauswerk/heizen/override", room_id: roomId, boost };
     if (!boost) {
       const base = r.target ?? 20;
       msg.temp = Math.min(30, Math.max(5, Math.round((base + delta) * 2) / 2));
@@ -51,7 +51,7 @@ class HeizwerkPanel extends HTMLElement {
   }
 
   async _reset(roomId) {
-    try { await this._hass.callWS({ type: "heizwerk/override", room_id: roomId, temp: null }); }
+    try { await this._hass.callWS({ type: "hauswerk/heizen/override", room_id: roomId, temp: null }); }
     catch (err) { alertless(this, err); }
   }
 
@@ -64,6 +64,7 @@ class HeizwerkPanel extends HTMLElement {
     const css = `
       :host { display:block; padding:16px; color:var(--primary-text-color); background:var(--primary-background-color); min-height:100vh; box-sizing:border-box; font-family:var(--paper-font-body1_-_font-family, sans-serif); }
       h1 { font-size:22px; font-weight:500; margin:0 0 4px; }
+      h1 .mod { color:var(--secondary-text-color); font-weight:400; }
       .sub { color:var(--secondary-text-color); margin-bottom:16px; font-size:14px; }
       .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
       .card { background:var(--card-background-color); border-radius:12px; padding:14px; box-shadow:var(--ha-card-box-shadow, 0 1px 3px rgba(0,0,0,.15)); }
@@ -80,11 +81,11 @@ class HeizwerkPanel extends HTMLElement {
       .note { margin-top:20px; font-size:12px; color:var(--secondary-text-color); }
     `;
     if (this._error) {
-      root.innerHTML = `<style>${css}</style><h1>Heizwerk</h1><p class="err">${esc(this._error)}</p>`;
+      root.innerHTML = `<style>${css}</style><h1>Hauswerk <span class="mod">· Heizen</span></h1><p class="err">${esc(this._error)}</p>`;
       return;
     }
     if (!this._data) {
-      root.innerHTML = `<style>${css}</style><h1>Heizwerk</h1><p class="sub">Lade …</p>`;
+      root.innerHTML = `<style>${css}</style><h1>Hauswerk <span class="mod">· Heizen</span></h1><p class="sub">Lade …</p>`;
       return;
     }
     const st = this._status || {};
@@ -127,7 +128,7 @@ class HeizwerkPanel extends HTMLElement {
 
     root.innerHTML = `
       <style>${css}</style>
-      <h1>Heizwerk</h1>
+      <h1>Hauswerk <span class="mod">· Heizen</span></h1>
       <div class="sub">${flags.length ? esc(flags.join(" · ")) : "Normalbetrieb"}${esc(outside)}</div>
       <div class="grid">${cards || '<p class="sub">Noch keine Räume angelegt.</p>'}</div>
       <div class="note">Ersatz-Panel – Räume, Pläne und Einstellungen sind hier nicht bearbeitbar.</div>
@@ -155,4 +156,4 @@ function alertless(panel, err) {
   setTimeout(() => { panel._error = null; panel._render(); }, 4000);
 }
 
-customElements.define("heizwerk-panel", HeizwerkPanel);
+customElements.define("hauswerk-panel", HauswerkPanel);
