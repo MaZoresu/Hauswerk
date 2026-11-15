@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.18.0";
+const VERSION = "0.18.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2724,9 +2724,6 @@ class HauswerkPanel extends HTMLElement {
       case "weather": {
         const S = this._hass.states;
         const weathers = Object.keys(S).filter((e) => e.startsWith("weather.")).sort();
-        const temps = Object.keys(S)
-          .filter((e) => e.startsWith("sensor.") && (S[e].attributes.device_class === "temperature" || S[e].attributes.unit_of_measurement === "°C"))
-          .sort((a, b) => this._entityName(a).localeCompare(this._entityName(b), "de"));
         const wid = p.weather_entity || weathers[0];
         const w = wid ? S[wid] : null;
         const a = w?.attributes || {};
@@ -2743,21 +2740,19 @@ class HauswerkPanel extends HTMLElement {
             <div class="wxr-l"><b>${title}<button class="qm ${help[key] ? "on" : ""}" data-action="help" data-k="${key}" aria-label="Erklärung zu ${title}">?</button></b>${sub ? `<small>${sub}</small>` : ""}${help[key] ? `<p class="wxr-h">${text}</p>` : ""}</div>
             <div class="wxr-v">${value}</div>
           </div>`;
-        const sel = (key, list, empty) =>
-          `<select data-set="${key}" ${dis}><option value="">${empty}</option>${list
-            .map((id) => `<option value="${esc(id)}" ${p[key] === id ? "selected" : ""}>${esc(this._entityName(id))}</option>`)
-            .join("")}</select>`;
         const num = (key, def, min, max, step, u) =>
           `<div class="unit"><input type="number" step="${step}" min="${min}" max="${max}" data-set="${key}" value="${p[key] ?? def}" ${dis}><i>${u}</i></div>`;
         const alerts = this._wxAlerts();
         return {
           icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter", sub: "Hauswerk · für Startseite, Widgets und alle Module",
           body: `
-            <div class="wxrows">
-              ${row("src", "Wetterquelle", "Quelle für Wetterlage, Vorhersage und Hinweise", sel("weather_entity", weathers, weathers.length ? "Automatisch" : "Keine gefunden"),
-                "Die Wetter-Entität (z. B. OpenWeatherMap, Met.no) liefert Wetterlage, Vorhersage, Wind und Luftfeuchte. Leer = die erste gefundene.", true)}
-              ${row("out", "Außentemperatur von", "eigene Wetterstation statt Wetterdienst – die Vorhersage kommt weiterhin vom Wetterdienst", sel("outside_sensor", temps, "Vom Wetterdienst"),
-                "Ein eigener Temperatursensor misst meist genauer als der Wetterdienst. Heizwerk nutzt ihn auch für die Sommerpause nach Außentemperatur.", true)}
+            <div class="wxsrcs">
+              <div class="wxsrc">${row("src", "Wetterquelle", p.weather_entity ? "gewählt" : weathers.length ? `automatisch: ${esc(this._entityName(weathers[0]))}` : "keine gefunden", "",
+                "Die Wetter-Entität (z. B. OpenWeatherMap, Met.no) liefert Wetterlage, Vorhersage, Wind und Luftfeuchte. Leer = die erste gefundene.")}
+              <div class="wxr-pk">${this._picker("weather_entity", p.weather_entity ? [p.weather_entity] : [])}</div></div>
+              <div class="wxsrc">${row("out", "Außentemperatur von", p.outside_sensor ? "eigene Wetterstation statt Wetterdienst" : "leer = vom Wetterdienst", "",
+                "Ein eigener Temperatursensor misst meist genauer als der Wetterdienst. Die Vorhersage kommt weiterhin vom Wetterdienst. Heizwerk nutzt ihn auch für die Sommerpause nach Außentemperatur.")}
+              <div class="wxr-pk">${this._picker("outside_sensor", p.outside_sensor ? [p.outside_sensor] : [])}</div></div>
             </div>
             ${head("mdi:clock-outline", "Jetzt")}
             ${w ? `
@@ -2783,6 +2778,43 @@ class HauswerkPanel extends HTMLElement {
                 "Erwartet die Vorhersage der nächsten 24 Stunden Böen (oder Wind) ab dieser Stärke, erscheint ein Hinweis unter der Glocke.", true)}
             </div>
             ${alerts.length ? `<div class="lbl">Gerade aktiv</div><div class="evlist">${alerts.map((x) => `<div class="ev live"><ha-icon icon="${x.icon}"></ha-icon><span class="grow"><b>${esc(x.text)}</b><small>${esc(x.sub)}</small></span></div>`).join("")}</div>` : ""}`,
+        };
+      }
+
+      case "look": {
+        const acc = p.look_accent || null;
+        const known = ACCENTS.some(([v]) => v === acc);
+        const bg = p.look_background || "pattern";
+        const now = this._skyPhase();
+        const size = this._lookSize();
+        const bgText = {
+          pattern: "Dezentes Muster je Bereich: Glut und aufsteigende Wärme bei Heizwerk, Punkte auf der Startseite.",
+          daytime: "Die Kopfzeile folgt dem Sonnenstand (sun.sun, sonst der Uhrzeit): Nacht, Sonnenaufgang, Tag und Sonnenuntergang.",
+          plain: "Ruhiger, einfarbiger Hintergrund – gut für Wand-Tablets.",
+        }[bg];
+        return {
+          icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung", sub: "Hauswerk · für alle Module und Benutzer",
+          body: `
+            ${head("mdi:theme-light-dark", "Design")}
+            <div class="field">${segs("look_theme", [["auto", "Wie Home Assistant", "mdi:home-assistant"], ["light", "Hell", "mdi:white-balance-sunny"], ["dark", "Dunkel", "mdi:weather-night"]], "auto")}</div>
+            ${head("mdi:palette-outline", "Akzentfarbe")}
+            <div class="swatches">
+              ${ACCENTS.map(([v, name, show]) => `<button class="sw ${acc === v ? "on" : ""}" style="--c:${show || v}" data-action="look-accent" data-v="${v || ""}" title="${name}" aria-label="${name}" ${dis}></button>`).join("")}
+              <label class="sw custom ${known ? "" : "on"}" style="--c:${known ? "#94a3b8" : acc}" title="Eigene Farbe"><input type="color" data-look-color value="${known ? "#14b8a6" : acc}" aria-label="Eigene Farbe" ${dis}></label>
+              <span class="muted small">Eigene</span>
+            </div>
+            ${head("mdi:image-filter-hdr", "Hintergrund")}
+            <div class="field">${segs("look_background", [["pattern", "Muster", "mdi:texture-box"], ["daytime", "Tageszeit", "mdi:weather-sunset"], ["plain", "Schlicht", "mdi:square-rounded-outline"]], "pattern")}</div>
+            <p class="muted small">${bgText}</p>
+            ${bg === "daytime" ? `<div class="skies">${SKIES.map(([k, l]) => `<div class="skyc"><div class="sky ${k === now ? "on" : ""}" style="background:var(--sky-${k})">${k === now ? "<em>jetzt</em>" : ""}</div><small>${l}</small></div>`).join("")}</div>` : ""}
+            ${head("mdi:page-layout-header", "Kopfzeile")}
+            <label class="check"><span><b>Wetter anzeigen</b><small>Außentemperatur und Wetterlage oben rechts. Die Quelle stellst du unter Hauswerk › Wetter ein.</small></span>${sw("look_header_weather")}</label>
+            <label class="check"><span><b>Uhrzeit anzeigen</b><small>Praktisch für Wand-Tablets. Auf dem Handy ausgeblendet.</small></span>${sw("look_header_clock")}</label>
+            ${head("mdi:cellphone-cog", "Auf diesem Gerät")}
+            <div class="field"><span>Größe</span><div class="segs small">${[["s", "Kompakt", "mdi:format-font-size-decrease"], ["m", "Normal", "mdi:format-size"], ["l", "Groß", "mdi:format-font-size-increase"]]
+              .map(([v, l, i]) => `<button class="seg ${size === v ? "on" : ""}" data-action="look-size" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${l}</button>`)
+              .join("")}</div></div>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Die Größe gilt nur für dieses Gerät und sofort – z. B. größer auf dem Wand-Tablet, kompakter am Handy. Alles andere gilt nach dem Speichern für alle.</p>`,
         };
       }
 
@@ -3125,7 +3157,7 @@ class HauswerkPanel extends HTMLElement {
   _picker(field, selected) {
     const cfg = PICKERS[field];
     const S = this._pkState(field);
-    const open = this._admin && (S.open || !selected.length);
+    const open = this._admin && S.open;  // erst nach „Hinzufügen“ bzw. „Ändern“
     const cards = selected
       .map((id) => {
         const st = this._hass.states[id];
@@ -3139,9 +3171,9 @@ class HauswerkPanel extends HTMLElement {
         </div>`;
       })
       .join("");
-    const more = this._admin && selected.length && !open
-      ? `<button class="pk-add" data-action="pk-open" data-field="${field}"><ha-icon icon="${cfg.multi ? "mdi:plus" : "mdi:swap-horizontal"}"></ha-icon>${cfg.multi ? "Weitere hinzufügen" : "Andere wählen"}</button>`
-      : "";
+    const more = this._admin && !open
+      ? `<button class="pk-add" data-action="pk-open" data-field="${field}"><ha-icon icon="${cfg.multi || !selected.length ? "mdi:plus" : "mdi:swap-horizontal"}"></ha-icon>${!selected.length ? "Hinzufügen" : cfg.multi ? "Weitere hinzufügen" : "Andere wählen"}</button>`
+      : !this._admin && !selected.length ? `<div class="pk-none muted small">Nichts gewählt</div>` : "";
     const box = open
       ? `<div class="pk-box">
           <div class="search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-picker-input="${field}" placeholder="Suchen: Name, Raum, Entität …" value="${esc(S.q)}" autocomplete="off"></div>
@@ -3149,7 +3181,7 @@ class HauswerkPanel extends HTMLElement {
             .map(([k, l]) => `<button class="${S.tab === k ? "on" : ""}" data-action="pk-tab" data-field="${field}" data-v="${k}">${l}</button>`)
             .join("")}</div>
           <div class="pk-body">${this._pickerList(field)}</div>
-          ${selected.length ? `<button class="link tiny pk-close" data-action="pk-open" data-field="${field}">Fertig</button>` : ""}
+          <button class="link tiny pk-close" data-action="pk-open" data-field="${field}">${selected.length ? "Fertig" : "Abbrechen"}</button>
         </div>`
       : "";
     return `<div class="picker" data-picker="${field}">${cards}${more}${box}</div>`;
@@ -3295,7 +3327,7 @@ class HauswerkPanel extends HTMLElement {
       this._renderMain();
       return;
     }
-    if (["outside_sensor", "vacation_calendar", "import_calendar", "w_weather"].includes(field)) {
+    if (["outside_sensor", "weather_entity", "vacation_calendar", "import_calendar", "w_weather"].includes(field)) {
       this._refreshSettings();
       return;
     }
@@ -5012,6 +5044,10 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .wxr-h { margin:8px 0 0 !important; font-size:12.5px; line-height:1.45; color:var(--text) !important; padding:8px 10px; border-radius:10px; background:color-mix(in srgb, var(--accent) 10%, var(--card)); }
 .wxr-v { flex:none; max-width:55%; text-align:right; font-weight:700; font-size:15px; }
 .wxr-v select { max-width:260px; font-weight:600; }
+.wxsrcs { display:grid; gap:8px; margin-bottom:6px; }
+.wxsrc { background:var(--card2); border-radius:14px; }
+.wxr-pk { padding:0 14px 12px; }
+.pk-none { padding:4px 2px; }
 .wxr-v .unit { justify-content:flex-end; }
 .wxr-v .unit input { width:96px; text-align:right; font-weight:700; }
 .wxr-v .link { font-size:15px; }
