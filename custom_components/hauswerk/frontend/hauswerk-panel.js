@@ -1,159 +1,4269 @@
-// Hauswerk – Ersatz-Panel (Wiederherstellung), zeigt das Modul Heizen.
-// Schlichte Raumübersicht mit ±0,5 °C und Boost über die WebSocket-API.
-// Das vollständige Original-Panel (Widgets, Raumseite, Einstellungen, Hinweise)
-// war nicht unter den gesicherten Dateien und sollte diese Datei ersetzen.
+/* Hauswerk – Panel für Home Assistant (Module: Heizen; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
+
+const VERSION = "0.13.0";
+const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const TYPES = {
+  heizkoerper: {
+    label: "Heizkörper",
+    icon: "mdi:radiator",
+    text: "Reagiert schnell. Kurze Fensterverzögerung, kurzes Vorheizen, Absenken lohnt sich.",
+  },
+  flaeche: {
+    label: "Flächenheizung",
+    icon: "mdi:heating-coil",
+    text: "Fußboden- oder Wandheizung, sehr träge. Lange Fensterverzögerung, frühes Vorheizen, nur geringe Absenkung.",
+  },
+};
+const MODE = {
+  komfort: { c: "#fbbf24", i: "mdi:sofa-outline" },
+  vorheizen: { c: "#fb923c", i: "mdi:clock-fast" },
+  eco: { c: "#60a5fa", i: "mdi:leaf" },
+  fenster: { c: "#22d3ee", i: "mdi:window-open-variant" },
+  manuell: { c: "#a78bfa", i: "mdi:hand-back-right-outline" },
+  urlaub: { c: "#34d399", i: "mdi:palm-tree" },
+  abwesend: { c: "#94a3b8", i: "mdi:home-export-outline" },
+  aus: { c: "#6b7280", i: "mdi:power" },
+  entkalken: { c: "#38bdf8", i: "mdi:water-sync" },
+  sommer: { c: "#facc15", i: "mdi:weather-sunny" },
+  boost: { c: "#f43f5e", i: "mdi:rocket-launch-outline" },
+  party: { c: "#e879f9", i: "mdi:party-popper" },
+  leer: { c: "#64748b", i: "mdi:account-off-outline" },
+  belegt: { c: "#fbbf24", i: "mdi:account-check-outline" },
+  warm: { c: "#f97316", i: "mdi:thermometer-check" },
+  eco_fix: { c: "#22c55e", i: "mdi:leaf-circle-outline" },
+  frost: { c: "#38bdf8", i: "mdi:snowflake-thermometer" },
+};
+/** Raum-Icon aus dem Namen erraten (reihenfolgeabhängig: spezielle Begriffe zuerst). */
+const ROOM_GUESS = [
+  [/wc|toilette|klo/, "mdi:toilet"],
+  [/bad|dusche/, "mdi:shower-head"],
+  [/küche|kueche|kochen/, "mdi:stove"],
+  [/wohn|lounge/, "mdi:sofa-outline"],
+  [/schlaf|eltern/, "mdi:bed-king-outline"],
+  [/kind|baby|jugend/, "mdi:teddy-bear"],
+  [/arbeit|büro|buero|office|studio/, "mdi:desk"],
+  [/ess/, "mdi:silverware-fork-knife"],
+  [/flur|diele|gang|eingang|treppe/, "mdi:door"],
+  [/gäste|gaeste|gast/, "mdi:bed-outline"],
+  [/keller|hauswirtschaft|wasch/, "mdi:washing-machine"],
+  [/dach|speicher|boden/, "mdi:home-roof"],
+  [/wintergarten|garten/, "mdi:flower-outline"],
+  [/hobby|werkstatt|werk/, "mdi:hammer-wrench"],
+  [/ankleide|garderobe/, "mdi:hanger"],
+  [/sport|fitness/, "mdi:dumbbell"],
+  [/garage/, "mdi:garage"],
+];
+const ROOM_ICON_CHOICES = [...new Set(ROOM_GUESS.map(([, i]) => i)), "mdi:radiator", "mdi:heating-coil", "mdi:television", "mdi:music", "mdi:book-open-variant", "mdi:paw"];
+const roomIcon = (room) => {
+  if (room.icon) return room.icon;
+  const n = (room.name || "").toLowerCase();
+  const hit = ROOM_GUESS.find(([re]) => re.test(n));
+  return hit ? hit[1] : (TYPES[room.type] || TYPES.heizkoerper).icon;
+};
+/** Wie weit ist der Raum vom Soll entfernt? Icon, Farbe und Kurztext. */
+const trend = (temp, target) => {
+  if (temp == null || target == null) return null;
+  const d = temp - target;
+  if (Math.abs(d) < 0.3) return { i: "mdi:thermometer-check", c: "#34d399", t: "am Soll" };
+  if (d < 0) return { i: "mdi:thermometer-chevron-up", c: "#fb923c", t: `${fmt(-d)} K unter Soll` };
+  return { i: "mdi:thermometer-chevron-down", c: "#60a5fa", t: `${fmt(d)} K über Soll` };
+};
+const humidityInfo = (h) =>
+  h == null ? null : h >= 65 ? { i: "mdi:water-alert", c: "#f59e0b", t: "feucht – lüften" } : h <= 35 ? { i: "mdi:water-off-outline", c: "#f59e0b", t: "trocken" } : { i: "mdi:water-percent", c: "var(--muted)", t: "" };
+/** Wetterlage aus Home Assistant: Symbol und deutscher Text. */
+const WEATHER = {
+  "clear-night": ["mdi:weather-night", "Klar"],
+  cloudy: ["mdi:weather-cloudy", "Bewölkt"],
+  exceptional: ["mdi:alert-circle-outline", "Unwetter"],
+  fog: ["mdi:weather-fog", "Nebel"],
+  hail: ["mdi:weather-hail", "Hagel"],
+  lightning: ["mdi:weather-lightning", "Gewitter"],
+  "lightning-rainy": ["mdi:weather-lightning-rainy", "Gewitter mit Regen"],
+  partlycloudy: ["mdi:weather-partly-cloudy", "Teils bewölkt"],
+  pouring: ["mdi:weather-pouring", "Starkregen"],
+  rainy: ["mdi:weather-rainy", "Regen"],
+  snowy: ["mdi:weather-snowy", "Schnee"],
+  "snowy-rainy": ["mdi:weather-snowy-rainy", "Schneeregen"],
+  sunny: ["mdi:weather-sunny", "Sonnig"],
+  windy: ["mdi:weather-windy", "Windig"],
+  "windy-variant": ["mdi:weather-windy-variant", "Windig, bewölkt"],
+};
+/** Widgets der Startseite: Name, Symbol, Farbe, Beschreibung; go = Ansicht öffnen, pop = Einstellung, config = Entitäten wählen. */
+const WIDGETS = {
+  heat: { name: "Heizen", icon: "mdi:radiator", c: "#fb923c", text: "Ø-Temperatur, Kurzurteil, heizende Räume, offene Fenster und Heizstunden heute", go: "overview" },
+  presence: { name: "Anwesenheit", icon: "mdi:home-account", c: "#34d399", text: "Zu Hause, Abwesend, Urlaub sowie Gäste, Party und Eco mit einem Tipp umschalten", pop: "presence" },
+  weather: { name: "Wetter", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", text: "Wetterlage, Außentemperatur, Wind und Luftfeuchte", pop: "weather" },
+  rooms: { name: "Räume", icon: "mdi:floor-plan", c: "#2dd4bf", text: "Alle Räume als kleine Kacheln mit Temperatur und Betriebsart", size: "l", go: "overview" },
+  shortcuts: { name: "Shortcuts", icon: "mdi:gesture-tap-button", c: "#a78bfa", text: "Eigene Knöpfe für Szenen, Skripte, Schalter oder Lichter", config: true },
+  windows: { name: "Fenster", icon: "mdi:window-open-variant", c: "#22d3ee", text: "Welche Fenster gerade offen sind und seit wann" },
+  schedule: { name: "Komfortzeiten", icon: "mdi:calendar-clock", c: "#f59e0b", text: "Wann welcher Raum als Nächstes warm wird oder absenkt" },
+  report: { name: "Heizdauer", icon: "mdi:chart-bar", c: "#a78bfa", text: "Geheizte Stunden der letzten 7 Tage als Balken", go: "report" },
+  values: { name: "Werte", icon: "mdi:gauge", c: "#94a3b8", text: "Beliebige Sensoren, z. B. Gaszähler, Strompreis oder Vorlauftemperatur", config: true },
+  forecast: { name: "Wetterprognose", icon: "mdi:weather-cloudy-clock", c: "#60a5fa", text: "Die nächsten Stunden oder Tage mit Tiefst- und Höchstwerten, Regen und Frost-Hinweis", size: "l", forecast: true },
+};
+const DEFAULT_WIDGETS = [{ type: "heat", size: "m" }, { type: "weather", size: "s" }, { type: "windows", size: "s" }, { type: "presence", size: "l" }, { type: "rooms", size: "l" }];
+const SC_ICONS = { light: "mdi:lightbulb-outline", switch: "mdi:toggle-switch-outline", input_boolean: "mdi:toggle-switch-outline", script: "mdi:script-text-play-outline", scene: "mdi:palette-outline", button: "mdi:gesture-tap-button", input_button: "mdi:gesture-tap-button", fan: "mdi:fan", cover: "mdi:window-shutter", lock: "mdi:lock-outline", media_player: "mdi:speaker" };
+const ROOM_COLORS = ["#2dd4bf", "#f59e0b", "#a78bfa", "#f472b6", "#60a5fa", "#a3e635", "#f87171", "#22d3ee", "#facc15", "#c084fc"];
+const PICKERS = {
+  climates: { scope: "room", multi: true, domains: ["climate"] },
+  windows: { scope: "room", multi: true, domains: ["binary_sensor", "cover"] },
+  temp_sensor: { scope: "room", multi: false, domains: ["sensor"], deviceClass: "temperature" },
+  humidity_sensor: { scope: "room", multi: false, domains: ["sensor"], deviceClass: "humidity" },
+  persons: { scope: "settings", multi: true, domains: ["person", "device_tracker"] },
+  presence_sensor: { scope: "room", multi: false, domains: ["binary_sensor"] },
+  comfort_entity: { scope: "room", multi: false, domains: ["input_number", "number", "sensor"] },
+  eco_entity: { scope: "room", multi: false, domains: ["input_number", "number", "sensor"] },
+  proximity_sensors: { scope: "settings", multi: true, domains: ["sensor"] },
+  outside_sensor: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "temperature" },
+  season_entity: { scope: "settings", multi: false, domains: ["input_boolean", "switch", "binary_sensor", "schedule"] },
+  schedule_entity: { scope: "room", multi: false, domains: ["schedule", "calendar", "input_boolean", "binary_sensor"] },
+  vacation_calendar: { scope: "settings", multi: false, domains: ["calendar"] },
+  weather_entity: { scope: "settings", multi: false, domains: ["weather"] },
+  import_calendar: { scope: "pop", multi: false, domains: ["calendar"] },
+  w_weather: { scope: "pop", multi: false, domains: ["weather"] },
+  w_entities: { scope: "pop", multi: true, domains: ["sensor", "binary_sensor", "input_number", "input_select", "counter", "switch", "light", "input_boolean", "script", "scene", "button", "input_button", "fan", "cover", "lock", "media_player"] },
+  plan_calendar: { scope: "plan", multi: false, domains: ["calendar"] },
+  presence_schedule: { scope: "room", multi: false, domains: ["schedule", "input_boolean", "binary_sensor"] },
+  calibration_entities: { scope: "room", multi: true, domains: ["number"] },
+  valve_entities: { scope: "room", multi: true, domains: ["number"] },
+};
+const PLAN_PRESETS = {
+  berufstaetig: {
+    label: "Werktags früh und abends",
+    blocks: [
+      { days: [0, 1, 2, 3, 4], start: "06:00", end: "08:00" },
+      { days: [0, 1, 2, 3, 4], start: "16:30", end: "22:00" },
+      { days: [5, 6], start: "08:00", end: "22:30" },
+    ],
+  },
+  homeoffice: {
+    label: "Homeoffice",
+    blocks: [
+      { days: [0, 1, 2, 3, 4], start: "07:00", end: "22:00" },
+      { days: [5, 6], start: "08:00", end: "22:30" },
+    ],
+  },
+  ganztags: { label: "Täglich 6–22 Uhr", blocks: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "06:00", end: "22:00" }] },
+  bad: {
+    label: "Bad morgens und abends",
+    blocks: [
+      { days: [0, 1, 2, 3, 4, 5, 6], start: "05:30", end: "08:00" },
+      { days: [0, 1, 2, 3, 4, 5, 6], start: "19:00", end: "21:30" },
+    ],
+  },
+};
+// Modul-Reiter (Aufbau wie in der Haussteuerung): Start + nummerierte Module, Einstellungen oben rechts.
+// Alles rund ums Heizen liegt im Modul „Heizen“ mit eigener Unterleiste.
+const HEAT_VIEWS = [
+  { id: "overview", slug: "raeume", name: "Räume", icon: "mdi:radiator" },
+  { id: "plans", slug: "heizplaene", name: "Heizpläne", icon: "mdi:calendar-clock", hidden: true }, // über Einstellungen › Heizpläne
+  { id: "room", slug: "raum", name: "Raum", icon: "mdi:door", hidden: true }, // Raum-Detailseite
+  { id: "report", slug: "bericht", name: "Bericht", icon: "mdi:chart-bar" },
+  { id: "settings", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
+];
+const MODULES = [{ id: "heizen", no: 1, name: "Heizen", icon: "mdi:radiator", views: HEAT_VIEWS.map((v) => v.id) }];
+// Geplante Module: nur ausgegraut angezeigt, noch ohne Funktion.
+const COMING = [
+  { name: "Rollladen", icon: "mdi:window-shutter" },
+  { name: "Licht", icon: "mdi:lightbulb-outline" },
+  { name: "Garten", icon: "mdi:flower-outline" },
+];
+const SLUGS = { start: "start", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])) };
+const DEFAULT_VIEW = "start";
+
+const esc = (v) =>
+  String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const fmt = (v, d = 1) => (v === null || v === undefined || isNaN(v) ? "–" : Number(v).toLocaleString("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d }));
+const int = (v) => Math.round(v || 0).toLocaleString("de-DE");
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const hm = (s) => {
+  const [h, m] = String(s || "0:0").split(":").map(Number);
+  return h * 60 + m;
+};
+const clampT = (t) => Math.min(30, Math.max(5, Math.round(t * 2) / 2));
+/** Farbskala für Temperaturen: kühl blau, mittel grün/gelb, warm orange. */
+const tempColor = (t) => {
+  if (t == null) return "var(--muted)";
+  if (t < 16.5) return "#60a5fa";
+  if (t < 18.5) return "#5eead4";
+  if (t < 20) return "#a3e635";
+  if (t < 21.5) return "#fde047";
+  if (t < 23) return "#fbbf24";
+  return "#fb923c";
+};
+/** Farbe für Text: im hellen Theme abgedunkelt, damit sie auf Weiß lesbar bleibt. */
+const tint = (c) => `color-mix(in srgb, ${c}, var(--text) var(--shade))`;
 
 class HauswerkPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
+    this._tab = this._viewFromPath() || DEFAULT_VIEW;
+    this._onLocation = () => {
+      const v = this._viewFromPath();
+      if (v && v !== this._tab) this._setView(v, false);
+    };
     this._data = null;
     this._status = null;
-    this._unsub = null;
+    this._dialog = null;
+    this._plan = null;
+    this._settings = null;
+    this._pop = null;
+    this._reports = {};
+    this._reportDays = 7;
     this._error = null;
   }
 
   set hass(hass) {
     const first = !this._hass;
     this._hass = hass;
+    // Hell oder dunkel wie in Home Assistant eingestellt (Profil › Design)
+    this.toggleAttribute("dark", !!hass.themes?.darkMode);
     if (first) this._init();
+    // Startseite mit Shortcuts, Werten, Wetter oder Fenstern: Änderungen in HA zeigen (höchstens alle 3 s)
+    else if (this._tab === "start" && this._data && !this._busy && Date.now() - (this._hassAt || 0) > 3000 &&
+      this._widgets().some((w) => ["shortcuts", "values", "weather", "windows"].includes(w.type))) {
+      this._hassAt = Date.now();
+      this._renderMain();
+    }
+  }
+  get hass() {
+    return this._hass;
+  }
+  set narrow(value) {
+    this._narrow = value;
+    this.toggleAttribute("narrow", !!value);
+  }
+  set panel(value) {
+    this._panel = value;
+  }
+  set route(_) {}
+
+  connectedCallback() {
+    if (this._hass && this._data && !this._unsub) this._subscribe();
+    window.addEventListener("location-changed", this._onLocation);
+    window.addEventListener("popstate", this._onLocation);
+    this._timer = setInterval(() => {
+      this._reports = {};
+      if (["start", "overview", "report"].includes(this._tab)) this._renderMain();
+    }, 5 * 60 * 1000);
+  }
+  disconnectedCallback() {
+    window.removeEventListener("location-changed", this._onLocation);
+    window.removeEventListener("popstate", this._onLocation);
+    clearInterval(this._timer);
+    if (this._io) this._io.disconnect();
+    for (const sub of Object.values(this._fcSubs || {})) sub.then((u) => u()).catch(() => {});
+    this._fcSubs = {};
+    this._fc = {};
+    if (this._unsub) {
+      this._unsub.then((u) => u()).catch(() => {});
+      this._unsub = null;
+    }
   }
 
-  set narrow(v) { this._narrow = v; }
-  set panel(v) { this._panel = v; }
-
   async _init() {
+    this._renderShell();
     try {
       this._data = await this._hass.callWS({ type: "hauswerk/heizen/get" });
       this._status = this._data.status;
-      this._unsub = await this._hass.connection.subscribeMessage(
-        (status) => { this._status = status; this._render(); },
-        { type: "hauswerk/heizen/subscribe" }
-      );
+      this._renderShell();
+      this._renderMain();
+      this._subscribe();
     } catch (err) {
       this._error = err.message || String(err);
+      this._renderMain();
     }
-    this._render();
   }
 
-  disconnectedCallback() {
-    if (this._unsub) { this._unsub(); this._unsub = null; }
+  _subscribe() {
+    this._unsub = this._hass.connection.subscribeMessage(
+      (status) => {
+        this._status = status;
+        if (["start", "overview"].includes(this._tab) && !this._busy) this._renderMain();
+        else this._renderChrome();
+      },
+      { type: "hauswerk/heizen/subscribe" }
+    );
   }
 
-  async _override(roomId, delta, boost = false) {
-    const r = (this._status.rooms || {})[roomId] || {};
-    const msg = { type: "hauswerk/heizen/override", room_id: roomId, boost };
-    if (!boost) {
-      const base = r.target ?? 20;
-      msg.temp = Math.min(30, Math.max(5, Math.round((base + delta) * 2) / 2));
+  async _ws(msg) {
+    try {
+      return await this._hass.callWS(msg);
+    } catch (err) {
+      this._toast(err.message || "Fehler beim Speichern");
+      throw err;
     }
-    try { await this._hass.callWS(msg); } catch (err) { alertless(this, err); }
   }
 
-  async _reset(roomId) {
-    try { await this._hass.callWS({ type: "hauswerk/heizen/override", room_id: roomId, temp: null }); }
-    catch (err) { alertless(this, err); }
+  get _admin() {
+    return !!this._data?.is_admin;
   }
 
-  _fmt(v, unit = "°C") {
-    return v === null || v === undefined ? "–" : `${Number(v).toLocaleString("de-DE", { maximumFractionDigits: 1 })} ${unit}`;
+  _rooms() {
+    return Object.values(this._data?.rooms || {}).sort((a, b) => a.name.localeCompare(b.name, "de"));
   }
 
-  _render() {
-    const root = this.shadowRoot;
-    const css = `
-      :host { display:block; padding:16px; color:var(--primary-text-color); background:var(--primary-background-color); min-height:100vh; box-sizing:border-box; font-family:var(--paper-font-body1_-_font-family, sans-serif); }
-      h1 { font-size:22px; font-weight:500; margin:0 0 4px; }
-      h1 .mod { color:var(--secondary-text-color); font-weight:400; }
-      .sub { color:var(--secondary-text-color); margin-bottom:16px; font-size:14px; }
-      .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; }
-      .card { background:var(--card-background-color); border-radius:12px; padding:14px; box-shadow:var(--ha-card-box-shadow, 0 1px 3px rgba(0,0,0,.15)); }
-      .name { font-weight:500; font-size:16px; }
-      .mode { font-size:13px; color:var(--secondary-text-color); margin-top:2px; }
-      .row { display:flex; align-items:center; justify-content:space-between; margin-top:12px; }
-      .temp { font-size:28px; font-weight:300; }
-      .small { font-size:13px; color:var(--secondary-text-color); }
-      button { border:none; border-radius:8px; padding:8px 12px; background:var(--secondary-background-color); color:var(--primary-text-color); font-size:15px; cursor:pointer; }
-      button.accent { background:var(--primary-color); color:var(--text-primary-color, #fff); }
-      .chips span { display:inline-block; font-size:12px; padding:2px 8px; border-radius:10px; background:var(--secondary-background-color); margin:6px 4px 0 0; }
-      .heat { color:var(--state-climate-heat-color, #ff8100); }
-      .err { color:var(--error-color); }
-      .note { margin-top:20px; font-size:12px; color:var(--secondary-text-color); }
-    `;
-    if (this._error) {
-      root.innerHTML = `<style>${css}</style><h1>Hauswerk <span class="mod">· Heizen</span></h1><p class="err">${esc(this._error)}</p>`;
-      return;
+  _roomColor(id) {
+    const ids = this._rooms().map((r) => r.id);
+    return ROOM_COLORS[Math.max(0, ids.indexOf(id)) % ROOM_COLORS.length];
+  }
+
+  _report(days) {
+    if (this._reports[days]) return this._reports[days];
+    if (!this._reports["loading" + days]) {
+      this._reports["loading" + days] = true;
+      this._hass
+        .callWS({ type: "hauswerk/heizen/report", days })
+        .then((r) => (this._reports[days] = r))
+        .catch(() => (this._reports[days] = {}))
+        .finally(() => {
+          delete this._reports["loading" + days];
+          this._renderMain();
+        });
     }
-    if (!this._data) {
-      root.innerHTML = `<style>${css}</style><h1>Hauswerk <span class="mod">· Heizen</span></h1><p class="sub">Lade …</p>`;
-      return;
+    return null;
+  }
+
+  // ------------------------------------------------------------ Gerüst
+  _renderShell() {
+    this.shadowRoot.innerHTML = `
+      <style>${STYLE}</style>
+      <div id="sentinel" aria-hidden="true"></div>
+      <header class="top" id="head"></header>
+      <div class="app">
+        <div id="chips"></div>
+        <main id="main"><div class="loading"><div class="spinner"></div></div></main>
+      </div>
+      <nav id="bnav" class="bnav" aria-label="Navigation"></nav>
+      <div id="dialog"></div>
+      <div id="pop"></div>
+      <div id="toast" class="toast" hidden></div>`;
+    this._renderChrome();
+    // Kopfzeile schrumpft, sobald gescrollt wird (funktioniert mit jedem Scroll-Container)
+    if (this._io) this._io.disconnect();
+    const sentinel = this.shadowRoot.getElementById("sentinel");
+    if (sentinel && "IntersectionObserver" in window) {
+      this._io = new IntersectionObserver(([e]) => this.shadowRoot.getElementById("head")?.classList.toggle("slim", !e.isIntersecting));
+      this._io.observe(sentinel);
     }
-    const st = this._status || {};
-    const rooms = this._data.rooms || {};
-    const flags = [];
-    if (st.away) flags.push("Abwesend");
-    if (st.vacation) flags.push("Urlaub");
-    if (st.party) flags.push("Party");
-    if (st.guest) flags.push("Gäste");
-    if (st.summer) flags.push("Sommerpause");
-    if (st.eco_force) flags.push("Eco erzwungen");
-    const outside = st.outside_temp != null ? ` · Außen ${this._fmt(st.outside_temp)}` : "";
-
-    const cards = Object.values(rooms).map((room) => {
-      const r = (st.rooms || {})[room.id] || {};
-      const chips = [];
-      if (r.windows_open) chips.push("Fenster offen");
-      if (r.humidity != null) chips.push(`${Math.round(r.humidity)} % rF`);
-      if (r.override_until) chips.push(`bis ${new Date(r.override_until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`);
-      return `
-        <div class="card">
-          <div class="name">${esc(room.name)} ${r.heating ? '<span class="heat">●</span>' : ""}</div>
-          <div class="mode">${esc(r.mode_label || "–")}</div>
-          <div class="row">
-            <div><div class="temp">${this._fmt(r.room_temp)}</div><div class="small">Soll ${this._fmt(r.target)}</div></div>
-            <div>
-              <button data-act="minus" data-id="${room.id}">−</button>
-              <button data-act="plus" data-id="${room.id}">+</button>
-            </div>
-          </div>
-          <div class="row">
-            <div class="chips">${chips.map((c) => `<span>${esc(c)}</span>`).join("")}</div>
-            <div>
-              ${r.override_until ? `<button data-act="reset" data-id="${room.id}">Plan</button>` : ""}
-              <button class="accent" data-act="boost" data-id="${room.id}">Boost</button>
-            </div>
-          </div>
-        </div>`;
-    }).join("");
-
-    root.innerHTML = `
-      <style>${css}</style>
-      <h1>Hauswerk <span class="mod">· Heizen</span></h1>
-      <div class="sub">${flags.length ? esc(flags.join(" · ")) : "Normalbetrieb"}${esc(outside)}</div>
-      <div class="grid">${cards || '<p class="sub">Noch keine Räume angelegt.</p>'}</div>
-      <div class="note">Ersatz-Panel – Räume, Pläne und Einstellungen sind hier nicht bearbeitbar.</div>
-    `;
-    root.querySelectorAll("button[data-act]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.dataset.id;
-        const act = btn.dataset.act;
-        if (act === "plus") this._override(id, 0.5);
-        else if (act === "minus") this._override(id, -0.5);
-        else if (act === "boost") this._override(id, 0, true);
-        else if (act === "reset") this._reset(id);
+    if (!this._listening) {
+      this._listening = true;
+      const root = this.shadowRoot;
+      root.addEventListener("click", (e) => this._onClick(e));
+      root.addEventListener("input", (e) => this._onInput(e));
+      root.addEventListener("change", (e) => this._onInput(e, true));
+      root.addEventListener("focusin", (e) => {
+        const input = e.target.closest?.("[data-picker-input]");
+        if (input) this._showPickList(input);
       });
+    }
+  }
+
+  _markTab() {
+    this._renderChrome();
+  }
+
+  // ------------------------------------------------------------ Navigation (eigene Adresse je Modul)
+  get _base() {
+    return `/${this._panel?.url_path || "hauswerk"}`;
+  }
+
+  _viewFromPath() {
+    const parts = location.pathname.split("/").filter(Boolean);
+    if (parts[0] !== (this._panel?.url_path || "hauswerk")) return null;
+    if (parts[1] === "heizen" && parts[2] === "raum" && parts[3]) {
+      this._roomId = decodeURIComponent(parts[3]);
+      return "room";
+    }
+    if (parts[1] === "heizen") {
+      // /hauswerk/heizen ohne Unterseite = Räume
+      const slug = `heizen/${parts[2] || "raeume"}`;
+      return Object.keys(SLUGS).find((k) => SLUGS[k] === slug) || "overview";
+    }
+    // alte Adressen (/hauswerk/raeume …) weiter verstehen
+    const old = HEAT_VIEWS.find((v) => v.slug === parts[1]);
+    return old ? old.id : DEFAULT_VIEW;
+  }
+
+  _setView(view, push = true) {
+    if (this._tab === "plans" && view !== "plans" && this._plan?.dirty && !confirm("Ungespeicherte Änderungen am Heizplan verwerfen?")) return;
+    this._tab = view;
+    if (view === "settings") this._settings = null;
+    // Adresse nur innerhalb von Home Assistant ändern (nicht in der Vorschau-Datei)
+    if (push && location.pathname.startsWith(this._base)) {
+      history.pushState(null, "", `${this._base}/${SLUGS[view]}${view === "room" ? `/${encodeURIComponent(this._roomId)}` : ""}`);
+      window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+    }
+    this._renderMain();
+    window.scrollTo({ top: 0 });
+  }
+
+  // ------------------------------------------------------------ Kopfleiste, Modul-Reiter, Status-Chips
+  _renderChrome() {
+    const head = this.shadowRoot.getElementById("head");
+    if (head) head.innerHTML = this._headHtml();
+    const bnav = this.shadowRoot.getElementById("bnav");
+    if (bnav) bnav.innerHTML = this._data && !this._error ? this._bnavHtml() : "";
+    const chips = this.shadowRoot.getElementById("chips");
+    if (chips)
+      chips.innerHTML =
+        this._data && !this._error
+          ? (["start", "overview", "room"].includes(this._tab) ? "" : this._chipsHtml()) + (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "")
+          : "";
+  }
+
+  /** Untere Leiste fürs Handy: Start · Räume · Bericht · Einstellungen. */
+  _bnavHtml() {
+    const f = this._data ? this._facts() : null;
+    const on = (ids) => (ids.includes(this._tab) ? "on" : "");
+    const item = (tab, ids, icon, label, badge = "") =>
+      `<button class="bn ${on(ids)}" data-action="tab" data-tab="${tab}"><span class="bi"><ha-icon icon="${icon}"></ha-icon>${badge}</span><span>${label}</span></button>`;
+    return [
+      item("start", ["start"], "mdi:home-outline", "Start"),
+      item("overview", ["overview", "room"], "mdi:radiator", "Räume", f && (f.open || f.heating) ? `<em class="${f.open ? "warn" : ""}">${f.open || f.heating}</em>` : ""),
+      item("report", ["report"], "mdi:chart-bar", "Bericht"),
+      item("settings", ["settings", "plans"], "mdi:tune-variant", "Einstellungen"),
+    ].join("");
+  }
+
+  _facts() {
+    const rooms = this._rooms();
+    const st = this._status?.rooms || {};
+    const infos = rooms.map((r) => st[r.id] || {});
+    return {
+      rooms,
+      heating: infos.filter((s) => s.heating).length,
+      open: infos.filter((s) => s.windows_open).length,
+      hints: this._hints().filter((h) => h.lvl === "warn").length,
+      withPlan: rooms.filter((r) => r.schedule_entity || this._data.plans?.[r.plan_id] || (r.schedule || []).length).length,
+    };
+  }
+
+  /** Alle Hinweise an einer Stelle: warn = sollte man beheben, info = gut zu wissen. */
+  _hints() {
+    const out = [];
+    const S = this._hass?.states || {};
+    const s = this._status || {};
+    const set = this._data?.settings || {};
+    const bad = (id) => !S[id] || ["unavailable", "unknown"].includes(S[id].state);
+    const add = (lvl, icon, text, sub, action, data = {}) => out.push({ lvl, icon, text, sub, action, data });
+    for (const r of this._rooms()) {
+      const rs = s.rooms?.[r.id] || {};
+      const climates = r.climates || [];
+      if (r.enabled === false) {
+        add("info", "mdi:robot-off-outline", "Automatik aus", r.name, "room-edit", { id: r.id });
+        continue;
+      }
+      if (!climates.length) add("warn", "mdi:thermostat", "Kein Thermostat zugeordnet", r.name, "room-edit", { id: r.id, rtab: "devices" });
+      for (const c of climates) if (bad(c)) add("warn", "mdi:lan-disconnect", "Thermostat nicht erreichbar", `${r.name} · ${this._entityName(c)}`, "room-edit", { id: r.id, rtab: "devices" });
+      if (r.temp_sensor && bad(r.temp_sensor)) add("warn", "mdi:thermometer-off", "Raumsensor nicht erreichbar", `${r.name} · ${this._entityName(r.temp_sensor)}`, "room-edit", { id: r.id, rtab: "devices" });
+      else if (climates.length && rs.room_temp == null && s.rooms) add("warn", "mdi:thermometer-off", "Kein Messwert", r.name, "room-edit", { id: r.id, rtab: "devices" });
+      for (const w of r.windows || []) if (bad(w)) add("info", "mdi:window-shutter-alert", "Fensterkontakt nicht erreichbar", `${r.name} · ${this._entityName(w)}`, "room-edit", { id: r.id, rtab: "devices" });
+      if (r.schedule_entity && bad(r.schedule_entity)) add("warn", "mdi:calendar-remove", "Zeitplan nicht erreichbar", `${r.name} · ${this._entityName(r.schedule_entity)}`, "room-edit", { id: r.id });
+      else if (!r.schedule_entity && !this._data.plans?.[r.plan_id] && !(r.schedule || []).length) add("info", "mdi:calendar-blank-outline", "Kein Heizplan – bleibt auf Eco", r.name, "plan-open", { id: r.id });
+      if (rs.humidity >= 65) add("info", "mdi:water-alert", `Luftfeuchte ${fmt(rs.humidity, 0)} % – lüften`, r.name, "tab", { tab: "overview" });
+    }
+    for (const o of this._openWindows ? this._openWindows() : []) {
+      const mins = o.s.last_changed ? (Date.now() - new Date(o.s.last_changed)) / 60000 : 0;
+      if (mins >= 30) add("info", "mdi:window-open-variant", `Fenster seit ${mins < 90 ? `${Math.round(mins)} Min.` : `${fmt(mins / 60)} h`} offen`, `${o.room.name} · ${this._entityName(o.id)}`, "tab", { tab: "overview" });
+    }
+    if (s.vacation_calendar_error) add("warn", "mdi:calendar-alert", "Urlaubskalender nicht lesbar", s.vacation_calendar_error, "settings-go", { sub: "vacation" });
+    for (const [pid, err] of Object.entries(s.plan_errors || {})) add("warn", "mdi:calendar-alert", `Kalender von Plan „${this._data.plans?.[pid]?.name || pid}“ nicht lesbar`, err, "plan-sel", { kind: "plan", id: pid });
+    if (!(set.persons || []).length) add("info", "mdi:account-question-outline", "Keine Personen gewählt", "Ohne Personen gibt es kein automatisches „Abwesend“", "settings-go", { sub: "presence" });
+    return out.sort((a, b) => (a.lvl === b.lvl ? 0 : a.lvl === "warn" ? -1 : 1));
+  }
+
+  _headHtml() {
+    const mod = MODULES.find((m) => m.views.includes(this._tab));
+    const sub = HEAT_VIEWS.find((v) => v.id === this._tab);
+    const roomName = this._tab === "room" ? this._data?.rooms?.[this._roomId]?.name : null;
+    const title = mod ? `${mod.name}${roomName ? ` · ${roomName}` : sub ? ` · ${sub.name}` : ""}` : "Start";
+    const f = this._data ? this._facts() : null;
+    const badge = (id) => {
+      if (!f || id !== "heizen") return "";
+      return f.open ? `<em class="badge warn">${f.open} OFFEN</em>` : f.heating ? `<em class="badge ok">${f.heating} HEIZT</em>` : "";
+    };
+    const tab = (id, name, icon, target) => `
+      <button class="mtab ${id === "start" ? (this._tab === "start" ? "active" : "") : mod?.id === id ? "active" : ""}" data-action="tab" data-tab="${target}">
+        <ha-icon icon="${icon}"></ha-icon><span class="mt"><b>${name}</b></span>${badge(id)}
+      </button>`;
+    const soon = (m) => `
+      <button class="mtab soon" disabled title="${m.name}: kommt später" aria-label="${m.name}, noch nicht verfügbar">
+        <ha-icon icon="${m.icon}"></ha-icon><span class="mt"><b>${m.name}</b></span>
+      </button>`;
+    return `
+      <div class="bar">
+        <button class="menu" data-action="menu" aria-label="Menü"><ha-icon icon="mdi:menu"></ha-icon></button>
+        <div class="brand">${LOGO}</div>
+        <div class="ttl"><small>HAUSWERK</small><b>${esc(title)}</b><span>Haussteuerung · Version ${VERSION}</span></div>
+        <div class="hacts">
+          ${(() => {
+            if (!this._data) return "";
+            const h = this._hints();
+            const warn = h.filter((x) => x.lvl === "warn").length;
+            return `<button class="bell ${warn ? "warn" : h.length ? "info" : ""}" data-action="hints-open" title="${h.length ? `${h.length} Hinweis${h.length > 1 ? "e" : ""}` : "Keine Hinweise"}" aria-label="Hinweise">
+              <ha-icon icon="${h.length ? "mdi:bell-badge-outline" : "mdi:bell-outline"}"></ha-icon>${warn ? `<em>${warn}</em>` : h.length ? "<i></i>" : ""}</button>`;
+          })()}
+        </div>
+      </div>
+      <nav class="mtabs">
+        ${tab("start", "Start", "mdi:home-outline", "start")}
+        ${MODULES.map((m) => tab(m.id, m.name, m.icon, mod?.id === m.id ? this._tab : m.views[0])).join("")}
+        ${COMING.map(soon).join("")}
+      </nav>`;
+  }
+
+  /** Unterleiste im Modul Heizen: Räume, Heizpläne, Bericht, Einstellungen. */
+  _heatNavHtml() {
+    const f = this._facts();
+    const badge = (id) => {
+      if (id === "overview") return f.open ? `<em class="warn">${f.open} offen</em>` : f.heating ? `<em class="ok">${f.heating} heizt</em>` : "";
+      if (id === "plans" && f.rooms.length - f.withPlan > 0) return `<em>${f.rooms.length - f.withPlan} ohne Plan</em>`;
+      return "";
+    };
+    return `<nav class="heatnav">${HEAT_VIEWS.filter((v) => !v.hidden).map(
+      (v) => `<button class="hnav ${this._tab === v.id || (v.id === "settings" && this._tab === "plans") || (v.id === "overview" && this._tab === "room") ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span>${badge(v.id)}</button>`
+    ).join("")}</nav>`;
+  }
+
+  _chipsHtml() {
+    const f = this._facts();
+    if (!f.rooms.length) return "";
+    const s = this._status || {};
+    const set = this._data.settings;
+    const c = (icon, val, cap, k = "", action = "") =>
+      `<${action ? `button data-action="${action}"` : "span"} class="schip" ${k ? `style="--c:${k}"` : ""}><ha-icon icon="${icon}"></ha-icon><span><b>${esc(val)}</b><small>${esc(cap)}</small></span></${action ? "button" : "span"}>`;
+    const presence = s.vacation ? ["mdi:palm-tree", "Urlaub", "#34d399"] : s.away ? ["mdi:home-export-outline", "abwesend", "#94a3b8"] : set.party ? ["mdi:party-popper", "Party", "#e879f9"] : set.guest ? ["mdi:account-group-outline", "Gäste", "#e879f9"] : ["mdi:home-heart", "zu Hause", "#34d399"];
+    return `<div class="schips">${[
+      c(f.heating ? "mdi:fire" : "mdi:fire-off", `${f.heating} von ${f.rooms.length}`, "heizen", f.heating ? "#fb923c" : ""),
+      c(f.open ? "mdi:window-open-variant" : "mdi:window-closed-variant", f.open ? `${f.open} offen` : "alle zu", "Fenster", f.open ? "#22d3ee" : "#34d399"),
+      c(presence[0], presence[1], "Anwesenheit", presence[2]),
+      s.outside_temp != null ? c(s.outside_temp <= 0 ? "mdi:snowflake-thermometer" : "mdi:thermometer", `${fmt(s.outside_temp)} °C`, "Außen") : "",
+      s.summer ? c("mdi:weather-sunny", "Sommerpause", "Saison", "#facc15") : "",
+      set.eco_force ? c("mdi:leaf", "erzwungen", "Eco", "#22c55e") : "",
+      s.long_away ? c("mdi:snowflake-thermometer", "Frostschutz", "lange weg", "#38bdf8") : "",
+      s.liming ? c("mdi:water-sync", "läuft", "Entkalken", "#38bdf8") : "",
+      c(f.hints ? "mdi:alert-circle-outline" : "mdi:check-circle-outline", f.hints ? `${f.hints} Hinweis${f.hints > 1 ? "e" : ""}` : "alles gut", "Hinweise", f.hints ? "#f59e0b" : "#34d399", "hints-open"),
+    ].join("")}</div>`;
+  }
+
+  _toast(text) {
+    const el = this.shadowRoot.getElementById("toast");
+    if (!el) return;
+    el.textContent = text;
+    el.hidden = false;
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => (el.hidden = true), 3500);
+  }
+
+  _renderMain() {
+    const main = this.shadowRoot.getElementById("main");
+    if (!main) return;
+    if (this._error) {
+      main.innerHTML = `<section class="card empty"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><h2>Hauswerk antwortet nicht</h2><p>${esc(this._error)}</p></section>`;
+      return;
+    }
+    this._renderChrome();
+    // Hintergrund passend zum Bereich: Startseite oder Heizen
+    this.setAttribute("view", MODULES[0].views.includes(this._tab) ? "heat" : "start");
+    if (!this._data) return;
+    const view = { start: this._viewStart, overview: this._viewOverview, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom }[this._tab] || this._viewStart;
+    main.innerHTML = view.call(this);
+  }
+
+  // ------------------------------------------------------------ Bausteine
+  _chip(mode, label) {
+    const m = MODE[mode] || MODE.aus;
+    return `<span class="mode" style="--c:${m.c}"><ha-icon icon="${m.i}"></ha-icon>${esc(label)}</span>`;
+  }
+
+  _stepper(kind, key, value, { placeholder = null, small = false } = {}) {
+    const shown = value ?? placeholder;
+    return `
+      <div class="stepper ${small ? "small" : ""}">
+        <button class="sbtn" data-action="step" data-kind="${kind}" data-key="${esc(key)}" data-delta="-0.5" aria-label="kälter">−</button>
+        <b style="color:${value == null ? "var(--muted)" : tint(tempColor(shown))}">${fmt(shown)} °C</b>
+        <button class="sbtn" data-action="step" data-kind="${kind}" data-key="${esc(key)}" data-delta="0.5" aria-label="wärmer">+</button>
+      </div>`;
+  }
+
+  _sectionHead(icon, title, right = "") {
+    return `<div class="shead"><ha-icon icon="${icon}"></ha-icon><h3>${title}</h3><span class="grow"></span>${right}</div>`;
+  }
+
+  // ------------------------------------------------------------ Start (Zuhause mit Modul-Kacheln)
+  _viewStart() {
+    const f = this._facts();
+    const n = f.rooms.length;
+    const warn = this._hints().filter((h) => h.lvl === "warn");
+    const list = this._widgets();
+    const edit = this._wEdit && this._admin;
+    return `
+      ${warn.length ? `
+      <button class="hstrip" data-action="hints-open">
+        <ha-icon icon="mdi:alert-circle-outline"></ha-icon>
+        <span class="grow"><b>${warn.length} Hinweis${warn.length > 1 ? "e" : ""}</b> · ${esc(warn[0].text)}${warn[0].sub ? ` (${esc(warn[0].sub)})` : ""}${warn.length > 1 ? " …" : ""}</span>
+        <span class="hs-go">Anzeigen<ha-icon icon="mdi:chevron-right"></ha-icon></span>
+      </button>` : ""}
+
+      <div class="shead outer">
+        <ha-icon icon="mdi:widgets-outline"></ha-icon><h3>Übersicht</h3><span class="grow"></span>
+        ${this._admin ? `
+          ${edit ? `<button class="link" data-action="w-add-open"><ha-icon icon="mdi:plus"></ha-icon>Widget</button>` : ""}
+          <button class="link" data-action="w-edit"><ha-icon icon="${edit ? "mdi:check" : "mdi:pencil-outline"}"></ha-icon>${edit ? "Fertig" : "Anpassen"}</button>` : ""}
+      </div>
+      ${list.length
+        ? `<div class="wgrid">${list.map((w, i) => this._widget(w, i, edit, list.length)).join("")}</div>`
+        : `<section class="card empty small"><p>Keine Widgets.${this._admin ? ` <button class="link inline" data-action="w-add-open">Widget hinzufügen</button>` : ""}</p></section>`}
+      ${n ? "" : `
+      <section class="card empty">
+        <ha-icon icon="mdi:home-plus-outline"></ha-icon><h2>Noch keine Räume</h2>
+        <p>Lege einen Raum an und ordne Thermostate, Fensterkontakte und einen Raumsensor zu.</p>
+        ${this._admin ? `<button class="primary" data-action="room-new"><ha-icon icon="mdi:plus"></ha-icon>Raum anlegen</button>` : ""}
+      </section>`}`;
+  }
+
+  // ------------------------------------------------------------ Widgets der Startseite
+  /** Widgets aus den Einstellungen (für alle Benutzer gleich), sonst eine Grundauswahl. */
+  _widgets() {
+    const list = this._data.settings.start_widgets;
+    return Array.isArray(list) ? list : DEFAULT_WIDGETS.map((w, i) => ({ id: `d${i}`, title: null, entities: [], ...w }));
+  }
+
+  /** Größe eines Widgets: s = klein, m = mittel, l = groß (alte Angabe „w“ = groß). */
+  _wSize(w) {
+    return w.size === "w" ? "l" : ["s", "m", "l"].includes(w.size) ? w.size : "m";
+  }
+
+  async _saveWidgets(list) {
+    this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { start_widgets: list } });
+    this._renderMain();
+  }
+
+  _widget(w, i, edit, count) {
+    const def = WIDGETS[w.type];
+    if (!def) return "";
+    const z = this._wSize(w);
+    let body;
+    try {
+      body = this[`_w_${w.type}`](w, z);
+    } catch (err) {
+      body = `<p class="muted small">Widget kann nicht angezeigt werden.</p>`;
+    }
+    const tools = edit
+      ? `<span class="wtools">
+          <button class="icon tiny" data-action="w-move" data-i="${i}" data-d="-1" title="Nach vorne" ${i === 0 ? "disabled" : ""}><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+          <button class="icon tiny" data-action="w-move" data-i="${i}" data-d="1" title="Nach hinten" ${i === count - 1 ? "disabled" : ""}><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+          <button class="icon tiny" data-action="w-conf" data-i="${i}" title="Einstellen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>
+          <button class="icon tiny danger-t" data-action="w-del" data-i="${i}" title="Entfernen"><ha-icon icon="mdi:close"></ha-icon></button>
+        </span>`
+      : def.go
+        ? `<button class="link tiny" data-action="tab" data-tab="${def.go}" title="Öffnen"><span>Öffnen</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`
+        : def.pop && this._admin && z !== "s"
+          ? `<button class="icon tiny" data-action="settings-go" data-sub="${def.pop}" title="Einstellungen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>`
+          : "";
+    return `
+      <section class="card wdg sz-${z} ${edit ? "edit" : ""}" style="--c:${def.c}">
+        <div class="wh"><span class="wic"><ha-icon icon="${def.icon}"></ha-icon></span><b>${esc(w.title || def.name)}</b><span class="grow"></span>${tools}</div>
+        <div class="wb">${body}</div>
+      </section>`;
+  }
+
+  /** Kennzahlen fürs Heizen-Widget. */
+  _heatFacts() {
+    const f = this._facts();
+    const st = this._status?.rooms || {};
+    const temps = f.rooms.map((r) => st[r.id]?.room_temp).filter((t) => t != null);
+    const avg = temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null;
+    const below = f.rooms.filter((r) => {
+      const x = st[r.id] || {};
+      return x.room_temp != null && x.target != null && !["aus", "fenster", "sommer", "warm", "entkalken"].includes(x.mode) && x.target - x.room_temp >= 0.5;
+    }).length;
+    const rep = this._report(14);
+    const today = rep ? this._sumDay(rep, 13) : null;
+    const v = this._status?.summer
+      ? ["mdi:weather-sunny", "Sommerpause", "#facc15"]
+      : f.open
+        ? ["mdi:window-open-variant", `${f.open} Fenster offen`, "#22d3ee"]
+        : below
+          ? ["mdi:thermometer-chevron-up", `${below} unter Soll`, "#fb923c"]
+          : ["mdi:check-circle-outline", "Alle im Soll", "#34d399"];
+    return { f, st, avg, today, v };
+  }
+
+  _w_heat(w, z) {
+    const { f, st, avg, today, v } = this._heatFacts();
+    const big = `<div class="wbig"><span>${fmt(avg)}<small>°C</small></span>${z === "s" ? "" : `<span class="wverdict" style="--c:${v[2]}"><ha-icon icon="${v[0]}"></ha-icon>${v[1]}</span>`}</div>`;
+    if (z === "s") return `${big}<div class="wline" style="--c:${v[2]}"><ha-icon icon="${v[0]}"></ha-icon>${v[1]}</div>`;
+    const mini = (icon, val, cap) => `<div class="wmini"><ha-icon icon="${icon}"></ha-icon><b>${val}</b><small>${cap}</small></div>`;
+    const minis = `
+      <div class="wminis">
+        ${mini(f.heating ? "mdi:fire" : "mdi:fire-off", `${f.heating}/${f.rooms.length}`, "heizen")}
+        ${mini(f.open ? "mdi:window-open-variant" : "mdi:window-closed-variant", f.open || "0", "offen")}
+        ${mini("mdi:timer-outline", today ? fmt(today.heat / 60) : "–", "h heute")}
+      </div>`;
+    if (z === "m") return big + minis;
+    // groß: zusätzlich jeder Raum mit Ist, Soll und Betriebsart
+    const rows = f.rooms
+      .map((r) => {
+        const rs = st[r.id] || {};
+        const m = MODE[rs.mode] || MODE.aus;
+        if (!(r.climates || []).length) return `<div class="wroom setup"><ha-icon icon="${esc(roomIcon(r))}"></ha-icon><b>${esc(r.name)}</b><span class="grow"></span><small>nicht eingerichtet</small></div>`;
+        return `<div class="wroom" style="--c:${m.c}"><ha-icon icon="${esc(roomIcon(r))}"></ha-icon><b>${esc(r.name)}</b>
+          <span class="grow"></span>${rs.heating ? `<ha-icon class="gf" icon="mdi:fire"></ha-icon>` : ""}<span>${fmt(rs.room_temp)}°</span><small>→ ${fmt(rs.target)}°</small><ha-icon class="wm" icon="${m.i}" title="${esc(rs.mode_label || "")}"></ha-icon></div>`;
+      })
+      .join("");
+    return `<div class="wsplit"><div>${big}${minis}</div><div class="wrooms">${rows}</div></div>`;
+  }
+
+  /** Bekannte Personen mit Ort und Entfernung zu Hause (GPS der Person, sonst Entfernungs-Sensor). */
+  _people() {
+    const st = this._hass.states;
+    const ids = (this._data.settings.persons || []).length ? this._data.settings.persons : Object.keys(st).filter((e) => e.startsWith("person."));
+    const home = st["zone.home"]?.attributes || {};
+    const rad = (d) => (d * Math.PI) / 180;
+    const km = (a) => {
+      if (a.latitude == null || home.latitude == null) return null;
+      const dLat = rad(a.latitude - home.latitude), dLon = rad(a.longitude - home.longitude);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(home.latitude)) * Math.cos(rad(a.latitude)) * Math.sin(dLon / 2) ** 2;
+      return 6371 * 2 * Math.asin(Math.sqrt(h));
+    };
+    const toKm = (v, unit) => (v == null || isNaN(v) ? null : unit === "m" ? v / 1000 : unit === "mi" ? v * 1.609 : unit === "ft" ? v * 0.0003048 : v);
+    return ids
+      .map((id) => {
+        const s = st[id];
+        if (!s) return null;
+        const a = s.attributes || {};
+        const slug = id.split(".")[1];
+        const name = a.friendly_name || slug;
+        let dist = km(a);
+        if (dist == null) {
+          // Entfernungs-Sensor der Person, z. B. aus der Integration „Nähe“
+          const sensor = (this._data.settings.proximity_sensors || []).concat(Object.keys(st).filter((e) => e.startsWith("sensor.") && st[e].attributes.device_class === "distance"))
+            .find((e) => e.includes(slug) || (st[e]?.attributes?.friendly_name || "").toLowerCase().includes(name.toLowerCase()));
+          if (sensor) dist = toKm(parseFloat(st[sensor].state), st[sensor].attributes.unit_of_measurement);
+        }
+        const home_ = s.state === "home";
+        const zone = !home_ && s.state !== "not_home" && !["unknown", "unavailable"].includes(s.state) ? st[`zone.${s.state}`]?.attributes?.friendly_name || s.state : null;
+        const where = home_ ? "zu Hause" : zone || (["unknown", "unavailable"].includes(s.state) ? "unbekannt" : "unterwegs");
+        const distTxt = home_ || dist == null ? "" : dist < 1 ? `${Math.round(dist * 1000)} m` : `${fmt(dist, dist < 10 ? 1 : 0)} km`;
+        return { id, name, home: home_, where, dist, distTxt, pic: a.entity_picture || null };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.home - a.home) || (a.dist ?? 1e9) - (b.dist ?? 1e9));
+  }
+
+  _peopleHtml(z) {
+    const people = this._people();
+    if (!people.length) return z === "s" ? "" : `<p class="muted small" style="margin-top:10px">Keine Personen bekannt – unter Einstellungen › Anwesenheit wählen.</p>`;
+    const av = (p) => (p.pic ? `<img src="${esc(p.pic)}" alt="">` : `<span>${esc(p.name.trim().slice(0, 1).toUpperCase())}</span>`);
+    if (z === "s")
+      return `<div class="ppl-s">${people.map((p) => `<span class="pav ${p.home ? "home" : ""}" title="${esc(p.name)}: ${esc(p.where)}${p.distTxt ? ` · ${p.distTxt}` : ""}">${av(p)}<em>${p.home ? "⌂" : esc(p.distTxt || "–")}</em></span>`).join("")}</div>`;
+    return `<div class="ppl">${people
+      .map(
+        (p) => `
+        <div class="prow ${p.home ? "home" : ""}">
+          <span class="pav">${av(p)}</span>
+          <span class="grow"><b>${esc(p.name)}</b><small><ha-icon icon="${p.home ? "mdi:home" : p.where === "unterwegs" ? "mdi:map-marker-distance" : "mdi:map-marker-outline"}"></ha-icon>${esc(p.where)}</small></span>
+          <em>${p.home ? "" : esc(p.distTxt || "–")}</em>
+        </div>`
+      )
+      .join("")}</div>`;
+  }
+
+  _w_presence(w, z) {
+    if (z !== "s") return this._presenceCard(true) + this._peopleHtml(z);
+    // klein: nur der aktuelle Zustand und drei Knöpfe
+    const s = this._status || {};
+    const mode = s.vacation ? "urlaub" : s.away ? "abwesend" : "home";
+    const dis = this._admin ? "" : "disabled";
+    const b = (id, icon, label) => `<button class="pq ${mode === id ? "on" : ""}" data-action="presence" data-mode="${id}" title="${label}" ${dis}><ha-icon icon="${icon}"></ha-icon></button>`;
+    const label = { home: "Zu Hause", abwesend: "Abwesend", urlaub: "Urlaub" }[mode];
+    return `<div class="wstate">${label}${this._data.settings.guest ? " · Gäste" : ""}${this._data.settings.party ? " · Party" : ""}</div>
+      <div class="pqs">${b("home", "mdi:home-heart", "Zu Hause")}${b("abwesend", "mdi:home-export-outline", "Abwesend")}${b("urlaub", "mdi:palm-tree", "Urlaub")}</div>
+      ${this._peopleHtml("s")}`;
+  }
+
+  _w_weather(w, z) {
+    const wx = this._weather();
+    if (!wx) return `<p class="muted small">Keine Wetter-Entität gefunden. Unter Einstellungen › Wetter auswählen.</p>`;
+    const head = `<div class="wwx"><ha-icon icon="${wx.icon}"></ha-icon><div><b>${fmt(wx.temp)} °C</b><span>${esc(wx.label)}</span></div></div>`;
+    if (z === "s") return head;
+    const extra = wx.extra ? `<p class="muted small" style="margin:8px 0 0">${wx.extra}</p>` : "";
+    if (z === "m") return head + extra;
+    // groß: dazu die nächsten Stunden
+    return `<div class="wsplit"><div>${head}${extra}</div><div>${this._w_forecast({ mode: "hourly", entities: [] }, "s", true)}</div></div>`;
+  }
+
+  _w_rooms(w, z) {
+    const st = this._status?.rooms || {};
+    const rooms = this._rooms();
+    if (!rooms.length) return `<p class="muted small">Noch keine Räume.</p>`;
+    if (z === "s") {
+      const heating = rooms.filter((r) => st[r.id]?.heating).length;
+      return `<div class="wbig"><span>${heating}<small>von ${rooms.length} heizen</small></span></div>
+        <div class="wdots">${rooms.map((r) => `<i title="${esc(r.name)}: ${fmt(st[r.id]?.room_temp)} °C" style="background:${(MODE[st[r.id]?.mode] || MODE.aus).c}"></i>`).join("")}</div>`;
+    }
+    return `<div class="gmini ${z === "m" ? "two" : ""}">${rooms
+      .map((r) => {
+        const rs = st[r.id] || {};
+        const m = MODE[rs.mode] || MODE.aus;
+        return `<button class="gm" style="--acc:${this._roomColor(r.id)}; --c:${m.c}" data-action="room-open" data-id="${r.id}">
+          <span class="gh"><ha-icon icon="${esc(roomIcon(r))}"></ha-icon><span class="gn">${esc(r.name)}</span>${rs.heating ? `<ha-icon class="gf" icon="mdi:fire"></ha-icon>` : ""}</span>
+          <span class="gt">${fmt(rs.room_temp)}<small>°C</small></span>
+          ${z === "l" ? `<span class="gl"><ha-icon icon="${m.i}"></ha-icon>${esc(rs.mode_label || "Automatik aus")}${rs.target != null && rs.mode !== "aus" ? ` · ${fmt(rs.target)} °C` : ""}</span>` : ""}
+        </button>`;
+      })
+      .join("")}</div>`;
+  }
+
+  _w_shortcuts(w, z) {
+    const ids = w.entities || [];
+    if (!ids.length) return `<p class="muted small">Noch keine Knöpfe.${this._admin && z !== "s" ? " Über „Anpassen“ › Zahnrad Szenen, Skripte, Schalter oder Lichter wählen." : ""}</p>`;
+    return `<div class="wsc ${z}">${ids
+      .map((id) => {
+        const s = this._hass.states[id];
+        const d = id.split(".")[0];
+        const on = s && ["on", "open", "unlocked", "playing", "heat"].includes(s.state);
+        const icon = s?.attributes?.icon || SC_ICONS[d] || "mdi:gesture-tap";
+        const name = s?.attributes?.friendly_name || id;
+        const stateTxt = ["script", "scene", "button", "input_button"].includes(d) ? "" : `<small>${s ? (on ? "an" : "aus") : "fehlt"}</small>`;
+        return `<button class="sc ${on ? "on" : ""} ${s ? "" : "missing"}" data-action="w-sc" data-e="${esc(id)}" title="${esc(name)}">
+          <ha-icon icon="${esc(icon)}"></ha-icon>${z === "s" ? "" : `<span>${esc(name)}</span>${z === "l" ? stateTxt : ""}`}</button>`;
+      })
+      .join("")}</div>`;
+  }
+
+  _openWindows() {
+    const open = [];
+    for (const r of this._rooms()) {
+      for (const id of r.windows || []) {
+        const s = this._hass.states[id];
+        if (s && ["on", "open", "opening", "true"].includes(String(s.state).toLowerCase())) open.push({ room: r, s, id });
+      }
+    }
+    return open;
+  }
+
+  _w_windows(w, z) {
+    const open = this._openWindows();
+    if (z === "s")
+      return `<div class="wbig"><span style="color:${open.length ? tint("#22d3ee") : "inherit"}">${open.length}<small>offen</small></span></div>
+        <div class="wline" style="--c:${open.length ? "#22d3ee" : "#34d399"}"><ha-icon icon="${open.length ? "mdi:window-open-variant" : "mdi:check"}"></ha-icon>${open.length ? esc(open.map((o) => o.room.name).join(", ")) : "alles zu"}</div>`;
+    if (!open.length) return `<div class="wok"><ha-icon icon="mdi:window-closed-variant"></ha-icon>Alle Fenster und Türen zu</div>`;
+    return `<div class="wlist">${open
+      .map(({ room, s, id }) => {
+        const mins = s.last_changed ? Math.max(0, Math.round((Date.now() - new Date(s.last_changed)) / 60000)) : null;
+        const rs = this._status?.rooms?.[room.id] || {};
+        return `<div class="wrow"><ha-icon icon="mdi:window-open-variant" style="color:#22d3ee"></ha-icon><span class="grow"><b>${esc(room.name)}</b><small>${esc(this._entityName(id))}${z === "l" ? ` · ${rs.mode === "fenster" ? "Heizung pausiert" : rs.window_pending ? "Pause beginnt gleich" : "heizt weiter"}` : ""}</small></span><em>${mins == null ? "" : mins < 60 ? `${mins} Min.` : `${fmt(mins / 60)} h`}</em></div>`;
+      })
+      .join("")}</div>`;
+  }
+
+  _w_schedule(w, z) {
+    const st = this._status?.rooms || {};
+    const rows = this._rooms()
+      .filter((r) => r.enabled !== false)
+      .map((r) => ({ r, i: this._schedInfo(r, st[r.id] || {}) }));
+    if (!rows.length) return `<p class="muted small">Noch keine Räume.</p>`;
+    if (z === "s") {
+      // klein: der Raum, der als Nächstes warm wird
+      const next = rows.filter((x) => !x.i.comfort && st[x.r.id]?.next_change != null).sort((a, b) => st[a.r.id].next_change - st[b.r.id].next_change)[0] || rows.find((x) => !x.i.comfort);
+      const on = rows.filter((x) => x.i.comfort).length;
+      return `<div class="wbig"><span>${on}<small>in Komfort</small></span></div>
+        ${next ? `<div class="wline" style="--c:#f59e0b"><ha-icon icon="mdi:clock-outline"></ha-icon>${esc(next.r.name)}: ${esc(next.i.text.replace("Komfort ", ""))}</div>` : ""}`;
+    }
+    const day = (new Date().getDay() + 6) % 7;
+    return `<div class="wlist">${rows
+      .map(({ r, i }) => `<div class="wrow ${z === "l" ? "tall" : ""}"><ha-icon icon="${esc(roomIcon(r))}"></ha-icon>
+        <span class="grow"><b>${esc(r.name)}</b><small>${esc(i.src)}</small>${z === "l" && i.blocks ? this._dayBar(i.blocks, r, day, true) : ""}</span><em class="${i.comfort ? "hot" : ""}">${esc(i.text)}</em></div>`)
+      .join("")}</div>`;
+  }
+
+  _w_report(w, z) {
+    const rep = this._report(7);
+    if (!rep) return `<div class="chart-empty"><div class="spinner"></div></div>`;
+    const days = Array.from({ length: 7 }, (_, i) => this._sumDay(rep, i).heat / 60);
+    const sum = days.reduce((a, b) => a + b, 0);
+    if (z === "s") return `<div class="wbig"><span>${fmt(sum)}<small>h</small></span></div><div class="wline"><ha-icon icon="mdi:calendar-week"></ha-icon>7 Tage · Ø ${fmt(sum / 7)} h</div>`;
+    const max = Math.max(1, ...days);
+    const dates = (rep[this._rooms()[0]?.id] || []).map((x) => x.date);
+    const bars = `
+      <div class="wbars">${days
+        .map((h, i) => `<div class="wbar" title="${fmt(h)} h">${z === "l" ? `<em>${fmt(h)}</em>` : ""}<i style="height:${Math.max(3, (h / max) * 100)}%"></i><small>${i === 6 ? "heute" : dates[i] ? DAYS[(new Date(dates[i]).getDay() + 6) % 7] : ""}</small></div>`)
+        .join("")}</div>`;
+    const foot = `<p class="muted small" style="margin:8px 0 0">${fmt(sum)} h in 7 Tagen · Ø ${fmt(sum / 7)} h am Tag</p>`;
+    if (z === "m") return bars + foot;
+    // groß: dazu die Räume mit den meisten Stunden
+    const per = this._rooms()
+      .map((r) => ({ r, h: (rep[r.id] || []).reduce((a, x) => a + (x.heat_min || 0), 0) / 60 }))
+      .sort((a, b) => b.h - a.h);
+    const top = Math.max(1, ...per.map((x) => x.h));
+    return `<div class="wsplit"><div>${bars}${foot}</div><div class="wlist">${per
+      .map(({ r, h }) => `<div class="wrow"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><span class="grow"><b>${esc(r.name)}</b><span class="hbar"><i style="width:${(h / top) * 100}%; background:${this._roomColor(r.id)}"></i></span></span><em>${fmt(h)} h</em></div>`)
+      .join("")}</div></div>`;
+  }
+
+  /** Prognose einer weather-Entität abonnieren (wie die Wetterkarte von Home Assistant). */
+  _forecast(entityId, type) {
+    this._fc = this._fc || {};
+    this._fcSubs = this._fcSubs || {};
+    const key = `${entityId}|${type}`;
+    if (!this._fcSubs[key]) {
+      this._fcSubs[key] = this._hass.connection.subscribeMessage(
+        (msg) => {
+          this._fc[key] = { list: msg.forecast || [] };
+          if (this._tab === "start" && !this._busy) this._renderMain();
+        },
+        { type: "weather/subscribe_forecast", entity_id: entityId, forecast_type: type }
+      );
+      this._fcSubs[key].catch((err) => {
+        this._fc[key] = { error: err?.message || "Prognose nicht verfügbar" };
+        if (this._tab === "start") this._renderMain();
+      });
+    }
+    return this._fc[key];
+  }
+
+  _w_forecast(w, z, embedded = false) {
+    const id = (w.entities || [])[0] || this._data.settings.weather_entity || Object.keys(this._hass.states).find((e) => e.startsWith("weather."));
+    const st = id && this._hass.states[id];
+    if (!st) return `<p class="muted small">Keine Wetter-Entität gefunden.${this._admin ? " Über „Anpassen“ › Zahnrad eine wählen." : ""}</p>`;
+    // Was kann die Entität? 1 = täglich, 2 = stündlich, 4 = zweimal täglich
+    const feat = Number(st.attributes.supported_features || 0);
+    let type = w.mode || "hourly";
+    if (type === "hourly" && !(feat & 2) && feat & 1) type = "daily";
+    if (type === "daily" && !(feat & 1) && feat & 2) type = "hourly";
+    const fc = this._forecast(id, type);
+    if (!fc) return `<div class="chart-empty"><div class="spinner"></div></div>`;
+    if (fc.error) return `<p class="muted small">${esc(fc.error)}</p>`;
+    const hourly = type === "hourly";
+    // Je Größe mehr Spalten: klein 4, mittel 6 (Stunden) bzw. 4 (Tage), groß 12 bzw. 7
+    const count = embedded ? 6 : z === "s" ? (hourly ? 4 : 3) : z === "m" ? (hourly ? 6 : 4) : hourly ? 12 : 7;
+    const items = fc.list.slice(0, count);
+    if (!items.length) return `<p class="muted small">Keine Prognose verfügbar.</p>`;
+    const temps = items.flatMap((x) => [x.temperature, x.templow]).filter((t) => t != null);
+    const lo = Math.min(...temps), hi = Math.max(...temps);
+    const unit = st.attributes.temperature_unit || "°C";
+    // Hinweis für die Heizung: tiefster Wert der nächsten 24 h
+    const next24 = hourly ? fc.list.filter((x) => new Date(x.datetime) - Date.now() < 24 * 3600e3) : fc.list.slice(0, 2);
+    const lows = next24.map((x) => ({ t: x.templow ?? x.temperature, at: x.datetime })).filter((x) => x.t != null);
+    const min = lows.length ? lows.reduce((a, b) => (b.t < a.t ? b : a)) : null;
+    const set = this._data.settings;
+    let hint = "";
+    if (z === "s" || embedded) hint = "";
+    else if (min && min.t <= 0) hint = `<span class="fchint" style="--c:#38bdf8"><ha-icon icon="mdi:snowflake-alert"></ha-icon>Frost: bis ${fmt(min.t)} ${unit}${hourly ? ` um ${new Date(min.at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : ""}</span>`;
+    else if (set.summer_mode === "auto" && min && min.t >= (set.summer_temp ?? 16)) hint = `<span class="fchint" style="--c:#facc15"><ha-icon icon="mdi:weather-sunny"></ha-icon>Mild: Sommerpause ab ${fmt(set.summer_temp ?? 16)} °C möglich</span>`;
+    else if (min) hint = `<span class="fchint"><ha-icon icon="mdi:thermometer-low"></ha-icon>Tiefstwert ${hourly ? "24 h" : "bis morgen"}: ${fmt(min.t)} ${unit}</span>`;
+    const label = (x, i) => {
+      const d = new Date(x.datetime);
+      if (hourly) return i === 0 ? "jetzt" : String(d.getHours()).padStart(2, "0") + (z === "s" || embedded ? "" : " Uhr");
+      if (d.toDateString() === new Date().toDateString()) return "heute";
+      return d.toLocaleDateString("de-DE", { weekday: "short" });
+    };
+    const pos = (t) => (hi > lo ? ((t - lo) / (hi - lo)) * 100 : 50);
+    const detail = z === "l" && !embedded;
+    return `
+      ${hint ? `<div class="fchints">${hint}</div>` : ""}
+      <div class="fc ${hourly ? "hourly" : "daily"} ${z === "s" || embedded ? "tight" : ""}">${items
+        .map((x, i) => {
+          const [icon, text] = WEATHER[x.condition] || ["mdi:weather-partly-cloudy", x.condition || ""];
+          const rain = x.precipitation_probability ?? null;
+          return `
+          <div class="fci" title="${esc(text)}">
+            <small>${label(x, i)}</small>
+            <ha-icon icon="${icon}"></ha-icon>
+            <b style="color:${tint(tempColor(x.temperature))}">${fmt(x.temperature, 0)}°</b>
+            ${!hourly && x.templow != null ? `
+              ${detail ? `<span class="fcr"><i style="bottom:${pos(x.templow)}%; height:${Math.max(6, pos(x.temperature) - pos(x.templow))}%"></i></span>` : ""}
+              <em>${fmt(x.templow, 0)}°</em>` : ""}
+            ${z !== "s" && !embedded ? `<small class="fcp ${rain >= 50 ? "wet" : ""}">${rain != null ? `<ha-icon icon="mdi:water-outline"></ha-icon>${fmt(rain, 0)} %` : x.precipitation ? `${fmt(x.precipitation)} mm` : "&nbsp;"}</small>` : ""}
+          </div>`;
+        })
+        .join("")}</div>`;
+  }
+
+  _w_values(w, z) {
+    const ids = w.entities || [];
+    if (!ids.length) return `<p class="muted small">Noch keine Werte.${this._admin && z !== "s" ? " Über „Anpassen“ › Zahnrad Sensoren wählen." : ""}</p>`;
+    const val = (id) => {
+      const s = this._hass.states[id];
+      const unit = s?.attributes?.unit_of_measurement || "";
+      const num = s && !isNaN(parseFloat(s.state)) && isFinite(s.state);
+      return { s, txt: s ? `${num ? Number(s.state).toLocaleString("de-DE", { maximumFractionDigits: 2 }) : esc(s.state)}${unit ? ` ${esc(unit)}` : ""}` : "fehlt" };
+    };
+    if (z === "s") {
+      // klein: der erste Wert groß, weitere als Zeile
+      const a = val(ids[0]);
+      return `<div class="wval"><b>${a.txt}</b><small>${esc(a.s?.attributes?.friendly_name || ids[0])}</small></div>
+        ${ids[1] ? `<div class="wline"><ha-icon icon="mdi:plus"></ha-icon>${ids.length - 1} weitere</div>` : ""}`;
+    }
+    return `<div class="wlist ${z === "l" ? "cols" : ""}">${ids
+      .map((id) => {
+        const { s, txt } = val(id);
+        return `<div class="wrow"><ha-icon icon="${esc(s?.attributes?.icon || "mdi:gauge")}"></ha-icon><span class="grow"><b>${esc(s?.attributes?.friendly_name || id)}</b>${z === "l" && s?.last_changed ? `<small>seit ${new Date(s.last_changed).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</small>` : ""}</span><em>${txt}</em></div>`;
+      })
+      .join("")}</div>`;
+  }
+  // ------------------------------------------------------------ Modul 1: Räume
+  _viewOverview() {
+    const rooms = this._rooms();
+    const st = this._status?.rooms || {};
+    const s = this._status || {};
+    const set = this._data.settings;
+    const f = this._facts();
+    const n = rooms.length;
+    const avgOf = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : null);
+    const avg = avgOf(rooms.map((r) => st[r.id]?.room_temp).filter((t) => t != null));
+    const avgTarget = avgOf(rooms.filter((r) => !["fenster", "aus", "sommer"].includes(st[r.id]?.mode)).map((r) => st[r.id]?.target).filter((t) => t != null));
+    const hum = avgOf(rooms.map((r) => st[r.id]?.humidity).filter((h) => h != null));
+    const below = rooms.filter((r) => {
+      const x = st[r.id] || {};
+      return x.room_temp != null && x.target != null && !["aus", "fenster", "sommer", "warm", "entkalken"].includes(x.mode) && x.target - x.room_temp >= 0.5;
     });
+    const rep = this._report(14);
+    const today = rep ? this._sumDay(rep, 13) : null;
+    const date = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
+    const w = this._weather();
+    // Kurzurteil: das Wichtigste zuerst
+    const verdict = !n
+      ? { i: "mdi:home-plus-outline", c: "#94a3b8", t: "Noch keine Räume angelegt" }
+      : s.summer
+        ? { i: "mdi:weather-sunny", c: "#facc15", t: "Sommerpause – die Thermostate ruhen" }
+        : f.open
+          ? { i: "mdi:window-open-variant", c: "#22d3ee", t: `${f.open} ${f.open > 1 ? "Räume lüften" : "Raum lüftet"} – dort pausiert die Heizung` }
+          : s.vacation
+            ? { i: "mdi:palm-tree", c: "#34d399", t: `Urlaub – alle Räume auf ${fmt(set.vacation_temp)} °C` }
+            : s.away
+              ? { i: "mdi:home-export-outline", c: "#94a3b8", t: "Niemand zu Hause – abgesenkt" }
+              : s.approaching
+                ? { i: "mdi:home-import-outline", c: "#34d399", t: "Jemand kommt heim – es wird schon geheizt" }
+                : below.length
+                  ? { i: "mdi:thermometer-chevron-up", c: "#fb923c", t: `${below.length} ${below.length > 1 ? "Räume" : "Raum"} unter Soll – ${f.heating ? "wird aufgeheizt" : "Heizung prüfen"}` }
+                  : { i: "mdi:check-circle-outline", c: "#34d399", t: "Alle Räume im Soll" };
+    const presence = s.vacation ? ["mdi:palm-tree", "Urlaub"] : s.away ? ["mdi:home-export-outline", "Abwesend"] : set.party ? ["mdi:party-popper", "Party"] : set.guest ? ["mdi:account-group-outline", "Gäste"] : ["mdi:home-heart", "Zu Hause"];
+    const stat = (icon, label, value, sub = "", c = "") =>
+      `<div class="hstat" ${c ? `style="--c:${c}"` : ""}><ha-icon icon="${icon}"></ha-icon><span><small>${label}</small><b>${value}</b>${sub ? `<em>${sub}</em>` : ""}</span></div>`;
+    const compact = this._roomView() === "compact";
+
+    return `
+      <section class="hero">
+        <div class="hero-row">
+          <div class="hero-text">
+            <div class="hero-label"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon>Im Haus · ${date}</div>
+            <div class="hero-line"><div class="hero-big">${fmt(avg)}<span>°C</span></div>
+            <div class="verdict" style="--c:${verdict.c}"><ha-icon icon="${verdict.i}"></ha-icon>${verdict.t}</div></div>
+          </div>
+          ${w ? `
+          <div class="wx" title="${esc(w.name)}">
+            <ha-icon icon="${w.icon}"></ha-icon>
+            <div><b>${fmt(w.temp)} °C</b><small>${esc(w.label)}</small>${w.extra ? `<small>${w.extra}</small>` : ""}</div>
+          </div>` : ""}
+        </div>
+        <div class="hstats">
+          ${stat(f.heating ? "mdi:fire" : "mdi:fire-off", "Heizen", `${f.heating} von ${n}`, "Räumen", f.heating ? "#fb923c" : "")}
+          ${stat(f.open ? "mdi:window-open-variant" : "mdi:window-closed-variant", "Fenster", f.open ? `${f.open} offen` : "alle zu", "", f.open ? "#22d3ee" : "")}
+          ${stat(w ? w.icon : "mdi:thermometer", "Außen", s.outside_temp != null || w ? `${fmt(s.outside_temp ?? w?.temp)} °C` : "–", w ? esc(w.label) : "")}
+          ${hum != null ? stat(humidityInfo(hum).i, "Luftfeuchte Ø", `${fmt(hum, 0)} %`, humidityInfo(hum).t) : ""}
+          ${stat("mdi:timer-outline", "Heute geheizt", today ? `${fmt(today.heat / 60)} h` : "–", presence[1])}
+        </div>
+      </section>
+
+      <div class="shead outer">
+        <ha-icon icon="mdi:floor-plan"></ha-icon><h3>Räume</h3><span class="count">${n}</span><span class="grow"></span>
+        ${n ? `<div class="vtog" role="group" aria-label="Ansicht">
+          <button class="${compact ? "" : "on"}" data-action="room-view" data-v="detail" title="Detailliert"><ha-icon icon="mdi:view-agenda-outline"></ha-icon><span>Detailliert</span></button>
+          <button class="${compact ? "on" : ""}" data-action="room-view" data-v="compact" title="Kompakt"><ha-icon icon="mdi:view-grid-outline"></ha-icon><span>Kompakt</span></button>
+        </div>` : ""}
+        ${this._admin && n ? `<button class="link" data-action="room-new"><ha-icon icon="mdi:plus"></ha-icon>Raum</button>` : ""}
+      </div>
+      ${
+        n
+          ? `<div class="rooms ${compact ? "compact" : ""}">${rooms.map((r) => (compact ? this._roomMini(r) : this._roomCard(r))).join("")}</div>`
+          : `<section class="card empty">
+              <ha-icon icon="mdi:home-plus-outline"></ha-icon>
+              <h2>Noch keine Räume</h2>
+              <p>Lege einen Raum an und ordne Thermostate, Fensterkontakte und einen Raumsensor zu.</p>
+              ${this._admin ? `<button class="primary" data-action="room-new"><ha-icon icon="mdi:plus"></ha-icon>Raum anlegen</button>` : ""}
+            </section>`
+      }`;
+  }
+
+  /** Raumkacheln: detailliert oder kompakt (je Gerät gemerkt). */
+  _roomView() {
+    if (this._view) return this._view;
+    try {
+      this._view = localStorage.getItem("hauswerk.raumansicht") || localStorage.getItem("heizwerk.raumansicht") || "detail";
+    } catch (e) {
+      this._view = "detail";
+    }
+    return this._view;
+  }
+
+  /** Wetter aus der gewählten weather-Entität, sonst der ersten gefundenen. */
+  _weather() {
+    const id = this._data.settings.weather_entity || Object.keys(this._hass.states).find((e) => e.startsWith("weather."));
+    const w = id && this._hass.states[id];
+    if (!w || ["unavailable", "unknown"].includes(w.state)) return null;
+    const a = w.attributes || {};
+    const [icon, label] = WEATHER[w.state] || ["mdi:weather-partly-cloudy", w.state];
+    const extra = [a.wind_speed != null ? `Wind ${fmt(a.wind_speed, 0)} ${a.wind_speed_unit || "km/h"}` : "", a.humidity != null ? `${fmt(a.humidity, 0)} % Feuchte` : ""].filter(Boolean).join(" · ");
+    return { icon, label, temp: this._status?.outside_temp ?? a.temperature, extra, name: a.friendly_name || id };
+  }
+  _gauge(avg, target) {
+    // Eigener Ring: Bogen 135°…405°, Skala 14–26 °C
+    const pct = (t) => Math.min(1, Math.max(0, ((t ?? 14) - 14) / 12));
+    const R = 62, C = 2 * Math.PI * R, arc = 0.75 * C;
+    const val = pct(avg) * arc;
+    const tAng = 135 + pct(target) * 270;
+    const tx = 80 + R * Math.cos((tAng * Math.PI) / 180);
+    const ty = 80 + R * Math.sin((tAng * Math.PI) / 180);
+    return `
+      <div class="gauge" aria-hidden="true">
+        <svg viewBox="0 0 160 160">
+          <defs><linearGradient id="g" x1="0" x2="1" y1="1" y2="0"><stop offset="0" stop-color="#5eead4"/><stop offset=".6" stop-color="#fde047"/><stop offset="1" stop-color="#fb923c"/></linearGradient></defs>
+          <circle cx="80" cy="80" r="${R}" fill="none" stroke="rgba(255,255,255,.14)" stroke-width="12" stroke-linecap="round"
+            stroke-dasharray="${arc} ${C}" transform="rotate(135 80 80)"/>
+          <circle cx="80" cy="80" r="${R}" fill="none" stroke="url(#g)" stroke-width="12" stroke-linecap="round"
+            stroke-dasharray="${val} ${C}" transform="rotate(135 80 80)"/>
+          ${target != null ? `<circle cx="${tx}" cy="${ty}" r="7" fill="#fff" stroke="rgba(0,0,0,.25)" stroke-width="2"/>` : ""}
+          <text x="80" y="76" text-anchor="middle" class="g-small">Soll Ø</text>
+          <text x="80" y="100" text-anchor="middle" class="g-big">${fmt(target)}°</text>
+        </svg>
+      </div>`;
+  }
+
+  _presenceCard(inline = false) {
+    const s = this._status || {};
+    const settings = this._data.settings;
+    const mode = s.vacation ? "urlaub" : s.away ? "abwesend" : "home";
+    const persons = (settings.persons || []).length;
+    const text = {
+      home: persons
+        ? `Heizpläne laufen normal · abwesend nach ${settings.away_delay} Min. ohne Personen`
+        : `Heizpläne laufen normal · <button class="link inline" data-action="settings-go" data-sub="presence">Personen wählen</button>, damit Abwesenheit erkannt wird`,
+      abwesend: `${s.long_away ? `Lange niemand da – Frostschutz ${fmt(settings.frost_temp)} °C` : settings.away_action === "off" ? "Thermostate aus" : settings.away_mode === "offset" ? `Alle Räume ${fmt(settings.away_offset)} K kühler` : `Alle Räume höchstens ${fmt(settings.away_temp)} °C`} · ${s.presence_force ? "von Hand gesetzt" : "endet, wenn jemand heimkommt"}`,
+      urlaub: (() => {
+        // Ende des Urlaubs: aus dem laufenden Kalendertermin oder dem eingetragenen Zeitraum
+        const src = settings.vacation_source || "period";
+        const ev = src === "calendar" ? (s.vacation_events || []).find((e) => new Date(e.start) <= new Date()) : null;
+        const end = settings.vacation ? null : ev ? new Date(new Date(ev.end).getTime() - 1) : src === "period" && settings.vacation_to ? new Date(settings.vacation_to) : null;
+        return `Alle Räume auf ${fmt(settings.vacation_temp)} °C${end ? ` bis ${end.toLocaleDateString("de-DE")}` : ""}${ev && !settings.vacation ? ` · laut Kalender: ${esc(ev.summary || "Termin")}` : ""}`;
+      })(),
+    }[mode];
+    const dis = this._admin ? "" : "disabled";
+    const seg = (id, icon, label) =>
+      `<button class="pseg ${mode === id ? "on" : ""}" data-action="presence" data-mode="${id}" ${dis}><ha-icon icon="${icon}"></ha-icon><span>${label}</span></button>`;
+    const toggle = (key, icon, label, title) =>
+      `<label class="ptoggle ${settings[key] ? "on" : ""}" title="${title}"><input type="checkbox" data-action="hmode" data-key="${key}" ${settings[key] ? "checked" : ""} ${dis}><ha-icon icon="${icon}"></ha-icon><span>${label}</span></label>`;
+    return `
+      <section class="${inline ? "" : "card "}presence">
+        <div class="pbar">
+          <div class="psegs">
+            ${seg("home", "mdi:home-heart", "Zu Hause")}
+            ${seg("abwesend", "mdi:home-export-outline", "Abwesend")}
+            ${seg("urlaub", "mdi:palm-tree", "Urlaub")}
+          </div>
+          <div class="ptoggles">
+            ${toggle("guest", "mdi:account-group-outline", "Gäste", "Gäste: nie auf Abwesend absenken")}
+            ${toggle("party", "mdi:party-popper", "Party", "Party: alle Räume auf Komfort")}
+            ${toggle("eco_force", "mdi:leaf", "Eco", "Eco erzwingen: alle Räume auf Eco")}
+          </div>
+        </div>
+        <p class="ptext"><ha-icon icon="mdi:information-outline"></ha-icon><span>${text}</span></p>
+      </section>`;
+  }
+
+  _kpi(color, icon, label, value, unit, sub) {
+    return `
+      <div class="kpi" style="--k:${color}">
+        <div class="kpi-l"><ha-icon icon="${icon}"></ha-icon>${label}</div>
+        <div class="kpi-v">${value}<span>${unit}</span></div>
+        <div class="kpi-s">${sub || "&nbsp;"}</div>
+      </div>`;
+  }
+
+  _sumDay(rep, idx) {
+    const out = { heat: 0, pause: 0, comfort: 0, open: 0 };
+    for (const rows of Object.values(rep)) {
+      const r = rows[idx];
+      if (!r) continue;
+      out.heat += r.heat_min;
+      out.pause += r.pause_min;
+      out.comfort += r.comfort_min;
+      out.open += r.openings;
+    }
+    return out;
+  }
+
+  _sumRange(rep, from, to) {
+    const out = { heat: 0, pause: 0, comfort: 0, open: 0 };
+    for (let i = from; i < to; i++) {
+      const d = this._sumDay(rep, i);
+      for (const k in out) out[k] += d[k];
+    }
+    return out;
+  }
+
+  _stackChart(rep, days, key) {
+    const rooms = this._rooms();
+    const W = 1000, H = 240, padL = 44, padB = 28, padT = 10;
+    const totals = Array.from({ length: days }, (_, i) => rooms.reduce((a, r) => a + ((rep[r.id] || [])[i]?.[key] || 0), 0));
+    const hoursMode = key === "heat_min";
+    const maxRaw = Math.max(...totals, hoursMode ? 60 : 10);
+    const unit = hoursMode ? 60 : 1;
+    const stepCount = 4;
+    let step = Math.ceil(maxRaw / unit / stepCount);
+    if (hoursMode && step > 2) step = Math.ceil(step / 2) * 2;
+    if (!hoursMode) step = Math.max(5, Math.ceil(step / 5) * 5);
+    const max = step * stepCount * unit;
+    const y = (v) => padT + (H - padT - padB) * (1 - v / max);
+    const bw = (W - padL) / days;
+    const grid = Array.from({ length: stepCount + 1 }, (_, i) => {
+      const v = i * step * unit;
+      return `<line x1="${padL}" x2="${W}" y1="${y(v)}" y2="${y(v)}" class="gl"/><text x="${padL - 10}" y="${y(v) + 4}" text-anchor="end" class="ax">${int(v / unit)}</text>`;
+    }).join("");
+    const anyData = totals.some((t) => t > 0);
+    let bars = "";
+    let labels = "";
+    const dates = (rep[rooms[0]?.id] || []).map((r) => r.date);
+    for (let i = 0; i < days; i++) {
+      let acc = 0;
+      const x = padL + i * bw + bw * 0.2;
+      rooms.forEach((r) => {
+        const v = (rep[r.id] || [])[i]?.[key] || 0;
+        if (!v) return;
+        const y1 = y(acc + v), y0 = y(acc);
+        bars += `<rect x="${x}" y="${y1}" width="${bw * 0.6}" height="${Math.max(0, y0 - y1 - 2)}" rx="4" fill="${this._roomColor(r.id)}"><title>${esc(r.name)}: ${hoursMode ? fmt(v / 60) + " h" : int(v) + " Min."}</title></rect>`;
+        acc += v;
+      });
+      const isToday = i === days - 1;
+      if (isToday || i % Math.ceil(days / 7) === (days - 1) % Math.ceil(days / 7)) {
+        const label = isToday ? "heute" : dates[i] ? new Date(dates[i]).toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) : "";
+        labels += `<text x="${padL + i * bw + bw / 2}" y="${H - 6}" text-anchor="middle" class="ax ${isToday ? "today" : ""}">${label}</text>`;
+      }
+    }
+    return `
+      <div class="chart-wrap">
+        <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${grid}${bars}${labels}</svg>
+        ${anyData ? "" : `<div class="chart-note">Noch keine Werte. Hauswerk zählt ab jetzt jede Minute mit.</div>`}
+      </div>
+      <div class="legend">
+        <span class="muted">${hoursMode ? "Stunden" : "Minuten"}</span>
+        ${rooms.map((r) => `<span><i style="background:${this._roomColor(r.id)}"></i>${esc(r.name)}</span>`).join("")}
+      </div>`;
+  }
+
+  /** Raum ohne Thermostat: ruhige graue Kachel mit genau einem Knopf. */
+  _roomSetup(room, mini = false) {
+    return `
+      <article class="${mini ? "rmini" : "room"} setup" id="room-${room.id}" style="--rc:${this._roomColor(room.id)}">
+        <div class="${mini ? "rm-head" : "room-head"}">
+          <${mini ? "span" : "div"} class="${mini ? "rm-ic" : "room-ic"}"><ha-icon icon="${esc(roomIcon(room))}"></ha-icon></${mini ? "span" : "div"}>
+          ${mini ? `<b class="rm-name">${esc(room.name)}</b>` : `<div class="room-t"><h4>${esc(room.name)}</h4><small>noch nicht eingerichtet</small></div>`}
+        </div>
+        <div class="setup-b">
+          ${mini ? "" : `<p><ha-icon icon="mdi:thermostat-box"></ha-icon>Ordne ein Thermostat zu – dann regelt Hauswerk diesen Raum.</p>`}
+          ${this._admin ? `<button class="secondary" data-action="room-edit" data-id="${room.id}" data-rtab="devices"><ha-icon icon="mdi:link-variant-plus"></ha-icon>Geräte zuordnen</button>` : `<p class="muted small">Noch nicht eingerichtet</p>`}
+        </div>
+      </article>`;
+  }
+
+  _roomCard(room) {
+    if (!(room.climates || []).length) return this._roomSetup(room);
+    const s = this._status?.rooms?.[room.id] || {};
+    const type = TYPES[room.type] || TYPES.heizkoerper;
+    const mode = s.mode || "aus";
+    const until = s.override_until ? new Date(s.override_until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : null;
+    const canStep = !["aus", "fenster", "sommer", "entkalken", "boost"].includes(mode);
+    const canBoost = !["aus", "fenster", "entkalken"].includes(mode) && (room.climates || []).length;
+    // Nur was auffällt, als kleines Symbol neben dem Namen (Text im Tooltip)
+    const icons = [];
+    const si = (icon, c, title, text = "") => `<span class="si" style="--c:${c}" title="${esc(title)}"><ha-icon icon="${icon}"></ha-icon>${text}</span>`;
+    if (s.windows_open) icons.push(si("mdi:window-open-variant", "#22d3ee", s.window_pending ? "Fenster offen – Pause beginnt gleich" : "Fenster offen"));
+    if (s.occupied === true) icons.push(si("mdi:account-check-outline", "#fbbf24", "Präsenzmelder: jemand im Raum"));
+    else if (s.occupied === false) icons.push(si("mdi:account-off-outline", "var(--muted)", "Präsenzmelder: niemand im Raum"));
+    const hum = humidityInfo(s.humidity);
+    if (hum) icons.push(si(hum.i, hum.t ? hum.c : "var(--muted)", `Luftfeuchte ${fmt(s.humidity, 0)} %${hum.t ? " – " + hum.t : ""}`, `${fmt(s.humidity, 0)} %`));
+    const tr = !["aus", "fenster", "sommer", "entkalken", "warm", "boost"].includes(mode) ? trend(s.room_temp, s.target) : null;
+    // Genau ein Hinweis, der wichtigste zuerst
+    const note = (() => {
+      if (!(room.climates || []).length) return `<div class="room-note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>Kein Thermostat zugeordnet${this._admin ? `<span class="grow"></span><button class="link" data-action="room-edit" data-id="${room.id}" data-rtab="devices">Zuordnen</button>` : ""}</div>`;
+      if (mode === "manuell" && until) return `<div class="room-note"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>Manuell bis ${until}<span class="grow"></span><button class="link" data-action="ovr-reset" data-id="${room.id}">Zurück zum Plan</button></div>`;
+      if (mode === "boost" && until) return `<div class="room-note boost"><ha-icon icon="mdi:rocket-launch-outline"></ha-icon>Boost bis ${until}<span class="grow"></span><button class="link" data-action="ovr-reset" data-id="${room.id}">Beenden</button></div>`;
+      if (s.window_pending) return `<div class="room-note"><ha-icon icon="mdi:window-open-variant"></ha-icon>Fenster offen – Heizpause beginnt gleich</div>`;
+      if (mode === "vorheizen") {
+        const mins = s.comfort_in ?? s.next_change;
+        const at = mins != null ? new Date(Date.now() + mins * 60000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : null;
+        return `<div class="room-note pre"><ha-icon icon="${s.preheat_mode === "smart" ? "mdi:brain" : "mdi:clock-fast"}"></ha-icon><span>Heizt vor${at ? ` – ${fmt(s.target)} °C ab ${at}` : ""}${s.preheat_mode === "smart" && s.heat_rate ? `<small> · ${fmt(s.heat_rate)} K/h</small>` : ""}</span></div>`;
+      }
+      if (mode === "warm") return `<div class="room-note warmn"><ha-icon icon="mdi:thermometer-check"></ha-icon>Warm genug – aus, bis unter ${fmt(s.target)} °C</div>`;
+      return "";
+    })();
+    const auto = room.enabled !== false;
+    const menu = this._admin
+      ? `<details class="rmenu">
+          <summary class="icon" title="Mehr"><ha-icon icon="mdi:dots-horizontal"></ha-icon></summary>
+          <div class="rm-pop">
+            <button data-action="plan-open" data-id="${room.id}"><ha-icon icon="mdi:calendar-clock"></ha-icon>Heizplan</button>
+            <button data-action="room-edit" data-id="${room.id}"><ha-icon icon="mdi:cog-outline"></ha-icon>Bearbeiten</button>
+            <button data-action="room-auto" data-id="${room.id}"><ha-icon icon="${auto ? "mdi:robot-off-outline" : "mdi:robot-outline"}"></ha-icon>Automatik ${auto ? "ausschalten" : "einschalten"}</button>
+          </div>
+        </details>`
+      : "";
+    return `
+      <article class="room ${mode === "aus" ? "off" : ""}" id="room-${room.id}" style="--rc:${this._roomColor(room.id)}">
+        <div class="room-head">
+          <div class="room-ic">
+            <ha-icon icon="${esc(roomIcon(room))}"></ha-icon>
+            ${s.heating ? `<span class="flame" title="Heizt"><ha-icon icon="mdi:fire"></ha-icon></span>` : ""}
+          </div>
+          <div class="room-t"><h4><button class="rlink" data-action="room-page" data-id="${room.id}" title="Raum öffnen">${esc(room.name)}</button></h4><small><ha-icon icon="${type.icon}"></ha-icon>${type.label}${icons.length ? `<span class="sis">${icons.join("")}</span>` : ""}</small></div>
+          ${this._chip(mode, s.mode_label || "Automatik aus")}
+          ${canBoost ? `<button class="icon ${mode === "boost" ? "hot" : ""}" title="${mode === "boost" ? "Boost beenden" : `Boost: ${this._data.settings.boost_minutes || 30} Min. volle Leistung`}" data-action="${mode === "boost" ? "ovr-reset" : "boost"}" data-id="${room.id}"><ha-icon icon="mdi:rocket-launch-outline"></ha-icon></button>` : ""}
+          ${menu}
+        </div>
+        <div class="room-body">
+          <div class="room-now">
+            <div class="room-temp">${fmt(s.room_temp)}<span>°C</span></div>
+            ${tr ? `<div class="trend" style="--c:${tr.c}"><ha-icon icon="${tr.i}"></ha-icon>${tr.t}</div>` : ""}
+          </div>
+          <div class="room-set">
+            <small><ha-icon icon="mdi:target"></ha-icon>Soll</small>
+            ${canStep ? this._stepper("ovr", room.id, s.target, { small: true }) : `<b class="tgt" style="color:${tint(tempColor(s.target))}">${fmt(s.target)} °C</b>`}
+          </div>
+        </div>
+        ${this._schedStrip(room, s)}
+        ${note}
+      </article>`;
+  }
+
+  // ------------------------------------------------------------ Raum-Detailseite
+  _viewRoom() {
+    const room = this._data.rooms[this._roomId];
+    const back = `<button class="link back" data-action="tab" data-tab="overview"><ha-icon icon="mdi:chevron-left"></ha-icon>Räume</button>`;
+    if (!room) return `${back}<section class="card empty"><ha-icon icon="mdi:door-closed-cancel"></ha-icon><h2>Raum nicht gefunden</h2></section>`;
+    const s = this._status?.rooms?.[room.id] || {};
+    const S = this._hass.states;
+    const set = this._data.settings;
+    const d = this._data.defaults[room.type] || {};
+    const val = (id, attr) => {
+      const st = S[id];
+      if (!st) return "fehlt";
+      if (attr) return st.attributes[attr] != null ? `${fmt(st.attributes[attr])} °C` : "–";
+      const u = st.attributes.unit_of_measurement || "";
+      return `${isNaN(parseFloat(st.state)) ? st.state : fmt(parseFloat(st.state))}${u ? ` ${u}` : ""}`;
+    };
+    const dev = (icon, label, id, value, ok = true) => `
+      <div class="wrow"><ha-icon icon="${icon}"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${label} · ${esc(id)}</small></span><em class="${ok ? "" : "bad"}">${value}</em></div>`;
+    const devices = [
+      ...(room.climates || []).map((id) => {
+        const st = S[id];
+        const bad = !st || ["unavailable", "unknown"].includes(st.state);
+        return dev("mdi:thermostat", "Thermostat", id, bad ? "nicht erreichbar" : `${val(id, "current_temperature")} → ${val(id, "temperature")}${st.attributes.hvac_action === "heating" ? " · heizt" : ""}`, !bad);
+      }),
+      ...(room.windows || []).map((id) => {
+        const st = S[id];
+        const open = st && ["on", "open", "opening", "true"].includes(String(st.state).toLowerCase());
+        return dev(open ? "mdi:window-open-variant" : "mdi:window-closed-variant", "Fenster", id, !st ? "fehlt" : open ? "offen" : "zu", !!st);
+      }),
+      room.temp_sensor ? dev("mdi:thermometer", "Raumsensor", room.temp_sensor, val(room.temp_sensor), !!S[room.temp_sensor]) : "",
+      room.humidity_sensor ? dev("mdi:water-percent", "Luftfeuchte", room.humidity_sensor, val(room.humidity_sensor), !!S[room.humidity_sensor]) : "",
+      room.presence_sensor ? dev("mdi:motion-sensor", "Präsenz", room.presence_sensor, S[room.presence_sensor]?.state === "on" ? "jemand da" : "leer", !!S[room.presence_sensor]) : "",
+    ].join("");
+    const preMode = room.preheat_mode || set.preheat_mode || "fixed";
+    const kv = (k, v) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`;
+    const settings = [
+      kv("Komfort / Eco", `${fmt(room.comfort)} / ${fmt(room.eco)} °C`),
+      kv("Heizplan", esc(this._planLabel(room))),
+      kv("Vorheizen", preMode === "smart" ? `lernend${s.heat_rate ? ` · ${fmt(s.heat_rate)} K/h` : ""}` : preMode === "off" ? "aus" : `${room.lead_min ?? this._leadFor(room.type)} Min.`),
+      kv("Fensterpause nach", `${room.window_delay ?? d.window_delay ?? 0} s`),
+      kv("Bei offenem Fenster", (room.pause_mode || d.pause_mode) === "off" ? "aus" : `${fmt(room.window_temp ?? set.frost_temp)} °C`),
+      kv("Automatik", room.enabled === false ? "aus" : "an"),
+    ].join("");
+    const rep = this._report(7);
+    const rows = rep?.[room.id] || [];
+    const sum = (k) => rows.reduce((a, x) => a + (x[k] || 0), 0);
+    const temps = rows.map((x) => x.avg_temp).filter((t) => t != null);
+    const week = rep
+      ? `<div class="wminis four">
+          <div class="wmini"><ha-icon icon="mdi:fire"></ha-icon><b>${fmt(sum("heat_min") / 60)} h</b><small>geheizt</small></div>
+          <div class="wmini"><ha-icon icon="mdi:sofa-outline"></ha-icon><b>${fmt(sum("comfort_min") / 60)} h</b><small>Komfort</small></div>
+          <div class="wmini"><ha-icon icon="mdi:window-open-variant"></ha-icon><b>${int(sum("openings"))}×</b><small>gelüftet</small></div>
+          <div class="wmini"><ha-icon icon="mdi:thermometer"></ha-icon><b>${temps.length ? fmt(temps.reduce((a, b) => a + b, 0) / temps.length) : "–"} °C</b><small>Ø Raum</small></div>
+        </div>`
+      : `<div class="chart-empty"><div class="spinner"></div></div>`;
+    return `
+      ${back}
+      <div class="rpage">${this._roomCard(room)}</div>
+      <section class="card">
+        ${this._sectionHead("mdi:chart-line", "Letzte 24 Stunden", `<span class="rlegend"><span><i class="lt"></i>Raum</span><span><i class="ls"></i>Soll</span><span><i class="lh"></i>heizt</span><span><i class="lw"></i>Fenster offen</span></span>`)}
+        ${this._historyChart(room)}
+      </section>
+      <div class="rp-grid">
+        <section class="card">${this._sectionHead("mdi:devices", "Geräte", this._admin ? `<button class="link" data-action="room-edit" data-id="${room.id}" data-rtab="devices">Ändern</button>` : "")}<div class="wlist">${devices || `<p class="muted small">Noch keine Geräte zugeordnet.</p>`}</div></section>
+        <section class="card">${this._sectionHead("mdi:tune-variant", "Einstellungen", this._admin ? `<button class="link" data-action="room-edit" data-id="${room.id}">Bearbeiten</button>` : "")}<div class="kvs">${settings}</div></section>
+        <section class="card">${this._sectionHead("mdi:calendar-week", "Letzte 7 Tage", `<button class="link" data-action="tab" data-tab="report">Bericht</button>`)}${week}</section>
+      </div>`;
+  }
+
+  /** Verlauf der letzten 24 h aus dem Recorder (Soll-Sensor von Hauswerk, sonst das Thermostat). */
+  _history(room) {
+    this._hist = this._hist || {};
+    const h = this._hist[room.id];
+    if (h && (h.loading || Date.now() - h.at < 5 * 60000)) return h;
+    const sensor = this._data.target_sensors?.[room.id];
+    const climate = (room.climates || [])[0];
+    const ids = [sensor, climate, room.temp_sensor].filter(Boolean);
+    this._hist[room.id] = { loading: true, at: Date.now() };
+    if (!ids.length) {
+      this._hist[room.id] = { at: Date.now(), error: "Keine Entitäten mit Verlauf" };
+      return this._hist[room.id];
+    }
+    this._hass
+      .callWS({ type: "history/history_during_period", start_time: new Date(Date.now() - 24 * 3600e3).toISOString(), entity_ids: ids, minimal_response: false, no_attributes: false, significant_changes_only: false })
+      .then((res) => (this._hist[room.id] = { at: Date.now(), res, sensor, climate, temp: room.temp_sensor }))
+      .catch((err) => (this._hist[room.id] = { at: Date.now(), error: err?.message || "Verlauf nicht verfügbar" }))
+      .finally(() => this._tab === "room" && this._roomId === room.id && this._renderMain());
+    return this._hist[room.id];
+  }
+
+  _historyChart(room) {
+    const h = this._history(room);
+    if (h.loading) return `<div class="chart-empty"><div class="spinner"></div></div>`;
+    if (h.error) return `<p class="muted small">${esc(h.error)}</p>`;
+    // Einträge vereinheitlichen: komprimiert (s, a, lu) oder ausführlich (state, attributes, last_updated)
+    const norm = (list) =>
+      (list || []).map((x) => ({ s: x.s ?? x.state, a: x.a ?? x.attributes ?? {}, t: x.lu != null ? x.lu * 1000 : new Date(x.last_updated || x.last_changed).getTime() }));
+    const num = (v) => (v == null || v === "" || isNaN(parseFloat(v)) ? null : parseFloat(v));
+    let pts = [];
+    if (h.sensor && h.res[h.sensor]?.length) {
+      let last = {};
+      pts = norm(h.res[h.sensor]).map((x) => {
+        // Attribute fehlen bei unveränderten Einträgen: letzten Stand weiterführen
+        last = { ...last, ...x.a };
+        return { t: x.t, target: num(x.s), temp: num(last.raumtemperatur), heat: !!last.heizt, win: !!last.fenster_offen };
+      });
+    } else if (h.climate && h.res[h.climate]?.length) {
+      let last = {};
+      pts = norm(h.res[h.climate]).map((x) => {
+        last = { ...last, ...x.a };
+        return { t: x.t, target: num(last.temperature), temp: num(last.current_temperature), heat: last.hvac_action === "heating", win: false };
+      });
+    }
+    // eigener Raumsensor hat Vorrang für die Ist-Kurve
+    const tempPts = h.temp && h.res[h.temp]?.length ? norm(h.res[h.temp]).map((x) => ({ t: x.t, v: num(x.s) })) : pts.map((p) => ({ t: p.t, v: p.temp }));
+    if (!pts.length && !tempPts.length) return `<p class="muted small">Noch kein Verlauf aufgezeichnet.</p>`;
+    const W = 1000, H = 220, L = 70, B = 24, T = 10;
+    const t1 = Date.now(), t0 = t1 - 24 * 3600e3;
+    const vals = [...tempPts.map((p) => p.v), ...pts.map((p) => p.target)].filter((v) => v != null);
+    let lo = Math.floor(Math.min(...vals) - 0.5), hi = Math.ceil(Math.max(...vals) + 0.5);
+    if (hi - lo < 4) hi = lo + 4;
+    const x = (t) => L + ((Math.max(t0, t) - t0) / (t1 - t0)) * (W - L);
+    const y = (v) => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+    // Bänder: heizt (unten), Fenster offen (oben)
+    const bands = (key, y0, hgt, cls) => {
+      let out = "", start = null;
+      pts.forEach((p, i) => {
+        if (p[key] && start == null) start = p.t;
+        const next = pts[i + 1]?.t ?? t1;
+        if (start != null && (!p[key] || i === pts.length - 1)) {
+          const end = p[key] ? next : p.t;
+          out += `<rect class="${cls}" x="${x(start)}" y="${y0}" width="${Math.max(2, x(end) - x(start))}" height="${hgt}" rx="2"/>`;
+          start = null;
+        }
+      });
+      return out;
+    };
+    const line = (list, key) => {
+      const ok = list.filter((p) => p[key] != null);
+      if (!ok.length) return "";
+      return ok.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p[key]).toFixed(1)}`).join("") + `L${x(t1)},${y(ok[ok.length - 1][key]).toFixed(1)}`;
+    };
+    const step = (list, key) => {
+      const ok = list.filter((p) => p[key] != null);
+      if (!ok.length) return "";
+      let dStr = `M${x(ok[0].t).toFixed(1)},${y(ok[0][key]).toFixed(1)}`;
+      for (let i = 1; i < ok.length; i++) dStr += `H${x(ok[i].t).toFixed(1)}V${y(ok[i][key]).toFixed(1)}`;
+      return dStr + `H${x(t1)}`;
+    };
+    // Beschriftung als HTML, damit sie auf schmalen Bildschirmen nicht verzerrt
+    const ticks = Array.from({ length: 5 }, (_, i) => lo + ((hi - lo) * i) / 4);
+    const grid = ticks.map((v) => `<line class="gl" x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}"/>`).join("");
+    const ylab = ticks.map((v) => `<span style="top:${(y(v) / H) * 100}%">${fmt(v, 0)}°</span>`).join("");
+    const hours = `<div class="hx">${Array.from({ length: 5 }, (_, i) => `<span>${i === 4 ? "jetzt" : new Date(t0 + i * 6 * 3600e3).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</span>`).join("")}</div>`;
+    return `
+      <div class="chart-wrap hwrap">
+        <div class="hy">${ylab}</div>
+        <svg class="chart hist" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+          ${grid}
+          ${bands("heat", H - B - 8, 8, "bh")}
+          ${bands("win", T, 8, "bw")}
+          <path class="ps" d="${step(pts, "target")}"/>
+          <path class="pt" d="${line(tempPts, "v")}"/>
+        </svg>
+        ${hours}
+      </div>`;
+  }
+
+  /** Zeitfenster, nach denen der Raum heizt (null bei Zeitplan/Kalender aus Home Assistant). */
+  _roomBlocks(room) {
+    if (room.schedule_entity) return null;
+    const plan = this._data.plans?.[room.plan_id];
+    if (plan) return plan.calendar ? null : plan.schedule || [];
+    return room.schedule || [];
+  }
+
+  /** Woher die Komfortzeiten kommen, ob gerade Komfort ist und wann sich das ändert. */
+  _schedInfo(room, s) {
+    const plan = this._data.plans?.[room.plan_id];
+    const blocks = this._roomBlocks(room);
+    const now = new Date();
+    let src, icon, comfort = false;
+    if (room.schedule_entity) {
+      const cal = room.schedule_entity.startsWith("calendar.");
+      icon = cal ? "mdi:calendar-sync" : "mdi:home-assistant";
+      src = this._entityName(room.schedule_entity);
+      comfort = this._hass.states[room.schedule_entity]?.state === "on";
+    } else if (plan?.calendar) {
+      icon = "mdi:calendar-sync";
+      src = plan.name;
+      comfort = (this._status?.plan_events?.[plan.id] || []).some((e) => new Date(e.start) <= now && now < new Date(e.end));
+    } else {
+      icon = plan ? "mdi:calendar-multiple" : "mdi:calendar-edit";
+      src = plan ? plan.name : "Eigener Plan";
+      const day = (now.getDay() + 6) % 7;
+      const min = now.getHours() * 60 + now.getMinutes();
+      comfort = this._daySegments(blocks, room, day).some(([a, b, , c]) => c && a <= min && min < b);
+    }
+    let mins = s.next_change;
+    if (blocks && blocks.length) mins = this._nextSwitch(blocks, room, comfort) ?? mins;
+    let text;
+    if (blocks && !blocks.length) text = "keine Komfortzeit – immer Eco";
+    else if (mins == null) text = comfort ? "Komfortzeit läuft" : "keine Komfortzeit in Sicht";
+    else {
+      const at = new Date(now.getTime() + mins * 60000);
+      const same = at.toDateString() === now.toDateString();
+      const tomorrow = new Date(now.getTime() + 864e5).toDateString() === at.toDateString();
+      const when = `${same ? "" : tomorrow ? "morgen " : at.toLocaleDateString("de-DE", { weekday: "short" }) + " "}${at.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
+      text = comfort ? `Komfort bis ${when}` : `Komfort ab ${when}`;
+    }
+    return { src, icon, comfort, text, blocks };
+  }
+
+  /** Minuten bis Komfort beginnt bzw. endet, aus den Zeitfenstern (bis zu 7 Tage voraus). */
+  _nextSwitch(blocks, room, comfort) {
+    const now = new Date();
+    const today = (now.getDay() + 6) % 7;
+    const min = now.getHours() * 60 + now.getMinutes();
+    for (let k = 0; k < 8; k++) {
+      const segs = this._daySegments(blocks, room, (today + k) % 7);
+      for (const [a, , , c] of segs) {
+        if (k === 0 && a <= min) continue;
+        if (c !== comfort && a > 0) return k * 1440 + a - min;
+        if (c !== comfort && a === 0 && k > 0) return k * 1440 - min;
+      }
+    }
+    return null;
+  }
+
+  /** Heutiger Zeitplan als Streifen mit Jetzt-Marke (Raumkarten). */
+  _schedStrip(room, s, mini = false) {
+    if (room.enabled === false) return "";
+    const info = this._schedInfo(room, s);
+    const day = (new Date().getDay() + 6) % 7;
+    return `
+      <div class="rsched ${mini ? "mini" : ""} ${info.comfort ? "on" : ""}">
+        <div class="rs-top"><ha-icon icon="${info.icon}"></ha-icon><span class="rs-src">${esc(info.src)}</span><span class="grow"></span><b>${esc(info.text)}</b></div>
+        ${info.blocks ? this._dayBar(info.blocks, room, day, true) : ""}
+      </div>`;
+  }
+
+  /** Kompakte Raumkachel: Temperatur, Soll, Betriebsart und der heutige Plan. */
+  _roomMini(room) {
+    if (!(room.climates || []).length) return this._roomSetup(room, true);
+    const s = this._status?.rooms?.[room.id] || {};
+    const mode = s.mode || "aus";
+    const m = MODE[mode] || MODE.aus;
+    const info = room.enabled === false ? null : this._schedInfo(room, s);
+    const day = (new Date().getDay() + 6) % 7;
+    return `
+      <article class="rmini ${mode === "aus" ? "off" : ""}" id="room-${room.id}" style="--rc:${this._roomColor(room.id)}; --c:${m.c}">
+        <div class="rm-head">
+          <span class="rm-ic"><ha-icon icon="${esc(roomIcon(room))}"></ha-icon></span>
+          <button class="rm-name rlink" data-action="room-page" data-id="${room.id}" title="Raum öffnen">${esc(room.name)}</button>
+          ${s.heating ? `<ha-icon class="rm-fire" icon="mdi:fire" title="Heizt"></ha-icon>` : ""}
+          ${s.windows_open ? `<ha-icon class="rm-win" icon="mdi:window-open-variant" title="Fenster offen"></ha-icon>` : ""}
+          ${this._admin ? `<button class="icon tiny" data-action="room-edit" data-id="${room.id}" title="Bearbeiten"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
+        </div>
+        <div class="rm-body">
+          <span class="rm-temp">${fmt(s.room_temp)}<small>°C</small></span>
+          <span class="rm-tgt"><small>Soll</small><b style="color:${tint(tempColor(s.target))}">${fmt(s.target)} °C</b></span>
+        </div>
+        <div class="rm-mode"><ha-icon icon="${m.i}"></ha-icon>${esc(s.mode_label || "Automatik aus")}${info ? `<span class="grow"></span><small>${esc(info.text)}</small>` : ""}</div>
+        ${info?.blocks ? this._dayBar(info.blocks, room, day, true) : ""}
+      </article>`;
+  }
+
+  // ------------------------------------------------------------ Heizpläne: gemeinsame Pläne, im Raum auswählbar
+  _viewPlans() {
+    const rooms = this._rooms();
+    const plans = this._planList();
+    const P = this._plan;
+    const valid = P && (P.kind === "plan" ? !P.id || this._data.plans?.[P.id] : this._data.rooms[P.id]);
+    if (!valid) {
+      this._plan = null;
+      if (plans.length) this._selectPlan("plan", plans[0].id);
+      else if (rooms.length) this._selectPlan("room", rooms[0].id);
+    }
+    const plan = this._plan;
+    const dis = this._admin ? "" : "disabled";
+    const isOn = (kind, id) => plan && plan.kind === kind && plan.id === id;
+    const roomIc = (r) =>
+      r.schedule_entity ? "mdi:home-assistant" : this._data.plans?.[r.plan_id] ? "mdi:link-variant" : (r.schedule || []).length ? "mdi:calendar-edit" : "mdi:calendar-blank-outline";
+    const pills = `
+      <button class="link back" data-action="tab" data-tab="settings"><ha-icon icon="mdi:chevron-left"></ha-icon>Einstellungen</button>
+      <section class="card plangroups">
+        <div class="pg">
+          <span class="pg-l"><ha-icon icon="mdi:calendar-multiple"></ha-icon>Gemeinsame Pläne</span>
+          <div class="pills">
+            ${plans.map((p) => `<button class="pill ${isOn("plan", p.id) ? "on" : ""}" data-action="plan-sel" data-kind="plan" data-id="${p.id}"><ha-icon icon="${p.calendar ? "mdi:calendar-sync" : "mdi:calendar-clock"}"></ha-icon>${esc(p.name)}<em>${this._planRooms(p.id).length}</em></button>`).join("")}
+            ${plan && plan.kind === "plan" && !plan.id ? `<button class="pill on"><ha-icon icon="mdi:calendar-plus"></ha-icon>${esc(plan.name || "Neuer Plan")}</button>` : ""}
+            ${this._admin ? `<button class="pill add" data-action="plan-new"><ha-icon icon="mdi:plus"></ha-icon>Neuer Plan</button>` : ""}
+          </div>
+        </div>
+        ${rooms.length ? `
+        <div class="pg">
+          <span class="pg-l"><ha-icon icon="mdi:floor-plan"></ha-icon>Räume</span>
+          <div class="pills">
+            ${rooms.map((r) => `<button class="pill ${isOn("room", r.id) ? "on" : ""}" style="--rc:${this._roomColor(r.id)}" data-action="plan-sel" data-kind="room" data-id="${r.id}" title="${esc(this._planLabel(r))}"><i></i>${esc(r.name)}<ha-icon class="pi" icon="${roomIc(r)}"></ha-icon></button>`).join("")}
+          </div>
+        </div>` : ""}
+      </section>`;
+    if (!plan) {
+      return `${pills}<section class="card empty"><ha-icon icon="mdi:calendar-blank"></ha-icon><h2>Noch keine Heizpläne</h2>
+        <p>Lege einen gemeinsamen Plan an und wähle ihn in den Räumen aus – oder lege zuerst einen Raum an.</p>
+        ${this._admin ? `<button class="primary" data-action="plan-new"><ha-icon icon="mdi:plus"></ha-icon>Plan anlegen</button>` : ""}</section>`;
+    }
+
+    // Raum, der einem Zeitplan/Kalender oder einem gemeinsamen Plan folgt: nur Hinweis, Bearbeiten beim Plan
+    if (plan.kind === "room") {
+      const room = this._data.rooms[plan.id];
+      const select = this._admin ? this._planSelect(room) : "";
+      if (room.schedule_entity) {
+        const se = this._hass.states[room.schedule_entity];
+        const cal = room.schedule_entity.startsWith("calendar.");
+        const nextIso = cal ? (se?.state === "off" ? se?.attributes?.start_time : null) : se?.attributes?.next_event;
+        const next = nextIso ? new Date(nextIso).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" }) : null;
+        return `${pills}
+          <section class="card empty">
+            <ha-icon icon="${cal ? "mdi:calendar-sync" : "mdi:home-assistant"}"></ha-icon>
+            <h2>${esc(room.name)} folgt ${cal ? "einem Kalender" : "einem Zeitplan"} aus Home Assistant</h2>
+            <p><b>${esc(this._entityName(room.schedule_entity))}</b> ist gerade <b>${se?.state === "on" ? (cal ? "mit Termin (Komfort)" : "an (Komfort)") : (cal ? "ohne Termin (Eco)" : "aus (Eco)")}</b>${next ? ` · nächster ${cal ? "Termin" : "Wechsel"} ${next}` : ""}.</p>
+            ${select}
+          </section>`;
+      }
+      const shared = this._data.plans?.[room.plan_id];
+      if (shared) {
+        return `${pills}
+          <section class="card empty">
+            <ha-icon icon="mdi:link-variant"></ha-icon>
+            <h2>${esc(room.name)} nutzt den Plan „${esc(shared.name)}“</h2>
+            <p>Änderungen am Plan gelten für alle Räume, die ihn nutzen: ${this._planRooms(shared.id).map((r) => esc(r.name)).join(", ")}.</p>
+            ${select}
+            <div class="row-btns">
+              <button class="secondary" data-action="plan-sel" data-kind="plan" data-id="${shared.id}"><ha-icon icon="mdi:calendar-edit"></ha-icon>Plan bearbeiten</button>
+              ${this._admin ? `<button class="secondary" data-action="plan-own" data-id="${room.id}"><ha-icon icon="mdi:content-copy"></ha-icon>Eigene Kopie für ${esc(room.name)}</button>` : ""}
+            </div>
+          </section>`;
+      }
+    }
+
+    const ref = this._planRef();
+    const day = plan.day;
+    const using = plan.kind === "plan" && plan.id ? this._planRooms(plan.id) : [];
+    const head =
+      plan.kind === "plan"
+        ? `
+        <div class="plan-head">
+          <div class="grow">
+            ${this._admin ? `<input class="plan-name" type="text" maxlength="60" data-planname value="${esc(plan.name)}" placeholder="Name des Plans">` : `<h2>${esc(plan.name)}</h2>`}
+            <div class="muted small">${using.length ? `Genutzt von ${using.map((r) => `<span class="uchip" style="--rc:${this._roomColor(r.id)}"><i></i>${esc(r.name)}</span>`).join(" ")}` : "Noch von keinem Raum genutzt – im Raum unter „Heizplan“ auswählen."}</div>
+          </div>
+          ${this._admin && plan.id ? `<button class="icon boxed" title="Plan löschen" data-action="plan-delete"><ha-icon icon="mdi:trash-can-outline"></ha-icon></button>` : ""}
+        </div>
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Komfort- und Eco-Temperatur kommen vom jeweiligen Raum; ein Zeitfenster kann eine eigene Temperatur haben.</p>`
+        : `
+        <div class="plan-head">
+          <div class="grow"><h2>Eigener Heizplan</h2><div class="muted">${esc(ref.name)} · ${TYPES[ref.type].label}</div></div>
+          <div class="plan-temps">
+            <span class="tpill" style="--c:${tempColor(ref.comfort)}">Komfort <b>${fmt(ref.comfort)} °C</b></span>
+            <span class="tpill" style="--c:#93c5fd">Eco <b>${fmt(ref.eco)} °C</b></span>
+          </div>
+        </div>
+        ${this._admin ? `<div class="row-btns">${this._planSelect(ref)}<button class="link" data-action="plan-promote"><ha-icon icon="mdi:calendar-multiple"></ha-icon>Als gemeinsamen Plan speichern</button></div>` : ""}`;
+
+    // Gemeinsamer Plan: feste Zeitfenster oder live aus einem Kalender
+    const src =
+      plan.kind === "plan"
+        ? `<div class="field"><span><ha-icon icon="mdi:source-branch"></ha-icon> Komfortzeiten kommen aus</span>
+            <div class="segs small">${[["times", "Zeitfenster", "mdi:clock-outline"], ["cal", "HA-Kalender (live)", "mdi:calendar-sync"]]
+              .map(([v, l, i]) => `<button class="seg ${(plan.cal ? "cal" : "times") === v ? "on" : ""}" data-action="plan-src" data-v="${v}" ${dis}><ha-icon icon="${i}"></ha-icon>${l}</button>`)
+              .join("")}</div></div>`
+        : "";
+    const saveBar = this._admin && plan.dirty ? `
+      <div class="savebar">
+        <button class="secondary" data-action="plan-revert">Verwerfen</button>
+        <button class="primary" data-action="plan-save">Speichern</button>
+      </div>` : "";
+    if (plan.kind === "plan" && plan.cal) {
+      const st = this._status || {};
+      const saved = plan.id ? this._data.plans?.[plan.id] : null;
+      const fresh = saved && saved.calendar === plan.calendar && (saved.keyword || "") === (plan.keyword || "");
+      const events = fresh ? st.plan_events?.[plan.id] || [] : null;
+      const err = fresh ? st.plan_errors?.[plan.id] : null;
+      const now = new Date();
+      const when = (iso) => new Date(iso).toLocaleString("de-DE", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+      const hhmm = (iso) => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+      return `
+        ${pills}
+        <section class="card">
+          ${head}
+          ${src}
+          <div class="field"><span><ha-icon icon="mdi:calendar"></ha-icon> Kalender</span>${this._picker("plan_calendar", plan.calendar ? [plan.calendar] : [])}</div>
+          <label class="field"><span><ha-icon icon="mdi:text-search"></ha-icon> Nur Termine mit diesen Wörtern (mit Komma getrennt, leer = alle)</span>
+            <input type="text" maxlength="200" data-plankw value="${esc(plan.keyword || "")}" placeholder="z. B. Homeoffice, Heizen" ${dis}></label>
+          <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Läuft ein Termin, heizen alle Räume mit diesem Plan auf Komfort, sonst Eco – vor dem nächsten Termin wird vorgeheizt. Ganztägige Termine zählen nicht. Neue oder geänderte Termine übernimmt Hauswerk innerhalb von 5 Minuten.</p>
+          ${err ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>Kalender nicht lesbar: ${esc(err)}</p>` : ""}
+          ${events ? `
+          <div class="lbl">Nächste Komfortzeiten</div>
+          <div class="evlist">${events.length ? events.map((e) => {
+            const on = new Date(e.start) <= now;
+            return `<div class="ev ${on ? "live" : ""}"><ha-icon icon="${on ? "mdi:fire" : "mdi:calendar-clock"}"></ha-icon>
+              <span class="grow"><b>${esc(e.summary || "Termin")}</b><small>${when(e.start)} – ${hhmm(e.end)}</small></span>${on ? `<em class="badge ok">JETZT</em>` : ""}</div>`;
+          }).join("") : `<p class="muted small">In den nächsten 8 Tagen kein passender Termin – die Räume bleiben auf Eco.</p>`}</div>`
+          : plan.calendar ? `<p class="muted small"><ha-icon icon="mdi:content-save-outline"></ha-icon>Nach dem Speichern zeigt Hauswerk hier die nächsten Termine.</p>` : ""}
+        </section>
+        ${saveBar}`;
+    }
+
+    return `
+      ${pills}
+      <section class="card">
+        ${head}
+        ${src}
+        <div class="lbl">Vorschau für Tag${plan.kind === "plan" ? ` <span class="muted small">(mit ${using.length ? esc(ref.name) : "Komfort 21 °C / Eco 18 °C"})</span>` : ""}</div>
+        <div class="daypills">
+          ${DAYS.map((d, i) => `<button class="dp ${i === day ? "on" : ""}" data-action="plan-preview" data-day="${i}">${d}</button>`).join("")}
+        </div>
+        ${this._dayBar(plan.blocks, ref, day)}
+        <div class="muted small legend-line">${["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"][day]}
+          <span><i style="background:color-mix(in srgb, #60a5fa 38%, var(--card2))"></i>Eco</span>
+          <span><i style="background:${tempColor(ref.comfort)}"></i>Komfort</span>
+          <span><i style="background:linear-gradient(90deg,#fde047,#fb923c)"></i>eigene Temperatur</span>
+        </div>
+        <div class="week-mini">
+          ${DAYS.map((d, i) => `<div class="wm-row"><span>${d}</span>${this._dayBar(plan.blocks, ref, i, true)}</div>`).join("")}
+        </div>
+      </section>
+
+      <div class="blocks">
+        ${plan.blocks.length ? plan.blocks.map((b, i) => this._blockCard(b, i, ref, dis)).join("") : `<section class="card empty small"><p>Keine Komfortzeiten: ${plan.kind === "plan" ? "Räume mit diesem Plan bleiben" : `${esc(ref.name)} bleibt`} immer auf Eco.</p></section>`}
+      </div>
+
+      ${this._admin ? `
+      <div class="plan-tools">
+        <button class="addbtn" data-action="plan-add"><ha-icon icon="mdi:plus"></ha-icon>Zeitfenster hinzufügen</button>
+        <label class="ghost select-link"><ha-icon icon="mdi:file-download-outline"></ha-icon>Vorlage laden
+          <select data-action="plan-preset"><option value=""></option>${Object.entries(PLAN_PRESETS).map(([k, p]) => `<option value="${k}">${esc(p.label)}</option>`).join("")}</select>
+        </label>
+        <button class="ghost" data-action="import-open"><ha-icon icon="mdi:calendar-import"></ha-icon>Aus Kalender importieren</button>
+      </div>
+      ${plan.dirty ? `
+      <div class="savebar">
+        <button class="secondary" data-action="plan-revert">Verwerfen</button>
+        <button class="primary" data-action="plan-save">Speichern</button>
+      </div>` : ""}` : ""}`;
+  }
+
+  /** Räume, die einen gemeinsamen Plan nutzen. */
+  _planRooms(planId) {
+    return this._rooms().filter((r) => r.plan_id === planId && !r.schedule_entity);
+  }
+
+  /** Raum für Vorschau-Farben: der Raum selbst bzw. der erste Raum, der den Plan nutzt. */
+  _planRef() {
+    const P = this._plan;
+    if (P.kind === "room") return this._data.rooms[P.id];
+    const first = P.id ? this._planRooms(P.id)[0] : null;
+    return first || { name: "Beispiel", type: "heizkoerper", comfort: 21, eco: 18 };
+  }
+
+  /** Auswahl, welchem Plan ein Raum folgt (direkt speichern). */
+  _planSelect(room) {
+    if (room.schedule_entity) {
+      return `<button class="secondary" data-action="room-edit" data-id="${room.id}"><ha-icon icon="mdi:calendar-edit"></ha-icon>Im Raum auf einen Heizplan umstellen</button>`;
+    }
+    return `
+      <label class="field inline-sel"><span><ha-icon icon="mdi:calendar-clock"></ha-icon> ${esc(room.name)} folgt</span>
+        <select data-action="room-plan" data-id="${room.id}">
+          ${this._planList().map((p) => `<option value="${p.id}" ${room.plan_id === p.id ? "selected" : ""}>Plan „${esc(p.name)}“</option>`).join("")}
+          <option value="" ${this._data.plans?.[room.plan_id] ? "" : "selected"}>Eigener Plan</option>
+        </select>
+      </label>`;
+  }
+
+  _selectPlan(kind, id) {
+    const day = this._plan?.day ?? (new Date().getDay() + 6) % 7;
+    const src = kind === "plan" ? this._data.plans?.[id] : this._data.rooms[id];
+    this._plan = { kind, id, name: src?.name || "", blocks: clone(src?.schedule || []), dirty: false, day,
+      cal: kind === "plan" && !!src?.calendar, calendar: src?.calendar || null, keyword: src?.keyword || "" };
+  }
+  /** Segmente eines Tages: [start, end, temp, isComfort], lückenlos 0–1440. */
+  _daySegments(blocks, room, day) {
+    const cover = [];
+    for (const b of blocks) {
+      const s = hm(b.start);
+      let e = hm(b.end);
+      if (e <= s) e += 1440;
+      const t = b.temp ?? room.comfort;
+      for (const d of b.days || []) {
+        if (d === day) cover.push([s, Math.min(e, 1440), t]);
+        if (e > 1440 && (d + 1) % 7 === day) cover.push([0, e - 1440, t]);
+      }
+    }
+    const cuts = new Set([0, 1440]);
+    cover.forEach(([s, e]) => (cuts.add(s), cuts.add(e)));
+    const pts = [...cuts].sort((a, b) => a - b);
+    const segs = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const hits = cover.filter(([s, e]) => s <= a && b <= e).map((c) => c[2]);
+      const t = hits.length ? Math.max(...hits) : room.eco;
+      const last = segs[segs.length - 1];
+      if (last && last[2] === t) last[1] = b;
+      else segs.push([a, b, t, hits.length > 0]);
+    }
+    return segs;
+  }
+
+  _dayBar(blocks, room, day, mini = false) {
+    const segs = this._daySegments(blocks, room, day);
+    const now = new Date();
+    const today = (now.getDay() + 6) % 7;
+    const nowPct = ((now.getHours() * 60 + now.getMinutes()) / 1440) * 100;
+    const bar = segs
+      .map(
+        ([s, e, t, comfort]) =>
+          `<div class="dseg ${comfort ? "" : "eco"}" style="left:${(s / 1440) * 100}%;width:${((e - s) / 1440) * 100}%;background:${tempColor(t)}" title="${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}–${String(Math.floor(e / 60)).padStart(2, "0")}:${String(e % 60).padStart(2, "0")} · ${fmt(t)} °C"></div>`
+      )
+      .join("");
+    if (mini) return `<div class="dbar mini">${bar}${day === today ? `<div class="now" style="left:${nowPct}%"></div>` : ""}</div>`;
+    return `
+      <div class="dbar">${bar}${day === today ? `<div class="now" style="left:${nowPct}%"></div>` : ""}</div>
+      <div class="dscale">${[0, 6, 12, 18, 24].map((h) => `<span>${h}</span>`).join("")}</div>`;
+  }
+
+  _blockCard(b, i, room, dis) {
+    const days = b.days || [];
+    let dur = hm(b.end) - hm(b.start);
+    if (dur <= 0) dur += 1440;
+    const durTxt = dur > 0 ?`${Math.floor(dur / 60)} h${dur % 60 ? ` ${dur % 60} min` : ""}` : "";
+    return `
+      <section class="block" style="--tc:${tempColor(b.temp ?? room.comfort)}">
+        <div class="block-top">
+          <div class="times">
+            <label class="timebox"><input type="time" value="${esc(b.start)}" data-plan="start" data-i="${i}" ${dis}><ha-icon icon="mdi:clock-outline"></ha-icon></label>
+            <span class="muted">bis</span>
+            <label class="timebox"><input type="time" value="${esc(b.end)}" data-plan="end" data-i="${i}" ${dis}><ha-icon icon="mdi:clock-outline"></ha-icon></label>
+            ${durTxt ? `<span class="dur">${durTxt}${hm(b.end) <= hm(b.start) ? " · bis zum Folgetag" : ""}</span>` : ""}
+          </div>
+          <div class="block-temp">
+            ${this._admin ? this._stepper("blk", i, b.temp, { placeholder: room.comfort }) : `<b style="color:${tint(tempColor(b.temp ?? room.comfort))}">${fmt(b.temp ?? room.comfort)} °C</b>`}
+            ${b.temp != null && this._admin ? `<button class="link tiny" data-action="blk-comfort" data-i="${i}">= Komfort</button>` : `<span class="tiny muted">${b.temp == null ? "Komfort" : ""}</span>`}
+          </div>
+          ${this._admin ? `<button class="icon boxed" title="Entfernen" data-action="plan-del" data-i="${i}"><ha-icon icon="mdi:trash-can-outline"></ha-icon></button>` : ""}
+        </div>
+        <div class="lbl">Gilt an (mehrere Tage möglich)</div>
+        <div class="daypills">
+          ${DAYS.map((d, di) => `<button class="dp ${days.includes(di) ? "on" : ""}" data-action="plan-day" data-i="${i}" data-day="${di}" ${dis}>${d}</button>`).join("")}
+        </div>
+        ${this._admin ? `
+        <div class="quick">
+          <button class="link" data-action="plan-days" data-i="${i}" data-set="0,1,2,3,4">Mo–Fr</button>
+          <button class="link" data-action="plan-days" data-i="${i}" data-set="5,6">Sa–So</button>
+          <button class="link" data-action="plan-days" data-i="${i}" data-set="0,1,2,3,4,5,6">Alle Tage</button>
+          <button class="link" data-action="plan-copy" data-i="${i}"><ha-icon icon="mdi:content-copy"></ha-icon>Kopie</button>
+        </div>` : ""}
+      </section>`;
+  }
+
+  // ------------------------------------------------------------ Bericht
+  _viewReport() {
+    const rooms = this._rooms();
+    const days = this._reportDays;
+    const rep = this._report(days);
+    const pills = `<div class="pills">${[7, 14, 30]
+      .map((d) => `<button class="pill ${d === days ? "on" : ""}" data-action="report-days" data-days="${d}">${d} Tage</button>`)
+      .join("")}</div>`;
+    if (!rooms.length) return `${pills}<section class="card empty"><ha-icon icon="mdi:chart-bar"></ha-icon><h2>Noch keine Räume</h2></section>`;
+    if (!rep) return `${pills}<section class="card"><div class="chart-empty"><div class="spinner"></div></div></section>`;
+    const tot = this._sumRange(rep, 0, days);
+    const row = (r) => {
+      const rows = rep[r.id] || [];
+      const sum = (k) => rows.reduce((a, x) => a + (x[k] || 0), 0);
+      const temps = rows.map((x) => x.avg_temp).filter((t) => t != null);
+      const avg = temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null;
+      return `<tr>
+        <td><span class="rdot" style="background:${this._roomColor(r.id)}"></span>${esc(r.name)}<small>${TYPES[r.type].label}</small></td>
+        <td>${fmt(sum("heat_min") / 60)} h</td><td>${fmt(sum("comfort_min") / 60)} h</td>
+        <td>${int(sum("pause_min"))} Min.</td><td>${int(sum("openings"))}×</td>
+        <td style="color:${tint(tempColor(avg))}">${fmt(avg)} °C</td></tr>`;
+    };
+    return `
+      ${pills}
+      <div class="kpis">
+        ${this._kpi("#2dd4bf", "mdi:fire", "Geheizt", fmt(tot.heat / 60), "h", `Ø ${fmt(tot.heat / 60 / days)} h am Tag`)}
+        ${this._kpi("#60a5fa", "mdi:sofa-outline", "Komfortzeit", fmt(tot.comfort / 60), "h", "Summe aller Räume")}
+        ${this._kpi("#a78bfa", "mdi:window-open-variant", "Fensterpause", int(tot.pause), "Min.", "Thermostat abgesenkt")}
+        ${this._kpi("#f472b6", "mdi:window-maximize", "Fenster geöffnet", int(tot.open), "×", `in ${days} Tagen`)}
+      </div>
+      <section class="card">
+        ${this._sectionHead("mdi:fire", `Heizdauer pro Tag · ${days} Tage`)}
+        ${this._stackChart(rep, days, "heat_min")}
+      </section>
+      <section class="card">
+        ${this._sectionHead("mdi:window-open-variant", `Fensterpause pro Tag · ${days} Tage`)}
+        ${this._stackChart(rep, days, "pause_min")}
+      </section>
+      <section class="card">
+        ${this._sectionHead("mdi:table", "Räume im Vergleich")}
+        <div class="table-wrap"><table>
+          <thead><tr><th>Raum</th><th>Geheizt</th><th>Komfort</th><th>Pause</th><th>Fenster</th><th>Ø Raum</th></tr></thead>
+          <tbody>${rooms.map(row).join("")}</tbody>
+        </table></div>
+        <p class="muted small">Geheizt: Minuten, in denen ein Thermostat „heizt“ meldet (ohne diese Angabe: Raum unter Soll).</p>
+      </section>`;
+  }
+
+  // ------------------------------------------------------------ Einstellungen: eine flache Liste, Details im Pop-up
+  _setHelpers(p) {
+    const dis = this._admin ? "" : "disabled";
+    return {
+      dis,
+      minutes: (key, def, min = 0, max = 240, step = 1, unit = "Min.") =>
+        `<div class="unit"><input type="number" step="${step}" min="${min}" max="${max}" data-set="${key}" value="${p[key] ?? def}" ${dis}><i>${unit}</i></div>`,
+      segs: (key, options, def) =>
+        `<div class="segs small">${options
+          .map(([v, l, icon]) => `<button class="seg ${(p[key] || def) === v ? "on" : ""}" data-action="set-seg" data-key="${key}" data-v="${v}" ${dis}>${icon ? `<ha-icon icon="${icon}"></ha-icon>` : ""}${l}</button>`)
+          .join("")}</div>`,
+      sw: (key) => `<label class="switch"><input type="checkbox" data-set="${key}" ${p[key] ? "checked" : ""} ${dis}><span></span></label>`,
+      head: (icon, title) => `<div class="sub-h"><ha-icon icon="${icon}"></ha-icon>${title}</div>`,
+    };
+  }
+
+  _planList() {
+    return Object.values(this._data.plans || {}).sort((a, b) => a.name.localeCompare(b.name, "de"));
+  }
+
+  /** Woher ein Raum seine Komfortzeiten bekommt, als Kurztext. */
+  _planLabel(r) {
+    if (r.schedule_entity) return `${r.schedule_entity.startsWith("calendar.") ? "Kalender" : "Zeitplan"} ${this._entityName(r.schedule_entity)}`;
+    const plan = this._data.plans?.[r.plan_id];
+    if (plan) return `Plan „${plan.name}“${plan.calendar ? " (Kalender)" : ""}`;
+    return (r.schedule || []).length ? "eigener Plan" : "ohne Plan";
+  }
+
+  _leadFor(type, p = this._data.settings) {
+    return type === "flaeche" ? p.lead_floor ?? 120 : p.lead_radiator ?? 15;
+  }
+
+  /** Alle Einstellungen als Zeilen: Gruppe, Symbol, Titel und der aktuelle Stand. */
+  _settingRows() {
+    const p = this._data.settings;
+    const s = this._status || {};
+    const rooms = this._rooms();
+    const plans = this._planList();
+    const persons = (p.persons || []).length;
+    const d = (iso) => new Date(iso).toLocaleDateString("de-DE", { day: "numeric", month: "short" });
+    const vac = {
+      off: "Nur von Hand",
+      period: p.vacation_from && p.vacation_to ? `${d(p.vacation_from)} – ${d(p.vacation_to)}` : "Zeitraum – keiner eingetragen",
+      calendar: p.vacation_calendar ? `Kalender ${this._entityName(p.vacation_calendar)}` : "Kalender – keiner gewählt",
+    }[p.vacation_source || "period"];
+    const season = {
+      off: "Immer Heizperiode",
+      auto: `Sommerpause ab ${fmt(p.summer_temp ?? 16)} °C außen`,
+      entity: `Nach ${p.season_entity ? this._entityName(p.season_entity) : "Entität"}`,
+      on: "Sommerpause von Hand an",
+    }[p.summer_mode || "off"];
+    const pre = { smart: "Lernend", fixed: `Feste Zeit · ${this._leadFor("heizkoerper")} / ${this._leadFor("flaeche")} Min.`, off: "Aus" }[p.preheat_mode || "fixed"];
+    const own = rooms.filter((r) => r.preheat_mode).length;
+    const shared = rooms.filter((r) => !r.schedule_entity && this._data.plans?.[r.plan_id]).length;
+    const away = p.away_action === "off" ? "Thermostate aus" : p.away_mode === "offset" ? `${fmt(p.away_offset)} K kühler` : `höchstens ${fmt(p.away_temp)} °C`;
+    const rows = [
+      { g: "Haus", id: "presence", icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit",
+        sum: persons ? `${persons} Person${persons > 1 ? "en" : ""} · ${away} nach ${p.away_delay} Min.` : "Noch keine Personen gewählt", warn: !persons, words: "personen abwesend heimweg nähe entfernung gäste" },
+      { g: "Haus", id: "vacation", icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub", sum: `${vac} · ${fmt(p.vacation_temp)} °C`, on: s.vacation, words: "kalender zeitraum stichwort ferien reise" },
+      { g: "Haus", id: "season", icon: s.summer ? "mdi:weather-sunny" : "mdi:snowflake-thermometer", c: "#facc15", title: "Saison", sum: season + (s.summer ? " · gerade Sommerpause" : ""), words: "sommer sommerpause heizperiode außentemperatur" },
+      { g: "Haus", id: "weather", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter",
+        sum: `${p.weather_entity ? this._entityName(p.weather_entity) : "automatisch"}${p.outside_sensor ? ` · Außen: ${this._entityName(p.outside_sensor)}` : ""}`, words: "wetter außentemperatur sensor banner" },
+      { g: "Heizen", id: "plans", icon: "mdi:calendar-clock", c: "#60a5fa", title: "Heizpläne",
+        sum: plans.length ? `${plans.length} gemeinsame${plans.length === 1 ? "r Plan" : " Pläne"} · ${shared} von ${rooms.length} Räumen nutzen sie` : "Noch kein gemeinsamer Plan", go: "plans", words: "zeitplan komfortzeit kalender import vorlage" },
+      { g: "Heizen", id: "preheat", icon: "mdi:clock-fast", c: "#fb923c", title: "Vorheizen", sum: pre + (own ? ` · ${own} ${own > 1 ? "Räume" : "Raum"} mit eigener Einstellung` : ""), words: "lernen lernend fest aus vorlauf aufheizen" },
+      { g: "Heizen", id: "protect", icon: "mdi:snowflake-thermometer", c: "#38bdf8", title: "Frostschutz", sum: `${fmt(p.frost_temp)} °C bei offenem Fenster und in der Sommerpause`, words: "fenster frost" },
+      { g: "Heizen", id: "boost", icon: "mdi:rocket-launch-outline", c: "#f43f5e", title: "Boost", sum: `${p.boost_minutes || 30} Min. volle Leistung`, words: "boost schnell" },
+      { g: "Heizen", id: "liming", icon: "mdi:water-sync", c: "#38bdf8", title: "Entkalkungsschutz",
+        sum: p.liming ? `${["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"][p.liming_day ?? 0]}, ${p.liming_time || "10:00"} Uhr · ${p.liming_minutes || 5} Min.` : "Aus", words: "ventil entkalken festsitzen" },
+      { g: "Heizen", id: "calibration", icon: "mdi:tune-vertical-variant", c: "#a78bfa", title: "Kalibrierung", sum: `Offset höchstens alle ${p.calibration_interval || 10} Min. anpassen`, words: "offset kalibrieren batterie" },
+      ...rooms.map((r) => ({ g: "Räume", room: r, icon: roomIcon(r), c: this._roomColor(r.id), title: r.name,
+        sum: `${TYPES[r.type].label} · ${(r.climates || []).length}× Thermostat · ${this._planLabel(r)}`, off: r.enabled === false, words: "raum thermostat" })),
+    ];
+    rows.push({ g: "System", id: "access", icon: "mdi:shield-account-outline", c: "#94a3b8", title: "Berechtigungen",
+      sum: p.allow_users ? "Alle Benutzer dürfen ändern" : "Nur Administratoren dürfen ändern", words: "admin benutzer rechte tablet speichern" });
+    if (!rooms.length) rows.push({ g: "Räume", newRoom: true, icon: "mdi:plus", c: "#2dd4bf", title: "Raum anlegen", sum: "Thermostate, Fenster und Sensoren zuordnen", words: "raum neu" });
+    return rows;
+  }
+
+  _viewSettings() {
+    return `
+      <div class="setsearch search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-action="set-search" placeholder="Einstellung suchen …" value="${esc(this._setQuery || "")}" autocomplete="off"></div>
+      <div id="set-list">${this._settingsList()}</div>`;
+  }
+
+  _settingsList() {
+    const q = (this._setQuery || "").toLowerCase().trim();
+    const rows = this._settingRows().filter((r) => !q || `${r.g} ${r.title} ${r.sum} ${r.words}`.toLowerCase().includes(q));
+    if (!rows.length) return `<section class="card empty small"><p>Nichts gefunden für „${esc(q)}“.</p></section>`;
+    const row = (r) => {
+      const attrs = r.room
+        ? `data-action="room-edit" data-id="${r.room.id}" ${this._admin ? "" : "disabled"}`
+        : r.newRoom
+          ? `data-action="room-new" ${this._admin ? "" : "disabled"}`
+          : r.go
+            ? `data-action="tab" data-tab="${r.go}"`
+            : `data-action="pop-open" data-pop="${r.id}"`;
+      return `
+        <button class="srow ${r.warn ? "warn" : ""} ${r.off ? "off" : ""}" ${attrs}>
+          <span class="sr-ic" style="--c:${r.c}"><ha-icon icon="${esc(r.icon)}"></ha-icon></span>
+          <span class="sr-t"><b>${esc(r.title)}${r.on ? ` <em class="badge ok">AKTIV</em>` : ""}${r.off ? ` <em class="badge">AUTOMATIK AUS</em>` : ""}</b><small>${esc(r.sum)}</small></span>
+          <ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon>
+        </button>`;
+    };
+    return [...new Set(rows.map((r) => r.g))]
+      .map(
+        (g) => `
+        <section class="card sgroup">
+          <div class="sg-h">${g}${g === "Räume" && this._admin && this._rooms().length ? `<span class="grow"></span><button class="link" data-action="room-new"><ha-icon icon="mdi:plus"></ha-icon>Raum</button>` : ""}</div>
+          ${rows.filter((r) => r.g === g).map(row).join("")}
+        </section>`
+      )
+      .join("");
+  }
+
+  // ------------------------------------------------------------ Pop-ups
+  _openPop(id, draft = {}) {
+    this._settings = clone(this._data.settings);
+    this._pop = { id, draft };
+    this._renderPop();
+  }
+
+  _closePop() {
+    this._pop = null;
+    this._settings = null;
+    this._renderPop();
+  }
+
+  /** Nach einer Änderung an Einstellungen neu zeichnen: das offene Pop-up, sonst die Seite. */
+  _refreshSettings() {
+    if (this._pop) this._renderPop();
+    else this._renderMain();
+  }
+
+  _renderPop() {
+    const host = this.shadowRoot.getElementById("pop");
+    if (!host) return;
+    if (!this._pop) {
+      host.innerHTML = "";
+      return;
+    }
+    const scroll = host.querySelector(".sheet-body")?.scrollTop || 0;
+    const def = this._popDef(this._pop.id);
+    const foot =
+      def.foot ??
+      `<button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
+       ${this._admin ? `<button class="primary" data-action="pop-save"><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>` : ""}`;
+    host.innerHTML = `
+      <div class="backdrop" data-action="pop-close"></div>
+      <div class="sheet pop" role="dialog" aria-label="${esc(def.title)}">
+        <div class="sheet-head">
+          <span class="sr-ic big" style="--c:${def.c}"><ha-icon icon="${def.icon}"></ha-icon></span>
+          <div class="grow"><h2>${def.title}</h2>${def.sub ? `<div class="muted">${def.sub}</div>` : ""}</div>
+          <button class="icon boxed" data-action="pop-close" title="Schließen"><ha-icon icon="mdi:close"></ha-icon></button>
+        </div>
+        <div class="sheet-body">${this._admin ? "" : `<p class="note warn"><ha-icon icon="mdi:lock-outline"></ha-icon>Nur ansehen: Ändern dürfen Administratoren – oder alle, wenn ein Admin es unter „Berechtigungen“ freigibt.</p>`}${def.body}</div>
+        <div class="sheet-foot">${foot}</div>
+      </div>`;
+    const body = host.querySelector(".sheet-body");
+    if (body && this._pop.keep) body.scrollTop = scroll;
+    this._pop.keep = true;
+  }
+
+  _popDef(id) {
+    const p = this._settings;
+    const s = this._status || {};
+    const { minutes, segs, sw, head, dis } = this._setHelpers(p);
+    const rooms = this._rooms();
+    const st = s.rooms || {};
+    const date = (iso, time = false) =>
+      new Date(iso).toLocaleString("de-DE", time ? { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" } : { weekday: "short", day: "numeric", month: "short" });
+    switch (id) {
+      case "presence":
+        return {
+          icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit", sub: "Gilt für das ganze Haus",
+          body: `
+            <div class="field"><span><ha-icon icon="mdi:account-multiple-outline"></ha-icon> Wer wohnt hier?</span>${this._picker("persons", p.persons || [])}</div>
+            <p class="muted small">Sind alle gewählten Personen weg, senkt Hauswerk nach der Wartezeit ab. Ohne Personen gibt es kein automatisches „Abwesend“.</p>
+            ${head("mdi:home-export-outline", "Wenn niemand da ist")}
+            <div class="field">${segs("away_action", [["lower", "Absenken", "mdi:thermometer-chevron-down"], ["off", "Thermostate aus", "mdi:power"]], "lower")}</div>
+            ${(p.away_action || "lower") === "lower" ? `
+            <div class="field">${segs("away_mode", [["temp", "Auf höchstens …", "mdi:thermometer"], ["offset", "Um … kühler", "mdi:arrow-down-thin"]], "temp")}</div>
+            ${(p.away_mode || "temp") === "offset"
+              ? `<label class="field narrow"><span>Absenkung</span><div class="unit"><input type="number" step="0.5" min="0" max="10" data-set="away_offset" value="${p.away_offset ?? 2}" ${dis}><i>K</i></div></label>`
+              : `<div class="field"><span>Höchstens</span>${this._stepper("set", "away_temp", p.away_temp)}</div>`}` : ""}
+            <div class="row2">
+              <label class="field"><span><ha-icon icon="mdi:logout"></ha-icon> Absenken nach dem Gehen</span>${minutes("away_delay", 10)}</label>
+              <label class="field"><span><ha-icon icon="mdi:login"></ha-icon> Normal heizen nach dem Heimkommen</span>${minutes("arrive_delay", 0)}</label>
+            </div>
+            <label class="field narrow"><span><ha-icon icon="mdi:snowflake-thermometer"></ha-icon> Frostschutz, wenn so lange niemand da war (0 = nie)</span><div class="unit"><input type="number" step="1" min="0" max="60" data-set="long_away_days" value="${p.long_away_days ?? 0}" ${dis}><i>Tage</i></div></label>
+            ${head("mdi:map-marker-radius-outline", "Auf dem Heimweg vorheizen")}
+            <p class="muted small">Entfernungs-Sensoren, z. B. aus der Integration „Nähe“. Ist jemand näher als die Grenze, gilt das Haus schon als bewohnt.</p>
+            <div class="row2">
+              <div class="field"><span>Entfernungs-Sensoren</span>${this._picker("proximity_sensors", p.proximity_sensors || [])}</div>
+              <label class="field"><span>Näher als (0 = aus)</span><div class="unit"><input type="number" step="0.5" min="0" max="200" data-set="proximity_km" value="${p.proximity_km ?? 0}" ${dis}><i>km</i></div></label>
+            </div>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Gäste, Party und Eco schaltest du direkt in der Hausmodus-Leiste auf der Startseite. Präsenzmelder einzelner Räume stehen am Raum unter „Geräte“.</p>`,
+        };
+
+      case "vacation": {
+        const src = p.vacation_source || "period";
+        const saved = this._data.settings;
+        const events = src === "calendar" && saved.vacation_calendar === p.vacation_calendar && saved.vacation_keywords === p.vacation_keywords ? s.vacation_events || [] : null;
+        return {
+          icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub", sub: "Gilt für das ganze Haus",
+          body: `
+            <div class="field"><span>Temperatur im Urlaub (alle Räume)</span>${this._stepper("set", "vacation_temp", p.vacation_temp)}</div>
+            <div class="field"><span>Urlaub automatisch erkennen</span>${segs("vacation_source", [["off", "Aus", "mdi:close-circle-outline"], ["period", "Zeitraum", "mdi:calendar-range"], ["calendar", "HA-Kalender", "mdi:calendar-search"]], "period")}</div>
+            ${src === "period" ? `
+            <div class="row2">
+              <label class="field"><span><ha-icon icon="mdi:calendar-start"></ha-icon> Von</span><input type="date" data-set="vacation_from" value="${esc(p.vacation_from || "")}" ${dis}></label>
+              <label class="field"><span><ha-icon icon="mdi:calendar-end"></ha-icon> Bis</span><input type="date" data-set="vacation_to" value="${esc(p.vacation_to || "")}" ${dis}></label>
+            </div>` : ""}
+            ${src === "calendar" ? `
+            <div class="field"><span><ha-icon icon="mdi:calendar"></ha-icon> Kalender</span>${this._picker("vacation_calendar", p.vacation_calendar ? [p.vacation_calendar] : [])}</div>
+            <label class="field"><span><ha-icon icon="mdi:text-search"></ha-icon> Stichworte im Termin-Titel (mit Komma getrennt, leer = jeder Termin)</span>
+              <input type="text" maxlength="200" data-set="vacation_keywords" value="${esc(p.vacation_keywords ?? "")}" placeholder="Urlaub, Ferien" ${dis}></label>
+            <p class="muted small">Läuft ein passender Termin, ist Urlaub – auch ganztägige und mehrtägige Termine. Hauswerk schaut alle 5 Minuten nach.</p>
+            ${s.vacation_calendar_error && events ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>Kalender nicht lesbar: ${esc(s.vacation_calendar_error)}</p>` : ""}
+            ${events ? `
+            <div class="lbl">Gefundene Termine</div>
+            <div class="evlist">${events.length ? events.map((e) => `
+              <div class="ev ${new Date(e.start) <= new Date() ? "live" : ""}"><ha-icon icon="${new Date(e.start) <= new Date() ? "mdi:palm-tree" : "mdi:calendar-blank-outline"}"></ha-icon>
+                <span class="grow"><b>${esc(e.summary || "Termin")}</b><small>${date(e.start)} – ${date(new Date(e.end).getTime() - 1)}</small></span>${new Date(e.start) <= new Date() ? `<em class="badge ok">JETZT</em>` : ""}</div>`).join("") : `<p class="muted small">In den nächsten 4 Monaten kein passender Termin.</p>`}</div>`
+            : `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Nach dem Speichern zeigt Hauswerk hier die gefundenen Termine.</p>`}` : ""}
+            ${src === "off" ? `<p class="muted small">Urlaub nur von Hand.</p>` : ""}
+            <p class="muted small"><ha-icon icon="mdi:gesture-tap"></ha-icon>Von Hand geht es immer: „Urlaub“ in der Hausmodus-Leiste oder <code>switch.hauswerk_urlaub</code> für Automationen.</p>`,
+        };
+      }
+
+      case "season":
+        return {
+          icon: "mdi:weather-sunny", c: "#facc15", title: "Saison", sub: "Heizperiode oder Sommerpause – für alle Räume",
+          body: `
+            <p class="muted">In der Sommerpause bleiben die Thermostate aus. Zurück in den Heizbetrieb geht es 1 K unter der Schwelle.</p>
+            <div class="field"><span>Sommerpause</span>${segs("summer_mode", [["off", "Nie", "mdi:close-circle-outline"], ["auto", "Nach Außentemperatur", "mdi:thermometer-auto"], ["entity", "Nach Entität", "mdi:toggle-switch-outline"], ["on", "Jetzt an", "mdi:weather-sunny"]], "off")}</div>
+            ${p.summer_mode === "auto" ? `
+            <div class="row2">
+              <div class="field"><span>Außentemperatur</span>${this._picker("outside_sensor", p.outside_sensor ? [p.outside_sensor] : [])}</div>
+              <div class="field"><span>Sommerpause ab</span>${this._stepper("set", "summer_temp", p.summer_temp ?? 16)}</div>
+            </div>` : ""}
+            ${p.summer_mode === "entity" ? `
+            <div class="field"><span>Heizperiode (an = heizen, aus = Sommerpause)</span>${this._picker("season_entity", p.season_entity ? [p.season_entity] : [])}</div>` : ""}
+            ${["auto", "entity"].includes(p.summer_mode) ? `
+            <div class="field"><span>Wenn ${p.summer_mode === "auto" ? "der Außensensor" : "die Entität"} nicht verfügbar ist</span>${segs("summer_fallback", [["keep", "Zustand halten", "mdi:pause-circle-outline"], ["heat", "Heizen", "mdi:fire"], ["summer", "Sommerpause", "mdi:weather-sunny"]], "keep")}</div>` : ""}
+            ${p.summer_mode && p.summer_mode !== "off" ? `
+            <div class="field"><span>Thermostate in der Sommerpause</span>${segs("summer_action", [["off", "Ausschalten", "mdi:power"], ["frost", "Frostschutz", "mdi:snowflake"]], "off")}</div>` : ""}`,
+        };
+
+      case "preheat": {
+        const mode = p.preheat_mode || "fixed";
+        const own = rooms.filter((r) => r.preheat_mode);
+        const label = { smart: "lernend", fixed: "feste Zeit", off: "aus" };
+        return {
+          icon: "mdi:clock-fast", c: "#fb923c", title: "Vorheizen", sub: "Für alle Räume – je Raum änderbar",
+          body: `
+            <p class="muted">Damit ein Raum zu Beginn der Komfortzeit schon warm ist, heizt Hauswerk vorher los.</p>
+            <div class="field">${segs("preheat_mode", [["smart", "Lernen", "mdi:brain"], ["fixed", "Feste Zeit", "mdi:timer-outline"], ["off", "Aus", "mdi:timer-off-outline"]], "fixed")}</div>
+            ${mode === "fixed" ? `
+            <div class="row2">
+              <label class="field"><span><ha-icon icon="mdi:radiator"></ha-icon> Heizkörper</span>${minutes("lead_radiator", 15, 0, 600, 5)}</label>
+              <label class="field"><span><ha-icon icon="mdi:heating-coil"></ha-icon> Flächenheizung</span>${minutes("lead_floor", 120, 0, 600, 5)}</label>
+            </div>
+            <p class="muted small">So viele Minuten vor Beginn der Komfortzeit geht es los. Fußbodenheizungen brauchen deutlich länger.</p>` : ""}
+            ${mode === "smart" ? `
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Hauswerk misst bei jedem Aufheizen, wie viele Grad pro Stunde ein Raum schafft, und startet so früh, dass er pünktlich warm ist – mit 15 % Reserve. Höchstens ${this._data.defaults.heizkoerper.preheat_max} Min. (Heizkörper) bzw. ${this._data.defaults.flaeche.preheat_max} Min. (Fläche) vorher; je Raum änderbar.</p>
+            <div class="lbl">Gelernt</div>
+            <div class="evlist">${rooms.map((r) => {
+              const rs = st[r.id] || {};
+              return `<div class="ev"><ha-icon icon="${esc(roomIcon(r))}"></ha-icon><span class="grow"><b>${esc(r.name)}</b><small>${rs.heat_rate ? `${fmt(rs.heat_rate)} K/h${rs.learned ? " · gelernt" : " · Startwert"}` : "noch nichts gemessen"}</small></span>
+                ${rs.learned && this._admin ? `<button class="link tiny" data-action="preheat-reset" data-id="${r.id}"><ha-icon icon="mdi:restore"></ha-icon>neu lernen</button>` : ""}</div>`;
+            }).join("") || `<p class="muted small">Noch keine Räume.</p>`}</div>` : ""}
+            ${mode === "off" ? `<p class="muted small">Räume heizen erst zu Beginn der Komfortzeit los.</p>` : ""}
+            ${own.length ? `<p class="muted small"><ha-icon icon="mdi:home-edit-outline"></ha-icon>Eigene Einstellung: ${own.map((r) => `${esc(r.name)} (${label[r.preheat_mode]})`).join(", ")} – änderbar am Raum unter „Vorheizen & Fenster“.</p>` : ""}`,
+        };
+      }
+
+      case "protect":
+        return {
+          icon: "mdi:snowflake-thermometer", c: "#38bdf8", title: "Frostschutz",
+          body: `
+            <p class="muted">Diese Temperatur bekommen Thermostate bei offenem Fenster und in der Sommerpause (wenn sie nicht ausgeschaltet werden). Wann die Fensterpause beginnt, stellst du je Raum ein.</p>
+            <div class="field narrow">${this._stepper("set", "frost_temp", p.frost_temp)}</div>`,
+        };
+
+      case "boost":
+        return {
+          icon: "mdi:rocket-launch-outline", c: "#f43f5e", title: "Boost",
+          body: `
+            <p class="muted">Der <ha-icon icon="mdi:rocket-launch-outline"></ha-icon>-Knopf auf einer Raumkarte dreht die Thermostate des Raums für eine Weile ganz auf.</p>
+            <label class="field narrow"><span>Dauer</span>${minutes("boost_minutes", 30, 5, 240, 5)}</label>`,
+        };
+
+      case "liming":
+        return {
+          icon: "mdi:water-sync", c: "#38bdf8", title: "Entkalkungsschutz",
+          body: `
+            <label class="check"><span><b>Einmal pro Woche alle Ventile öffnen</b><small>Damit sie über den Sommer nicht festsitzen.</small></span>${sw("liming")}</label>
+            ${p.liming ? `
+            <div class="row3">
+              <label class="field"><span>Tag</span><select data-set="liming_day" ${dis}>${["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+                .map((d, i) => `<option value="${i}" ${Number(p.liming_day ?? 0) === i ? "selected" : ""}>${d}</option>`)
+                .join("")}</select></label>
+              <label class="field"><span>Uhrzeit</span><input type="time" data-set="liming_time" value="${esc(p.liming_time || "10:00")}" ${dis}></label>
+              <label class="field"><span>Dauer</span>${minutes("liming_minutes", 5, 1, 60)}</label>
+            </div>
+            <label class="check"><span><b>Auch in der Heizperiode</b><small>Sonst nur in der Sommerpause (oder immer, wenn keine Sommerpause genutzt wird).</small></span>${sw("liming_winter")}</label>` : ""}`,
+        };
+
+      case "hints": {
+        const h = this._hints();
+        const row = (x) => {
+          const data = Object.entries(x.data).map(([k, v]) => `data-${k}="${esc(v)}"`).join(" ");
+          const can = this._admin || !["room-edit", "plan-open", "plan-sel"].includes(x.action);
+          return `<button class="hint ${x.lvl}" ${can ? `data-action="${x.action}" data-hint="1" ${data}` : "disabled"}>
+            <span class="sr-ic"><ha-icon icon="${x.icon}"></ha-icon></span>
+            <span class="sr-t"><b>${esc(x.text)}</b>${x.sub ? `<small class="wrap">${esc(x.sub)}</small>` : ""}</span>
+            ${can ? `<ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon>` : ""}</button>`;
+        };
+        const warn = h.filter((x) => x.lvl === "warn"), info = h.filter((x) => x.lvl === "info");
+        return {
+          icon: h.length ? "mdi:bell-badge-outline" : "mdi:bell-check-outline", c: warn.length ? "#f59e0b" : "#34d399", title: "Hinweise",
+          sub: h.length ? `${warn.length} zu beheben · ${info.length} zur Info` : "Alles in Ordnung",
+          body: h.length
+            ? `${warn.length ? `<div class="lbl">Bitte beheben</div><div class="hints">${warn.map(row).join("")}</div>` : ""}
+               ${info.length ? `<div class="lbl" style="margin-top:14px">Gut zu wissen</div><div class="hints">${info.map(row).join("")}</div>` : ""}`
+            : `<div class="wok"><ha-icon icon="mdi:check-circle-outline"></ha-icon>Keine Hinweise – alles läuft.</div>`,
+          foot: `<button class="secondary" data-action="pop-close">Schließen</button>`,
+        };
+      }
+
+      case "widget-add": {
+        const have = new Set(this._widgets().map((w) => w.type));
+        return {
+          icon: "mdi:widgets-outline", c: "#2dd4bf", title: "Widget hinzufügen", sub: "Erscheint auf der Startseite für alle Benutzer",
+          body: `<div class="wcat">${Object.entries(WIDGETS)
+            .map(([k, d]) => `
+              <button class="wcat-i" data-action="w-add" data-type="${k}" style="--c:${d.c}">
+                <span class="sr-ic"><ha-icon icon="${d.icon}"></ha-icon></span>
+                <span class="sr-t"><b>${d.name}${have.has(k) ? ` <em class="badge">SCHON DA</em>` : ""}</b><small class="wrap">${d.text}</small></span>
+                <ha-icon class="sr-go" icon="mdi:plus"></ha-icon>
+              </button>`)
+            .join("")}</div>`,
+          foot: `<button class="secondary" data-action="pop-close">Schließen</button>`,
+        };
+      }
+
+      case "widget": {
+        const dr = this._pop.draft;
+        const w = this._widgets()[dr.i] || {};
+        const def = WIDGETS[w.type] || {};
+        return {
+          icon: def.icon || "mdi:widgets-outline", c: def.c || "#2dd4bf", title: `Widget „${def.name || ""}“`,
+          body: `
+            <label class="field"><span>Titel (leer = „${def.name || ""}“)</span><input type="text" maxlength="40" data-pop="title" value="${esc(dr.title)}" placeholder="${esc(def.name || "")}"></label>
+            <div class="field"><span>Größe</span>
+              <div class="segs small">${[["s", "Klein", "mdi:square-small"], ["m", "Mittel", "mdi:square-outline"], ["l", "Groß", "mdi:rectangle-outline"]]
+                .map(([v, l, i]) => `<button class="seg ${dr.size === v ? "on" : ""}" data-action="w-size" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${l}</button>`)
+                .join("")}</div>
+              <small class="muted">${{ s: "Klein: nur das Wichtigste auf einen Blick.", m: "Mittel: mit Kennzahlen bzw. Liste.", l: "Groß: volle Breite mit allen Einzelheiten." }[dr.size] || ""}</small></div>
+            ${def.forecast ? `
+            <div class="field"><span>Zeitraum</span>
+              <div class="segs small">${[["hourly", "Nächste Stunden", "mdi:clock-outline"], ["daily", "Nächste Tage", "mdi:calendar-week"]]
+                .map(([v, l, i]) => `<button class="seg ${(dr.mode || "hourly") === v ? "on" : ""}" data-action="w-mode" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${l}</button>`)
+                .join("")}</div></div>
+            <div class="field"><span>Wetter-Entität (leer = wie unter Einstellungen › Wetter)</span>${this._picker("w_weather", dr.w_weather ? [dr.w_weather] : [])}</div>
+            <p class="muted small">Kann die Entität keine Stunden-Prognose, zeigt das Widget die Tage (und umgekehrt).</p>` : ""}
+            ${def.config ? `
+            <div class="field"><span>${w.type === "shortcuts" ? "Knöpfe: Szenen, Skripte, Schalter, Lichter …" : "Sensoren und andere Entitäten"}</span>${this._picker("w_entities", dr.w_entities || [])}</div>
+            <p class="muted small">${w.type === "shortcuts" ? "Ein Tipp schaltet um bzw. startet Skript oder Szene. Es gelten die Rechte des angemeldeten Benutzers." : "Zeigt den aktuellen Wert mit Einheit."}</p>` : ""}`,
+          foot: `<button class="secondary" data-action="pop-close">Abbrechen</button><button class="primary" data-action="w-save"><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>`,
+        };
+      }
+
+      case "weather":
+        return {
+          icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter", sub: "Für das Banner in der Raumübersicht",
+          body: `
+            <div class="field"><span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon> Wetter-Entität (leer = erste gefundene)</span>${this._picker("weather_entity", p.weather_entity ? [p.weather_entity] : [])}</div>
+            <div class="field"><span><ha-icon icon="mdi:thermometer"></ha-icon> Außentemperatur (leer = vom Wetter)</span>${this._picker("outside_sensor", p.outside_sensor ? [p.outside_sensor] : [])}</div>
+            <p class="muted small">Der Außensensor wird auch für die Sommerpause nach Außentemperatur genutzt.</p>`,
+        };
+
+      case "access":
+        return {
+          icon: "mdi:shield-account-outline", c: "#94a3b8", title: "Berechtigungen",
+          body: `
+            <p class="muted">Wer darf Einstellungen, Räume und Heizpläne ändern? Temperatur ±, Boost und „Zurück zum Plan“ dürfen immer alle.</p>
+            <label class="check"><span><b>Alle Benutzer dürfen ändern</b><small>Sinnvoll z. B. für ein Wand-Tablet mit eigenem Benutzer ohne Admin-Rechte.</small></span>
+              <span class="switch"><input type="checkbox" data-set="allow_users" ${p.allow_users ? "checked" : ""} ${this._data.user_admin ? "" : "disabled"}><span></span></span></label>
+            ${this._data.user_admin ? "" : `<p class="muted small"><ha-icon icon="mdi:lock-outline"></ha-icon>Das kann nur ein Administrator umstellen.</p>`}`,
+        };
+
+      case "calibration":
+        return {
+          icon: "mdi:tune-vertical-variant", c: "#a78bfa", title: "Kalibrierung",
+          body: `
+            <p class="muted">Gilt für Räume mit „Thermostat kalibrieren“: so oft wird der Offset am Gerät höchstens angepasst. Seltener schont die Batterien.</p>
+            <label class="field narrow"><span>Höchstens alle</span>${minutes("calibration_interval", 10, 1, 120)}</label>`,
+        };
+
+      case "import": {
+        const dr = this._pop.draft;
+        const res = dr.result;
+        return {
+          icon: "mdi:calendar-import", c: "#60a5fa", title: "Aus Kalender importieren", sub: "Termine der nächsten 7 Tage werden Komfortzeiten",
+          body: `
+            <div class="field"><span><ha-icon icon="mdi:calendar"></ha-icon> Kalender</span>${this._picker("import_calendar", dr.import_calendar ? [dr.import_calendar] : [])}</div>
+            <label class="field"><span><ha-icon icon="mdi:text-search"></ha-icon> Nur Termine mit diesen Wörtern (leer = alle)</span><input type="text" maxlength="200" data-pop="keyword" value="${esc(dr.keyword || "")}" placeholder="z. B. Homeoffice, Heizen"></label>
+            <p class="muted small">Gleiche Uhrzeiten an mehreren Tagen werden zu einem Zeitfenster. Ganztägige Termine werden übersprungen. Danach kannst du alles wie gewohnt anpassen.</p>
+            <button class="secondary wide" data-action="import-read" ${dr.import_calendar ? "" : "disabled"}><ha-icon icon="mdi:calendar-search"></ha-icon>Termine lesen</button>
+            ${res ? `
+            <div class="lbl" style="margin-top:16px">${res.length ? `${res.length} Zeitfenster gefunden` : "Keine passenden Termine gefunden"}</div>
+            <div class="evlist">${res.map((b) => `<div class="ev"><ha-icon icon="mdi:clock-outline"></ha-icon><span class="grow"><b>${esc(b.start)} – ${esc(b.end)}</b><small>${b.days.map((d) => DAYS[d]).join(", ")}</small></span></div>`).join("")}</div>` : ""}`,
+          foot: `<button class="secondary" data-action="pop-close">Abbrechen</button>
+            ${res && res.length ? `<button class="secondary" data-action="import-apply" data-mode="append"><ha-icon icon="mdi:plus"></ha-icon>Hinzufügen</button>
+            <button class="primary" data-action="import-apply" data-mode="replace"><ha-icon icon="mdi:swap-horizontal"></ha-icon>Ersetzen</button>` : ""}`,
+        };
+      }
+    }
+    return { icon: "mdi:cog", c: "#94a3b8", title: "Einstellung", body: "" };
+  }
+  // ------------------------------------------------------------ Raum-Dialog
+  _expertOn() {
+    if (this._expert == null) {
+      try {
+        this._expert = (localStorage.getItem("hauswerk.experte") ?? localStorage.getItem("heizwerk.experte")) === "1";
+      } catch (e) {
+        this._expert = false;
+      }
+    }
+    return this._expert;
+  }
+
+  _openRoom(room) {
+    this._dialog = {
+      room: room
+        ? clone(room)
+        : { name: "", type: "heizkoerper", comfort: 21, eco: 18, climates: [], windows: [], schedule: clone(PLAN_PRESETS.berufstaetig.blocks), enabled: true, allow_manual: true },
+      isNew: !room,
+    };
+    // Altes Gesamt-Schalter-Feld in die zwei neuen Schalter überführen
+    const r = this._dialog.room;
+    if (r.allow_manual === false) {
+      r.manual_device = r.manual_device ?? false;
+      r.manual_ui = r.manual_ui ?? false;
+    }
+    r.allow_manual = true;
+    // Neuer Raum: erster gemeinsamer Plan, falls es einen gibt
+    const plans = this._planList();
+    if (!room && plans.length) {
+      r.plan_id = plans[0].id;
+      r.schedule = [];
+    }
+    this._dialog.schedSrc = r.schedule_entity ? "entity" : this._data.plans?.[r.plan_id] ? "plan" : "own";
+    this._renderDialog();
+  }
+
+  _renderDialog() {
+    const host = this.shadowRoot.getElementById("dialog");
+    if (!this._dialog) {
+      host.innerHTML = "";
+      return;
+    }
+    const scroll = host.querySelector(".sheet-body")?.scrollTop || 0;
+    const r = this._dialog.room;
+    const d = this._data.defaults[r.type];
+    const tab = this._dialog.tab || "basis";
+    const num = (key, unit, step, extra = "") =>
+      `<div class="unit"><input type="number" step="${step}" data-room="${key}" value="${r[key] ?? ""}" placeholder="${d[key] ?? 0}" ${extra}><i>${unit}</i></div>`;
+    const check = (key, icon, title, text, { on = !!r[key], disabled = false } = {}) =>
+      `<label class="check"><ha-icon class="ck-ic" icon="${icon}"></ha-icon><span><b>${title}</b><small>${text}</small></span>
+        <span class="switch"><input type="checkbox" data-room="${key}" ${on ? "checked" : ""} ${disabled ? "disabled" : ""}><span></span></span></label>`;
+    const segs = (action, current, options) =>
+      `<div class="segs small">${options
+        .map(([v, l, icon]) => `<button class="seg ${current === v ? "on" : ""}" data-action="${action}" data-v="${v}">${icon ? `<ha-icon icon="${icon}"></ha-icon>` : ""}${l}</button>`)
+        .join("")}</div>`;
+    const hint = `<p class="muted small"><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon>Leere Felder nutzen die Werte für ${TYPES[r.type].label} (grau).</p>`;
+    const guessed = roomIcon({ ...r, icon: null });
+    // Experten-Einstellungen nur auf Wunsch (gemerkt je Gerät)
+    const ex = this._expertOn();
+    const expertHint = (keys) => {
+      const n = keys.filter((k) => r[k] != null && r[k] !== "" && r[k] !== false && !(Array.isArray(r[k]) && !r[k].length)).length;
+      return `<button class="xhint" data-action="expert"><ha-icon icon="mdi:school-outline"></ha-icon><span>${n ? `${n} Experten-Einstellung${n > 1 ? "en" : ""} aktiv` : "Weitere Einstellungen für Experten"}</span><span class="grow"></span>Anzeigen<ha-icon icon="mdi:chevron-right"></ha-icon></button>`;
+    };
+
+    // Reiter mit Punkt, sobald dort etwas eingerichtet ist
+    const TABS_D = [
+      ["basis", "mdi:home-edit-outline", "Raum", false],
+      ["devices", "mdi:thermostat", "Geräte", !!r.presence_sensor],
+      ["window", "mdi:clock-fast", "Vorheizen & Fenster", ["window_delay", "resume_delay", "lead_min", "max_setback", "pause_mode", "preheat_mode", "preheat_max"].some((k) => r[k] != null && r[k] !== "") || r.min_instead_of_off],
+      ["control", "mdi:tune-variant", "Regelung", !!(r.compensation || r.calibration || r.valve_control || r.comfort_entity || r.eco_entity || Number(r.off_above) > 0 || Number(r.aggressive_range) > 0)],
+    ];
+
+    const views = {
+      basis: () => `
+        <label class="field"><span>Name</span><input type="text" maxlength="60" data-room="name" value="${esc(r.name)}" placeholder="z. B. Wohnzimmer"></label>
+        <div class="field"><span>Symbol</span>
+          <div class="icons">
+            <button class="ic-pick ${!r.icon ? "on" : ""}" data-action="room-icon" data-v="" title="Automatisch aus dem Namen"><ha-icon icon="${guessed}"></ha-icon><em>Auto</em></button>
+            ${ROOM_ICON_CHOICES.map((i) => `<button class="ic-pick ${r.icon === i ? "on" : ""}" data-action="room-icon" data-v="${i}" title="${i.replace("mdi:", "")}"><ha-icon icon="${i}"></ha-icon></button>`).join("")}
+          </div>
+        </div>
+        <div class="field"><span>Heizungsart</span>
+          <div class="types">
+            ${Object.entries(TYPES)
+              .map(([k, t]) => `
+              <button class="type ${r.type === k ? "on" : ""}" data-action="room-type" data-type="${k}">
+                <ha-icon icon="${t.icon}"></ha-icon><b>${t.label}</b><small>${t.text}</small>
+              </button>`)
+              .join("")}
+          </div>
+        </div>
+        <div class="row2">
+          <div class="field"><span><ha-icon icon="mdi:sofa-outline"></ha-icon> Komfort</span>${this._stepper("dlg", "comfort", r.comfort)}</div>
+          <div class="field"><span><ha-icon icon="mdi:leaf"></ha-icon> Eco</span>${this._stepper("dlg", "eco", r.eco)}</div>
+        </div>
+        ${this._schedField(r, segs)}
+        ${check("enabled", "mdi:robot-outline", "Automatik aktiv", "Aus: Hauswerk lässt die Thermostate dieses Raums in Ruhe.", { on: r.enabled !== false })}`,
+
+      devices: () => `
+        <div class="field"><span><ha-icon icon="mdi:thermostat"></ha-icon> Thermostate</span>${this._picker("climates", r.climates || [])}</div>
+        <div class="field"><span><ha-icon icon="mdi:window-closed-variant"></ha-icon> Fenster- und Türkontakte</span>${this._picker("windows", r.windows || [])}</div>
+        <div class="row2">
+          <div class="field"><span><ha-icon icon="mdi:thermometer"></ha-icon> Raumtemperatur</span>${this._picker("temp_sensor", r.temp_sensor ? [r.temp_sensor] : [])}</div>
+          <div class="field"><span><ha-icon icon="mdi:water-percent"></ha-icon> Luftfeuchte</span>${this._picker("humidity_sensor", r.humidity_sensor ? [r.humidity_sensor] : [])}</div>
+        </div>
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Raumtemperatur und Luftfeuchte sind optional. Ohne Raumsensor nutzt Hauswerk den Messwert der Thermostate.</p>
+        <div class="sub-h"><ha-icon icon="mdi:motion-sensor"></ha-icon>Präsenzmelder im Raum <span class="muted small">· optional</span></div>
+        <div class="field">${this._picker("presence_sensor", r.presence_sensor ? [r.presence_sensor] : [])}</div>
+        ${r.presence_sensor ? `
+        <div class="field"><span>Wann heizen</span>
+          ${segs("presence-mode", r.presence_mode || "plan", [["plan", "In Komfortzeiten, wenn jemand da ist", "mdi:calendar-account-outline"], ["always", "Immer, sobald jemand da ist", "mdi:account-check-outline"]])}
+        </div>
+        <div class="row2">
+          <label class="field"><span><ha-icon icon="mdi:account-arrow-right-outline"></ha-icon> Belegt nach</span>${num("presence_on", "Min.", 1, 'min="0" max="240"')}</label>
+          <label class="field"><span><ha-icon icon="mdi:account-arrow-left-outline"></ha-icon> Leer nach</span>${num("presence_off", "Min.", 1, 'min="0" max="240"')}</label>
+        </div>
+        <div class="field"><span><ha-icon icon="mdi:calendar-clock"></ha-icon> Nur berücksichtigen, solange an (optional)</span>${this._picker("presence_schedule", r.presence_schedule ? [r.presence_schedule] : [])}</div>` : `<p class="muted small">Mit Präsenzmelder bleibt der Raum während der Komfortzeit auf Eco, solange niemand darin ist.</p>`}
+        <p class="muted small"><ha-icon icon="mdi:home-account"></ha-icon>Wer zu Hause ist (Personen, Abwesend, Urlaub), gilt für das ganze Haus: Einstellungen › Anwesenheit.</p>`,
+
+      window: () => `
+        ${hint}
+        ${this._preheatSection(r, d, num, segs, ex)}
+        <div class="sub-h"><ha-icon icon="mdi:window-open-variant"></ha-icon>Fenster</div>
+        <div class="field"><span>Bei offenem Fenster</span>
+          ${segs("pause-mode", r.pause_mode || "", [["", `Standard (${d.pause_mode === "off" ? "aus" : "Frostschutz"})`, "mdi:auto-mode"], ["frost", "Frostschutz", "mdi:snowflake"], ["off", "Ausschalten", "mdi:power"]])}
+        </div>
+        <div class="row2">
+          <label class="field"><span><ha-icon icon="mdi:timer-sand"></ha-icon> Fensterpause nach</span>${num("window_delay", "s", 10, 'min="0" max="7200"')}</label>
+          ${ex ? `<label class="field"><span><ha-icon icon="mdi:timer-play-outline"></ha-icon> Weiterheizen nach dem Schließen</span>${num("resume_delay", "s", 10, 'min="0" max="3600"')}</label>` : ""}
+        </div>
+        ${ex ? `
+        <div class="sub-h"><ha-icon icon="mdi:school-outline"></ha-icon>Experte</div>
+        <div class="row2">
+          <label class="field"><span><ha-icon icon="mdi:arrow-collapse-down"></ha-icon> Höchstens absenken um</span>${num("max_setback", "K", 0.5, 'min="0" max="15"')}</label>
+          <label class="field"><span><ha-icon icon="mdi:window-open-variant"></ha-icon> Temperatur bei offenem Fenster</span><div class="unit"><input type="number" step="0.5" min="5" max="30" data-room="window_temp" value="${r.window_temp ?? ""}" placeholder="${fmt(this._data.settings.frost_temp)}"><i>°C</i></div></label>
+        </div>
+        ${check("min_instead_of_off", "mdi:thermometer-low", "Kleinste Temperatur statt Ausschalten", "Für Thermostate, die sich nicht zuverlässig aus- und wieder einschalten lassen.")}` : expertHint(["resume_delay", "max_setback", "window_temp", "min_instead_of_off"])}`,
+
+      control: () => `
+        ${check("manual_device", "mdi:hand-back-right-outline", "Am Gerät gedreht übernehmen", "Dreht jemand am Thermostat selbst, gilt der Wert bis zur nächsten Planänderung.", { on: r.allow_manual !== false && r.manual_device !== false })}
+        ${check("manual_ui", "mdi:cellphone-cog", "In Home Assistant geändert übernehmen", "Ändert jemand das Thermostat in Home Assistant oder der App, gilt der Wert bis zur nächsten Planänderung.", { on: r.allow_manual !== false && r.manual_ui !== false })}
+        ${r.type === "heizkoerper" ? check("compensation", "mdi:thermometer-plus", "Nach Raumsensor nachführen", "Misst das Thermostat am Heizkörper zu warm, wird der Sollwert um die Differenz (max. 4 K) angehoben.", { disabled: !r.temp_sensor }) : ""}
+        ${r.type === "heizkoerper" && !r.temp_sensor ? `<p class="muted small"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>Nachführen braucht einen Raumsensor (Reiter Geräte).</p>` : ""}
+        ${ex ? `
+        <div class="sub-h"><ha-icon icon="mdi:school-outline"></ha-icon>Experte</div>
+        ${hint}
+        <div class="row2">
+          <label class="field"><span><ha-icon icon="mdi:plus-minus-variant"></ha-icon> Fester Ausgleich am Thermostat</span>${num("target_offset", "K", 0.5, 'min="-5" max="5"')}</label>
+        </div>
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Regelt ein Thermostat dauerhaft zu kalt, z. B. +1 K: Hauswerk schickt dann 1 K mehr als den Sollwert.</p>
+        ${check("calibration", "mdi:tune-vertical-variant", "Thermostat kalibrieren", "Setzt den Temperatur-Offset am Gerät (number-Entität mit „calibration“ oder „offset“ im Namen), damit es wie der Raumsensor misst. Ersetzt das Nachführen.", { disabled: !r.temp_sensor })}
+        ${r.calibration ? `<div class="field"><span>Offset-Entität (leer = automatisch suchen)</span>${this._picker("calibration_entities", r.calibration_entities || [])}</div>` : ""}
+        ${check("valve_control", "mdi:valve", "Ventil direkt steuern", "Für Thermostate mit Ventil-Entität (number mit „valve“ oder „position“ im Namen): Öffnung nach Abstand zum Soll.")}
+        ${r.valve_control ? `
+        <div class="row2">
+          <label class="field"><span>Ganz offen ab</span>${num("valve_diff", "K unter Soll", 0.1, 'min="0.2" max="5"')}</label>
+          <label class="field"><span>Höchstens öffnen</span>${num("valve_max", "%", 5, 'min="10" max="100"')}</label>
+        </div>
+        <div class="field"><span>Ventil-Entität (leer = automatisch suchen)</span>${this._picker("valve_entities", r.valve_entities || [])}</div>` : ""}
+        <div class="sub-h"><ha-icon icon="mdi:chart-bell-curve-cumulative"></ha-icon>Feinregelung <span class="muted small">· 0 = aus</span></div>
+        <div class="row3">
+          <label class="field"><span><ha-icon icon="mdi:thermometer-check"></ha-icon> Aus ab Soll +</span>${num("off_above", "K", 0.1, 'min="0" max="5"')}</label>
+          <label class="field"><span><ha-icon icon="mdi:arrow-expand-vertical"></ha-icon> Übersteuern ab</span>${num("aggressive_range", "K", 0.1, 'min="0" max="5"')}</label>
+          <label class="field"><span><ha-icon icon="mdi:plus-minus-variant"></ha-icon> Übersteuern um</span>${num("aggressive_offset", "K", 0.5, 'min="0" max="5"')}</label>
+        </div>
+        <p class="muted small">Übersteuern stellt das Thermostat höher bzw. tiefer, solange der Raum weit vom Soll entfernt ist – träge Thermostate reagieren so schneller.</p>
+        <div class="sub-h"><ha-icon icon="mdi:tune-vertical"></ha-icon>Komfort und Eco aus Helfern</div>
+        <p class="muted small">Eine Zahl-Entität (z. B. input_number) ersetzt den festen Wert, so lässt er sich per Automation oder Dashboard ändern.</p>
+        <div class="row2">
+          <div class="field"><span><ha-icon icon="mdi:sofa-outline"></ha-icon> Komfort aus</span>${this._picker("comfort_entity", r.comfort_entity ? [r.comfort_entity] : [])}</div>
+          <div class="field"><span><ha-icon icon="mdi:leaf"></ha-icon> Eco aus</span>${this._picker("eco_entity", r.eco_entity ? [r.eco_entity] : [])}</div>
+        </div>` : expertHint(["target_offset", "calibration", "valve_control", "off_above", "aggressive_range", "aggressive_offset", "comfort_entity", "eco_entity"])}`,
+    };
+
+    host.innerHTML = `
+      <div class="backdrop" data-action="dialog-close"></div>
+      <div class="sheet" role="dialog" aria-label="Raum">
+        <div class="sheet-head">
+          <span class="rr-ic big" style="--rc:${r.id ? this._roomColor(r.id) : "var(--accent)"}"><ha-icon icon="${esc(roomIcon(r))}"></ha-icon></span>
+          <div class="grow"><h2>${esc(r.name || (this._dialog.isNew ? "Neuer Raum" : "Raum"))}</h2><div class="muted">${this._dialog.isNew ? "Neuer Raum" : "Raum bearbeiten"} · ${TYPES[r.type].label}</div></div>
+          <button class="icon boxed" data-action="dialog-close" title="Schließen"><ha-icon icon="mdi:close"></ha-icon></button>
+        </div>
+        <nav class="dtabs">
+          ${TABS_D.map(([id, icon, label, dot]) => `<button class="dtab ${tab === id ? "on" : ""}" data-action="dialog-tab" data-tab="${id}" title="${label}"><ha-icon icon="${icon}"></ha-icon><span>${label}</span>${dot ? "<i></i>" : ""}</button>`).join("")}
+          <span class="grow"></span>
+          <button class="xtog ${ex ? "on" : ""}" data-action="expert" title="Experten-Einstellungen ${ex ? "ausblenden" : "anzeigen"}"><ha-icon icon="mdi:school-outline"></ha-icon><span>Experte</span><i></i></button>
+        </nav>
+        <div class="sheet-body">${views[tab]()}</div>
+        <div class="sheet-foot">
+          ${this._dialog.isNew ? "" : `<button class="danger" data-action="room-delete" title="Raum löschen"><ha-icon icon="mdi:trash-can-outline"></ha-icon></button>`}
+          <button class="secondary" data-action="dialog-close">Abbrechen</button>
+          <button class="primary" data-action="room-save"><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>
+        </div>
+      </div>`;
+    const body = host.querySelector(".sheet-body");
+    if (body && this._dialog.keepScroll) body.scrollTop = scroll;
+    this._dialog.keepScroll = true;
+    const name = host.querySelector('[data-room="name"]');
+    if (this._dialog.isNew && name && !this._dialog.focused) {
+      this._dialog.focused = true;
+      setTimeout(() => name.focus(), 50);
+    }
+  }
+
+  _preheatSection(r, d, num, segs, ex = true) {
+    const global = this._data.settings.preheat_mode || "fixed";
+    const label = { smart: "lernend", fixed: "feste Zeit", off: "aus" };
+    const mode = r.preheat_mode || global;
+    const st = r.id ? this._status?.rooms?.[r.id] || {} : {};
+    const learned = st.learned;
+    const rate = st.heat_rate;
+    const example = rate ? Math.round((2 / rate) * 60 * 1.15 + 5) : null;
+    return `
+      <div class="sub-h"><ha-icon icon="mdi:clock-fast"></ha-icon>Vorheizen</div>
+      <p class="muted small">Damit der Raum zu Beginn einer Komfortzeit schon warm ist, heizt Hauswerk vorher los.</p>
+      <div class="field">
+        ${segs("preheat-mode", r.preheat_mode || "", [["", `Wie alle Räume (${label[global]})`, "mdi:home-outline"], ["smart", "Lernen", "mdi:brain"], ["fixed", "Feste Zeit", "mdi:timer-outline"], ["off", "Aus", "mdi:timer-off-outline"]])}
+      </div>
+      ${mode === "smart" ? `
+        <div class="row2">
+          ${ex ? `<label class="field"><span><ha-icon icon="mdi:timer-alert-outline"></ha-icon> Höchstens vorher</span>${num("preheat_max", "Min.", 10, 'min="10" max="600"')}</label>` : ""}
+          <div class="field"><span><ha-icon icon="mdi:speedometer"></ha-icon> Aufheizgeschwindigkeit</span>
+            <div class="learn ${learned ? "ok" : ""}">
+              <b>${rate ? `${fmt(rate)} K/h` : "–"}</b>
+              <small>${!r.id ? "wird nach dem Speichern gelernt" : learned ? `gelernt · 2 K wärmer ≈ ${example} min` : `Startwert · lernt beim nächsten Aufheizen`}</small>
+              ${learned && this._admin ? `<button class="link tiny" data-action="preheat-reset" data-id="${r.id}"><ha-icon icon="mdi:restore"></ha-icon>neu lernen</button>` : ""}
+            </div>
+          </div>
+        </div>
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Hauswerk misst bei jedem Aufheizen, wie viele Grad pro Stunde der Raum schafft, und rechnet daraus die Startzeit aus – mit 15 % Reserve.</p>` : ""}
+      ${mode === "fixed" ? `
+        <div class="row2">
+          <label class="field"><span><ha-icon icon="mdi:timer-outline"></ha-icon> Vorheizen vor Komfortbeginn</span>
+            <div class="unit"><input type="number" step="5" min="0" max="600" data-room="lead_min" value="${r.lead_min ?? ""}" placeholder="${this._leadFor(r.type)}"><i>Min.</i></div></label>
+        </div>` : ""}
+      ${mode === "off" ? `<p class="muted small">Der Raum heizt erst zu Beginn der Komfortzeit los.</p>` : ""}`;
+  }
+
+  /** Woher der Raum seine Komfortzeiten bekommt: gemeinsamer Plan, eigener Plan oder Home Assistant. */
+  _schedField(r, segs) {
+    const plans = this._planList();
+    const src = this._dialog.schedSrc;
+    return `
+      <div class="field"><span><ha-icon icon="mdi:calendar-clock"></ha-icon> Heizplan</span>
+        ${segs("sched-src", src, [["plan", "Gemeinsamer Plan", "mdi:calendar-multiple"], ["own", "Eigener Plan", "mdi:calendar-edit"], ["entity", "Aus Home Assistant", "mdi:home-assistant"]])}
+      </div>
+      ${src === "plan" ? (plans.length ? `
+      <label class="field"><span>Plan</span>
+        <select data-room="plan_id">${plans.map((p) => `<option value="${p.id}" ${r.plan_id === p.id ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
+      <p class="muted small">Zeiten des Plans änderst du unter Heizpläne – sie gelten für alle Räume mit diesem Plan. Komfort und Eco bleiben die Werte dieses Raums.</p>`
+        : `<p class="note warn"><ha-icon icon="mdi:calendar-alert"></ha-icon>Noch kein gemeinsamer Plan. Lege einen unter Heizpläne an – bis dahin nutzt der Raum seinen eigenen Plan.</p>`) : ""}
+      ${src === "own" ? `<p class="muted small">Die Zeiten bearbeitest du unter Heizpläne › Räume › ${esc(r.name || "dieser Raum")}.</p>` : ""}
+      ${src === "entity" ? `
+      <div class="field"><span>Zeitplan oder Kalender (an bzw. Termin = Komfort, sonst Eco)</span>${this._picker("schedule_entity", r.schedule_entity ? [r.schedule_entity] : [])}</div>
+      <p class="muted small">Bei einem Kalender heizt Hauswerk vor dem nächsten Termin vor.</p>` : ""}`;
+  }
+  // ------------------------------------------------------------ Entitätsauswahl
+  _entityName(id) {
+    return this._hass.states[id]?.attributes?.friendly_name || id;
+  }
+
+  _picker(field, selected) {
+    const cfg = PICKERS[field];
+    const dis = this._admin ? "" : "disabled";
+    return `
+      <div class="picker" data-picker="${field}">
+        ${selected.length ? `<div class="chips">
+          ${selected
+            .map((id) => {
+              const st = this._hass.states[id];
+              const val = st ? `${st.state}${st.attributes.unit_of_measurement ? " " + st.attributes.unit_of_measurement : ""}` : "nicht gefunden";
+              return `<span class="echip ${st ? "" : "missing"}" title="${esc(id)}">${esc(this._entityName(id))}<em>${esc(val)}</em>${
+                this._admin ? `<button data-action="pick-remove" data-field="${field}" data-id="${esc(id)}" title="Entfernen">×</button>` : ""
+              }</span>`;
+            })
+            .join("")}
+        </div>` : ""}
+        ${cfg.multi || !selected.length ? `<div class="search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-picker-input="${field}" placeholder="${cfg.multi ? "Name oder Entität suchen …" : "Suchen …"}" autocomplete="off" ${dis}></div>` : ""}
+        <div class="pick-list" hidden></div>
+      </div>`;
+  }
+
+  _candidates(field, query) {
+    const cfg = PICKERS[field];
+    const selected = this._pickerValue(field);
+    const q = (query || "").toLowerCase().trim();
+    const list = [];
+    for (const [id, st] of Object.entries(this._hass.states)) {
+      const domain = id.split(".")[0];
+      if (!cfg.domains.includes(domain) || selected.includes(id)) continue;
+      if (cfg.deviceClass) {
+        const dc = st.attributes.device_class;
+        const unit = st.attributes.unit_of_measurement;
+        const ok = dc === cfg.deviceClass || (cfg.deviceClass === "temperature" && unit === "°C") || (cfg.deviceClass === "humidity" && unit === "%");
+        if (!ok) continue;
+      }
+      if (field === "windows" && domain === "binary_sensor") {
+        const dc = st.attributes.device_class;
+        if (dc && !["window", "door", "opening", "garage_door"].includes(dc) && !q) continue;
+      }
+      if (field === "presence_sensor" && !q && !["occupancy", "motion", "presence"].includes(st.attributes.device_class)) continue;
+      if (field === "proximity_sensors" && !q && !["distance"].includes(st.attributes.device_class) && !/distan|entfern/.test(id)) continue;
+      const name = st.attributes.friendly_name || id;
+      if (q && !name.toLowerCase().includes(q) && !id.includes(q)) continue;
+      list.push({ id, name, state: st.state });
+    }
+    return list.sort((a, b) => a.name.localeCompare(b.name, "de")).slice(0, 40);
+  }
+
+  _showPickList(input) {
+    const field = input.dataset.pickerInput;
+    const list = input.closest(".picker").querySelector(".pick-list");
+    const items = this._candidates(field, input.value);
+    list.innerHTML = items.length
+      ? items
+          .map(
+            (it) =>
+              `<button class="pick-item" data-action="pick-add" data-field="${field}" data-id="${esc(it.id)}"><span>${esc(it.name)}</span><small>${esc(it.id)} · ${esc(it.state)}</small></button>`
+          )
+          .join("")
+      : `<div class="pick-empty">Nichts gefunden</div>`;
+    list.hidden = false;
+  }
+
+  _pickerTarget(field) {
+    const scope = PICKERS[field].scope;
+    return scope === "room" ? this._dialog?.room : scope === "pop" ? this._pop?.draft : scope === "plan" ? this._plan : this._settings;
+  }
+
+  _pickerValue(field) {
+    if (field === "plan_calendar") return this._plan?.calendar ? [this._plan.calendar] : [];
+    const target = this._pickerTarget(field);
+    if (!target) return [];
+    const v = target[field];
+    return Array.isArray(v) ? v : v ? [v] : [];
+  }
+
+  _setPickerValue(field, values) {
+    const cfg = PICKERS[field];
+    const target = this._pickerTarget(field);
+    target[field] = cfg.multi ? values : values[0] || null;
+    if (["temp_sensor", "presence_sensor"].includes(field) && this._dialog) {
+      this._renderDialog();
+      return;
+    }
+    if (field === "plan_calendar") {
+      this._plan.calendar = values[0] || null;
+      this._plan.dirty = true;
+      this._renderMain();
+      return;
+    }
+    if (["outside_sensor", "vacation_calendar", "import_calendar", "w_weather"].includes(field)) {
+      this._refreshSettings();
+      return;
+    }
+    const el = this.shadowRoot.querySelector(`[data-picker="${field}"]`);
+    if (el) {
+      el.outerHTML = this._picker(field, values);
+      const input = this.shadowRoot.querySelector(`[data-picker-input="${field}"]`);
+      if (input && cfg.multi) input.focus();
+    }
+  }
+
+  // ------------------------------------------------------------ Ereignisse
+  _onInput(e, isChange = false) {
+    const t = e.target;
+    if (t.dataset.pickerInput) {
+      this._showPickList(t);
+      return;
+    }
+    if (t.dataset.room && this._dialog) {
+      const key = t.dataset.room;
+      let v;
+      if (t.type === "checkbox") v = t.checked;
+      else if (t.type === "number") v = t.value === "" ? null : Number(t.value);
+      else v = t.value;
+      if (key === "plan_id") v = v || null;
+      this._dialog.room[key] = v;
+      if (["name", "valve_control", "calibration"].includes(key) && isChange) this._renderDialog();
+      return;
+    }
+    if (t.dataset.action === "set-search") {
+      // nur die Liste neu zeichnen, damit das Suchfeld den Fokus behält
+      this._setQuery = t.value;
+      const list = this.shadowRoot.getElementById("set-list");
+      if (list) list.innerHTML = this._settingsList();
+      return;
+    }
+    if (t.dataset.pop !== undefined && this._pop) {
+      this._pop.draft[t.dataset.pop] = t.value;
+      return;
+    }
+    if (t.dataset.plankw !== undefined && this._plan) {
+      this._plan.keyword = t.value;
+      this._plan.dirty = true;
+      if (isChange) this._renderMain();
+      return;
+    }
+    if (t.dataset.planname !== undefined && this._plan) {
+      this._plan.name = t.value;
+      this._plan.dirty = true;
+      if (isChange) this._renderMain();
+      return;
+    }
+    if (isChange && t.dataset.action === "room-plan") {
+      const room = clone(this._data.rooms[t.dataset.id]);
+      const old = this._data.plans?.[room.plan_id];
+      room.plan_id = t.value || null;
+      // Wechsel auf „Eigener Plan“ ohne eigene Zeiten: Zeiten des bisherigen Plans übernehmen
+      if (!room.plan_id && old && !(room.schedule || []).length) room.schedule = clone(old.schedule || []);
+      this._saveRoom(room).then((saved) => {
+        if (!saved) return;
+        this._selectPlan("room", room.id);
+        this._renderMain();
+        this._toast(room.plan_id ? `${room.name} nutzt jetzt „${this._data.plans[room.plan_id].name}“` : `${room.name} hat jetzt einen eigenen Plan`);
+      });
+      return;
+    }
+    if (t.dataset.plan && this._plan) {
+      const b = this._plan.blocks[Number(t.dataset.i)];
+      if (t.value) b[t.dataset.plan] = t.value;
+      this._plan.dirty = true;
+      if (isChange) this._renderMain();
+      return;
+    }
+    if (t.dataset.set && this._settings) {
+      const key = t.dataset.set;
+      if (t.type === "checkbox") this._settings[key] = t.checked;
+      else if (t.type === "number") {
+        if (t.value !== "") this._settings[key] = Number(t.value); // leer = alten Wert behalten
+      } else this._settings[key] = t.value || null;
+      const bar = this.shadowRoot.getElementById("set-save");
+      if (bar) bar.hidden = !this._settingsDirty();
+      return;
+    }
+    if (isChange && t.dataset.action === "plan-preset" && t.value) {
+      this._plan.blocks = clone(PLAN_PRESETS[t.value].blocks);
+      this._plan.dirty = true;
+      this._renderMain();
+      return;
+    }
+    if (isChange && t.dataset.action === "hmode") {
+      const key = t.dataset.key;
+      this._ws({ type: "hauswerk/heizen/settings/save", settings: { [key]: t.checked } })
+        .then((settings) => {
+          this._data.settings = settings;
+          if (this._settings) this._settings[key] = t.checked;
+          this._renderMain();
+        })
+        .catch(() => this._renderMain());
+      return;
+    }
+    if (isChange && t.dataset.action === "room-toggle") {
+      const room = clone(this._data.rooms[t.dataset.id]);
+      room.enabled = t.checked;
+      this._saveRoom(room);
+    }
+  }
+
+  async _onClick(e) {
+    const path = e.composedPath();
+    if (!path.some((n) => n.classList?.contains("picker"))) {
+      this.shadowRoot.querySelectorAll(".pick-list").forEach((l) => (l.hidden = true));
+    }
+    for (const d of this.shadowRoot.querySelectorAll("details.rmenu[open]")) if (!path.includes(d) || e.target.closest?.(".rm-pop [data-action]")) d.open = false;
+    const el = e.target.closest?.("[data-action]");
+    if (!el) return;
+    const a = el.dataset.action;
+    if (["room-toggle", "plan-preset", "adv", "hmode", "room-plan", "set-search"].includes(a)) {
+      if (a === "adv" && this._dialog) setTimeout(() => (this._dialog.advanced = el.open), 0);
+      return;
+    }
+    if (el.tagName === "BUTTON") e.preventDefault();
+    // Sprung aus der Hinweis-Liste: Liste schließen, dann Ziel öffnen
+    if (el.dataset.hint && this._pop) this._closePop();
+
+    switch (a) {
+      case "tab":
+        this._setView(el.dataset.tab);
+        break;
+      case "menu":
+        this.dispatchEvent(new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true }));
+        break;
+      case "room-open":
+      case "room-page":
+        this._roomId = el.dataset.id;
+        this._setView("room");
+        break;
+      case "presence": {
+        const m = el.dataset.mode;
+        const patch = { vacation: m === "urlaub", presence_force: m === "abwesend" ? "away" : null };
+        const settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: patch });
+        this._data.settings = settings;
+        break;
+      }
+      case "step":
+        await this._step(el.dataset.kind, el.dataset.key, Number(el.dataset.delta));
+        break;
+      case "blk-comfort":
+        this._plan.blocks[Number(el.dataset.i)].temp = null;
+        this._plan.dirty = true;
+        this._renderMain();
+        break;
+      case "room-new":
+        this._openRoom(null);
+        break;
+      case "room-edit":
+        this._openRoom(this._data.rooms[el.dataset.id]);
+        if (el.dataset.rtab && this._dialog) {
+          this._dialog.tab = el.dataset.rtab;
+          this._renderDialog();
+        }
+        break;
+      case "expert":
+        this._expert = !this._expertOn();
+        try {
+          localStorage.setItem("hauswerk.experte", this._expert ? "1" : "0");
+        } catch (err) {
+          /* ohne Speicher: gilt bis zum Neuladen */
+        }
+        this._renderDialog();
+        break;
+      case "hints-open":
+        this._openPop("hints");
+        break;
+      case "plan-open":
+        if (this._plan?.dirty && !confirm("Ungespeicherte Änderungen am Heizplan verwerfen?")) break;
+        this._selectPlan("room", el.dataset.id);
+        this._plan.dirty = false;
+        this._setView("plans");
+        break;
+      case "plan-sel":
+        if (this._plan?.dirty && !confirm("Ungespeicherte Änderungen verwerfen?")) return;
+        this._selectPlan(el.dataset.kind, el.dataset.id);
+        if (this._tab !== "plans") this._setView("plans");
+        else this._renderMain();
+        break;
+      case "w-edit":
+        this._wEdit = !this._wEdit;
+        this._renderMain();
+        break;
+      case "w-add-open":
+        this._openPop("widget-add");
+        break;
+      case "w-add": {
+        const def = WIDGETS[el.dataset.type];
+        const list = clone(this._widgets());
+        const w = { id: Math.random().toString(16).slice(2, 10), type: el.dataset.type, size: def.size || "m", title: null, entities: [] };
+        list.push(w);
+        this._wEdit = true;
+        await this._saveWidgets(list);
+        if (def.config) this._openPop("widget", { i: list.length - 1, title: "", size: w.size, w_entities: [] });
+        else this._closePop();
+        this._toast(`Widget „${def.name}“ hinzugefügt`);
+        break;
+      }
+      case "w-move": {
+        const list = clone(this._widgets());
+        const i = Number(el.dataset.i), j = i + Number(el.dataset.d);
+        if (j < 0 || j >= list.length) break;
+        [list[i], list[j]] = [list[j], list[i]];
+        await this._saveWidgets(list);
+        break;
+      }
+      case "w-del": {
+        const list = clone(this._widgets());
+        const w = list[Number(el.dataset.i)];
+        if (!confirm(`Widget „${w.title || WIDGETS[w.type]?.name}“ entfernen?`)) break;
+        list.splice(Number(el.dataset.i), 1);
+        await this._saveWidgets(list);
+        break;
+      }
+      case "w-conf": {
+        const w = this._widgets()[Number(el.dataset.i)];
+        this._openPop("widget", { i: Number(el.dataset.i), title: w.title || "", size: this._wSize(w), w_entities: [...(w.entities || [])], w_weather: w.type === "forecast" ? (w.entities || [])[0] || null : null, mode: w.mode || "hourly" });
+        break;
+      }
+      case "w-mode":
+        this._pop.draft.mode = el.dataset.v;
+        this._renderPop();
+        break;
+      case "w-size":
+        this._pop.draft.size = el.dataset.v;
+        this._renderPop();
+        break;
+      case "w-save": {
+        const dr = this._pop.draft;
+        const list = clone(this._widgets());
+        const isFc = list[dr.i].type === "forecast";
+        Object.assign(list[dr.i], { title: dr.title.trim() || null, size: dr.size, entities: isFc ? (dr.w_weather ? [dr.w_weather] : []) : dr.w_entities || [] });
+        if (isFc) list[dr.i].mode = dr.mode || "hourly";
+        await this._saveWidgets(list);
+        this._closePop();
+        break;
+      }
+      case "w-sc": {
+        const id = el.dataset.e;
+        const d = id.split(".")[0];
+        const [dom, svc] = { script: ["script", "turn_on"], scene: ["scene", "turn_on"], button: ["button", "press"], input_button: ["input_button", "press"], lock: [ "lock", this._hass.states[id]?.state === "locked" ? "unlock" : "lock"] }[d] || ["homeassistant", "toggle"];
+        try {
+          await this._hass.callService(dom, svc, { entity_id: id });
+          this._toast(`${this._entityName(id)}: ${svc === "toggle" ? "umgeschaltet" : "ausgeführt"}`);
+        } catch (err) {
+          this._toast(err.message || "Aktion fehlgeschlagen");
+        }
+        setTimeout(() => this._tab === "start" && this._renderMain(), 700);
+        break;
+      }
+      case "room-view":
+        this._view = el.dataset.v;
+        try {
+          localStorage.setItem("hauswerk.raumansicht", this._view);
+        } catch (err) {
+          /* ohne Speicher: gilt bis zum Neuladen */
+        }
+        this._renderMain();
+        break;
+      case "plan-src":
+        this._plan.cal = el.dataset.v === "cal";
+        this._plan.dirty = true;
+        this._renderMain();
+        break;
+      case "plan-new":
+        if (this._plan?.dirty && !confirm("Ungespeicherte Änderungen verwerfen?")) return;
+        this._plan = { kind: "plan", id: null, name: "Neuer Plan", blocks: clone(PLAN_PRESETS.berufstaetig.blocks), dirty: true, day: this._plan?.day ?? (new Date().getDay() + 6) % 7, cal: false, calendar: null, keyword: "" };
+        this._renderMain();
+        break;
+      case "plan-delete": {
+        const using = this._planRooms(this._plan.id);
+        if (!confirm(`Plan „${this._plan.name}“ löschen?${using.length ? `\n\n${using.map((r) => r.name).join(", ")} behalten die Zeiten als eigenen Plan.` : ""}`)) break;
+        const res = await this._ws({ type: "hauswerk/heizen/plan/delete", plan_id: this._plan.id });
+        this._data.rooms = res.rooms;
+        this._data.plans = res.plans;
+        this._plan = null;
+        this._renderMain();
+        this._toast("Plan gelöscht");
+        break;
+      }
+      case "plan-own": {
+        // Raum bekommt eine eigene Kopie des gemeinsamen Plans
+        const room = clone(this._data.rooms[el.dataset.id]);
+        room.schedule = clone(this._data.plans[room.plan_id]?.schedule || []);
+        room.plan_id = null;
+        if (await this._saveRoom(room)) {
+          this._selectPlan("room", room.id);
+          this._renderMain();
+          this._toast(`${room.name} hat jetzt einen eigenen Plan`);
+        }
+        break;
+      }
+      case "plan-promote": {
+        // Eigenen Plan eines Raums als gemeinsamen Plan speichern und dem Raum zuordnen
+        const room = clone(this._data.rooms[this._plan.id]);
+        const plan = await this._ws({ type: "hauswerk/heizen/plan/save", plan: { name: `Plan ${room.name}`, schedule: this._plan.blocks.filter((b) => b.days.length) } });
+        this._data.plans = { ...(this._data.plans || {}), [plan.id]: plan };
+        room.plan_id = plan.id;
+        if (await this._saveRoom(room)) {
+          this._selectPlan("plan", plan.id);
+          this._renderMain();
+          this._toast(`Gemeinsamer Plan „${plan.name}“ angelegt`);
+        }
+        break;
+      }
+      case "import-open":
+        this._openPop("import", { import_calendar: null, keyword: "", result: null });
+        break;
+      case "import-read": {
+        const dr = this._pop.draft;
+        try {
+          const res = await this._ws({ type: "hauswerk/heizen/calendar/import", entity_id: dr.import_calendar, keyword: dr.keyword || null, days: 7 });
+          dr.result = res.blocks || [];
+        } catch (err) {
+          dr.result = null;
+        }
+        this._renderPop();
+        break;
+      }
+      case "import-apply": {
+        const blocks = this._pop.draft.result || [];
+        this._plan.blocks = el.dataset.mode === "replace" ? clone(blocks) : [...this._plan.blocks, ...clone(blocks)];
+        this._plan.dirty = true;
+        this._closePop();
+        this._renderMain();
+        this._toast(`${blocks.length} Zeitfenster übernommen – bitte prüfen und speichern`);
+        break;
+      }
+      case "pop-open":
+        this._openPop(el.dataset.pop);
+        break;
+      case "pop-close":
+        this._closePop();
+        break;
+      case "pop-save": {
+        const p = this._settings;
+        if (p.vacation_from && p.vacation_to && p.vacation_from > p.vacation_to) {
+          this._toast("Der Urlaub endet vor seinem Beginn.");
+          return;
+        }
+        // Nur Geändertes schicken: alte, inzwischen ungültige Werte blockieren so nicht das Speichern
+        const old = this._data.settings;
+        const diff = Object.fromEntries(Object.entries(p).filter(([k, v]) => JSON.stringify(v ?? null) !== JSON.stringify(old[k] ?? null)));
+        if (Object.keys(diff).length) this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: diff });
+        this._closePop();
+        this._renderMain();
+        this._toast("Gespeichert");
+        break;
+      }
+      case "dialog-close":
+        this._dialog = null;
+        this._renderDialog();
+        break;
+      case "room-type":
+        this._dialog.room.type = el.dataset.type;
+        if (el.dataset.type === "flaeche") this._dialog.room.compensation = null;
+        this._renderDialog();
+        break;
+      case "pause-mode":
+        this._dialog.room.pause_mode = el.dataset.v || null;
+        this._renderDialog();
+        break;
+      case "room-auto": {
+        const room = clone(this._data.rooms[el.dataset.id]);
+        room.enabled = room.enabled === false;
+        if (await this._saveRoom(room)) this._toast(`${room.name}: Automatik ${room.enabled ? "an" : "aus"}`);
+        break;
+      }
+      case "dialog-tab":
+        this._dialog.tab = el.dataset.tab;
+        this._dialog.keepScroll = false;
+        this._renderDialog();
+        break;
+      case "room-icon":
+        this._dialog.room.icon = el.dataset.v || null;
+        this._renderDialog();
+        break;
+      case "sched-src":
+        this._dialog.schedSrc = el.dataset.v;
+        if (el.dataset.v !== "entity") this._dialog.room.schedule_entity = null;
+        if (el.dataset.v !== "plan") this._dialog.room.plan_id = null;
+        else if (!this._data.plans?.[this._dialog.room.plan_id]) this._dialog.room.plan_id = this._planList()[0]?.id || null;
+        this._renderDialog();
+        break;
+      case "preheat-mode":
+        this._dialog.room.preheat_mode = el.dataset.v || null;
+        this._renderDialog();
+        break;
+      case "preheat-reset":
+        if (!confirm("Gelernte Aufheizgeschwindigkeit vergessen und neu lernen?")) break;
+        await this._ws({ type: "hauswerk/heizen/preheat/reset", room_id: el.dataset.id });
+        if (this._status?.rooms?.[el.dataset.id]) this._status.rooms[el.dataset.id].learned = false;
+        this._renderDialog();
+        if (this._pop) this._renderPop();
+        this._toast("Wird beim nächsten Aufheizen neu gelernt");
+        break;
+      case "presence-mode":
+        this._dialog.room.presence_mode = el.dataset.v;
+        this._renderDialog();
+        break;
+      case "room-save":
+        await this._saveDialog();
+        break;
+      case "room-delete":
+        if (confirm(`Raum „${this._dialog.room.name}“ löschen? Heizplan und Bericht des Raums gehen verloren.`)) {
+          const id = this._dialog.room.id;
+          await this._ws({ type: "hauswerk/heizen/room/delete", room_id: id });
+          delete this._data.rooms[id];
+          this._dialog = null;
+          this._renderDialog();
+          this._renderMain();
+        }
+        break;
+      case "pick-add": {
+        const field = el.dataset.field;
+        const values = PICKERS[field].multi ? [...this._pickerValue(field), el.dataset.id] : [el.dataset.id];
+        this._setPickerValue(field, values);
+        break;
+      }
+      case "pick-remove": {
+        const field = el.dataset.field;
+        this._setPickerValue(field, this._pickerValue(field).filter((id) => id !== el.dataset.id));
+        break;
+      }
+      case "ovr-reset":
+        await this._ws({ type: "hauswerk/heizen/override", room_id: el.dataset.id, temp: null });
+        break;
+      case "boost":
+        await this._ws({ type: "hauswerk/heizen/override", room_id: el.dataset.id, boost: true });
+        this._toast(`Boost für ${this._data.settings.boost_minutes || 30} Minuten`);
+        break;
+      case "plan-preview":
+        this._plan.day = Number(el.dataset.day);
+        this._renderMain();
+        break;
+      case "plan-day": {
+        const b = this._plan.blocks[Number(el.dataset.i)];
+        const day = Number(el.dataset.day);
+        b.days = b.days.includes(day) ? b.days.filter((x) => x !== day) : [...b.days, day].sort();
+        this._plan.dirty = true;
+        this._renderMain();
+        break;
+      }
+      case "plan-days":
+        this._plan.blocks[Number(el.dataset.i)].days = el.dataset.set.split(",").map(Number);
+        this._plan.dirty = true;
+        this._renderMain();
+        break;
+      case "plan-copy": {
+        const i = Number(el.dataset.i);
+        this._plan.blocks.splice(i + 1, 0, clone(this._plan.blocks[i]));
+        this._plan.dirty = true;
+        this._renderMain();
+        break;
+      }
+      case "plan-add":
+        this._plan.blocks.push({ days: [0, 1, 2, 3, 4], start: "06:00", end: "22:00", temp: null });
+        this._plan.dirty = true;
+        this._renderMain();
+        break;
+      case "plan-del":
+        this._plan.blocks.splice(Number(el.dataset.i), 1);
+        this._plan.dirty = true;
+        this._renderMain();
+        break;
+      case "plan-revert":
+        if (this._plan.id) this._selectPlan(this._plan.kind, this._plan.id);
+        else this._plan = null;
+        this._renderMain();
+        break;
+      case "plan-save": {
+        const P = this._plan;
+        const blocks = P.blocks.filter((b) => b.days.length);
+        if (P.kind === "plan") {
+          if (!P.name.trim()) {
+            this._toast("Bitte einen Namen für den Plan eingeben.");
+            return;
+          }
+          if (P.cal && !P.calendar) {
+            this._toast("Bitte einen Kalender wählen.");
+            return;
+          }
+          const saved = await this._ws({ type: "hauswerk/heizen/plan/save", plan: { id: P.id, name: P.name, schedule: blocks, calendar: P.cal ? P.calendar : null, keyword: P.cal ? P.keyword || null : null } });
+          this._data.plans = { ...(this._data.plans || {}), [saved.id]: saved };
+          this._selectPlan("plan", saved.id);
+          this._renderMain();
+          this._toast(P.id ? "Plan gespeichert" : "Plan angelegt – jetzt im Raum auswählen");
+        } else {
+          const room = { ...clone(this._data.rooms[P.id]), schedule: blocks };
+          if (await this._saveRoom(room)) {
+            this._selectPlan("room", room.id);
+            this._renderMain();
+            this._toast("Heizplan gespeichert");
+          }
+        }
+        break;
+      }
+      case "settings-go":
+        this._setView("settings");
+        if (el.dataset.sub) this._openPop(el.dataset.sub);
+        break;
+      case "set-seg":
+        this._settings[el.dataset.key] = el.dataset.v;
+        this._refreshSettings();
+        break;
+      case "report-days":
+        this._reportDays = Number(el.dataset.days);
+        this._renderMain();
+        break;
+    }
+  }
+
+  async _step(kind, key, delta) {
+    if (kind === "dlg") {
+      const r = this._dialog.room;
+      r[key] = clampT((r[key] ?? 20) + delta);
+      this._renderDialog();
+    } else if (kind === "blk") {
+      const room = this._planRef();
+      const b = this._plan.blocks[Number(key)];
+      b.temp = clampT((b.temp ?? room.comfort) + delta);
+      this._plan.dirty = true;
+      this._renderMain();
+    } else if (kind === "set") {
+      this._settings[key] = clampT((this._settings[key] ?? 17) + delta);
+      this._refreshSettings();
+    } else if (kind === "ovr") {
+      const s = this._status?.rooms?.[key] || {};
+      const base = s.target ?? this._data.rooms[key].comfort;
+      const temp = clampT(base + delta);
+      // sofort anzeigen, der Server bestätigt per Abo
+      if (this._status?.rooms?.[key]) Object.assign(this._status.rooms[key], { target: temp, mode: "manuell", mode_label: "Manuell" });
+      this._renderMain();
+      await this._ws({ type: "hauswerk/heizen/override", room_id: key, temp });
+    }
+  }
+
+  async _saveRoom(room) {
+    try {
+      const saved = await this._ws({ type: "hauswerk/heizen/room/save", room });
+      this._data.rooms[saved.id] = saved;
+      if (this._tab !== "plans") this._renderMain();
+      return saved;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async _saveDialog() {
+    const r = this._dialog.room;
+    if (!r.name || !r.name.trim()) {
+      this._dialog.tab = "basis";
+      this._renderDialog();
+      this._toast("Bitte einen Namen eingeben.");
+      return;
+    }
+    if (r.eco > r.comfort) {
+      this._toast("Eco sollte nicht wärmer sein als Komfort.");
+      return;
+    }
+    const saved = await this._saveRoom(r);
+    if (saved) {
+      this._dialog = null;
+      this._renderDialog();
+      this._renderMain();
+    }
   }
 }
 
-function esc(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
+/* Eigenes Zeichen: Flamme in einem Thermostat-Ring */
+const LOGO = `
+<svg viewBox="0 0 48 48" aria-hidden="true">
+  <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#0e7490"/></linearGradient></defs>
+  <rect width="48" height="48" rx="13" fill="url(#lg)"/>
+  <circle cx="24" cy="24" r="13" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="3" stroke-dasharray="61 82" transform="rotate(135 24 24)" stroke-linecap="round"/>
+  <path d="M24 14c1.2 3.6 5.5 5.6 5.5 10.2A5.5 5.5 0 0 1 18.5 24c0-2.3 1.2-3.7 2.3-4.8.2 1.6 1 2.6 2 2.9-.3-3 .2-5.6 1.2-8.1z" fill="#fff"/>
+</svg>`;
 
-function alertless(panel, err) {
-  panel._error = err.message || String(err);
-  panel._render();
-  setTimeout(() => { panel._error = null; panel._render(); }, 4000);
+const STYLE = `
+/* Farben kommen aus dem Home-Assistant-Theme: hell oder dunkel wie dort eingestellt. */
+:host {
+  --text:var(--primary-text-color, #1f2328); --muted:var(--secondary-text-color, #5f6670);
+  --bg:var(--primary-background-color, #f3f5f7); --card:var(--card-background-color, var(--ha-card-background, #fff));
+  --card2:var(--secondary-background-color, #eceff2);
+  --line:var(--divider-color, rgba(0,0,0,.1)); --line2:color-mix(in srgb, var(--text) 18%, transparent);
+  --track:color-mix(in srgb, var(--text) 22%, transparent);
+  --accent:#0f9488; --ink:#fff; --shade:38%; --shadow:0 8px 24px rgba(0,0,0,.10); --r:18px;
+  display:block; min-height:100vh; background:var(--bg); color:var(--text);
+  font-family:var(--paper-font-body1_-_font-family, Inter, "Segoe UI", Roboto, system-ui, sans-serif); -webkit-font-smoothing:antialiased;
 }
+:host([dark]) {
+  --text:var(--primary-text-color, #f1f3f4); --muted:var(--secondary-text-color, #9aa0a6);
+  --bg:var(--primary-background-color, #111315); --card:var(--card-background-color, var(--ha-card-background, #1b1d20));
+  --card2:var(--secondary-background-color, #24272b); --line:var(--divider-color, rgba(255,255,255,.1));
+  --accent:#2dd4bf; --ink:#04211d; --shade:0%; --shadow:0 10px 30px rgba(0,0,0,.45);
+}
+* { box-sizing:border-box; scrollbar-color:var(--track) transparent; scrollbar-width:thin;
+  --ct:color-mix(in srgb, var(--c, currentColor), var(--text) var(--shade));
+  --rct:color-mix(in srgb, var(--rc, currentColor), var(--text) var(--shade)); }
+ha-icon { --mdc-icon-size:18px; flex:none; }
+button { font:inherit; color:inherit; }
+.app { max-width:1180px; margin:0 auto; padding:16px 20px 40px; }
+.grow { flex:1; }
+.muted { color:var(--muted); }
+.small { font-size:12px; }
+code { background:var(--card2); padding:1px 6px; border-radius:6px; font-size:12px; }
 
-customElements.define("hauswerk-panel", HauswerkPanel);
+/* Kopfleiste (fest oben) mit Modul-Reitern */
+.top { position:sticky; top:0; z-index:6; padding:8px max(16px, calc((100% - 1180px) / 2 + 20px)) 0;
+  background:linear-gradient(135deg, color-mix(in srgb, #2dd4bf 20%, var(--bg)), color-mix(in srgb, #60a5fa 14%, var(--bg)));
+  border-bottom:1px solid var(--line); }
+.bar { display:flex; align-items:center; gap:12px; min-height:58px; }
+.menu { all:unset; cursor:pointer; width:40px; height:40px; border-radius:50%; display:grid; place-items:center; flex:none; }
+.menu ha-icon { --mdc-icon-size:24px; }
+:host(:not([narrow])) .menu { display:none; }
+.brand svg { width:44px; height:44px; display:block; }
+.ttl { display:flex; flex-direction:column; min-width:0; flex:1; line-height:1.2; }
+.ttl small { font-size:10.5px; letter-spacing:.14em; font-weight:800; color:var(--accent); }
+.ttl b { font-size:19px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.ttl span { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.hacts { display:flex; gap:8px; flex:none; }
+.abtn { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:7px; padding:9px 15px; border-radius:99px; font-weight:600; font-size:14px;
+  background:var(--card); border:1px solid var(--line); }
+.abtn:hover { border-color:var(--line2); }
+.abtn.active { border-color:var(--accent); color:var(--accent); }
+.mtabs { display:flex; gap:10px; overflow-x:auto; padding:10px 0 12px; scrollbar-width:none; }
+.mtabs::-webkit-scrollbar { display:none; }
+.mtab { all:unset; cursor:pointer; flex:none; display:inline-flex; align-items:center; gap:10px; padding:9px 14px; border-radius:16px;
+  background:var(--card); border:1px solid var(--line); }
+.mtab > ha-icon { --mdc-icon-size:22px; color:var(--muted); }
+.mtab .mt { display:flex; flex-direction:column; line-height:1.15; }
+.mtab .mt small { font-size:10.5px; color:var(--muted); }
+.mtab .mt b { font-size:15px; font-weight:600; }
+.mtab:hover { border-color:var(--line2); }
+.mtab.active { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, var(--card)); }
+.mtab.active > ha-icon, .mtab.active .mt small { color:var(--accent); }
+.mtab.soon { cursor:default; opacity:.45; border-style:dashed; }
+.mtab.soon:hover { border-color:var(--line); }
+.badge { font-style:normal; font-size:10px; font-weight:800; letter-spacing:.05em; padding:2px 8px; border-radius:99px; color:var(--muted); border:1px solid var(--line2); }
+.badge.ok { --c:#fb923c; color:var(--ct); border-color:color-mix(in srgb, var(--c) 55%, transparent); background:color-mix(in srgb, var(--c) 12%, transparent); }
+.badge.warn { --c:#06b6d4; color:var(--ct); border-color:color-mix(in srgb, var(--c) 55%, transparent); background:color-mix(in srgb, var(--c) 12%, transparent); }
+
+/* Unterleiste im Modul Heizen */
+.heatnav { display:flex; gap:4px; padding:4px; margin:0 0 16px; border-radius:16px; background:var(--card); border:1px solid var(--line); overflow-x:auto; scrollbar-width:none; }
+.heatnav::-webkit-scrollbar { display:none; }
+.hnav { all:unset; cursor:pointer; flex:1 0 auto; display:flex; align-items:center; justify-content:center; gap:8px; padding:10px 14px; border-radius:12px; font-weight:600; font-size:14px; color:var(--muted); white-space:nowrap; }
+.hnav:hover { color:var(--text); background:var(--card2); }
+.hnav.on { color:var(--text); background:color-mix(in srgb, var(--accent) 16%, var(--card)); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.hnav.on ha-icon { color:var(--accent); }
+.hnav em { font-style:normal; font-size:11px; font-weight:700; padding:1px 7px; border-radius:99px; color:var(--muted); background:var(--card2); }
+.hnav em.ok { --c:#fb923c; color:var(--ct); background:color-mix(in srgb, var(--c) 14%, transparent); }
+.hnav em.warn { --c:#06b6d4; color:var(--ct); background:color-mix(in srgb, var(--c) 14%, transparent); }
+
+/* Status-Chips */
+.schips { display:flex; gap:10px; overflow-x:auto; padding:2px 0 14px; scrollbar-width:none; }
+.schips::-webkit-scrollbar { display:none; }
+.schip { all:unset; flex:none; display:inline-flex; align-items:center; gap:9px; padding:8px 15px 8px 12px; border-radius:99px; background:var(--card); border:1px solid var(--line); }
+.schip > ha-icon { --mdc-icon-size:20px; color:var(--ct); }
+.schip:not([style]) > ha-icon { color:var(--muted); }
+.schip > span { display:flex; flex-direction:column; line-height:1.15; }
+.schip b { font-size:13.5px; } .schip small { font-size:10.5px; color:var(--muted); }
+
+/* Start */
+.start .stit { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.start .stit ha-icon { --mdc-icon-size:20px; color:var(--accent); }
+.hl { margin:0 0 4px; font-size:26px; font-weight:800; letter-spacing:-.01em; --c:#14b8a6; color:var(--ct); }
+.hl.warn { --c:#f59e0b; }
+.hsub { margin:0 0 16px; color:var(--muted); font-size:14px; }
+.mtiles { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:12px; }
+.mtile { all:unset; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:6px; padding:18px 10px; border-radius:18px; text-align:center;
+  background:color-mix(in srgb, var(--card2) 55%, var(--card)); border:1px solid var(--line); }
+.mtile:hover { border-color:var(--line2); transform:translateY(-1px); }
+.mtile.warn { --c:#f59e0b !important; background:color-mix(in srgb, #f59e0b 12%, var(--card)); border-color:color-mix(in srgb, #f59e0b 60%, transparent); }
+.mico { width:46px; height:46px; border-radius:14px; display:grid; place-items:center; background:color-mix(in srgb, var(--c) 18%, transparent); color:var(--ct); }
+.mico ha-icon { --mdc-icon-size:26px; }
+.mtile b { font-size:15px; }
+.mtile small { font-size:12.5px; color:var(--muted); }
+.mtile small.g { --c:#14b8a6; color:var(--ct); font-weight:600; }
+.gmini { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px; }
+.gm { all:unset; cursor:pointer; display:flex; flex-direction:column; gap:4px; padding:12px 14px; border-radius:14px; background:color-mix(in srgb, var(--card2) 55%, var(--card));
+  border:1px solid var(--line); border-left:4px solid var(--acc); }
+.gm:hover { border-color:var(--line2); border-left-color:var(--acc); }
+.gh { display:flex; align-items:center; gap:7px; font-weight:600; font-size:14px; }
+.gh ha-icon { --mdc-icon-size:18px; color:var(--muted); }
+.gh .gn { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.gh .gf { --c:#fb923c; color:var(--ct); }
+.gt { font-size:26px; font-weight:800; letter-spacing:-.02em; }
+.gt small { font-size:13px; font-weight:500; color:var(--muted); margin-left:2px; }
+.gl { display:flex; align-items:center; gap:5px; font-size:12px; font-weight:600; color:var(--ct); }
+.gl ha-icon { --mdc-icon-size:14px; }
+
+/* Karten */
+.card { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:18px 20px; margin-bottom:14px; }
+.shead { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+.shead ha-icon { color:var(--accent); }
+.shead h3 { margin:0; font-size:16px; font-weight:600; }
+.shead.outer { margin:22px 2px 12px; }
+.empty { text-align:center; padding:36px 20px; color:var(--muted); }
+.empty ha-icon { --mdc-icon-size:46px; color:var(--accent); opacity:.8; }
+.empty h2 { color:var(--text); margin:10px 0 6px; font-size:18px; }
+.empty.small { padding:18px; }
+.loading, .chart-empty { display:grid; place-items:center; padding:60px 0; }
+.spinner { width:28px; height:28px; border-radius:50%; border:3px solid var(--line2); border-top-color:var(--accent); animation:spin 1s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* Banner */
+.hero { color:#fff; position:relative; overflow:hidden; display:flex; align-items:center; gap:20px; padding:24px 28px; margin-bottom:14px; border-radius:22px;
+  background:radial-gradient(120% 140% at 85% 0%, rgba(45,212,191,.55) 0%, rgba(45,212,191,0) 55%),
+             linear-gradient(115deg, #0f5f63 0%, #11505a 40%, #0c3446 100%);
+  box-shadow:0 10px 40px rgba(0,0,0,.35); }
+.hero::after { content:""; position:absolute; inset:auto -10% -60% 30%; height:120%; background:radial-gradient(closest-side, rgba(255,255,255,.06), transparent); pointer-events:none; }
+.hero-text { flex:1; min-width:0; position:relative; z-index:1; }
+.hero-label { display:flex; gap:7px; align-items:center; font-size:14px; color:rgba(255,255,255,.85); }
+.hero-big { font-size:64px; font-weight:800; letter-spacing:-.03em; line-height:1.05; margin-top:6px; }
+.hero-big span { font-size:22px; font-weight:500; margin-left:6px; letter-spacing:0; }
+.hero-date { color:rgba(255,255,255,.75); font-size:14px; margin-bottom:16px; }
+.hero-chips { display:flex; gap:8px; flex-wrap:wrap; }
+.hchip { display:inline-flex; align-items:center; gap:7px; padding:7px 13px; border-radius:99px; background:rgba(255,255,255,.12); backdrop-filter:blur(6px); font-size:13px; font-weight:500; }
+.gauge { width:190px; flex:none; position:relative; z-index:1; }
+.gauge svg { width:100%; display:block; }
+.g-small { fill:rgba(255,255,255,.7); font-size:12px; }
+.g-big { fill:#fff; font-size:26px; font-weight:800; }
+
+/* Anwesenheit */
+.segs { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
+.seg { all:unset; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:6px; padding:14px 8px; border-radius:14px; border:1px solid var(--line2); color:var(--muted); font-weight:600; font-size:14px; text-align:center; }
+.seg ha-icon { --mdc-icon-size:22px; }
+.seg:hover { background:var(--card2); }
+.seg.on { border-color:var(--accent); color:var(--text); background:color-mix(in srgb, var(--accent) 14%, var(--card)); }
+.seg.on ha-icon { color:var(--accent); }
+.seg[disabled] { cursor:default; }
+.segs.small .seg { flex-direction:row; justify-content:center; padding:10px 8px; font-size:13px; }
+.ptext { margin:14px 0 8px; color:var(--muted); line-height:1.5; }
+.ptext b { color:var(--text); }
+.links { display:flex; gap:20px; flex-wrap:wrap; }
+.link { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; color:var(--accent); font-weight:600; font-size:14px; }
+.link:hover { filter:brightness(1.15); }
+.link.tiny { font-size:12px; }
+.tiny { font-size:12px; }
+
+/* Kennzahlen */
+.kpis { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:14px; }
+.kpi { position:relative; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px 16px 14px 20px; overflow:hidden; }
+.kpi::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--k); }
+.kpi-l { display:flex; gap:7px; align-items:center; color:var(--muted); font-size:13px; }
+.kpi-v { font-size:28px; font-weight:800; margin:6px 0 2px; letter-spacing:-.02em; }
+.kpi-v span { font-size:14px; font-weight:500; color:var(--muted); margin-left:5px; letter-spacing:0; }
+.kpi-s { font-size:12px; color:var(--muted); }
+
+/* Diagramm */
+.chart-wrap { position:relative; }
+.chart { width:100%; height:240px; display:block; }
+.gl { stroke:var(--line2); stroke-dasharray:4 6; }
+.ax { fill:var(--muted); font-size:13px; }
+.ax.today { fill:var(--text); font-weight:700; }
+.chart-note { position:absolute; inset:0 0 30px 44px; display:grid; place-items:center; color:var(--muted); font-size:14px; }
+.legend { display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:12px; font-size:13px; color:var(--muted); }
+.legend span { display:inline-flex; align-items:center; gap:6px; }
+.legend i { width:10px; height:10px; border-radius:3px; }
+
+/* Räume */
+.rooms { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:12px; }
+.room { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:16px 18px; position:relative; overflow:hidden; display:flex; flex-direction:column; }
+.room::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--rc); }
+.room-head { display:flex; align-items:center; gap:12px; }
+.room-ic { width:40px; height:40px; border-radius:12px; display:grid; place-items:center; background:color-mix(in srgb, var(--rc) 18%, transparent); color:var(--rct); }
+.room-ic { position:relative; flex:none; }
+.room-ic > ha-icon { --mdc-icon-size:22px; }
+.flame { position:absolute; right:-5px; bottom:-5px; width:20px; height:20px; border-radius:50%; display:grid; place-items:center; background:#fb923c; color:#fff; border:2px solid var(--card); }
+.flame ha-icon { --mdc-icon-size:12px; }
+.room-t small { display:inline-flex; align-items:center; gap:4px; }
+.room-t small ha-icon { --mdc-icon-size:13px; }
+.room.off { opacity:.62; }
+.room.off .room-temp { color:var(--muted); }
+.trend { display:inline-flex; align-items:center; gap:4px; margin-top:6px; font-size:12px; font-weight:600; color:var(--ct); }
+.trend ha-icon { --mdc-icon-size:15px; }
+.room-set small { display:inline-flex !important; align-items:center; gap:4px; }
+.room-set small ha-icon { --mdc-icon-size:13px; }
+.sis { display:flex; align-items:center; gap:4px; min-width:0; overflow:hidden; }
+.room-foot { flex-wrap:nowrap !important; }
+.si .t { white-space:nowrap; }
+.si { display:inline-flex; align-items:center; gap:4px; height:28px; padding:0 7px; border-radius:9px; color:var(--ct); font-size:12px; font-weight:600; background:color-mix(in srgb, var(--c) 10%, transparent); }
+.si ha-icon { --mdc-icon-size:16px; }
+.acts { display:flex; align-items:center; gap:2px; padding:2px; border-radius:12px; background:var(--card2); }
+.acts .icon { width:32px; height:32px; }
+.acts:empty { display:none; }
+.icon.auto-on { color:var(--accent); }
+.icon.auto-off { color:#f87171; background:color-mix(in srgb, #f87171 14%, transparent); }
+.room.off .acts { opacity:1; }
+.room-t { flex:1; min-width:0; }
+.room-t h4 { margin:0; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.room-t small { color:var(--muted); font-size:12px; }
+.mode { display:inline-flex; align-items:center; gap:5px; padding:4px 10px 4px 8px; border-radius:99px; font-size:12px; font-weight:600;
+  color:var(--ct); background:color-mix(in srgb, var(--c) 15%, transparent); border:1px solid color-mix(in srgb, var(--c) 35%, transparent); white-space:nowrap; }
+.mode ha-icon { --mdc-icon-size:15px; }
+.room-body { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:16px 0 12px; }
+.room-now small, .room-set small { display:block; color:var(--muted); font-size:12px; margin-bottom:2px; }
+.room-set { text-align:right; }
+.room-temp { font-size:42px; font-weight:800; letter-spacing:-.03em; line-height:1; }
+.room-temp span { font-size:16px; font-weight:500; color:var(--muted); margin-left:3px; }
+.tgt { font-size:20px; }
+.room-note { display:flex; align-items:center; gap:7px; font-size:13px; padding:8px 10px; border-radius:10px; background:color-mix(in srgb, #a78bfa 12%, transparent); margin-bottom:10px; }
+.room-note.warn { background:color-mix(in srgb, #f59e0b 14%, transparent); }
+.room-foot { display:flex; align-items:center; gap:10px; flex-wrap:wrap; border-top:1px solid var(--line); padding-top:12px; margin-top:auto; }
+.dot-l { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--ct); }
+.dot-l i { width:8px; height:8px; border-radius:50%; background:var(--c); box-shadow:0 0 0 3px color-mix(in srgb, var(--c) 25%, transparent); }
+.dot-l.plain { color:var(--muted); font-weight:500; }
+.icon { all:unset; cursor:pointer; width:34px; height:34px; display:grid; place-items:center; border-radius:10px; color:var(--muted); }
+.icon:hover { background:var(--card2); color:var(--text); }
+.icon.boxed { border:1px solid var(--line2); }
+
+/* Stepper */
+.stepper { display:inline-flex; align-items:center; gap:10px; }
+.stepper b { min-width:78px; text-align:center; font-size:22px; font-weight:800; letter-spacing:-.01em; }
+.stepper.small b { min-width:64px; font-size:19px; }
+.sbtn { all:unset; cursor:pointer; width:38px; height:38px; display:grid; place-items:center; border-radius:50%; border:1px solid var(--line2); font-size:20px; line-height:1; }
+.stepper.small .sbtn { width:32px; height:32px; font-size:18px; }
+.sbtn:hover { border-color:var(--accent); color:var(--accent); }
+
+/* Schalter */
+.switch { position:relative; display:inline-block; width:46px; height:26px; flex:none; }
+.switch input { opacity:0; width:0; height:0; position:absolute; }
+.switch > span { position:absolute; inset:0; border-radius:99px; background:var(--track); transition:.2s; cursor:pointer; }
+.switch > span::after { content:""; position:absolute; width:20px; height:20px; left:3px; top:3px; border-radius:50%; background:#fff; transition:.2s; }
+.switch input:checked + span { background:var(--accent); }
+.switch input:checked + span::after { transform:translateX(20px); }
+.switch input:disabled + span { opacity:.4; cursor:default; }
+
+/* Pillen */
+.pills { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+.pill { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:8px; padding:8px 14px; border-radius:99px; background:var(--card); border:1px solid var(--line); font-size:14px; font-weight:500; }
+.pill i { width:8px; height:8px; border-radius:50%; background:var(--rc); }
+.pill.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, var(--card)); }
+
+/* Heizplan */
+.plan-head { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
+.plan-head h2 { margin:0; font-size:22px; }
+.plan-temps { display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start; }
+.tpill { padding:6px 12px; border-radius:99px; background:var(--card2); font-size:13px; color:var(--muted); }
+.tpill b { color:var(--ct); margin-left:4px; }
+.lbl { color:var(--muted); font-size:13px; margin:4px 0 8px; }
+.daypills { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+.dp { all:unset; cursor:pointer; width:42px; height:36px; display:grid; place-items:center; border-radius:99px; border:1px solid var(--line2); font-size:14px; font-weight:600; color:var(--muted); }
+.dp:hover { border-color:var(--accent); }
+.dp.on { background:var(--accent); border-color:var(--accent); color:var(--ink); }
+.dp[disabled] { cursor:default; }
+.dbar { position:relative; height:22px; border-radius:99px; overflow:hidden; background:var(--card2); }
+.dbar.mini { height:12px; }
+.dseg { position:absolute; top:0; bottom:0; }
+.dseg.eco { background:color-mix(in srgb, #60a5fa 38%, var(--card2)) !important; }
+.dseg + .dseg { box-shadow:inset 2px 0 0 var(--card); }
+.now { position:absolute; top:-3px; bottom:-3px; width:4px; margin-left:-2px; border-radius:2px; background:#fff; box-shadow:0 0 0 2px rgba(0,0,0,.45); }
+.legend-line { display:flex; flex-wrap:wrap; gap:6px 16px; align-items:center; }
+.legend-line span { display:inline-flex; align-items:center; gap:6px; }
+.legend-line i { width:14px; height:8px; border-radius:4px; }
+.dscale {display:flex; justify-content:space-between; color:var(--muted); font-size:12px; margin:6px 2px 4px; }
+.week-mini { display:grid; gap:7px; margin-top:18px; padding-top:16px; border-top:1px solid var(--line); }
+.wm-row { display:grid; grid-template-columns:28px 1fr; align-items:center; gap:8px; font-size:12px; color:var(--muted); }
+.blocks { display:grid; gap:12px; }
+.block { background:var(--card); border:1px solid var(--line); border-radius:var(--r); padding:16px 18px 16px 22px; position:relative; overflow:hidden; }
+.block::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--tc); }
+.block-top { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:12px; }
+.times { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.dur { font-size:12px; color:var(--muted); padding:4px 10px; border-radius:99px; background:var(--card2); margin-left:4px; }
+.block .dp { width:38px; height:32px; font-size:13px; }
+.block .dp.on { background:color-mix(in srgb, var(--accent) 18%, transparent); color:var(--accent); border-color:color-mix(in srgb, var(--accent) 55%, transparent); }
+.addbtn { all:unset; cursor:pointer; flex:1; display:flex; align-items:center; justify-content:center; gap:8px; padding:14px; border-radius:var(--r); border:1.5px dashed var(--line2); color:var(--accent); font-weight:600; font-size:14px; }
+.addbtn:hover { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent); }
+.timebox { display:flex; align-items:center; gap:8px; padding:0 12px; border-radius:12px; border:1px solid var(--line2); background:var(--bg); }
+.timebox input { all:unset; font-size:20px; font-weight:700; padding:9px 0; width:76px; color-scheme:dark; }
+.timebox input::-webkit-calendar-picker-indicator { display:none; }
+.timebox ha-icon { color:var(--muted); }
+.block-temp { display:flex; align-items:center; gap:10px; flex:1; justify-content:flex-end; }
+.quick { display:flex; gap:18px; flex-wrap:wrap; }
+.plan-tools { display:flex; align-items:stretch; gap:12px; margin:12px 0 16px; flex-wrap:wrap; }
+.plan-tools .ghost { border-radius:var(--r); padding:0 18px; }
+.unit input { max-width:140px; }
+.select-link { position:relative; }
+.select-link select { position:absolute; inset:0; opacity:0; cursor:pointer; }
+.savebar { position:sticky; bottom:12px; display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:16px; z-index:4; }
+.primary, .secondary, .danger { all:unset; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:13px 22px; border-radius:14px; font-weight:700; font-size:15px; text-align:center; }
+.primary { background:var(--accent); color:var(--ink); }
+.primary:hover { filter:brightness(1.08); }
+.secondary { background:var(--card2); border:1px solid var(--line2); }
+.danger { color:#f87171; border:1px solid color-mix(in srgb, #f87171 40%, transparent); padding:13px 16px; }
+.primary[disabled], .secondary[disabled] { background:var(--card2); color:var(--muted); pointer-events:none; }
+.savebar .primary, .savebar .secondary { box-shadow:var(--shadow); }
+
+/* Bericht */
+.table-wrap { overflow-x:auto; }
+table { width:100%; border-collapse:collapse; font-size:14px; }
+th { text-align:left; color:var(--muted); font-weight:500; font-size:12px; padding:0 10px 10px; border-bottom:1px solid var(--line); white-space:nowrap; }
+td { padding:12px 10px; border-bottom:1px solid var(--line); white-space:nowrap; font-weight:600; }
+td small { display:block; color:var(--muted); font-weight:400; font-size:12px; margin-left:18px; }
+.rdot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; }
+
+/* Formulare */
+.field { display:flex; flex-direction:column; gap:7px; margin-bottom:16px; }
+.field > span { font-size:13px; color:var(--muted); font-weight:500; }
+.field.narrow { max-width:280px; }
+.field > small { font-size:12px; }
+.sub-h { display:flex; align-items:center; gap:8px; margin:22px 0 6px; padding-top:16px; border-top:1px solid var(--line); font-weight:700; font-size:14px; }
+.sub-h ha-icon { color:var(--accent); }
+.sub-h + p { margin-top:0; }
+.sheet-body > .sub-h:first-of-type, .sheet-body > p:first-child + .sub-h { margin-top:4px; padding-top:0; border-top:none; }
+.segs.small { grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); }
+.savebar[hidden] { display:none; }
+.subnav { display:flex; gap:6px; overflow-x:auto; scrollbar-width:none; margin-bottom:14px; padding-bottom:2px; }
+.snav { all:unset; cursor:pointer; flex:none; display:inline-flex; align-items:center; gap:8px; padding:9px 14px; border-radius:12px; color:var(--muted); font-weight:600; font-size:14px; border:1px solid transparent; }
+.snav:hover { color:var(--text); background:var(--card); }
+.snav.on { color:var(--text); background:var(--card); border-color:var(--line2); }
+.snav.on ha-icon { color:var(--accent); }
+.snav em { font-style:normal; font-size:11px; font-weight:700; padding:1px 7px; border-radius:99px; background:color-mix(in srgb, var(--accent) 20%, transparent); color:var(--accent); }
+.field > span ha-icon { --mdc-icon-size:14px; vertical-align:-2px; }
+.seg ha-icon { --mdc-icon-size:18px; }
+.rr-ic { width:36px; height:36px; border-radius:11px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--rc) 18%, transparent); color:var(--rct); }
+.rrow small { display:inline-flex !important; align-items:center; gap:4px; }
+.rrow small ha-icon { --mdc-icon-size:13px; }
+.rrow.off { opacity:.55; }
+.rr-extras { display:flex; gap:6px; color:var(--muted); }
+.rr-extras ha-icon { --mdc-icon-size:17px; }
+p ha-icon { --mdc-icon-size:16px; vertical-align:-3px; color:var(--accent); margin-right:6px; }
+.presence { padding:14px; }
+.heat-sub .presence { padding:0; }
+.heat-sub { margin-top:18px; padding-top:16px; border-top:1px solid var(--line); }
+.mnum { font-size:10.5px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding:2px 8px; border-radius:99px; background:var(--card2); }
+.pbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.psegs { display:flex; flex:1 1 360px; padding:4px; gap:4px; border-radius:14px; background:var(--bg); border:1px solid var(--line); }
+.pseg { all:unset; cursor:pointer; flex:1; display:flex; align-items:center; justify-content:center; gap:8px; padding:10px 12px; border-radius:11px; font-weight:600; font-size:14px; color:var(--muted); }
+.pseg:hover { color:var(--text); }
+.pseg.on { background:color-mix(in srgb, var(--accent) 18%, var(--card)); color:var(--text); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent); }
+.pseg.on ha-icon { color:var(--accent); }
+.pseg[disabled] { cursor:default; }
+.ptoggles { display:flex; gap:8px; }
+.ptoggle { position:relative; cursor:pointer; display:inline-flex; align-items:center; gap:7px; padding:10px 14px; border-radius:14px; border:1px solid var(--line2); color:var(--muted); font-weight:600; font-size:14px; }
+.ptoggle input { position:absolute; opacity:0; pointer-events:none; }
+.ptoggle:hover { color:var(--text); }
+.ptoggle.on { --c:#d946ef; color:var(--ct); border-color:color-mix(in srgb, #e879f9 55%, transparent); background:color-mix(in srgb, #e879f9 12%, var(--card)); }
+.presence .ptext { display:flex; align-items:center; gap:8px; margin:12px 4px 0; font-size:13px; }
+.presence .ptext ha-icon { --mdc-icon-size:16px; flex:none; }
+.link.inline { font-size:13px; }
+.count { font-size:12px; font-weight:700; color:var(--muted); background:var(--card2); border-radius:99px; padding:2px 9px; }
+.hchip.warn { background:rgba(250,204,21,.22); }
+.hmodes { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:14px 0; }
+.hmode { display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:14px; border:1px solid var(--line2); cursor:pointer; }
+.hmode > ha-icon { --mdc-icon-size:22px; color:var(--muted); }
+.hmode > span:first-of-type { flex:1; min-width:0; }
+.hmode b { display:block; font-size:14px; }
+.hmode small { display:block; color:var(--muted); font-size:12px; }
+.hmode.on { border-color:#e879f9; background:color-mix(in srgb, #e879f9 10%, var(--card)); }
+.hmode.on > ha-icon { color:#e879f9; }
+.notes { display:flex; flex-wrap:wrap; gap:8px; margin:4px 0 6px; }
+.note { display:inline-flex; align-items:center; gap:7px; padding:6px 12px; border-radius:99px; font-size:13px; font-weight:600; color:var(--ct); background:color-mix(in srgb, var(--c) 13%, transparent); border:1px solid color-mix(in srgb, var(--c) 30%, transparent); }
+.room-note.pre { background:color-mix(in srgb, #fb923c 13%, transparent); }
+.room-note small { color:var(--muted); font-size:12px; }
+.learn { display:flex; flex-direction:column; gap:2px; padding:10px 13px; border-radius:12px; border:1px solid var(--line2); }
+.learn b { font-size:18px; }
+.learn small { font-size:12px; color:var(--muted); }
+.learn.ok { border-color:color-mix(in srgb, var(--accent) 50%, transparent); }
+.learn .link { align-self:flex-start; margin-top:4px; }
+.tpill ha-icon { --mdc-icon-size:14px; vertical-align:-2px; margin-right:4px; }
+.room-note.boost { background:color-mix(in srgb, #f43f5e 14%, transparent); }
+.room-note.warmn { background:color-mix(in srgb, #f97316 13%, transparent); }
+.icon.hot { color:#f43f5e; background:color-mix(in srgb, #f43f5e 14%, transparent); }
+select { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line2); border-radius:12px; padding:11px 13px; width:100%; color-scheme:dark; }
+input[type=time] { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line2); border-radius:12px; padding:10px 13px; width:100%; color-scheme:dark; }
+.timebox input[type=time] { border:none; padding:9px 0; background:none; width:76px; font-size:20px; font-weight:700; box-shadow:none; }
+input[type=text], input[type=number], input[type=date], input[type=search] { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line2); border-radius:12px; padding:11px 13px; min-width:0; width:100%; color-scheme:dark; }
+input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.unit { display:flex; align-items:center; gap:8px; }
+.unit i { font-style:normal; color:var(--muted); font-size:13px; min-width:30px; }
+.row2 { display:grid; grid-template-columns:1fr 1fr; gap:0 14px; }
+.row3 { display:grid; grid-template-columns:1fr 1fr 1.2fr; gap:0 14px; }
+.check { display:flex; align-items:center; gap:14px; justify-content:space-between; padding:12px 0; border-top:1px solid var(--line); cursor:pointer; }
+.check b { display:block; font-size:14px; }
+.check small { display:block; color:var(--muted); font-size:12px; margin-top:3px; line-height:1.4; }
+.rlist { display:grid; }
+.rrow { display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid var(--line); }
+.rrow:first-child { border-top:none; }
+.rrow small { display:block; color:var(--muted); font-size:12px; }
+
+/* Entitätsauswahl */
+.picker { position:relative; }
+.chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+.echip { display:inline-flex; align-items:center; gap:7px; padding:5px 5px 5px 12px; border-radius:99px; background:color-mix(in srgb, var(--accent) 14%, var(--card2)); border:1px solid color-mix(in srgb, var(--accent) 30%, transparent); font-size:13px; font-weight:500; max-width:100%; }
+.echip em { font-style:normal; color:var(--muted); font-size:12px; font-weight:400; }
+.echip.missing { background:color-mix(in srgb, #f87171 15%, var(--card2)); border-color:color-mix(in srgb, #f87171 40%, transparent); }
+.echip button { all:unset; cursor:pointer; width:22px; height:22px; border-radius:50%; display:grid; place-items:center; color:var(--muted); }
+.echip button:hover { background:var(--line2); color:var(--text); }
+.search { position:relative; }
+.search ha-icon { position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--muted); }
+.search input { padding-left:38px; }
+.pick-list { position:absolute; left:0; right:0; top:100%; margin-top:6px; max-height:270px; overflow:auto; z-index:10; background:var(--card2); border:1px solid var(--line2); border-radius:14px; box-shadow:0 16px 40px rgba(0,0,0,.5); padding:4px; }
+.pick-item { all:unset; cursor:pointer; display:flex; flex-direction:column; padding:9px 12px; width:100%; box-sizing:border-box; border-radius:10px; }
+.pick-item:hover { background:color-mix(in srgb, var(--accent) 14%, transparent); }
+.pick-item small { color:var(--muted); font-size:11px; }
+.pick-empty { padding:12px; color:var(--muted); }
+
+/* Dialog */
+.backdrop { position:fixed; inset:0; background:rgba(0,0,0,.6); backdrop-filter:blur(3px); z-index:20; }
+.sheet { position:fixed; z-index:21; top:50%; left:50%; transform:translate(-50%,-50%); width:min(660px, calc(100vw - 24px)); max-height:calc(100vh - 40px);
+  display:flex; flex-direction:column; background:var(--card); border:1px solid var(--line2); border-radius:24px; box-shadow:0 30px 80px rgba(0,0,0,.6); color:var(--text);
+  font-family:Inter, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif; }
+.sheet { height:min(780px, calc(100vh - 40px)); }
+.sheet-head { display:flex; align-items:center; gap:14px; padding:20px 24px 12px; }
+.sheet-head h2 { margin:0 0 2px; font-size:20px; }
+.rr-ic.big { width:46px; height:46px; border-radius:14px; }
+.rr-ic.big ha-icon { --mdc-icon-size:26px; }
+.sheet-body { padding:16px 24px 8px; overflow:auto; flex:1; }
+.dtabs { display:flex; gap:4px; padding:0 18px; border-bottom:1px solid var(--line); overflow-x:auto; scrollbar-width:none; flex:none; }
+.dtab { all:unset; cursor:pointer; position:relative; flex:none; display:inline-flex; align-items:center; gap:7px; padding:11px 10px 12px; color:var(--muted); font-weight:600; font-size:13px; border-bottom:2px solid transparent; margin-bottom:-1px; }
+.dtab:hover { color:var(--text); }
+.dtab.on { color:var(--text); border-bottom-color:var(--accent); }
+.dtab.on ha-icon { color:var(--accent); }
+.dtab i { position:absolute; top:8px; left:24px; width:7px; height:7px; border-radius:50%; background:var(--accent); }
+.icons { display:flex; flex-wrap:wrap; gap:6px; }
+.ic-pick { all:unset; cursor:pointer; position:relative; width:42px; height:42px; display:grid; place-items:center; border-radius:12px; border:1px solid var(--line2); color:var(--muted); }
+.ic-pick:hover { color:var(--text); border-color:var(--accent); }
+.ic-pick.on { color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent); }
+.ic-pick em { position:absolute; bottom:-7px; font-style:normal; font-size:9px; font-weight:700; background:var(--card); padding:0 3px; border-radius:4px; color:var(--accent); }
+.check .ck-ic { --mdc-icon-size:22px; color:var(--muted); align-self:flex-start; margin-top:2px; }
+.check > span:first-of-type { flex:1; }
+.check:has(input:checked) .ck-ic { color:var(--accent); }
+.sheet-foot { display:flex; gap:10px; padding:14px 24px 20px; border-top:1px solid var(--line); }
+.sheet-foot .secondary, .sheet-foot .primary { flex:1; }
+.types { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.type { all:unset; cursor:pointer; display:flex; flex-direction:column; gap:5px; padding:14px; border-radius:16px; border:1px solid var(--line2); }
+.type ha-icon { --mdc-icon-size:28px; color:var(--muted); }
+.type small { color:var(--muted); font-size:12px; line-height:1.4; }
+.type.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, var(--card)); }
+.type.on ha-icon { color:var(--accent); }
+details { border-top:1px solid var(--line); padding-top:14px; margin-top:6px; }
+summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
+/* Hinweise: Glocke, Zeile auf Start, Liste */
+.bell { all:unset; cursor:pointer; position:relative; width:42px; height:42px; border-radius:14px; display:grid; place-items:center; color:var(--muted); background:var(--card); border:1px solid var(--line); }
+.bell:hover { color:var(--text); border-color:var(--line2); }
+.bell ha-icon { --mdc-icon-size:22px; }
+.bell.warn { color:#f59e0b; }
+.bell em { position:absolute; top:-5px; right:-5px; min-width:18px; height:18px; padding:0 5px; box-sizing:border-box; border-radius:99px; background:#f59e0b; color:#1f1300; font-style:normal; font-size:11px; font-weight:800; display:grid; place-items:center; }
+.bell i { position:absolute; top:7px; right:8px; width:8px; height:8px; border-radius:50%; background:var(--accent); }
+.hstrip { all:unset; cursor:pointer; box-sizing:border-box; width:100%; display:flex; align-items:center; gap:10px; padding:10px 14px; margin-bottom:14px; border-radius:14px; font-size:13.5px;
+  background:color-mix(in srgb, #f59e0b 12%, var(--card)); border:1px solid color-mix(in srgb, #f59e0b 35%, transparent); }
+.hstrip > ha-icon { color:#f59e0b; }
+.hstrip .grow { min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.hs-go { display:inline-flex; align-items:center; color:var(--accent); font-weight:600; white-space:nowrap; }
+.hints { display:grid; gap:6px; }
+.hint { all:unset; cursor:pointer; box-sizing:border-box; display:flex; align-items:center; gap:12px; padding:9px 10px; border-radius:14px; border:1px solid var(--line); }
+.hint:hover { background:var(--card2); }
+.hint[disabled] { cursor:default; }
+.hint.warn .sr-ic { --c:#f59e0b; }
+.hint.info .sr-ic { --c:#60a5fa; }
+/* Startseite: Module und Widgets */
+.modtiles { display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:10px; }
+.modtile { all:unset; cursor:pointer; box-sizing:border-box; display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:16px; border:1px solid var(--line2); background:var(--card); min-width:0; }
+.modtile:hover { border-color:var(--accent); }
+.modtile .mico { width:44px; height:44px; border-radius:14px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--c) 18%, transparent); color:var(--ct); }
+.modtile .mico ha-icon { --mdc-icon-size:24px; }
+.mt-t { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.mt-t b { font-size:16px; }
+.mt-t small { color:var(--muted); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.mt-go { color:var(--muted); }
+.modtile.soon { cursor:default; opacity:.45; border-style:dashed; --c:#94a3b8; }
+.wgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:12px; grid-auto-flow:dense; }
+.wdg.sz-s { grid-column:span 1; }
+.wdg.sz-m { grid-column:span 2; }
+.wdg.sz-l { grid-column:1 / -1; }
+.wdg.sz-s { padding:12px 13px; }
+.wdg.sz-s .wh { margin-bottom:8px; }
+.wdg.sz-s .wh .link span { display:none; }
+.wdg.sz-s.edit .wh b, .wdg.sz-s.edit .wic { display:none; }
+.wline { display:flex; align-items:center; gap:6px; margin-top:6px; font-size:12.5px; font-weight:600; color:var(--ct); --c:var(--muted); min-width:0; }
+.wline ha-icon { --mdc-icon-size:15px; flex:none; }
+.wsplit { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1.3fr); gap:20px; align-items:start; }
+.wrooms { display:grid; gap:2px; }
+.wroom { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:10px; font-size:13px; }
+.wroom:nth-child(odd) { background:var(--card2); }
+.wroom > ha-icon { --mdc-icon-size:17px; }
+.wroom b { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.wroom span:not(.grow) { font-weight:700; }
+.wroom small { color:var(--muted); }
+.wroom .wm { color:var(--c); --mdc-icon-size:16px; }
+.wroom .gf { color:#fb923c; --mdc-icon-size:15px; }
+.wstate { font-size:18px; font-weight:700; margin-bottom:10px; }
+.pqs { display:flex; gap:6px; }
+.pq { all:unset; cursor:pointer; flex:1; display:grid; place-items:center; padding:9px 0; border-radius:12px; background:var(--card2); color:var(--muted); }
+.pq.on { background:color-mix(in srgb, var(--accent) 18%, var(--card2)); color:var(--accent); }
+.pq[disabled] { cursor:default; }
+.ppl { display:grid; gap:4px; margin-top:12px; padding-top:10px; border-top:1px solid var(--line); }
+.prow { display:flex; align-items:center; gap:10px; padding:5px 0; min-width:0; }
+.prow b { display:block; font-size:14px; font-weight:600; }
+.prow small { display:flex; align-items:center; gap:4px; color:var(--muted); font-size:12px; }
+.prow small ha-icon { --mdc-icon-size:13px; }
+.prow.home small { color:var(--ct); --c:#34d399; }
+.prow em { font-style:normal; font-weight:700; font-size:14px; white-space:nowrap; }
+.pav { position:relative; width:34px; height:34px; border-radius:50%; flex:none; display:grid; place-items:center; overflow:visible; background:var(--card2); border:2px solid var(--line2); font-weight:700; color:var(--muted); }
+.pav img { width:100%; height:100%; border-radius:50%; object-fit:cover; }
+.prow.home .pav, .pav.home { border-color:#34d399; }
+.ppl-s { display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+.ppl-s .pav { width:30px; height:30px; font-size:13px; }
+.ppl-s .pav em { position:absolute; bottom:-8px; left:50%; transform:translateX(-50%); font-style:normal; font-size:9.5px; font-weight:700; white-space:nowrap; padding:0 4px; border-radius:6px; background:var(--card); color:var(--text); border:1px solid var(--line); }
+.wdots { display:flex; flex-wrap:wrap; gap:5px; margin-top:10px; }
+.wdots i { width:12px; height:12px; border-radius:4px; }
+.gmini.two { grid-template-columns:repeat(2, 1fr); }
+.wsc.s { grid-template-columns:repeat(auto-fill, minmax(44px, 1fr)); gap:6px; }
+.wsc.s .sc { align-items:center; padding:10px 0; }
+.wval b { display:block; font-size:24px; font-weight:800; letter-spacing:-.02em; line-height:1.1; word-break:break-word; }
+.wval small { display:block; color:var(--muted); font-size:12px; margin-top:3px; }
+.wlist.cols { grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); column-gap:24px; }
+.wlist.cols .wrow:nth-child(-n+3) { border-top:none; }
+.wrow.tall .dbar.mini { height:6px; margin-top:5px; }
+.hbar { display:block; height:5px; border-radius:99px; background:var(--card2); margin-top:4px; overflow:hidden; }
+.hbar i { display:block; height:100%; border-radius:99px; }
+.rdot { width:9px; height:9px; border-radius:50%; flex:none; }
+.wbar em { font-style:normal; font-size:10.5px; color:var(--muted); }
+.fc.tight { grid-auto-columns:minmax(38px, 1fr); }
+.fc.tight .fci { padding:5px 0; gap:2px; }
+.fc.tight .fci > ha-icon { --mdc-icon-size:21px; }
+.wdg { margin:0; padding:14px 16px; display:flex; flex-direction:column; min-width:0; }
+
+.wdg.edit { outline:2px dashed color-mix(in srgb, var(--accent) 60%, transparent); outline-offset:-2px; }
+.wh { display:flex; align-items:center; gap:9px; margin-bottom:12px; min-width:0; }
+.wh b { font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wic { width:30px; height:30px; border-radius:10px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--c) 16%, transparent); color:var(--ct); }
+.wic ha-icon { --mdc-icon-size:18px; }
+.wtools { display:inline-flex; gap:2px; }
+.wtools .icon[disabled] { opacity:.3; cursor:default; }
+.danger-t { color:#f87171; }
+.wb { flex:1; min-width:0; }
+.wb .presence { margin:0; }
+.wbig { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.wbig > span:first-child { font-size:38px; font-weight:800; letter-spacing:-.03em; line-height:1; }
+.wbig small { font-size:15px; font-weight:500; color:var(--muted); margin-left:3px; }
+.wverdict { display:inline-flex; align-items:center; gap:6px; padding:6px 11px; border-radius:99px; font-size:13px; font-weight:600; color:var(--ct); background:color-mix(in srgb, var(--c) 14%, transparent); }
+.wminis { display:grid; grid-template-columns:repeat(3, 1fr); gap:8px; margin-top:12px; }
+.wmini { display:flex; flex-direction:column; align-items:flex-start; gap:1px; padding:8px 10px; border-radius:12px; background:var(--card2); }
+.wmini ha-icon { --mdc-icon-size:16px; color:var(--muted); }
+.wmini b { font-size:17px; }
+.wmini small { font-size:11.5px; color:var(--muted); }
+.wwx { display:flex; align-items:center; gap:14px; }
+.wwx > ha-icon { --mdc-icon-size:48px; color:#f59e0b; }
+.wwx b { display:block; font-size:30px; font-weight:800; letter-spacing:-.02em; }
+.wwx span { color:var(--muted); font-size:14px; }
+.wsc { display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:8px; }
+.sc { all:unset; cursor:pointer; box-sizing:border-box; display:flex; flex-direction:column; gap:4px; padding:10px 12px; border-radius:14px; background:var(--card2); border:1px solid transparent; min-width:0; }
+.sc ha-icon { --mdc-icon-size:22px; color:var(--muted); }
+.sc span { font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sc small { font-size:11px; color:var(--muted); }
+.sc:hover { border-color:var(--line2); }
+.sc.on { background:color-mix(in srgb, #f59e0b 16%, var(--card2)); }
+.sc.on ha-icon { color:#f59e0b; }
+.sc.missing { opacity:.5; }
+.wok { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:14px; }
+.wok ha-icon { color:#34d399; }
+.wlist { display:grid; }
+.wrow { display:flex; align-items:center; gap:10px; padding:7px 0; border-top:1px solid var(--line); min-width:0; }
+.wrow:first-child { border-top:none; padding-top:0; }
+.wrow > ha-icon { --mdc-icon-size:18px; color:var(--muted); }
+.wrow b { display:block; font-size:13.5px; font-weight:600; }
+.wrow small { display:block; font-size:11.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wrow .grow { min-width:0; }
+.wrow em { font-style:normal; font-size:12.5px; font-weight:600; white-space:nowrap; }
+.wrow em.hot { color:var(--ct); --c:#f59e0b; }
+.wbars { display:flex; align-items:flex-end; gap:8px; height:110px; }
+.wbar { flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:4px; }
+.wbar i { width:100%; max-width:34px; border-radius:6px 6px 3px 3px; background:linear-gradient(180deg, #fb923c, color-mix(in srgb, #fb923c 45%, var(--card2))); }
+.wbar small { font-size:11px; color:var(--muted); }
+.wcat { display:grid; gap:6px; }
+.fchints { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+.fchint { --c:#94a3b8; display:inline-flex; align-items:center; gap:6px; padding:5px 11px; border-radius:99px; font-size:12.5px; font-weight:600; color:var(--ct); background:color-mix(in srgb, var(--c) 14%, transparent); }
+.fchint ha-icon { --mdc-icon-size:15px; }
+.fc { display:grid; grid-auto-flow:column; grid-auto-columns:minmax(52px, 1fr); gap:4px; overflow-x:auto; scrollbar-width:thin; padding-bottom:4px; }
+.fci { display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 2px; border-radius:12px; text-align:center; }
+.fci:first-child { background:var(--card2); }
+.fci > small { font-size:11.5px; color:var(--muted); white-space:nowrap; }
+.fci > ha-icon { --mdc-icon-size:26px; color:#f59e0b; }
+.fci b { font-size:15px; }
+.fci em { font-style:normal; font-size:12.5px; color:var(--muted); }
+.fcr { position:relative; width:6px; height:46px; border-radius:99px; background:var(--card2); }
+.fci:first-child .fcr { background:var(--line2); }
+.fcr i { position:absolute; left:0; right:0; border-radius:99px; background:linear-gradient(0deg, #60a5fa, #fb923c); }
+.fcp { display:inline-flex; align-items:center; gap:1px; }
+.fcp ha-icon { --mdc-icon-size:12px; }
+.fcp.wet { color:#60a5fa !important; font-weight:600; }
+.wcat-i { all:unset; cursor:pointer; box-sizing:border-box; display:flex; align-items:center; gap:12px; padding:10px; border-radius:14px; border:1px solid var(--line); }
+.wcat-i:hover { border-color:var(--accent); background:var(--card2); }
+.sr-t small.wrap { white-space:normal; }
+@media (max-width:700px) {
+  .wgrid { grid-template-columns:1fr 1fr; gap:10px; }
+  .wdg.sz-m, .wdg.sz-l { grid-column:1 / -1; }
+  .wsplit { grid-template-columns:1fr; }
+  .modtiles { grid-template-columns:1fr 1fr; gap:8px; }
+  .modtile { padding:10px; gap:9px; }
+  .modtile .mico { width:36px; height:36px; border-radius:11px; }
+  .modtile .mt-go { display:none; }
+}
+/* Banner der Raumübersicht */
+.hero { flex-direction:column; align-items:stretch; gap:18px; }
+.hero-row { display:flex; align-items:center; gap:22px; position:relative; z-index:1; }
+.verdict { display:inline-flex; align-items:center; gap:8px; margin-top:12px; padding:8px 14px; border-radius:99px; font-size:14px; font-weight:600;
+  background:color-mix(in srgb, var(--c) 26%, rgba(255,255,255,.08)); border:1px solid color-mix(in srgb, var(--c) 55%, transparent); }
+.verdict ha-icon { color:var(--c); filter:brightness(1.3); }
+.wx { display:flex; align-items:center; gap:12px; padding:12px 16px; border-radius:18px; background:rgba(255,255,255,.1); backdrop-filter:blur(6px); flex:none; }
+.wx > ha-icon { --mdc-icon-size:40px; color:#fde68a; }
+.wx b { display:block; font-size:22px; font-weight:700; }
+.wx small { display:block; font-size:12px; color:rgba(255,255,255,.8); }
+.hstats { display:grid; grid-template-columns:repeat(auto-fit, minmax(128px, 1fr)); gap:8px; position:relative; z-index:1; }
+.hstat { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:14px; background:rgba(255,255,255,.09); border:1px solid rgba(255,255,255,.1); min-width:0; }
+.hstat > ha-icon { --mdc-icon-size:22px; color:var(--c, rgba(255,255,255,.85)); flex:none; }
+.hstat span { display:flex; flex-direction:column; min-width:0; }
+.hstat small { font-size:11px; color:rgba(255,255,255,.7); text-transform:uppercase; letter-spacing:.04em; }
+.hstat b { font-size:16px; font-weight:700; white-space:nowrap; }
+.hstat em { font-style:normal; font-size:11.5px; color:rgba(255,255,255,.72); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* Ansicht der Raumkacheln */
+.vtog { display:inline-flex; padding:3px; border-radius:12px; background:var(--card); border:1px solid var(--line); margin-right:6px; }
+.vtog button { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:9px; font-size:13px; font-weight:600; color:var(--muted); }
+.vtog button.on { background:color-mix(in srgb, var(--accent) 16%, var(--card)); color:var(--text); }
+.vtog button.on ha-icon { color:var(--accent); }
+/* Zeitplan in der Raumkarte */
+.rsched { margin:0 0 12px; padding:9px 11px 10px; border-radius:12px; background:var(--card2); }
+.rs-top { display:flex; align-items:center; gap:7px; font-size:12.5px; margin-bottom:7px; min-width:0; }
+.rs-top > ha-icon { --mdc-icon-size:15px; color:var(--muted); }
+.rs-src { color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+.rs-top b { font-weight:600; white-space:nowrap; }
+.rsched.on .rs-top b { color:var(--ct); --c:#f59e0b; }
+.rsched .dbar.mini { height:8px; }
+/* Kompakte Raumkacheln */
+.rooms.compact { grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:10px; }
+.rmini { position:relative; overflow:hidden; display:flex; flex-direction:column; gap:8px; padding:12px 12px 12px 15px; border-radius:16px; background:var(--card); border:1px solid var(--line); }
+.rmini::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--rc); }
+.rmini.off { opacity:.62; }
+.rm-head { display:flex; align-items:center; gap:8px; min-width:0; }
+.rm-ic { width:28px; height:28px; border-radius:9px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--rc) 18%, transparent); color:var(--rct); }
+.rm-ic ha-icon { --mdc-icon-size:17px; }
+.rm-name { flex:1; min-width:0; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rm-fire { color:#fb923c; --mdc-icon-size:16px; }
+.rm-win { color:#22d3ee; --mdc-icon-size:16px; }
+.icon.tiny { width:28px; height:28px; }
+.icon.tiny ha-icon { --mdc-icon-size:16px; }
+.rm-body { display:flex; align-items:flex-end; justify-content:space-between; gap:6px; }
+.rm-tgt { display:flex; flex-direction:column; align-items:flex-end; line-height:1.15; }
+.rm-tgt small { font-size:11px; color:var(--muted); }
+.rm-tgt b { font-size:16px; }
+.rm-temp { font-size:28px; font-weight:800; letter-spacing:-.02em; line-height:1; }
+.rm-temp small { font-size:13px; font-weight:500; color:var(--muted); margin-left:2px; }
+.rm-mode { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:600; color:var(--ct); min-width:0; }
+.rm-mode ha-icon { --mdc-icon-size:14px; }
+.rm-mode small { color:var(--muted); font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rmini .dbar.mini { height:6px; }
+.link.back { margin:0 0 10px; }
+@media (max-width:600px) {
+  .hero-row { flex-wrap:wrap; }
+  .hero .gauge { display:none; }
+  .wx { flex:1 1 100%; }
+  .hstats { grid-template-columns:1fr 1fr; }
+  .vtog span { display:none; }
+  .rooms.compact { grid-template-columns:1fr 1fr; }
+  .rm-mode small { display:none; }
+
+}
+/* Einstellungen: flache Liste, Details im Pop-up */
+.setsearch { margin-bottom:14px; }
+.setsearch input { width:100%; }
+.sgroup { padding:8px 10px; }
+.sg-h { display:flex; align-items:center; gap:8px; padding:8px 10px 6px; font-size:12px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+.srow { all:unset; cursor:pointer; box-sizing:border-box; width:100%; display:flex; align-items:center; gap:12px; padding:10px; border-radius:14px; }
+.srow + .srow { border-top:1px solid var(--line); border-radius:0 0 14px 14px; }
+.srow:hover { background:var(--card2); border-radius:14px; }
+.srow[disabled] { cursor:default; }
+.srow.off { opacity:.6; }
+.sr-ic { width:38px; height:38px; border-radius:12px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--c) 16%, transparent); color:var(--ct); }
+.sr-ic ha-icon { --mdc-icon-size:21px; }
+.sr-ic.big { width:46px; height:46px; border-radius:14px; }
+.sr-ic.big ha-icon { --mdc-icon-size:26px; }
+.sr-t { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.sr-t b { font-size:15px; font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.sr-t small { color:var(--muted); font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.srow.warn .sr-t small { color:var(--ct); --c:#f59e0b; }
+.sr-go { color:var(--muted); }
+.sheet.pop { height:auto; width:min(580px, calc(100vw - 24px)); z-index:23; }
+#pop .backdrop { z-index:22; }
+.note.warn { --c:#f59e0b; border-radius:12px; display:flex; margin:4px 0 12px; }
+.evlist { display:grid; gap:6px; margin-bottom:12px; }
+.ev { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:12px; background:var(--card2); }
+.ev > ha-icon { color:var(--muted); }
+.ev.live > ha-icon { color:#34d399; }
+.ev b { display:block; font-size:14px; font-weight:600; }
+.ev small { color:var(--muted); font-size:12px; }
+.wide { width:100%; display:flex; align-items:center; justify-content:center; gap:8px; }
+/* Heizpläne */
+.plangroups { padding:14px 16px 4px; }
+.pg { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+.pg + .pg { border-top:1px solid var(--line); padding-top:12px; }
+.pg-l { display:inline-flex; align-items:center; gap:6px; min-width:150px; font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--muted); }
+.pg .pills { flex:1; margin-bottom:10px; }
+.pill em { font-style:normal; font-size:11px; font-weight:700; padding:0 7px; border-radius:99px; background:var(--card2); color:var(--muted); }
+.pill .pi { --mdc-icon-size:14px; color:var(--muted); }
+.pill.add { border-style:dashed; color:var(--accent); }
+.plan-name { font-size:20px; font-weight:700; width:100%; max-width:420px; margin-bottom:6px; }
+.uchip { display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:99px; background:var(--card2); margin:2px 2px 0 0; }
+.uchip i { width:7px; height:7px; border-radius:50%; background:var(--rc); }
+.row-btns { display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; justify-content:center; margin-top:8px; }
+.plan-head + p, .plan-head + .row-btns { margin-top:-6px; margin-bottom:14px; }
+.card:not(.empty) .row-btns { justify-content:flex-start; }
+.inline-sel { margin:0; min-width:240px; text-align:left; }
+.empty .inline-sel { max-width:320px; margin:8px auto 0; }
+@media (max-width:600px) {
+  .pg-l { min-width:0; width:100%; }
+  .row-btns > * { flex:1 1 100%; }
+}
+/* Plakativer Hintergrund je Bereich: Heizen = Glut und aufsteigende Wärme, Start = Zuhause */
+:host { background-color:var(--bg); background-image:var(--deco, none); background-attachment:fixed; background-repeat:no-repeat; }
+:host([view="heat"]) {
+  --deco:radial-gradient(110% 55% at 50% 118%, rgba(249,115,22,.30), transparent 70%),
+         radial-gradient(50% 45% at 102% -5%, rgba(239,68,68,.20), transparent 70%),
+         radial-gradient(40% 40% at -5% 40%, rgba(251,191,36,.12), transparent 70%),
+         url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cg fill='none' stroke='%23fb923c' stroke-opacity='0.13' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M30 150c-14-16 14-28 0-44s14-28 0-44'/%3E%3Cpath d='M80 118c-14-16 14-28 0-44s14-28 0-44'/%3E%3Cpath d='M130 158c-14-16 14-28 0-44s14-28 0-44'/%3E%3C/g%3E%3C/svg%3E");
+  background-size:100% 100%, 100% 100%, 100% 100%, 160px 160px; background-repeat:no-repeat, no-repeat, no-repeat, repeat; }
+:host([dark][view="heat"]) {
+  --deco:radial-gradient(110% 55% at 50% 118%, rgba(249,115,22,.28), transparent 70%),
+         radial-gradient(50% 45% at 102% -5%, rgba(239,68,68,.22), transparent 70%),
+         radial-gradient(40% 40% at -5% 40%, rgba(251,191,36,.08), transparent 70%),
+         url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cg fill='none' stroke='%23fb923c' stroke-opacity='0.08' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M30 150c-14-16 14-28 0-44s14-28 0-44'/%3E%3Cpath d='M80 118c-14-16 14-28 0-44s14-28 0-44'/%3E%3Cpath d='M130 158c-14-16 14-28 0-44s14-28 0-44'/%3E%3C/g%3E%3C/svg%3E"); }
+:host([view="start"]) {
+  --deco:radial-gradient(60% 50% at 0% 0%, rgba(45,212,191,.22), transparent 70%),
+         radial-gradient(55% 50% at 100% 100%, rgba(251,146,60,.18), transparent 70%),
+         radial-gradient(rgba(45,212,191,.16) 1.2px, transparent 1.6px);
+  background-size:100% 100%, 100% 100%, 22px 22px; background-repeat:no-repeat, no-repeat, repeat; }
+:host([dark][view="start"]) {
+  --deco:radial-gradient(60% 50% at 0% 0%, rgba(45,212,191,.20), transparent 70%),
+         radial-gradient(55% 50% at 100% 100%, rgba(251,146,60,.14), transparent 70%),
+         radial-gradient(rgba(45,212,191,.12) 1.2px, transparent 1.6px); }
+/* Heizen-Banner: schmal und dezent */
+.hero { color:var(--text); padding:14px 18px; gap:12px; border-radius:var(--r); border:1px solid var(--line); box-shadow:none;
+  background:linear-gradient(100deg, color-mix(in srgb, #fb923c 10%, var(--card)) 0%, var(--card) 55%); }
+.hero::after { display:none; }
+.hero .hero-label { color:var(--muted); font-size:12.5px; }
+.hero-line { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:2px; }
+.hero .hero-big { font-size:38px; margin-top:0; }
+.hero .hero-big span { font-size:16px; color:var(--muted); }
+.hero .verdict { margin-top:0; padding:5px 12px; font-size:13px; color:var(--ct); background:color-mix(in srgb, var(--c) 13%, transparent); border-color:color-mix(in srgb, var(--c) 35%, transparent); }
+.hero .verdict ha-icon { filter:none; }
+.hero .wx { background:var(--card2); padding:8px 12px; border-radius:14px; backdrop-filter:none; }
+.hero .wx > ha-icon { --mdc-icon-size:30px; color:#f59e0b; }
+.hero .wx b { font-size:17px; }
+.hero .wx small { color:var(--muted); }
+.hero .hstats { grid-template-columns:repeat(auto-fit, minmax(118px, 1fr)); gap:6px; }
+.hero .hstat { background:var(--card2); border:none; padding:7px 10px; border-radius:12px; }
+.hero .hstat > ha-icon { --mdc-icon-size:18px; color:var(--ct); --c:var(--muted); }
+.hero .hstat[style] > ha-icon { color:var(--ct); }
+.hero .hstat small { color:var(--muted); font-size:10.5px; }
+.hero .hstat b { font-size:14.5px; }
+.hero .hstat em { color:var(--muted); font-size:11px; }
+@media (max-width:600px) {
+  .hero { padding:12px 14px; }
+  .hero .hero-big { font-size:32px; }
+}
+/* Untere Navigationsleiste (nur Handy) */
+.bnav { display:none; }
+@media (max-width:600px) {
+  .bnav { display:flex; position:fixed; left:0; right:0; bottom:0; z-index:8; padding:6px 8px calc(6px + env(safe-area-inset-bottom)); gap:4px;
+    background:color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter:blur(12px); border-top:1px solid var(--line); }
+  .bn { all:unset; cursor:pointer; flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:5px 0; border-radius:12px; font-size:11px; font-weight:600; color:var(--muted); }
+  .bn .bi { position:relative; display:grid; place-items:center; width:54px; height:28px; border-radius:99px; }
+  .bn ha-icon { --mdc-icon-size:22px; }
+  .bn.on { color:var(--text); }
+  .bn.on .bi { background:color-mix(in srgb, var(--accent) 18%, transparent); color:var(--accent); }
+  .bn em { position:absolute; top:-3px; right:6px; min-width:16px; height:16px; padding:0 4px; box-sizing:border-box; border-radius:99px; font-style:normal; font-size:10px; font-weight:800; display:grid; place-items:center; background:#fb923c; color:#1f1300; }
+  .bn em.warn { background:#22d3ee; color:#001b20; }
+  .app { padding-bottom:calc(84px + env(safe-area-inset-bottom)); }
+  .mtabs, .heatnav { display:none !important; }
+  .top { padding-bottom:6px; }
+  :host .top.slim .bar { display:flex; min-height:44px; }
+  :host .top.slim .ttl { display:flex; order:2; flex:1; }
+  :host .top.slim .ttl b { font-size:15px; }
+  :host .top.slim .ttl small { display:none; }
+}
+/* Raum-Detailseite */
+.rlink { all:unset; cursor:pointer; display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rlink:hover { color:var(--accent); text-decoration:underline; text-underline-offset:3px; }
+.rpage .room { margin-bottom:14px; }
+.rp-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; }
+.rp-grid .card { margin:0; }
+.kvs { display:grid; }
+.kv { display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-top:1px solid var(--line); font-size:13.5px; }
+.kv:first-child { border-top:none; }
+.kv span { color:var(--muted); }
+.kv b { font-weight:600; text-align:right; }
+.wrow em.bad { color:#f87171; }
+.wminis.four { grid-template-columns:repeat(2, 1fr); }
+.rlegend { display:inline-flex; gap:12px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
+.rlegend span { display:inline-flex; align-items:center; gap:5px; }
+.rlegend i { display:inline-block; width:14px; height:3px; border-radius:2px; }
+.rlegend .lt { background:var(--accent); }
+.rlegend .ls { background:repeating-linear-gradient(90deg, #fb923c 0 4px, transparent 4px 7px); }
+.rlegend .lh { background:#fb923c; opacity:.55; height:8px; }
+.rlegend .lw { background:#22d3ee; opacity:.55; height:8px; }
+.chart.hist { height:240px; }
+.hwrap { position:relative; }
+.hy { position:absolute; left:0; top:0; height:240px; width:6.5%; pointer-events:none; }
+.hy span { position:absolute; right:4px; transform:translateY(-50%); font-size:11px; color:var(--muted); }
+.hx { display:flex; justify-content:space-between; margin:-18px 0 0 7%; font-size:11px; color:var(--muted); }
+@media (max-width:600px) { .chart.hist, .hy { height:190px; } .rlegend { gap:8px; } }
+.chart.hist .pt { fill:none; stroke:var(--accent); stroke-width:2.5; vector-effect:non-scaling-stroke; stroke-linejoin:round; }
+.chart.hist .ps { fill:none; stroke:#fb923c; stroke-width:2; stroke-dasharray:6 5; vector-effect:non-scaling-stroke; }
+.chart.hist .bh { fill:#fb923c; opacity:.45; }
+.chart.hist .bw { fill:#22d3ee; opacity:.45; }
+/* Kopfzeile beim Scrollen: eine Zeile mit Logo, Reitern und Glocke */
+:host { position:relative; }
+#sentinel { position:absolute; top:0; left:0; width:1px; height:48px; pointer-events:none; }
+.top.slim { display:flex; align-items:center; gap:10px; padding-top:6px; padding-bottom:6px; }
+.top.slim .bar { display:contents; }
+.top.slim .ttl { display:none; }
+.top.slim .menu { order:0; width:34px; height:34px; }
+.top.slim .brand { order:1; }
+.top.slim .brand svg { width:32px; height:32px; }
+.top.slim .mtabs { order:2; flex:1; min-width:0; padding:0; gap:6px; }
+.top.slim .mtab { padding:6px 12px; }
+.top.slim .mtab > ha-icon { --mdc-icon-size:18px; }
+.top.slim .mtab .mt b { font-size:14px; }
+.top.slim .hacts { order:3; }
+.top.slim .bell { width:36px; height:36px; border-radius:12px; }
+/* Räume ohne Thermostat */
+.room.setup, .rmini.setup { background:transparent; border-style:dashed; box-shadow:none; }
+.room.setup::before, .rmini.setup::before { background:var(--line2); }
+.room.setup .room-ic, .rmini.setup .rm-ic { opacity:.6; }
+.room.setup .room-t small { color:var(--muted); }
+.setup-b { display:flex; flex-direction:column; align-items:flex-start; gap:10px; margin-top:14px; }
+.setup-b p { display:flex; align-items:center; gap:8px; margin:0; color:var(--muted); font-size:13.5px; }
+.setup-b p ha-icon { --mdc-icon-size:20px; }
+.setup-b .secondary { display:inline-flex; align-items:center; gap:7px; }
+.rmini .setup-b { margin-top:6px; }
+.rmini .setup-b .secondary { padding:7px 11px; font-size:13px; }
+.wroom.setup { opacity:.6; }
+.wroom.setup small { font-style:italic; }
+/* Gleichmäßiges Widget-Raster: klein und mittel gleich hoch, groß nach Inhalt */
+.wdg.sz-s, .wdg.sz-m { height:236px; }
+.wdg .wb { min-height:0; overflow-y:auto; overflow-x:hidden; scrollbar-width:thin; margin-right:-6px; padding-right:6px; }
+.wdg.sz-s .wb, .wdg.sz-m .wb { mask-image:linear-gradient(180deg, #000 calc(100% - 14px), transparent); -webkit-mask-image:linear-gradient(180deg, #000 calc(100% - 14px), transparent); }
+@media (max-width:700px) {
+  .wdg.sz-s { height:176px; }
+  .wdg.sz-m { height:auto; max-height:340px; }
+}
+/* Experten-Schalter im Raum-Dialog */
+.xtog { all:unset; cursor:pointer; flex:none; display:inline-flex; align-items:center; gap:6px; margin:6px 0; padding:5px 10px; border-radius:99px; font-size:12.5px; font-weight:600; color:var(--muted); border:1px solid var(--line2); }
+.xtog ha-icon { --mdc-icon-size:16px; }
+.xtog i { width:26px; height:14px; border-radius:99px; background:var(--track); position:relative; }
+.xtog i::after { content:""; position:absolute; top:2px; left:2px; width:10px; height:10px; border-radius:50%; background:#fff; transition:left .15s; }
+.xtog.on { color:var(--accent); border-color:var(--accent); }
+.xtog.on i { background:var(--accent); }
+.xtog.on i::after { left:14px; }
+.xhint { all:unset; cursor:pointer; box-sizing:border-box; width:100%; display:flex; align-items:center; gap:8px; margin-top:18px; padding:10px 12px; border-radius:12px; border:1px dashed var(--line2); color:var(--muted); font-size:13px; }
+.xhint:hover { border-color:var(--accent); color:var(--text); }
+.xhint > span:not(.grow) { color:var(--text); font-weight:600; }
+@media (max-width:600px) { .xtog span { display:none; } }
+/* Ruhigere Farben: Raumfarbe nur als Streifen, Symbole einheitlich */
+.room-ic, .rm-ic { background:var(--card2) !important; color:var(--text) !important; }
+.wic, .sr-ic { --c:var(--accent) !important; }
+.hint.warn .sr-ic { --c:#f59e0b !important; }
+.hint.info .sr-ic { --c:#60a5fa !important; }
+.room-head { gap:8px; }
+.room-head .icon { width:34px; height:34px; flex:none; }
+.room-t small { flex-wrap:wrap; }
+.room-t .sis { display:inline-flex; gap:7px; margin-left:8px; }
+.rmenu { border:none !important; padding:0 !important; margin:0 !important; }
+.room-head .icon { width:30px; height:30px; }
+.room-head .rmenu summary { width:30px; height:30px; }
+.room-head .mode { padding:4px 9px; font-size:12px; }
+.room-head .mode ha-icon { --mdc-icon-size:14px; }
+.room-t .si { display:inline-flex; align-items:center; gap:3px; color:var(--ct); font-size:12px; padding:0; background:none; }
+.room-t .si ha-icon { --mdc-icon-size:14px; }
+.rmenu { position:relative; flex:none; }
+.rmenu summary { list-style:none; display:grid; place-items:center; width:34px; height:34px; border-radius:11px; cursor:pointer; color:var(--muted); }
+.rmenu summary::-webkit-details-marker { display:none; }
+.rmenu summary:hover, .rmenu[open] summary { background:var(--card2); color:var(--text); }
+.rm-pop { position:absolute; right:0; top:calc(100% + 6px); z-index:6; min-width:210px; padding:6px; border-radius:14px; background:var(--card); border:1px solid var(--line2); box-shadow:var(--shadow); display:grid; }
+.rm-pop button { all:unset; cursor:pointer; display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:10px; font-size:14px; }
+.rm-pop button:hover { background:var(--card2); }
+.rm-pop ha-icon { --mdc-icon-size:18px; color:var(--muted); }
+.room .room-note:last-child { margin-bottom:0; }
+.room .rsched:last-child { margin-bottom:0; }
+@media (max-width:600px) {
+  .room-head .mode { max-width:120px; }
+}
+/* Einheitliche Schrift: Wert groß, Titel, Nebeninfo */
+:host { --fs-val:34px; --fs-title:15px; --fs-sub:12.5px; }
+.room-temp, .wbig > span:first-child, .wval b, .wwx b, .hero .hero-big, .kpi-v, .rm-temp { font-size:var(--fs-val) !important; letter-spacing:-.02em; }
+.rm-temp, .wdg.sz-s .wbig > span:first-child, .wdg.sz-s .wval b, .wdg.sz-s .wwx b { font-size:28px !important; }
+.room-t h4, .wh b, .sr-t b, .stit b, .shead h3, .rm-name, .prow b, .wrow b, .mt-t b, .ev b { font-size:var(--fs-title) !important; }
+.room-t small, .sr-t small, .wrow small, .prow small, .wmini small, .ev small, .kv, .rs-top, .room-note, .muted.small, .trend, .gm .gl, .rm-mode { font-size:var(--fs-sub) !important; }
+.room-temp span, .wbig small, .hero .hero-big span, .rm-temp small { font-size:14px !important; }
+.toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:11px 20px; border-radius:12px; z-index:30; font-size:14px; font-weight:600; box-shadow:0 10px 30px rgba(0,0,0,.4); }
+
+@media (max-width:820px) {
+  .kpis { grid-template-columns:1fr 1fr; }
+  .gauge { width:130px; }
+  .hero-big { font-size:52px; }
+}
+@media (max-width:600px) {
+  .app { padding:10px 12px 32px; }
+  .hmodes { grid-template-columns:1fr; }
+  .top { padding:6px 10px 0; }
+  .bar { gap:8px; }
+  .brand svg { width:36px; height:36px; }
+  .ttl b { font-size:16px; }
+  .ttl span { display:none; }
+  .abtn span { display:none; }
+  .abtn { padding:9px; }
+  .mtab { padding:8px 12px; gap:8px; }
+  .mtiles { grid-template-columns:repeat(2, 1fr); gap:8px; }
+  .mtile { padding:12px 8px; gap:4px; }
+  .mico { width:38px; height:38px; border-radius:12px; }
+  .gmini { grid-template-columns:1fr 1fr; }
+  .hl { font-size:22px; }
+  .hero { flex-direction:column; align-items:stretch; padding:20px; }
+  .gauge { position:absolute; right:10px; top:10px; width:96px; opacity:.95; }
+  .hero-big { font-size:46px; }
+  .row2, .row3, .types { grid-template-columns:1fr; }
+  .rooms { grid-template-columns:1fr; }
+  .card { padding:16px; }
+  .chart { height:180px; }
+  .dp { width:38px; }
+  .block-temp { justify-content:flex-start; flex-basis:calc(100% - 60px); }
+  .block .daypills { display:grid; grid-template-columns:repeat(7, 1fr); gap:5px; }
+  .block .dp { width:auto; }
+  .plan-tools .addbtn { flex-basis:100%; }
+  .plan-tools .ghost { padding:12px 18px; justify-content:center; flex:1; }
+  .sheet { top:auto; bottom:0; left:0; transform:none; width:100vw; height:92vh; max-height:92vh; border-radius:24px 24px 0 0; }
+  .dtabs { padding:0 10px; justify-content:space-between; }
+  .dtab:not(.on) span { display:none; }
+  .dtab { padding:11px 8px 12px; }
+  .pseg span { font-size:13px; }
+  .ptoggles { width:100%; }
+  .ptoggle { flex:1; justify-content:center; }
+  .snav:not(.on) span { display:none; }
+  .si .t { display:none; }
+  .si { padding:0 6px; }
+}
+`;
+
+customElements.get("hauswerk-panel") || customElements.define("hauswerk-panel", HauswerkPanel);

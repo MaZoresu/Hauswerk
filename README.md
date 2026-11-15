@@ -27,7 +27,7 @@ Hauswerk ersetzt die frühere Integration „Heizwerk“. Räume, Heizpläne, Ei
 3. Home Assistant neu starten.
 4. Automationen und Dashboards auf die neuen Entitäten umstellen: aus `switch.hauswerk_…` wird `switch.hauswerk_…`, aus `sensor.hauswerk_…` wird `sensor.hauswerk_…`.
 
-> **Hinweis zur Wiederherstellung:** `frontend/hauswerk-panel.js` ist in diesem Stand ein schlichtes Ersatz-Panel (Raumübersicht, ±0,5 °C, Boost). Das vollständige Panel mit Widgets, Raumseite, Hinweisen und Einstellungen war nicht unter den gesicherten Dateien und muss aus dem Original ersetzt werden – dabei die WebSocket-Befehle von `heizwerk/…` auf `hauswerk/heizen/…` und den Elementnamen auf `hauswerk-panel` umstellen. Ebenso fehlen `dev/vorschau.html` und die ursprünglichen Tests.
+> **Hinweis:** `dev/vorschau.html` (Panel-Vorschau mit simuliertem Home Assistant) und die ursprünglichen Tests sind in diesem Stand noch nicht enthalten. `tests/test_logic.py` wurde neu geschrieben.
 
 # Modul Heizen
 
