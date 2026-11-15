@@ -1,11 +1,15 @@
-# Legt automatisch ein GitHub-Release an, sobald sich die Version in manifest.json ändert.
-# HACS zeigt nur mit Releases die richtige Versionsnummer an (sonst den Commit-Hash).
+# Legt automatisch ein GitHub-Release an, sobald sich die Version in manifest.json ändert,
+# und übernimmt den passenden Abschnitt aus CHANGELOG.md als Release-Text.
+# HACS zeigt diesen Text im Update-Dialog von Home Assistant an.
+# Ändert sich nur CHANGELOG.md, werden die Texte bestehender Releases nachgezogen.
 name: Release
 
 on:
   push:
     branches: [main]
-    paths: [custom_components/hauswerk/manifest.json]
+    paths:
+      - custom_components/hauswerk/manifest.json
+      - CHANGELOG.md
   workflow_dispatch:
 
 permissions:
@@ -21,13 +25,37 @@ jobs:
         id: version
         run: echo "version=$(jq -r .version custom_components/hauswerk/manifest.json)" >> "$GITHUB_OUTPUT"
 
-      - name: Release anlegen (falls es die Version noch nicht gibt)
+      - name: Release-Text aus CHANGELOG.md
+        run: |
+          mkdir -p notes
+          # Für jede Version im CHANGELOG den Abschnitt bis zur nächsten Version in notes/<version>.md schreiben
+          awk '
+            /^## [0-9]/ { v=$2; file="notes/" v ".md"; next }
+            v != "" { print > file }
+          ' CHANGELOG.md
+          for f in notes/*.md; do
+            printf '\n---\nAlle Änderungen: [CHANGELOG](https://github.com/%s/blob/main/CHANGELOG.md)\n' "$GITHUB_REPOSITORY" >> "$f"
+          done
+          ls notes
+
+      - name: Release anlegen bzw. Texte aktualisieren
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          if [ ! -f "notes/$VERSION.md" ]; then
+            echo "::error::CHANGELOG.md hat keinen Abschnitt „## $VERSION“."
+            exit 1
+          fi
           if gh release view "v$VERSION" >/dev/null 2>&1; then
             echo "Release v$VERSION gibt es schon."
-            exit 0
+          else
+            gh release create "v$VERSION" --target "$GITHUB_SHA" --title "Hauswerk $VERSION" --notes-file "notes/$VERSION.md" --latest
           fi
-          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "Hauswerk $VERSION" --generate-notes --latest
+          # Texte aller vorhandenen Releases mit dem CHANGELOG abgleichen
+          for f in notes/*.md; do
+            v=$(basename "$f" .md)
+            if gh release view "v$v" >/dev/null 2>&1; then
+              gh release edit "v$v" --notes-file "$f" >/dev/null && echo "Text von v$v aktualisiert"
+            fi
+          done

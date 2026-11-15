@@ -29,6 +29,10 @@ jobs:
           P=$(grep -oP 'const VERSION = "\K[^"]+' custom_components/hauswerk/frontend/hauswerk-panel.js)
           echo "manifest $M · Panel $P"
           test "$M" = "$P"
+      - name: CHANGELOG hat einen Abschnitt für die Version
+        run: |
+          M=$(jq -r .version custom_components/hauswerk/manifest.json)
+          grep -q "^## $M " CHANGELOG.md || { echo "::error::In CHANGELOG.md fehlt „## $M“"; exit 1; }
 
   hassfest:
     name: hassfest

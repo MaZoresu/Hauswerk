@@ -163,7 +163,8 @@ tests/test_logic.py             Regel-Logik
 tests/test_smoke.py             Kern, Heizwerk und Protokoll mit nachgebautem Home Assistant
 dev/vorschau.html               Panel mit simuliertem Home Assistant im Browser ansehen
 .github/workflows/ci.yml        Prüfen bei jedem Push: pytest, hassfest, HACS
-.github/workflows/release.yml   Release, sobald sich die Version in manifest.json ändert
+.github/workflows/release.yml   Release, sobald sich die Version in manifest.json ändert; Text aus CHANGELOG.md
+CHANGELOG.md                    Änderungen je Version – erscheinen als Update-Notizen in Home Assistant (HACS)
 ```
 
 Tests: `pip install pytest`, dann im Projektordner `python -m pytest tests` (Home Assistant wird nicht gebraucht).
