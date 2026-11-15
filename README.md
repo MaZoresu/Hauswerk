@@ -25,7 +25,7 @@ Hauswerk ersetzt die frühere Integration „Heizwerk“. Räume, Heizpläne, Ei
 1. Hauswerk wie oben installieren und einrichten.
 2. Die alte Integration **Heizwerk** unter Geräte & Dienste löschen und den Ordner `config/custom_components/heizwerk` entfernen – sonst regeln beide gleichzeitig dieselben Thermostate.
 3. Home Assistant neu starten.
-4. Automationen und Dashboards auf die neuen Entitäten umstellen: aus `switch.hauswerk_…` wird `switch.hauswerk_…`, aus `sensor.hauswerk_…` wird `sensor.hauswerk_…`.
+4. Automationen und Dashboards auf die neuen Entitäten umstellen: aus `switch.heizwerk_…` wird `switch.hauswerk_…`, aus `sensor.heizwerk_…` wird `sensor.hauswerk_…`.
 
 > **Hinweis:** `dev/vorschau.html` (Panel-Vorschau mit simuliertem Home Assistant) und die ursprünglichen Tests sind in diesem Stand noch nicht enthalten. `tests/test_logic.py` wurde neu geschrieben.
 
