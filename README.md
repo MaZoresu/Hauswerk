@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="custom_components/hauswerk/brand/dark_logo.png">
+  <img alt="Hauswerk" src="custom_components/hauswerk/brand/logo.png" height="64">
+</picture>
+
 # Hauswerk
 
 Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite ist das Dashboard von Hauswerk und fasst die Informationen aller Module zusammen. Einstellungen, die für alle Module gelten (Anwesenheit, Urlaub, Wetter, Startseite, Berechtigungen), stehen zentral unter Hauswerk; alles andere steht im jeweiligen Modul. Hauswerk ist in Module gegliedert:
@@ -16,7 +21,7 @@ Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite 
 3. **Einstellungen → Geräte & Dienste → Integration hinzufügen → Hauswerk**.
 4. Im Seitenmenü **Hauswerk** öffnen, unter **Einstellungen** (Zahnrad oben rechts) Personen und Wetter wählen und unter **Heizwerk** Räume anlegen.
 
-Voraussetzung: Home Assistant 2024.11 oder neuer. Räume, Heizpläne und Einstellungen ändern dürfen Admins – oder alle Benutzer, wenn ein Admin das unter Einstellungen › Berechtigungen freigibt (z. B. für ein Wand-Tablet). Die Temperatur ±0,5 °C und Boost dürfen immer alle.
+Voraussetzung: Home Assistant 2024.11 oder neuer. Das eigene Logo unter Geräte & Dienste und in HACS zeigt Home Assistant ab 2026.3 (Ordner `brand/` der Integration); ältere Versionen zeigen dort einen Platzhalter. Räume, Heizpläne und Einstellungen ändern dürfen Admins – oder alle Benutzer, wenn ein Admin das unter Einstellungen › Berechtigungen freigibt (z. B. für ein Wand-Tablet). Die Temperatur ±0,5 °C und Boost dürfen immer alle.
 
 ### Umstieg von Heizwerk
 
@@ -144,6 +149,7 @@ custom_components/hauswerk/
   log.py            Protokoll für alle Module (config/.storage/hauswerk.protokoll, 14 Tage)
   api.py            WebSocket-Befehle fürs Panel (hauswerk/heizen/get, /subscribe, /room/save …, hauswerk/log/get, /subscribe)
   sensor.py, switch.py, entity.py
+  brand/            Logo und Symbol für Home Assistant (icon.png, logo.png, dark_logo.png, je mit @2x)
   frontend/hauswerk-panel.js   Panel als Web-Komponente, ohne Build-Schritt
 tests/test_logic.py             Regel-Logik
 tests/test_smoke.py             Kern, Heizwerk und Protokoll mit nachgebautem Home Assistant

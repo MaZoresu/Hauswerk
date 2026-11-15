@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.18.1";
+const VERSION = "0.18.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4001,10 +4001,14 @@ class HauswerkPanel extends HTMLElement {
 /* Eigenes Zeichen: Flamme in einem Thermostat-Ring */
 const LOGO = `
 <svg viewBox="0 0 48 48" aria-hidden="true">
-  <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:color-mix(in srgb, var(--accent) 80%, #fff)"/><stop offset="1" style="stop-color:color-mix(in srgb, var(--accent) 60%, #000)"/></linearGradient></defs>
+  <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:color-mix(in srgb, var(--accent) 75%, #fff)"/><stop offset="1" style="stop-color:color-mix(in srgb, var(--accent) 65%, #000)"/></linearGradient></defs>
   <rect width="48" height="48" rx="13" fill="url(#lg)"/>
-  <circle cx="24" cy="24" r="13" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="3" stroke-dasharray="61 82" transform="rotate(135 24 24)" stroke-linecap="round"/>
-  <path d="M24 14c1.2 3.6 5.5 5.6 5.5 10.2A5.5 5.5 0 0 1 18.5 24c0-2.3 1.2-3.7 2.3-4.8.2 1.6 1 2.6 2 2.9-.3-3 .2-5.6 1.2-8.1z" fill="#fff"/>
+  <path d="M10.5 23.5 24 11.5l13.5 12" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M14.8 21.8V34.2a2.8 2.8 0 0 0 2.8 2.8h12.8a2.8 2.8 0 0 0 2.8-2.8V21.8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="18.6" y="22.8" width="4.6" height="4.6" rx="1.3" fill="#fdba74"/>
+  <rect x="24.8" y="22.8" width="4.6" height="4.6" rx="1.3" fill="#fff"/>
+  <rect x="18.6" y="29" width="4.6" height="4.6" rx="1.3" fill="#fff"/>
+  <rect x="24.8" y="29" width="4.6" height="4.6" rx="1.3" fill="#fff" opacity=".55"/>
 </svg>`;
 
 const STYLE = `

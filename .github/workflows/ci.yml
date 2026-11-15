@@ -45,4 +45,4 @@ jobs:
         with:
           category: integration
           # Beschreibung, Themen und Lizenz braucht HACS nur für die Aufnahme in den HACS-Standardkatalog
-          ignore: brands description topics license
+          ignore: description topics license
