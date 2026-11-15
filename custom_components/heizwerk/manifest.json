@@ -1,13 +1,24 @@
 {
   "domain": "heizwerk",
   "name": "Heizwerk",
-  "codeowners": [],
+  "codeowners": [
+    "@MaZoresu"
+  ],
   "config_flow": true,
-  "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],
-  "after_dependencies": ["person", "device_tracker"],
-  "documentation": "https://github.com/",
+  "dependencies": [
+    "frontend",
+    "http",
+    "panel_custom",
+    "websocket_api"
+  ],
+  "after_dependencies": [
+    "person",
+    "device_tracker"
+  ],
+  "documentation": "https://github.com/MaZoresu/Hauswerk",
   "integration_type": "service",
   "iot_class": "local_push",
+  "issue_tracker": "https://github.com/MaZoresu/Hauswerk/issues",
   "requirements": [],
   "single_config_entry": true,
   "version": "0.12.0"
