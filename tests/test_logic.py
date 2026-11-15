@@ -251,3 +251,64 @@ def test_events_to_blocks():
         {"days": [0, 2], "start": "18:00", "end": "22:00"},
         {"days": [5], "start": "09:00", "end": "12:00"},
     ]
+
+
+# ------------------------------------------------------------ 0.19: Wetter, Lüften, Verläufe, Feiertage, Nachrichten
+def test_weather_lead_factor():
+    assert L.weather_lead_factor(None) == 1.0
+    assert L.weather_lead_factor(5) == 1.0
+    assert L.weather_lead_factor(-5) == pytest.approx(1.4)
+    assert L.weather_lead_factor(15) == pytest.approx(0.6)
+    assert L.weather_lead_factor(-40) == 1.8  # begrenzt
+
+
+def test_abs_humidity_and_dew_point():
+    assert L.abs_humidity(20, 50) == pytest.approx(8.6, abs=0.1)
+    assert L.dew_point(20, 50) == pytest.approx(9.3, abs=0.1)
+
+
+def test_ventilate_advice():
+    # Winter: drinnen feucht, draußen kalt und damit trocken -> lüften
+    advice = L.ventilate_advice(22, 72, 2, 90)
+    assert advice and advice["rh"] == 72 and advice["inside_g"] > advice["outside_g"]
+    # schwüler Sommer: draußen feuchter -> nicht lüften
+    assert L.ventilate_advice(24, 70, 28, 80) is None
+    # unter der Grenze oder ohne Werte -> nichts
+    assert L.ventilate_advice(22, 60, 2, 90) is None
+    assert L.ventilate_advice(22, 72, None, 90) is None
+    assert L.ventilate_advice(22, 72, 2, 90, limit_rh=0) is None
+
+
+def test_drop_and_rise_within():
+    samples = [(0, 21.0), (60, 20.8), (120, 20.1), (180, 19.7)]
+    assert L.drop_within(samples, 180, 300) == pytest.approx(1.3)
+    assert L.drop_within(samples, 180, 60) == pytest.approx(0.4)
+    assert L.drop_within([(0, 21.0)], 0, 300) == 0
+    hums = [(0, 55.0), (300, 60.0), (600, 71.0)]
+    assert L.rise_within(hums, 600, 900) == pytest.approx(16.0)
+
+
+def test_holiday_week_minute():
+    wed_10 = 2 * L.DAY_MIN + 600
+    assert L.holiday_week_minute(wed_10, True) == wed_10
+    assert L.holiday_week_minute(wed_10, None) == wed_10
+    assert L.holiday_week_minute(wed_10, False) == 6 * L.DAY_MIN + 600  # wie Sonntag
+    assert L.holiday_week_minute(wed_10, False, 5) == 5 * L.DAY_MIN + 600  # wie Samstag
+    sat = 5 * L.DAY_MIN + 600
+    assert L.holiday_week_minute(sat, False) == sat  # Wochenende bleibt
+
+
+def test_in_quiet_hours():
+    assert L.in_quiet_hours(23 * 60, "22:00", "07:00")
+    assert L.in_quiet_hours(6 * 60, "22:00", "07:00")
+    assert not L.in_quiet_hours(7 * 60, "22:00", "07:00")
+    assert L.in_quiet_hours(13 * 60, "12:00", "14:00")
+    assert not L.in_quiet_hours(13 * 60, None, "07:00")
+
+
+def test_battery_level():
+    assert L.battery_level("17", "battery", "%") == 17
+    assert L.battery_level("on", "battery", None) == 0
+    assert L.battery_level("off", "battery", None) == 100
+    assert L.battery_level("3.1", "voltage", "V") is None
+    assert L.battery_level("x", "battery", "%") is None

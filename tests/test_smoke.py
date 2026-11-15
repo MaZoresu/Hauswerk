@@ -20,6 +20,7 @@ SRC = Path(__file__).resolve().parents[1] / "custom_components" / "hauswerk"
 TZ = timezone(timedelta(hours=1))
 NOW = [datetime(2026, 11, 16, 7, 0, tzinfo=timezone.utc)]
 STORES: dict[str, object] = {}  # Speicher je Schlüssel (wie .storage/ in Home Assistant)
+REG: dict[str, object] = {}  # Entitäten-Register: entity_id -> Eintrag mit device_id
 
 
 class Store:
@@ -51,8 +52,8 @@ def _stub_homeassistant():
     _mod("homeassistant.core", Event=object, HomeAssistant=object, callback=lambda f: f)
     _mod("homeassistant.helpers")
     _mod("homeassistant.helpers.entity_registry",
-         async_get=lambda hass: types.SimpleNamespace(async_get=lambda e: None),
-         async_entries_for_device=lambda r, d: [])
+         async_get=lambda hass: types.SimpleNamespace(async_get=REG.get),
+         async_entries_for_device=lambda r, d: [e for e in REG.values() if e.device_id == d])
     _mod("homeassistant.helpers.dispatcher", async_dispatcher_send=lambda *a: None)
     _mod("homeassistant.helpers.event", async_call_later=noop, async_track_state_change_event=noop,
          async_track_time_interval=noop)
@@ -104,11 +105,23 @@ class Hass:
         self.data = {}
         self.st = {}
         self.calls = []
-        self.states = types.SimpleNamespace(get=self.st.get)
+        self.states = types.SimpleNamespace(
+            get=self.st.get, async_entity_ids=lambda domain: [e for e in self.st if e.startswith(f"{domain}.")])
         self.services = types.SimpleNamespace(async_call=self._call)
+        self.forecast = None
 
     async def _call(self, domain, service, data, **kw):
         self.calls.append((domain, service, data))
+        if (domain, service) == ("weather", "get_forecasts"):
+            return {data["entity_id"]: {"forecast": self.forecast or []}}
+        return None
+
+    def async_create_task(self, coro):
+        return asyncio.ensure_future(coro)
+
+    def sent(self):
+        """Gesendete Nachrichten (Titel)."""
+        return [d["title"] for dom, _s, d in self.calls if dom == "notify"]
 
     def set(self, eid, state, attrs=None, name=None):
         self.st[eid] = State(eid, state, attrs, name)
@@ -215,3 +228,110 @@ def test_uebernahme_aus_heizwerk(hw):
 def test_einstellungen_getrennt(hw):
     assert not set(hw.const.HOUSE_DEFAULTS) & set(hw.const.HEAT_DEFAULTS)
     assert hw.const.DEFAULT_SETTINGS == {**hw.const.HOUSE_DEFAULTS, **hw.const.HEAT_DEFAULTS}
+
+
+def _reg(entity_id, device_id, device_class=None):
+    REG[entity_id] = types.SimpleNamespace(entity_id=entity_id, device_id=device_id, domain=entity_id.split(".")[0],
+                                           disabled_by=None, device_class=device_class, original_device_class=device_class)
+
+
+def test_nachrichten_batterie_ruhezeit(hw):
+    """Fenster lange offen, Batterie schwach, Thermostat weg, Frost – einmal senden, Ruhezeit hält zurück."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 16, 7, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("climate.wz", "heat", {"current_temperature": 20.0, "temperature": 21.0}, "Thermostat Wohnzimmer")
+        hass.set("sensor.wz_batterie", "12", {"device_class": "battery", "unit_of_measurement": "%"}, "Thermostat Batterie")
+        hass.set("binary_sensor.fenster", "on", name="Fenster Wohnzimmer")
+        hass.st["binary_sensor.fenster"].last_changed = NOW[0] - timedelta(minutes=40)
+        hass.set("weather.home", "cloudy", {"temperature": 3.0, "humidity": 85})
+        hass.forecast = [{"datetime": "2026-11-17", "temperature": 2.0, "templow": -4.5}]
+        _reg("climate.wz", "d1")
+        _reg("sensor.wz_batterie", "d1", "battery")
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"notify_targets": ["mobile_app_pixel"], "notify_quiet": False})
+        await ctl.async_save_room({"id": "wz", "name": "Wohnzimmer", "type": "heizkoerper", "comfort": 21, "eco": 18,
+                                   "climates": ["climate.wz"], "windows": ["binary_sensor.fenster"], "enabled": True,
+                                   "schedule": []})
+        await haus._async_refresh_forecast(force=True)
+        await ctl.async_evaluate()
+        await asyncio.sleep(0)
+        first = hass.sent()
+        assert "Fenster lange offen" in first and "Batterie schwach" in first and "Frost erwartet" in first
+        assert ctl.status()["rooms"]["wz"]["battery_low"][0]["level"] == 12
+        # nicht doppelt
+        await ctl.async_evaluate()
+        await asyncio.sleep(0)
+        assert hass.sent() == first
+        # Fenster zu -> erledigt; Thermostat fällt aus (seit 20 Min.)
+        hass.set("binary_sensor.fenster", "off", name="Fenster Wohnzimmer")
+        hass.set("climate.wz", "unavailable", name="Thermostat Wohnzimmer")
+        hass.st["climate.wz"].last_changed = NOW[0] - timedelta(minutes=20)
+        # Ruhezeit den ganzen Tag: zurückhalten
+        await haus.async_save_settings({"notify_quiet": True, "notify_quiet_from": "00:00", "notify_quiet_to": "23:59"})
+        await ctl.async_evaluate()
+        await asyncio.sleep(0)
+        assert "Thermostat nicht erreichbar" not in hass.sent()
+        assert haus.status()["notify_queued"] == 1
+        # Ruhezeit vorbei: senden, weil der Anlass noch besteht
+        await haus.async_save_settings({"notify_quiet": False})
+        haus._flush_queue()
+        await asyncio.sleep(0)
+        assert hass.sent().count("Thermostat nicht erreichbar") == 1
+        return log
+
+    log = asyncio.run(run())
+    notes = [e for e in log.entries if e["cat"] == "notify"]
+    assert any("Ruhezeit" in e.get("why", "") for e in notes)
+    assert any("nach der Ruhezeit" in e.get("why", "") for e in notes)
+
+
+def test_fenster_erkennung_duschen_feiertag_wetter(hw):
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 18, 5, 0, tzinfo=timezone.utc)  # Mittwoch 06:00 lokal
+        hass = Hass()
+        hass.set("climate.bad", "heat", {"current_temperature": 21.0, "temperature": 21.0}, "Thermostat Bad")
+        hass.set("sensor.bad_t", "21.0", name="Bad Temperatur")
+        hass.set("sensor.bad_h", "55", name="Bad Feuchte")
+        hass.set("binary_sensor.arbeitstag", "off", name="Arbeitstag")  # Feiertag
+        hass.set("sensor.aussen", "-5.0", name="Außen")
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"outside_sensor": "sensor.aussen"})
+        await ctl.async_save_settings({"workday_entity": "binary_sensor.arbeitstag", "workday_as": 6,
+                                       "preheat_weather": True, "preheat_mode": "fixed", "lead_radiator": 20})
+        # Werktags 05:30–08:00, sonntags erst ab 09:00
+        await ctl.async_save_room({"id": "bad", "name": "Bad", "type": "heizkoerper", "comfort": 22, "eco": 18,
+                                   "climates": ["climate.bad"], "windows": [], "temp_sensor": "sensor.bad_t",
+                                   "humidity_sensor": "sensor.bad_h", "enabled": True,
+                                   "window_detect": True, "shower_boost": 20,
+                                   "schedule": [{"days": [0, 1, 2, 3, 4], "start": "05:30", "end": "08:00"},
+                                                {"days": [5, 6], "start": "09:00", "end": "22:00"}]})
+        res = ctl.status()["rooms"]["bad"]
+        assert res["holiday"] is True and res["mode"] == "eco"  # Feiertag: Sonntagsplan, noch keine Komfortzeit
+        assert res["preheat_factor"] == 1.4 and res["preheat_lead"] == 28  # -5 °C außen: 20 Min. × 1,4
+        # Duschen: Feuchte steigt in 10 Min. um 20 Punkte
+        NOW[0] += timedelta(minutes=10)
+        hass.set("sensor.bad_h", "75", name="Bad Feuchte")
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["bad"]
+        assert res["shower"] is True and res["target"] == 22
+        # Fenster ohne Kontakt: Temperatur fällt in 3 Min. um 1,5 °C
+        NOW[0] += timedelta(minutes=3)
+        hass.set("sensor.bad_t", "19.5", name="Bad Temperatur")
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["bad"]
+        assert res["window_virtual"] is True and res["mode"] == "fenster"
+        NOW[0] += timedelta(minutes=16)
+        await ctl.async_evaluate()
+        assert ctl.status()["rooms"]["bad"]["window_virtual"] is False
+        return log
+
+    log = asyncio.run(run())
+    titles = [e["title"] for e in log.entries]
+    assert any(t.startswith("Nach dem Duschen") for t in titles)
+    assert "Fensterpause beginnt" in titles and "Fensterpause endet" in titles
+    assert any("vermutlich offen" in (e.get("why") or "") for e in log.entries)

@@ -28,6 +28,8 @@ const states = {
   "weather.home": st("cloudy", { friendly_name: "OpenWeatherMap", temperature: 6.1, apparent_temperature: 3.2, humidity: 81, wind_speed: 14.6, wind_gust_speed: 31, wind_speed_unit: "km/h", supported_features: 3 }),
   "sensor.garten_temp": st("6.4", { friendly_name: "Wetterstation Garten Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   "zone.home": st("0", { latitude: 51.34, longitude: 12.37 }),
+  "binary_sensor.arbeitstag": st("on", { friendly_name: "Arbeitstag" }),
+  "sensor.bad_feuchte": st("72", { friendly_name: "Bad Luftfeuchte", device_class: "humidity", unit_of_measurement: "%" }),
   "sun.sun": st("below_horizon", { elevation: -30, rising: false, next_rising: "2026-11-16T06:25:00Z", next_setting: "2026-11-16T15:21:00Z" }),
 };
 const settings = {
@@ -38,17 +40,23 @@ const settings = {
   vacation_source: "period", vacation_keywords: "Urlaub, Ferien", preheat_mode: "fixed", lead_radiator: 15, lead_floor: 120,
   allow_users: false, weather_entity: null, start_widgets: null,
   look_theme: "auto", look_accent: null, look_background: "pattern", look_header_weather: true, look_header_clock: false, cold_snap_temp: 0, storm_kmh: 70, home_zone: "zone.home", proximity_m: 500,
+  notify_targets: ["mobile_app_pixel_8"], notify_window: true, notify_window_min: 30, notify_offline: true, notify_offline_min: 15,
+  notify_frost: true, notify_battery: true, notify_quiet: true, notify_quiet_from: "22:00", notify_quiet_to: "07:00", battery_low: 20,
+  preheat_weather: true, workday_entity: "binary_sensor.arbeitstag", workday_as: 6, vent_rh: 65,
 };
 const rooms = {
   a1: { id: "a1", name: "Wohnzimmer", type: "heizkoerper", comfort: 21, eco: 18, climates: ["climate.wohnzimmer"], windows: [], enabled: true,
     schedule: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "06:00", end: "22:00" }] },
   b2: { id: "b2", name: "Bad", type: "flaeche", comfort: 22, eco: 19, climates: ["climate.bad"], windows: ["binary_sensor.fenster_bad"], enabled: true,
+    humidity_sensor: "sensor.bad_feuchte", shower_boost: 30,
     schedule: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "05:30", end: "08:00" }] },
 };
 const status = {
   rooms: {
-    a1: { mode: "komfort", mode_label: "Komfort", target: 21, room_temp: 20.4, heating: true, humidity: 48, next_change: 120 },
-    b2: { mode: "eco", mode_label: "Eco", target: 20, room_temp: 21.8, heating: false, humidity: 66, next_change: 300 },
+    a1: { mode: "komfort", mode_label: "Komfort", target: 21, room_temp: 20.4, heating: true, humidity: 48, next_change: 120, preheat_factor: 1.06,
+      battery_low: [{ id: "sensor.thermostat_wohnzimmer_batterie", name: "Thermostat Wohnzimmer Batterie", level: 14 }] },
+    b2: { mode: "eco", mode_label: "Eco", target: 20, room_temp: 21.8, heating: false, humidity: 72, next_change: 300, preheat_factor: 1.06,
+      vent: { rh: 72, inside_g: 13.9, outside_g: 5.9, dew_point: 16.5 } },
   },
   away: false, vacation: false, summer: false, outside_temp: 6.5, plan_events: {}, plan_errors: {},
 };
@@ -64,6 +72,7 @@ const entities = {
   "binary_sensor.fenster_bad": { area_id: "bad" }, "sensor.kueche_temperatur": { area_id: "kueche" }, "sensor.garten_temp": { area_id: "garten" },
 };
 const hass = {
+  services: { notify: { mobile_app_pixel_8: {}, mobile_app_ipad_kueche: {}, persistent_notification: {}, notify: {} } },
   states, areas, devices, entities, themes: { darkMode: false }, user: { is_admin: true },
   callWS: async (msg) => {
     wsLog.push(msg.type);
@@ -71,6 +80,7 @@ const hass = {
     if (msg.type === "hauswerk/heizen/report") return report(msg.days);
     if (msg.type === "hauswerk/heizen/settings/save") return Object.assign(settings, msg.settings);
     if (msg.type === "history/history_during_period") return {};
+    if (msg.type === "hauswerk/notify/test") return null;
     if (msg.type === "hauswerk/log/get") {
       const T = (m) => Date.now() / 1000 - m * 60;
       return { days: 14, entries: [
@@ -83,6 +93,8 @@ const hass = {
         { ts: T(41), cat: "target", room: "b2", title: "Ziel 7,0 °C", why: "Fenster offen" },
         { ts: T(20), cat: "health", room: "b2", title: "Thermostat Bad nicht erreichbar", why: "climate.bad · Zustand unavailable" },
         { ts: T(6), cat: "manual", room: "a1", title: "Boost für 30 Min.", why: "bis 21:00 · im Panel · von Jens" },
+        { ts: T(11), cat: "notify", room: "b2", title: "Fenster lange offen", why: "Bad: seit 31 Min. offen · gesendet an Pixel 8" },
+        { ts: T(3), cat: "notify", room: "a1", title: "Batterie schwach", why: "Thermostat Wohnzimmer Batterie (Wohnzimmer): 14 % · gesendet an Pixel 8" },
       ] };
     }
     throw new Error("unbekannt: " + msg.type);

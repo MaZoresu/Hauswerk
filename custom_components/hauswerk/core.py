@@ -1,7 +1,8 @@
 """Hauswerk-Kern: Einstellungen und Zustände, die für alle Module gelten.
 
 Anwesenheit (Personen, Zone, Wartezeiten, Heimweg, Gäste), Urlaub (Schalter, Zeitraum, Kalender),
-Wetter, Darstellung, Widgets der Startseite und Berechtigungen. Module (z. B. Heizwerk) lesen
+Wetter (mit Frost-Vorhersage), Benachrichtigungen aufs Handy (mit Ruhezeit), Darstellung,
+Widgets der Startseite und Berechtigungen. Module (z. B. Heizwerk) lesen
 `away`, `approaching`, `away_for` und `vacation` und melden sich mit `subscribe()` für Änderungen an.
 """
 from __future__ import annotations
@@ -21,9 +22,18 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import CALENDAR_REFRESH, HOUSE_DEFAULTS, HOUSE_KEYS, HOUSE_STORAGE_KEY
+from .const import (
+    CALENDAR_REFRESH,
+    FORECAST_REFRESH,
+    HOUSE_DEFAULTS,
+    HOUSE_KEYS,
+    HOUSE_STORAGE_KEY,
+    NOTIFY_REPEAT,
+)
 from .log import Protokoll, log_settings
-from .logic import distance_km, is_vacation, keyword_match, keywords
+from .logic import distance_km, in_quiet_hours, is_vacation, keyword_match, keywords
+
+NOTIFY_KINDS = {"window": "Fenster", "offline": "Erreichbarkeit", "frost": "Frost", "battery": "Batterie"}
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +46,11 @@ def _float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _de(value: float) -> str:
+    """Zahl mit einer Nachkommastelle und deutschem Komma."""
+    return f"{value:.1f}".replace(".", ",")
 
 
 def parse_when(value: Any):
@@ -83,6 +98,14 @@ class Haus:
         self._cal_error: str | None = None
         self._cal_at = 0.0
         self._flags: dict[str, Any] = {}
+        # Benachrichtigungen: zuletzt gesendet je Schlüssel, in der Ruhezeit zurückgehalten, gerade aktuell
+        self._sent: dict[str, float] = {}
+        self._queued: dict[str, tuple[str, str, str | None, str | None]] = {}
+        self._active: set[str] = set()
+        # Wettervorhersage (Frost)
+        self._fc_at = 0.0
+        self.frost_low: float | None = None
+        self.frost_day: str | None = None
         self._listeners: set[Callable[[], None]] = set()
         self._unsubs: list[Callable[[], None]] = []
         self._state_unsub: Callable[[], None] | None = None
@@ -112,6 +135,7 @@ class Haus:
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
         self._track()
         await self._async_refresh_calendar(force=True)
+        await self._async_refresh_forecast(force=True)
         self.update()
 
     async def async_stop(self) -> None:
@@ -150,6 +174,8 @@ class Haus:
     async def _async_tick(self, _now=None) -> None:
         before = (self.away, self.approaching, self.vacation)
         await self._async_refresh_calendar()
+        await self._async_refresh_forecast()
+        self._flush_queue()
         self.update()
         if (self.away, self.approaching, self.vacation) != before:
             self._notify(update=False)
@@ -311,6 +337,142 @@ class Haus:
         upcoming.sort(key=lambda e: e["start"])
         self._cal_vacation, self._cal_events, self._cal_error = active, upcoming[:5], None
 
+    # ------------------------------------------------------------ Benachrichtigungen
+    def _quiet(self) -> bool:
+        if not self.settings.get("notify_quiet"):
+            return False
+        now = dt_util.now()
+        return in_quiet_hours(now.hour * 60 + now.minute, self.settings.get("notify_quiet_from"),
+                              self.settings.get("notify_quiet_to"))
+
+    def _target_names(self) -> str:
+        names = []
+        for target in self.settings.get("notify_targets") or []:
+            names.append(target.removeprefix("mobile_app_").replace("_", " ").title())
+        return ", ".join(names)
+
+    @callback
+    def notify(self, key: str, kind: str, title: str, message: str,
+               room: str | None = None, room_name: str | None = None) -> None:
+        """Nachricht aufs Handy (falls für diese Art eingeschaltet) und immer ins Protokoll.
+
+        Dieselbe Nachricht (key) kommt erst wieder, wenn sie mit clear() erledigt ist oder
+        NOTIFY_REPEAT vergangen ist. In der Ruhezeit wird sie zurückgehalten und danach gesendet,
+        falls der Anlass dann noch besteht.
+        """
+        if not self.settings.get(f"notify_{kind}", True):
+            return
+        self._active.add(key)
+        now = dt_util.utcnow().timestamp()
+        if key in self._queued or now - self._sent.get(key, 0) < NOTIFY_REPEAT:
+            return
+        self._sent[key] = now
+        targets = self.settings.get("notify_targets") or []
+        if not targets:
+            how = "nur hier – keine App unter Benachrichtigungen gewählt"
+        elif self._quiet():
+            self._queued[key] = (title, message, room, room_name)
+            how = f"Ruhezeit – wird um {self.settings.get('notify_quiet_to')} gesendet, falls noch aktuell"
+        else:
+            self._send(title, message)
+            how = f"gesendet an {self._target_names()}"
+        self.log.add("notify", title, f"{message} · {how}", room, room_name)
+
+    @callback
+    def clear(self, key: str) -> None:
+        """Anlass erledigt (z. B. Fenster zu): Nachricht darf beim nächsten Mal wieder kommen."""
+        self._active.discard(key)
+        self._sent.pop(key, None)
+        self._queued.pop(key, None)
+
+    @callback
+    def _flush_queue(self) -> None:
+        if not self._queued or self._quiet():
+            return
+        queued, self._queued = self._queued, {}
+        for key, (title, message, room, room_name) in queued.items():
+            if key in self._active:
+                self._send(title, message)
+                self.log.add("notify", title, f"{message} · nach der Ruhezeit gesendet an {self._target_names()}", room, room_name)
+
+    @callback
+    def _send(self, title: str, message: str) -> None:
+        for target in self.settings.get("notify_targets") or []:
+            self.hass.async_create_task(self._async_send(target, title, message))
+
+    async def _async_send(self, target: str, title: str, message: str) -> None:
+        try:
+            await self.hass.services.async_call("notify", target, {"title": title, "message": message}, blocking=True)
+        except Exception as err:  # noqa: BLE001 - App weg oder umbenannt: nur protokollieren
+            _LOGGER.warning("Benachrichtigung an notify.%s fehlgeschlagen: %s", target, err)
+            self.log.add("notify", "Nachricht nicht zugestellt", f"notify.{target}: {err}")
+
+    async def async_test_notify(self, by: str | None = None) -> None:
+        """Testnachricht aus dem Panel (ohne Ruhezeit)."""
+        title, message = "Hauswerk", "Testnachricht – Benachrichtigungen funktionieren."
+        self._send(title, message)
+        self.log.add("notify", "Testnachricht", f"gesendet an {self._target_names() or '–'}{f' · von {by}' if by else ''}")
+
+    # ------------------------------------------------------------ Wetter
+    def weather_entity(self) -> str | None:
+        chosen = self.settings.get("weather_entity")
+        if chosen:
+            return chosen
+        ids = getattr(self.hass.states, "async_entity_ids", None)
+        found = sorted(ids("weather")) if ids else []
+        return found[0] if found else None
+
+    def outside_air(self) -> tuple[float | None, float | None]:
+        """Außentemperatur (eigene Station oder Wetterdienst) und Luftfeuchte draußen."""
+        entity_id = self.weather_entity()
+        state = self.hass.states.get(entity_id) if entity_id else None
+        attrs = state.attributes if state is not None else {}
+        temp = self.outside_temp()
+        if temp is None:
+            temp = _float(attrs.get("temperature"))
+        return temp, _float(attrs.get("humidity"))
+
+    async def _async_refresh_forecast(self, force: bool = False) -> None:
+        """Tiefstwert der nächsten 3 Tage für die Frost-Nachricht."""
+        now_ts = dt_util.utcnow().timestamp()
+        if not force and now_ts - self._fc_at < FORECAST_REFRESH:
+            return
+        self._fc_at = now_ts
+        entity_id = self.weather_entity()
+        if not entity_id:
+            return
+        try:
+            response = await self.hass.services.async_call(
+                "weather", "get_forecasts", {"entity_id": entity_id, "type": "daily"}, blocking=True, return_response=True
+            )
+        except Exception as err:  # noqa: BLE001 - Dienst ohne Tagesvorhersage
+            _LOGGER.debug("Keine Tagesvorhersage von %s: %s", entity_id, err)
+            return
+        days = list(((response or {}).get(entity_id) or {}).get("forecast") or [])[:3]
+        lows = []
+        for day in days:
+            low = _float(day.get("templow"))
+            if low is None:
+                low = _float(day.get("temperature"))
+            if low is not None:
+                lows.append((low, day.get("datetime")))
+        if not lows:
+            self.frost_low = self.frost_day = None
+            return
+        low, when = min(lows, key=lambda x: x[0])
+        self.frost_low = low
+        self.frost_day = when
+        limit = float(self.settings.get("cold_snap_temp") or 0)
+        if low < limit:
+            day_text = ""
+            moment, _ = parse_when(when) if when else (None, False)
+            if moment is not None:
+                day_text = " am " + ("heute" if moment.date() == dt_util.now().date() else moment.strftime("%d.%m."))
+            self.notify("frost", "frost", "Frost erwartet",
+                        f"Tiefstwert {_de(low)} °C{day_text} (Grenze {_de(limit)} °C)")
+        else:
+            self.clear("frost")
+
     # ------------------------------------------------------------ Für das Panel
     def outside_temp(self) -> float | None:
         entity_id = self.settings.get("outside_sensor")
@@ -329,4 +491,6 @@ class Haus:
             "vacation_calendar_error": self._cal_error,
             "guest": bool(self.settings.get("guest")),
             "outside_temp": self.outside_temp(),
+            "frost_low": self.frost_low,
+            "notify_queued": len(self._queued),
         }

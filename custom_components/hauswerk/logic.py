@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import math
 from typing import Any
 
 DAY_MIN = 1440
@@ -503,3 +504,103 @@ def events_to_blocks(events: list[tuple[int, str, str]]) -> list[dict]:
         grouped.setdefault((start, end), set()).add(int(day) % 7)
     blocks = [{"days": sorted(days), "start": s, "end": e} for (s, e), days in grouped.items()]
     return sorted(blocks, key=lambda b: (b["days"][0], b["start"]))[:50]
+
+
+# ------------------------------------------------------------ Vorheizen nach Wetter
+WEATHER_REF_TEMP = 5.0  # bei dieser Außentemperatur gilt die gelernte bzw. feste Vorlaufzeit unverändert
+
+
+def weather_lead_factor(outside: float | None, ref: float = WEATHER_REF_TEMP, per_deg: float = 0.04,
+                        low: float = 0.6, high: float = 1.8) -> float:
+    """Faktor für die Vorlaufzeit nach Außentemperatur: kälter = länger, milder = kürzer.
+
+    Je Grad unter ref 4 % mehr Vorlauf, je Grad darüber 4 % weniger (begrenzt auf 0,6 … 1,8).
+    Ohne Außentemperatur 1.
+    """
+    if outside is None:
+        return 1.0
+    return round(max(low, min(high, 1 + (ref - float(outside)) * per_deg)), 2)
+
+
+# ------------------------------------------------------------ Luftfeuchte und Lüften
+def abs_humidity(temp: float, rh: float) -> float:
+    """Absolute Luftfeuchte in g/m³ (Magnus-Formel)."""
+    sat = 6.112 * math.exp(17.62 * temp / (243.12 + temp))  # hPa
+    return 216.7 * (rh / 100 * sat) / (273.15 + temp)
+
+
+def dew_point(temp: float, rh: float) -> float:
+    """Taupunkt in °C (Magnus-Formel)."""
+    rh = max(1.0, min(100.0, rh))
+    gamma = math.log(rh / 100) + 17.62 * temp / (243.12 + temp)
+    return 243.12 * gamma / (17.62 - gamma)
+
+
+def ventilate_advice(in_temp: float | None, in_rh: float | None, out_temp: float | None, out_rh: float | None,
+                     limit_rh: float = 65.0, min_gain: float = 1.0) -> dict | None:
+    """Lohnt sich Lüften? Drinnen feucht (ab limit_rh) und draußen um min_gain g/m³ trockenere Luft.
+
+    Ergebnis mit Werten für den Hinweis oder None.
+    """
+    if None in (in_temp, in_rh, out_temp, out_rh) or not limit_rh or in_rh < limit_rh:
+        return None
+    inside = abs_humidity(in_temp, in_rh)
+    outside = abs_humidity(out_temp, out_rh)
+    if inside - outside < min_gain:
+        return None
+    return {"rh": round(in_rh), "inside_g": round(inside, 1), "outside_g": round(outside, 1),
+            "dew_point": round(dew_point(in_temp, in_rh), 1)}
+
+
+# ------------------------------------------------------------ Verläufe (Fenster- und Duscherkennung)
+def drop_within(samples: list[tuple[float, float]], now: float, seconds: float) -> float:
+    """Wie stark ist der Wert in den letzten seconds Sekunden gefallen? (höchster Wert minus aktueller)"""
+    recent = [v for ts, v in samples if now - ts <= seconds]
+    if len(recent) < 2:
+        return 0.0
+    return round(max(recent) - recent[-1], 2)
+
+
+def rise_within(samples: list[tuple[float, float]], now: float, seconds: float) -> float:
+    """Wie stark ist der Wert in den letzten seconds Sekunden gestiegen? (aktueller minus tiefster Wert)"""
+    recent = [v for ts, v in samples if now - ts <= seconds]
+    if len(recent) < 2:
+        return 0.0
+    return round(recent[-1] - min(recent), 2)
+
+
+# ------------------------------------------------------------ Feiertage
+def holiday_week_minute(week_min: int, workday: bool | None, as_day: int = 6) -> int:
+    """An einem freien Werktag (Feiertag laut Sensor „Arbeitstag“) gelten die Zeiten von as_day (5 = Sa, 6 = So)."""
+    day, minute = divmod(week_min % WEEK_MIN, DAY_MIN)
+    if workday is not False or day >= 5:
+        return week_min
+    return int(as_day) % 7 * DAY_MIN + minute
+
+
+# ------------------------------------------------------------ Benachrichtigungen
+def in_quiet_hours(now_min: int, start: str | None, end: str | None) -> bool:
+    """Liegt die Tagesminute in der Ruhezeit (auch über Mitternacht, z. B. 22:00–07:00)?"""
+    if not start or not end:
+        return False
+    try:
+        a, b = parse_hm(start), parse_hm(end)
+    except (TypeError, ValueError):
+        return False
+    if a == b:
+        return False
+    return a <= now_min < b if a < b else now_min >= a or now_min < b
+
+
+def battery_level(state: str | None, device_class: str | None, unit: str | None) -> float | None:
+    """Ladestand in % aus einem Batterie-Sensor; binäre Sensoren (an = schwach) als 0 bzw. 100."""
+    if state is None:
+        return None
+    if device_class == "battery" and state in ("on", "off"):
+        return 0.0 if state == "on" else 100.0
+    if unit not in (None, "%"):
+        return None
+    try:
+        return float(state)
+    except (TypeError, ValueError):
+        return None

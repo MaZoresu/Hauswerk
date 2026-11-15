@@ -44,8 +44,11 @@ from .logic import (
     calendar_state,
     calibration_offset,
     compensated,
+    battery_level,
     compute_target,
+    drop_within,
     events_to_blocks,
+    holiday_week_minute,
     keyword_match,
     keywords,
     learn_rate,
@@ -54,10 +57,13 @@ from .logic import (
     next_comfort,
     smart_lead,
     occupied,
+    rise_within,
     room_setting,
     snap,
     summer_state,
     valve_opening,
+    ventilate_advice,
+    weather_lead_factor,
     week_minute,
     window_paused,
 )
@@ -116,6 +122,9 @@ class Heizen:
         self._subscribers: set[Callable[[dict], None]] = set()
         self._summer = False
         self._liming = False
+        self._lead_factor = 1.0
+        # Batterie-Entitäten je Raum (an den Geräten der Thermostate, Fenster und Sensoren)
+        self._batteries: dict[str, list[str]] = {}
 
     # ------------------------------------------------------------ Speicher
     async def async_load(self) -> None:
@@ -178,7 +187,8 @@ class Heizen:
             self._state_unsub()
             self._state_unsub = None
         ids: set[str] = set()
-        for entity_id in (self.haus.settings.get("outside_sensor"), self.settings.get("season_entity")):
+        for entity_id in (self.haus.settings.get("outside_sensor"), self.settings.get("season_entity"),
+                          self.settings.get("workday_entity")):
             if entity_id:
                 ids.add(entity_id)
         for room in self.rooms.values():
@@ -191,6 +201,41 @@ class Heizen:
             self._state_unsub = async_track_state_change_event(
                 self.hass, sorted(ids), self._on_state_change
             )
+        self._find_batteries()
+
+    def _find_batteries(self) -> None:
+        """Batterie-Sensoren an den Geräten jedes Raums suchen (Thermostate, Fenster, Sensoren)."""
+        registry = er.async_get(self.hass)
+        self._batteries = {}
+        for room_id, room in self.rooms.items():
+            devices = set()
+            for key in ("climates", "windows", "temp_sensor", "humidity_sensor", "presence_sensor"):
+                value = room.get(key)
+                for entity_id in value if isinstance(value, list) else [value] if value else []:
+                    entry = registry.async_get(entity_id)
+                    if entry is not None and entry.device_id:
+                        devices.add(entry.device_id)
+            found = []
+            for device_id in devices:
+                for entry in er.async_entries_for_device(registry, device_id):
+                    if entry.domain not in ("sensor", "binary_sensor") or entry.disabled_by is not None:
+                        continue
+                    dc = getattr(entry, "device_class", None) or getattr(entry, "original_device_class", None)
+                    if dc == "battery" or (dc is None and "battery" in entry.entity_id and entry.domain == "sensor"):
+                        found.append(entry.entity_id)
+            self._batteries[room_id] = sorted(set(found))
+
+    def _battery_low(self, room_id: str) -> list[dict[str, Any]]:
+        limit = float(self.haus.settings.get("battery_low") or 0)
+        out = []
+        for entity_id in self._batteries.get(room_id) or []:
+            state = self.hass.states.get(entity_id)
+            if state is None or state.state in BAD_STATES:
+                continue
+            level = battery_level(state.state, state.attributes.get("device_class"), state.attributes.get("unit_of_measurement"))
+            if level is not None and level <= limit:
+                out.append({"id": entity_id, "name": state.name, "level": level})
+        return out
 
     # ------------------------------------------------------------ Protokoll-Hilfen
     def _name(self, entity_id: str) -> str:
@@ -701,10 +746,12 @@ class Heizen:
         mode = self._preheat_mode(room)
         if mode == "off":
             return 0, None, None
+        factor = self._lead_factor
         if mode != "smart":
-            return self._fixed_lead(room), None, None
+            return int(round(self._fixed_lead(room) * factor)), None, None
         max_lead = int(room_setting(room, "preheat_max") or 90)
-        rate = self.heat_rates.get(room_id) or float(room_setting(room, "heat_rate") or 1.0)
+        # Gelernt wird die Geschwindigkeit bei 5 °C draußen; bei Kälte heizt der Raum langsamer auf.
+        rate = (self.heat_rates.get(room_id) or float(room_setting(room, "heat_rate") or 1.0)) / factor
         if room.get("schedule_entity") or self._calendar_plan(room) is not None:
             comfort = float(room.get("comfort", 21))
             upcoming = (schedule_next_on, comfort) if schedule_next_on is not None and schedule_next_on <= max_lead else None
@@ -734,13 +781,15 @@ class Heizen:
             return
         if run is None:
             if result["target"] - room_temp >= 1.0:
-                rt["learn"] = {"ts": now, "temp": room_temp, "target": result["target"]}
+                rt["learn"] = {"ts": now, "temp": room_temp, "target": result["target"], "factor": self._lead_factor}
             return
         if abs(result["target"] - run["target"]) > 0.6 or now - run["ts"] > 8 * 3600:
             rt["learn"] = None  # Ziel geändert oder zu lange: Messung verwerfen
             return
         if room_temp >= run["target"] - 0.2:
-            rate = learn_rate(self.heat_rates.get(room_id), run["temp"], room_temp, (now - run["ts"]) / 3600)
+            # auf 5 °C draußen umrechnen (gemessene Geschwindigkeit × Wetterfaktor)
+            hours = (now - run["ts"]) / 3600 / (run.get("factor") or 1.0)
+            rate = learn_rate(self.heat_rates.get(room_id), run["temp"], room_temp, hours)
             if rate is not None:
                 self.heat_rates[room_id] = rate
                 self._save()
@@ -781,6 +830,15 @@ class Heizen:
         away = self.haus.away
         vacation = self.haus.vacation
         outside = self.haus.outside_temp()
+        out_temp, out_rh = self.haus.outside_air()
+        self._lead_factor = weather_lead_factor(out_temp) if self.settings.get("preheat_weather") else 1.0
+        # Feiertag laut Sensor „Arbeitstag“: Heizpläne wie am Wochenende
+        workday_state = self.hass.states.get(self.settings.get("workday_entity") or "")
+        workday = None if workday_state is None or workday_state.state not in ("on", "off") else workday_state.state == "on"
+        plan_min = holiday_week_minute(week_min, workday, int(self.settings.get("workday_as") or 6))
+        holiday = plan_min != week_min
+        self._flip("holiday", holiday, "Feiertag – Heizpläne wie am Wochenende", None, "season",
+                   f"{self._name(self.settings['workday_entity'])} ist aus" if holiday else None)
         party = bool(self.settings.get("party"))
 
         summer_mode = self.settings.get("summer_mode") or "off"
@@ -823,6 +881,9 @@ class Heizen:
         for room_id, stored_room in list(self.rooms.items()):
             room = self._effective_room(stored_room)
             rt = self._rt(room_id)
+            room_temp, humidity = self._room_values(room)
+            self._sample(rt, "temps", room_temp, now)
+            self._sample(rt, "hums", humidity, now)
             open_since, closed_since = self._windows_open_since(room)
             rt["windows_open"] = open_since is not None
             paused = window_paused(
@@ -833,6 +894,9 @@ class Heizen:
                 float(room_setting(room, "window_delay") or 0),
                 float(room_setting(room, "resume_delay") or 0),
             )
+            # Fenster ohne Kontakt: Raumtemperatur fällt in 5 Minuten stark
+            virtual = self._virtual_window(room, rt, now)
+            paused = paused or virtual
             if paused != rt["paused"]:
                 if paused:
                     rt["pause_at"] = now
@@ -840,7 +904,11 @@ class Heizen:
                         self._name(w) for w in room.get("windows") or []
                         if (s := self.hass.states.get(w)) is not None and s.state.lower() in WINDOW_OPEN_STATES
                     ]
-                    why = f"{', '.join(names) or 'Fenster'} offen · Thermostate " + ("aus" if room_setting(room, "pause_mode") == "off" else "auf Frostschutz")
+                    mode_text = "Thermostate " + ("aus" if room_setting(room, "pause_mode") == "off" else "auf Frostschutz")
+                    if virtual and not names:
+                        why = f"Raumtemperatur fiel um {self._t(rt.get('virtual_drop'))} °C in 5 Min. – Fenster vermutlich offen · {mode_text}"
+                    else:
+                        why = f"{', '.join(names) or 'Fenster'} offen · {mode_text}"
                     self.log.add("window", "Fensterpause beginnt", why, room_id, room.get("name"))
                 else:
                     mins = int((now - rt.get("pause_at", now)) // 60)
@@ -851,14 +919,15 @@ class Heizen:
             if override and override.get("until") and now >= override["until"]:
                 rt["override"] = override = None
 
-            room_temp, humidity = self._room_values(room)
+            # Nach dem Duschen nachheizen: Luftfeuchte steigt in 15 Minuten stark
+            override = self._shower(room_id, room, rt, override, paused, now) or override
             rt["occupied"] = self._occupancy(room, rt, now)
             schedule_on, schedule_next_on = self._schedule_entity(room, now)
-            lead, rate, upcoming = self._preheat(room_id, room, room_temp, week_min, schedule_next_on)
+            lead, rate, upcoming = self._preheat(room_id, room, room_temp, plan_min, schedule_next_on)
             result = compute_target(
                 room,
                 self.settings,
-                week_min,
+                plan_min,
                 window_paused=paused,
                 away=away,
                 vacation=vacation,
@@ -899,8 +968,16 @@ class Heizen:
                     else None
                 ),
                 heating=self._is_heating(room, room_temp, result["target"]),
+                preheat_factor=self._lead_factor,
+                holiday=holiday,
+                window_virtual=virtual,
+                shower=bool(override and override.get("shower")),
+                vent=ventilate_advice(room_temp, humidity, out_temp, out_rh, float(self.settings.get("vent_rh") or 0))
+                if not open_since else None,
+                battery_low=self._battery_low(room_id),
             )
             rt["result"] = result
+            self._room_notices(room_id, room, result, open_since, now)
             # Entscheidung protokollieren, sobald sich Betriebsart oder Ziel ändern
             current = (result["mode"], result["target"], result["hvac_off"])
             before = rt.get("logged")
@@ -929,6 +1006,76 @@ class Heizen:
         for cb in list(self._subscribers):
             cb(status)
         async_dispatcher_send(self.hass, SIGNAL_UPDATE)
+
+    # ------------------------------------------------------------ Verläufe, Erkennung, Nachrichten
+    @staticmethod
+    def _sample(rt: dict, key: str, value: float | None, now: float) -> None:
+        """Messwerte der letzten 20 Minuten merken (für Fenster- und Duscherkennung)."""
+        samples = rt.setdefault(key, [])
+        if value is not None and (not samples or samples[-1][1] != value or now - samples[-1][0] >= 60):
+            samples.append((now, value))
+        while samples and now - samples[0][0] > 1200:
+            samples.pop(0)
+
+    def _virtual_window(self, room: dict, rt: dict, now: float) -> bool:
+        if not room.get("window_detect"):
+            rt["virtual_until"] = 0
+            return False
+        if now < rt.get("virtual_until", 0):
+            return True
+        drop = drop_within(rt.get("temps") or [], now, 300)
+        if drop >= float(room.get("window_detect_drop") or 1.0):
+            rt["virtual_until"] = now + float(room.get("window_detect_min") or 15) * 60
+            rt["virtual_drop"] = drop
+            rt["temps"] = []  # nach der Pause neu messen
+            return True
+        return False
+
+    def _shower(self, room_id: str, room: dict, rt: dict, override: dict | None, paused: bool, now: float) -> dict | None:
+        minutes = int(room.get("shower_boost") or 0)
+        if not minutes or paused or not room.get("humidity_sensor") or (override and not override.get("shower")):
+            return None
+        rise = rise_within(rt.get("hums") or [], now, 900)
+        if rise < float(room.get("shower_rise") or 10) or now - rt.get("shower_at", 0) < 3600:
+            return None
+        rt["shower_at"] = now
+        rt["override"] = {"temp": float(room.get("comfort", 21)), "until": now + minutes * 60, "shower": True}
+        self.log.add("manual", f"Nach dem Duschen: {self._t(rt['override']['temp'])} °C für {minutes} Min.",
+                     f"Luftfeuchte um {rise:.0f} Prozentpunkte gestiegen", room_id, room.get("name"))
+        return rt["override"]
+
+    def _room_notices(self, room_id: str, room: dict, result: dict, open_since: float | None, now: float) -> None:
+        """Nachrichten aufs Handy: Fenster lange offen, Thermostat nicht erreichbar, Batterie schwach."""
+        name = room.get("name") or room_id
+        hs = self.haus.settings
+        key = f"window:{room_id}"
+        limit = float(hs.get("notify_window_min") or 30)
+        if open_since is not None and now - open_since >= limit * 60:
+            self.haus.notify(key, "window", "Fenster lange offen",
+                             f"{name}: seit {int((now - open_since) // 60)} Min. offen", room_id, name)
+        else:
+            self.haus.clear(key)
+        limit = float(hs.get("notify_offline_min") or 15) * 60
+        for entity_id in room.get("climates") or []:
+            state = self.hass.states.get(entity_id)
+            key = f"offline:{entity_id}"
+            if state is not None and state.state in BAD_STATES and now - state.last_changed.timestamp() >= limit:
+                self.haus.notify(key, "offline", "Thermostat nicht erreichbar",
+                                 f"{state.name} ({name}) seit {int((now - state.last_changed.timestamp()) // 60)} Min.", room_id, name)
+            else:
+                self.haus.clear(key)
+        low = {b["id"]: b for b in result.get("battery_low") or []}
+        for entity_id in self._batteries.get(room_id) or []:
+            key = f"battery:{entity_id}"
+            if entity_id in low:
+                level = low[entity_id]["level"]
+                text = "schwach" if level == 0 else f"{level:.0f} %"
+                self.haus.notify(key, "battery", "Batterie schwach", f"{low[entity_id]['name']} ({name}): {text}", room_id, name)
+            else:
+                state = self.hass.states.get(entity_id)
+                lvl = battery_level(state.state, state.attributes.get("device_class"), state.attributes.get("unit_of_measurement")) if state else None
+                if lvl is not None and lvl > float(hs.get("battery_low") or 0) + 5:
+                    self.haus.clear(key)
 
     async def _apply(self, room: dict, rt: dict, result: dict, room_temp: float | None, now: float) -> None:
         if result["target"] is None:  # Automatik aus

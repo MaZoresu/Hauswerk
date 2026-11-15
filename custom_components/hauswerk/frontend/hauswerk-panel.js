@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.18.2";
+const VERSION = "0.19.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -126,6 +126,7 @@ const PICKERS = {
   presence_schedule: { scope: "room", multi: false, domains: ["schedule", "input_boolean", "binary_sensor"] },
   calibration_entities: { scope: "room", multi: true, domains: ["number"] },
   valve_entities: { scope: "room", multi: true, domains: ["number"] },
+  workday_entity: { scope: "settings", multi: false, domains: ["binary_sensor"] },
 };
 // Entitätssuche: Wörter im Namen, die zum Feld passen, und passende Geräteklassen
 const PICK_HINTS = {
@@ -143,6 +144,7 @@ const PICK_HINTS = {
   season_entity: ["heizperiode", "heizsaison", "winter"],
   schedule_entity: ["heiz", "zeitplan", "schedule"],
   vacation_calendar: ["urlaub", "familie", "ferien"],
+  workday_entity: ["arbeitstag", "workday", "werktag", "feiertag"],
 };
 const PICK_CLASSES = {
   windows: ["window", "door", "opening", "garage_door"],
@@ -206,7 +208,7 @@ const COMING = [
 ];
 const SLUGS = { start: "start", house: "einstellungen", log: "protokoll", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])) };
 // Pop-ups, die zu den zentralen Hauswerk-Einstellungen gehören (alle anderen gehören zu Heizwerk)
-const HOUSE_POPS = ["presence", "vacation", "weather", "access", "look"];
+const HOUSE_POPS = ["presence", "vacation", "weather", "notify", "access", "look"];
 // Akzentfarben der Darstellung: [gespeicherter Wert (null = Standard), Name, Anzeigefarbe]
 const ACCENTS = [
   [null, "Türkis", "#14b8a6"], ["#0ea5e9", "Himmelblau"], ["#3b82f6", "Blau"], ["#8b5cf6", "Violett"],
@@ -222,6 +224,7 @@ const LOG_CATS = {
   health: { name: "Geräte", icon: "mdi:heart-pulse", c: "#f43f5e" },
   command: { name: "Thermostat-Befehle", icon: "mdi:access-point", c: "#94a3b8", off: true },
   settings: { name: "Einstellungen", icon: "mdi:cog-outline", c: "#64748b" },
+  notify: { name: "Nachrichten", icon: "mdi:message-badge-outline", c: "#0ea5e9" },
 };
 const SKIES = [["night", "Nacht"], ["dawn", "Sonnenaufgang"], ["day", "Tag"], ["dusk", "Sonnenuntergang"]];
 const DEFAULT_VIEW = "start";
@@ -598,7 +601,11 @@ class HauswerkPanel extends HTMLElement {
       for (const w of r.windows || []) if (bad(w)) add("info", "mdi:window-shutter-alert", "Fensterkontakt nicht erreichbar", `${r.name} · ${this._entityName(w)}`, "room-edit", { id: r.id, rtab: "devices" });
       if (r.schedule_entity && bad(r.schedule_entity)) add("warn", "mdi:calendar-remove", "Zeitplan nicht erreichbar", `${r.name} · ${this._entityName(r.schedule_entity)}`, "room-edit", { id: r.id });
       else if (!r.schedule_entity && !this._data.plans?.[r.plan_id] && !(r.schedule || []).length) add("info", "mdi:calendar-blank-outline", "Kein Heizplan – bleibt auf Eco", r.name, "plan-open", { id: r.id });
-      if (rs.humidity >= 65) add("info", "mdi:water-alert", `Luftfeuchte ${fmt(rs.humidity, 0)} % – lüften`, r.name, "tab", { tab: "overview" });
+      for (const b of rs.battery_low || [])
+        add("warn", b.level === 0 ? "mdi:battery-alert-variant-outline" : "mdi:battery-10", `Batterie schwach${b.level ? ` · ${fmt(b.level, 0)} %` : ""}`, `${r.name} · ${b.name}`, "room-edit", { id: r.id, rtab: "devices" });
+      if (rs.vent) add("info", "mdi:weather-windy", `Jetzt lüften – ${fmt(rs.vent.rh, 0)} % Luftfeuchte`, `${r.name} · draußen trockenere Luft (${fmt(rs.vent.outside_g)} statt ${fmt(rs.vent.inside_g)} g/m³), Taupunkt ${fmt(rs.vent.dew_point)} °C`, "settings-go", { sub: "vent" });
+      else if (rs.humidity >= 70) add("info", "mdi:water-alert", `Luftfeuchte ${fmt(rs.humidity, 0)} %`, `${r.name} · Lüften bringt gerade wenig, draußen ist es ähnlich feucht`, "settings-go", { sub: "vent" });
+      if (rs.window_virtual) add("info", "mdi:window-open-variant", "Fenster vermutlich offen", `${r.name} · Temperatur fällt schnell – Fensterpause`, "tab", { tab: "overview" });
     }
     for (const o of this._openWindows ? this._openWindows() : []) {
       const mins = o.s.last_changed ? (Date.now() - new Date(o.s.last_changed)) / 60000 : 0;
@@ -2137,11 +2144,17 @@ class HauswerkPanel extends HTMLElement {
         `<div class="unit"><input type="number" step="${step}" min="${min}" max="${max}" data-set="${key}" value="${p[key] ?? def}" ${dis}><i>${unit}</i></div>`,
       segs: (key, options, def) =>
         `<div class="segs small">${options
-          .map(([v, l, icon]) => `<button class="seg ${(p[key] || def) === v ? "on" : ""}" data-action="set-seg" data-key="${key}" data-v="${v}" ${dis}>${icon ? `<ha-icon icon="${icon}"></ha-icon>` : ""}${l}</button>`)
+          .map(([v, l, icon]) => `<button class="seg ${String(p[key] || def) === String(v) ? "on" : ""}" data-action="set-seg" data-key="${key}" data-v="${v}" ${dis}>${icon ? `<ha-icon icon="${icon}"></ha-icon>` : ""}${l}</button>`)
           .join("")}</div>`,
       sw: (key) => `<label class="switch"><input type="checkbox" data-set="${key}" ${p[key] ? "checked" : ""} ${dis}><span></span></label>`,
       head: (icon, title) => `<div class="sub-h"><ha-icon icon="${icon}"></ha-icon>${title}</div>`,
     };
+  }
+
+  /** Anzeigename eines notify-Dienstes: mobile_app_pixel_8 → Pixel 8. */
+  _notifyName(x) {
+    const name = String(x).replace(/^mobile_app_/, "").replace(/_/g, " ");
+    return name.charAt(0).toUpperCase() + name.slice(1);
   }
 
   _planList() {
@@ -2183,6 +2196,11 @@ class HauswerkPanel extends HTMLElement {
         { g: "Haus", id: "weather", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter",
           sum: `${p.weather_entity ? this._entityName(p.weather_entity) : "Wetter automatisch"}${p.outside_sensor ? ` · Außen: ${this._entityName(p.outside_sensor)}` : ""} · Kälte < ${fmt(p.cold_snap_temp ?? 0)} °C · Sturm ab ${fmt(p.storm_kmh ?? 70, 0)} km/h`,
           warn: this._wxAlerts().length > 0, words: "wetter außentemperatur sensor prognose sonne kälteeinbruch sturm frost heizgrenze" },
+        { g: "Haus", id: "notify", icon: "mdi:cellphone-message", c: "#0ea5e9", title: "Benachrichtigungen",
+          sum: (p.notify_targets || []).length
+            ? `${(p.notify_targets || []).map((x) => this._notifyName(x)).join(", ")}${p.notify_quiet ? ` · Ruhezeit ${p.notify_quiet_from || "22:00"}–${p.notify_quiet_to || "07:00"}` : ""}`
+            : "Noch keine App gewählt – Nachrichten nur im Protokoll",
+          words: "handy app nachricht push benachrichtigung fenster batterie frost ruhezeit thermostat" },
         { g: "Darstellung", id: "look", icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung",
           sum: `${{ auto: "Wie Home Assistant", light: "Hell", dark: "Dunkel" }[p.look_theme || "auto"]} · Akzent ${(ACCENTS.find(([v]) => v === (p.look_accent || null)) || [0, "eigene Farbe"])[1]} · Hintergrund ${{ pattern: "Muster", daytime: "Tageszeit", plain: "schlicht" }[p.look_background || "pattern"]}`,
           words: "design farbe akzent hell dunkel hintergrund tageszeit himmel uhr uhrzeit wetter kopfzeile größe tablet" },
@@ -2203,13 +2221,14 @@ class HauswerkPanel extends HTMLElement {
       entity: `Nach ${p.season_entity ? this._entityName(p.season_entity) : "Entität"}`,
       on: "Sommerpause von Hand an",
     }[p.summer_mode || "off"];
-    const pre = { smart: "Lernend", fixed: `Feste Zeit · ${this._leadFor("heizkoerper")} / ${this._leadFor("flaeche")} Min.`, off: "Aus" }[p.preheat_mode || "fixed"];
+    const pre = { smart: "Lernend", fixed: `Feste Zeit · ${this._leadFor("heizkoerper")} / ${this._leadFor("flaeche")} Min.`, off: "Aus" }[p.preheat_mode || "fixed"] + (p.preheat_weather && (p.preheat_mode || "fixed") !== "off" ? " · nach Wetter" : "");
+    const hum = rooms.filter((r) => r.humidity_sensor).length;
     const own = rooms.filter((r) => r.preheat_mode).length;
     const shared = rooms.filter((r) => !r.schedule_entity && this._data.plans?.[r.plan_id]).length;
     const away = p.away_action === "off" ? "Thermostate aus" : p.away_mode === "offset" ? `${fmt(p.away_offset)} °C kühler` : `höchstens ${fmt(p.away_temp)} °C`;
     const rows = [
       { g: "Hauswerk", go: "house", icon: "mdi:home-cog-outline", c: "#2dd4bf", title: "Zentrale Einstellungen",
-        sum: "Anwesenheit, Urlaub, Wetter und Berechtigungen gelten für alle Module", words: "anwesenheit urlaub wetter personen berechtigungen zentral" },
+        sum: "Anwesenheit, Urlaub, Wetter, Benachrichtigungen und Berechtigungen gelten für alle Module", words: "anwesenheit urlaub wetter personen berechtigungen zentral" },
       { g: "Heizen", id: "absence", icon: "mdi:home-export-outline", c: "#94a3b8", title: "Abwesenheit & Urlaub",
         sum: `Abwesend: ${away} · Urlaub: ${fmt(p.vacation_temp)} °C${Number(p.long_away_days) > 0 ? ` · nach ${p.long_away_days} Tagen Frostschutz` : ""}`,
         on: s.vacation || s.away, words: "abwesend urlaub absenken temperatur frostschutz lange" },
@@ -2217,6 +2236,12 @@ class HauswerkPanel extends HTMLElement {
       { g: "Heizen", id: "plans", icon: "mdi:calendar-clock", c: "#60a5fa", title: "Heizpläne",
         sum: plans.length ? `${plans.length} gemeinsame${plans.length === 1 ? "r Plan" : " Pläne"} · ${shared} von ${rooms.length} Räumen nutzen sie` : "Noch kein gemeinsamer Plan", go: "plans", words: "zeitplan komfortzeit kalender import vorlage" },
       { g: "Heizen", id: "preheat", icon: "mdi:clock-fast", c: "#fb923c", title: "Vorheizen", sum: pre + (own ? ` · ${own} ${own > 1 ? "Räume" : "Raum"} mit eigener Einstellung` : ""), words: "lernen lernend fest aus vorlauf aufheizen" },
+      { g: "Heizen", id: "holiday", icon: "mdi:calendar-star", c: "#f472b6", title: "Feiertage",
+        sum: p.workday_entity ? `${this._entityName(p.workday_entity)} · wie ${Number(p.workday_as ?? 6) === 5 ? "Samstag" : "Sonntag"}${rooms.some((r) => s.rooms?.[r.id]?.holiday) ? " · heute Feiertag" : ""}` : "Aus – Feiertage wie normale Werktage",
+        words: "feiertag arbeitstag workday wochenende brückentag" },
+      { g: "Heizen", id: "vent", icon: "mdi:weather-windy", c: "#22d3ee", title: "Lüften & Schimmelschutz",
+        sum: Number(p.vent_rh ?? 65) > 0 ? `Hinweis ab ${p.vent_rh ?? 65} % Luftfeuchte · ${hum} ${hum === 1 ? "Raum" : "Räume"} mit Feuchtesensor` : "Aus",
+        words: "lüften feucht schimmel taupunkt bad dusche luftfeuchte" },
       { g: "Heizen", id: "protect", icon: "mdi:snowflake-thermometer", c: "#38bdf8", title: "Frostschutz", sum: `${fmt(p.frost_temp)} °C bei offenem Fenster und in der Sommerpause`, words: "fenster frost" },
       { g: "Heizen", id: "boost", icon: "mdi:rocket-launch-outline", c: "#f43f5e", title: "Boost", sum: `${p.boost_minutes || 30} Min. volle Leistung`, words: "boost schnell" },
       { g: "Heizen", id: "liming", icon: "mdi:water-sync", c: "#38bdf8", title: "Entkalkungsschutz",
@@ -2620,7 +2645,80 @@ class HauswerkPanel extends HTMLElement {
                 ${rs.learned && this._admin ? `<button class="link tiny" data-action="preheat-reset" data-id="${r.id}"><ha-icon icon="mdi:restore"></ha-icon>neu lernen</button>` : ""}</div>`;
             }).join("") || `<p class="muted small">Noch keine Räume.</p>`}</div>` : ""}
             ${mode === "off" ? `<p class="muted small">Räume heizen erst zu Beginn der Komfortzeit los.</p>` : ""}
+            ${mode !== "off" ? `
+            ${head("mdi:weather-snowy", "Nach Wetter")}
+            <label class="check"><span><b>Vorlauf nach Außentemperatur anpassen</b><small>Bei Kälte früher, an milden Tagen später. Bezug sind 5 °C draußen: je Grad kälter 4 % mehr Vorlauf, je Grad wärmer 4 % weniger (höchstens 0,6- bis 1,8-fach).${mode === "smart" ? " Gelernte Werte rechnet Heizwerk auf 5 °C um, damit kalte und milde Tage vergleichbar sind." : ""}</small></span>${sw("preheat_weather")}</label>
+            ${(() => {
+              const f = Object.values(st)[0]?.preheat_factor;
+              const out = s.outside_temp;
+              return this._data.settings.preheat_weather && f ? `<p class="muted small"><ha-icon icon="mdi:thermometer"></ha-icon>Gerade ${fmt(f, 2)}-facher Vorlauf${out != null ? ` bei ${fmt(out)} °C außen` : ""}${mode === "fixed" ? ` – Heizkörper ${Math.round(this._leadFor("heizkoerper") * f)} Min., Fläche ${Math.round(this._leadFor("flaeche") * f)} Min` : ""}.</p>` : "";
+            })()}` : ""}
             ${own.length ? `<p class="muted small"><ha-icon icon="mdi:home-edit-outline"></ha-icon>Eigene Einstellung: ${own.map((r) => `${esc(r.name)} (${label[r.preheat_mode]})`).join(", ")} – änderbar am Raum unter „Vorheizen & Fenster“.</p>` : ""}`,
+        };
+      }
+
+      case "notify": {
+        const services = Object.keys(this._hass.services?.notify || {})
+          .filter((x) => !["notify", "persistent_notification", "send_message"].includes(x))
+          .sort((a, b) => (a.startsWith("mobile_app_") === b.startsWith("mobile_app_") ? a.localeCompare(b) : a.startsWith("mobile_app_") ? -1 : 1));
+        const chosen = new Set(p.notify_targets || []);
+        const all = [...new Set([...services, ...chosen])];
+        const chip = (x) => `<button class="pchip ${chosen.has(x) ? "on" : ""}" data-action="notify-toggle" data-id="${esc(x)}" aria-pressed="${chosen.has(x)}" ${dis}><i></i>${esc(this._notifyName(x))}${chosen.has(x) && !services.includes(x) ? " · fehlt" : ""}</button>`;
+        const row = (k, title, sub, value, text, ctl) => this._setRow(k, title, sub, value, text, ctl);
+        const saved = (this._data.settings.notify_targets || []).length;
+        return {
+          icon: "mdi:cellphone-message", c: "#0ea5e9", title: "Benachrichtigungen", sub: "Hauswerk · aufs Handy über die Home-Assistant-App",
+          body: `
+            <div class="wxrows">
+              ${row("apps", "An wen?", "Geräte mit der Home-Assistant-App", `<div class="pchips">${all.map(chip).join("") || `<span class="muted small">Keine App gefunden</span>`}</div>`,
+                "Jedes Handy mit der Home-Assistant-App bringt einen Dienst „notify.mobile_app_…“ mit. Gewählte Geräte bekommen die Nachrichten als Push-Mitteilung. Ohne Auswahl landen sie nur im Protokoll.", true)}
+            </div>
+            ${saved && this._admin ? `<button class="secondary small" data-action="notify-test"><ha-icon icon="mdi:send-outline"></ha-icon>Testnachricht senden</button>` : ""}
+            ${head("mdi:bell-ring-outline", "Wann?")}
+            <div class="wxrows">
+              ${row("nwin", "Fenster lange offen", `ab ${p.notify_window_min ?? 30} Min.`, `<div class="nrow">${minutes("notify_window_min", 30, 5, 720, 5)}${sw("notify_window")}</div>`,
+                "Steht ein Fenster eines Raums so lange offen, kommt eine Nachricht – einmal je Öffnen.", true)}
+              ${row("noff", "Thermostat nicht erreichbar", `seit ${p.notify_offline_min ?? 15} Min.`, `<div class="nrow">${minutes("notify_offline_min", 15, 1, 720, 5)}${sw("notify_offline")}</div>`,
+                "Meldet sich ein Thermostat so lange nicht mehr (z. B. Funk weg, Batterie leer), kommt eine Nachricht. Kommt es zurück, ist die Sache erledigt.", true)}
+              ${row("nfrost", "Frost erwartet", `Vorhersage unter ${fmt(p.cold_snap_temp ?? 0)} °C · Grenze unter Wetter`, sw("notify_frost"),
+                "Sagt die Wettervorhersage für die nächsten 3 Tage einen Tiefstwert unter der Grenze „Kälteeinbruch“ (Hauswerk › Wetter) voraus, kommt eine Nachricht.")}
+              ${row("nbat", "Batterie schwach", `unter ${p.battery_low ?? 20} %`, `<div class="nrow">${minutes("battery_low", 20, 5, 60, 5, "%")}${sw("notify_battery")}</div>`,
+                "Hauswerk sucht an Thermostaten, Fensterkontakten und Raumsensoren nach Batterie-Sensoren. Liegt einer unter der Grenze, erscheint ein Hinweis unter der Glocke – und auf Wunsch eine Nachricht. Die Grenze gilt auch für die Glocke.", true)}
+            </div>
+            ${head("mdi:sleep", "Ruhezeit")}
+            <div class="wxrows">
+              ${row("quiet", "Nachts nicht stören", "Nachrichten danach senden, falls noch aktuell", sw("notify_quiet"),
+                "In der Ruhezeit hält Hauswerk Nachrichten zurück und schickt sie danach – aber nur, wenn der Anlass noch besteht (das Fenster also noch offen ist). Im Protokoll stehen sie sofort.")}
+              ${p.notify_quiet ? row("qtime", "Von – bis", "", `<div class="nrow"><input type="time" data-set="notify_quiet_from" value="${esc(p.notify_quiet_from || "22:00")}" ${dis}><span>–</span><input type="time" data-set="notify_quiet_to" value="${esc(p.notify_quiet_to || "07:00")}" ${dis}></div>`,
+                "Auch über Mitternacht, z. B. 22:00 – 07:00.", true) : ""}
+            </div>
+            <p class="muted small"><ha-icon icon="mdi:text-box-search-outline"></ha-icon>Jede Nachricht steht auch im <button class="link inline" data-action="tab" data-tab="log">Protokoll</button> unter „Nachrichten“ – mit dem Hinweis, ob sie gesendet oder zurückgehalten wurde.</p>`,
+        };
+      }
+
+      case "holiday":
+        return {
+          icon: "mdi:calendar-star", c: "#f472b6", title: "Feiertage", sub: "Heizwerk · Heizpläne an Feiertagen wie am Wochenende",
+          body: `
+            <p class="muted">Mit dem Sensor der Home-Assistant-Integration „Arbeitstag“ (Workday) erkennt Heizwerk Feiertage. Ist der Sensor an einem Werktag aus, gelten die Zeiten des Wochenendes – in allen Heizplänen.</p>
+            <div class="field"><span><ha-icon icon="mdi:calendar-check"></ha-icon> Arbeitstag-Sensor</span>${this._picker("workday_entity", p.workday_entity ? [p.workday_entity] : [])}</div>
+            ${p.workday_entity ? `<div class="field"><span>An Feiertagen heizen wie am</span>${segs("workday_as", [["5", "Samstag", "mdi:calendar-weekend"], ["6", "Sonntag", "mdi:calendar-weekend-outline"]], "6")}</div>` : ""}
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Noch keinen Sensor? In Home Assistant unter Geräte & Dienste die Integration „Arbeitstag“ für dein Bundesland hinzufügen. Zeitpläne und Kalender aus Home Assistant (statt Heizplan) bleiben unverändert.</p>`,
+        };
+
+      case "vent": {
+        const withHum = rooms.filter((r) => r.humidity_sensor);
+        return {
+          icon: "mdi:weather-windy", c: "#22d3ee", title: "Lüften & Schimmelschutz", sub: "Heizwerk · rechnet mit absoluter Feuchte und Taupunkt",
+          body: `
+            <p class="muted">Ist es drinnen feucht und die Luft draußen trockener, erscheint unter der Glocke „Jetzt lüften“. Verglichen wird die Wassermenge in der Luft (g/m³) – kalte Winterluft ist fast immer trockener, schwüle Sommerluft oft nicht.</p>
+            <label class="field narrow"><span><ha-icon icon="mdi:water-percent"></ha-icon> Hinweis ab Luftfeuchte (0 = aus)</span>${minutes("vent_rh", 65, 0, 95, 5, "%")}</label>
+            <div class="lbl">Räume mit Feuchtesensor</div>
+            <div class="evlist">${withHum.map((r) => {
+              const rs = st[r.id] || {};
+              return `<div class="ev ${rs.vent ? "live" : ""}"><ha-icon icon="${rs.vent ? "mdi:weather-windy" : "mdi:water-percent"}"></ha-icon><span class="grow"><b>${esc(r.name)}</b><small>${rs.humidity != null ? `${fmt(rs.humidity, 0)} %` : "–"}${rs.vent ? ` · jetzt lüften · Taupunkt ${fmt(rs.vent.dew_point)} °C` : ""}${r.shower_boost ? ` · nach dem Duschen ${r.shower_boost} Min. nachheizen` : ""}</small></span>${rs.vent ? `<em class="badge ok">LÜFTEN</em>` : ""}</div>`;
+            }).join("") || `<p class="muted small">Noch kein Raum hat einen Feuchtesensor – am Raum unter „Geräte“ zuordnen.</p>`}</div>
+            <p class="muted small"><ha-icon icon="mdi:shower-head"></ha-icon>Nach dem Duschen nachheizen stellst du am Raum unter „Geräte“ ein (braucht einen Feuchtesensor).</p>`,
         };
       }
 
@@ -2925,7 +3023,7 @@ class HauswerkPanel extends HTMLElement {
     const TABS_D = [
       ["basis", "mdi:home-edit-outline", "Raum", false],
       ["devices", "mdi:thermostat", "Geräte", !!r.presence_sensor],
-      ["window", "mdi:clock-fast", "Vorheizen & Fenster", ["window_delay", "resume_delay", "lead_min", "max_setback", "pause_mode", "preheat_mode", "preheat_max"].some((k) => r[k] != null && r[k] !== "") || r.min_instead_of_off],
+      ["window", "mdi:clock-fast", "Vorheizen & Fenster", !!r.window_detect || ["window_delay", "resume_delay", "lead_min", "max_setback", "pause_mode", "preheat_mode", "preheat_max"].some((k) => r[k] != null && r[k] !== "") || r.min_instead_of_off],
       ["control", "mdi:tune-variant", "Regelung", !!(r.compensation || r.calibration || r.valve_control || r.comfort_entity || r.eco_entity || Number(r.off_above) > 0 || Number(r.aggressive_range) > 0)],
     ];
 
@@ -2963,6 +3061,13 @@ class HauswerkPanel extends HTMLElement {
           <div class="field"><span><ha-icon icon="mdi:water-percent"></ha-icon> Luftfeuchte</span>${this._picker("humidity_sensor", r.humidity_sensor ? [r.humidity_sensor] : [])}</div>
         </div>
         <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Raumtemperatur und Luftfeuchte sind optional. Ohne Raumsensor nutzt Heizwerk den Messwert der Thermostate.</p>
+        ${r.humidity_sensor ? `
+        <div class="sub-h"><ha-icon icon="mdi:shower-head"></ha-icon>Nach dem Duschen</div>
+        <div class="row2">
+          <label class="field"><span>Nachheizen (0 = aus)</span><div class="unit"><input type="number" step="5" min="0" max="120" data-room="shower_boost" value="${r.shower_boost ?? ""}" placeholder="0"><i>Min.</i></div></label>
+          <label class="field"><span>wenn die Luftfeuchte steigt um</span><div class="unit"><input type="number" step="1" min="3" max="40" data-room="shower_rise" value="${r.shower_rise ?? ""}" placeholder="10"><i>%-Punkte in 15 Min.</i></div></label>
+        </div>
+        <p class="muted small">Steigt die Feuchte so schnell (Duschen, Baden), heizt Heizwerk den Raum für diese Zeit auf Komfort – damit Wände und Handtücher trocknen. Höchstens einmal pro Stunde.</p>` : ""}
         <div class="sub-h"><ha-icon icon="mdi:motion-sensor"></ha-icon>Präsenzmelder im Raum <span class="muted small">· optional</span></div>
         <div class="field">${this._picker("presence_sensor", r.presence_sensor ? [r.presence_sensor] : [])}</div>
         ${r.presence_sensor ? `
@@ -2983,6 +3088,13 @@ class HauswerkPanel extends HTMLElement {
         <div class="field"><span>Bei offenem Fenster</span>
           ${segs("pause-mode", r.pause_mode || "", [["", `Standard (${d.pause_mode === "off" ? "aus" : "Frostschutz"})`, "mdi:auto-mode"], ["frost", "Frostschutz", "mdi:snowflake"], ["off", "Ausschalten", "mdi:power"]])}
         </div>
+        ${check("window_detect", "mdi:thermometer-chevron-down", "Fenster ohne Kontakt erkennen", "Fällt die Raumtemperatur in 5 Minuten stark, gilt das als offenes Fenster – Fensterpause für eine feste Zeit.")}
+        ${r.window_detect ? `
+        <div class="row2">
+          <label class="field"><span><ha-icon icon="mdi:arrow-down-bold"></ha-icon> Temperatursturz ab</span><div class="unit"><input type="number" step="0.1" min="0.3" max="5" data-room="window_detect_drop" value="${r.window_detect_drop ?? ""}" placeholder="1,0"><i>°C in 5 Min.</i></div></label>
+          <label class="field"><span><ha-icon icon="mdi:timer-sand"></ha-icon> Pause dann für</span><div class="unit"><input type="number" step="5" min="5" max="60" data-room="window_detect_min" value="${r.window_detect_min ?? ""}" placeholder="15"><i>Min.</i></div></label>
+        </div>
+        ${(r.windows || []).length ? `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Gilt zusätzlich zu den Fensterkontakten – z. B. für ein Fenster ohne Kontakt.</p>` : ""}` : ""}
         <div class="row2">
           <label class="field"><span><ha-icon icon="mdi:timer-sand"></ha-icon> Fensterpause nach</span>${num("window_delay", "s", 10, 'min="0" max="7200"')}</label>
           ${ex ? `<label class="field"><span><ha-icon icon="mdi:timer-play-outline"></ha-icon> Weiterheizen nach dem Schließen</span>${num("resume_delay", "s", 10, 'min="0" max="3600"')}</label>` : ""}
@@ -3352,7 +3464,7 @@ class HauswerkPanel extends HTMLElement {
       else v = t.value;
       if (key === "plan_id") v = v || null;
       this._dialog.room[key] = v;
-      if (["name", "valve_control", "calibration"].includes(key) && isChange) this._renderDialog();
+      if (["name", "valve_control", "calibration", "window_detect"].includes(key) && isChange) this._renderDialog();
       return;
     }
     if (t.dataset.action === "log-search") {
@@ -3872,6 +3984,18 @@ class HauswerkPanel extends HTMLElement {
         // zentrale Pop-ups unter Hauswerk-Einstellungen, alle anderen unter Heizwerk › Einstellungen
         this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : "settings");
         if (el.dataset.sub) this._openPop(el.dataset.sub);
+        break;
+      case "notify-toggle": {
+        const list = new Set(this._settings.notify_targets || []);
+        if (list.has(el.dataset.id)) list.delete(el.dataset.id);
+        else list.add(el.dataset.id);
+        this._settings.notify_targets = [...list];
+        this._refreshSettings();
+        break;
+      }
+      case "notify-test":
+        await this._ws({ type: "hauswerk/notify/test" });
+        this._toast("Testnachricht gesendet");
         break;
       case "person-toggle": {
         const list = new Set(this._settings.persons || []);
@@ -5051,6 +5175,9 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .wxsrcs { display:grid; gap:8px; margin-bottom:6px; }
 .wxsrc { background:var(--card2); border-radius:14px; }
 .wxr-pk { padding:0 14px 12px; }
+.nrow { display:flex; align-items:center; gap:10px; justify-content:flex-end; }
+.nrow .unit input { width:76px; }
+.nrow input[type=time] { width:auto; }
 .pk-none { padding:4px 2px; }
 .wxr-v .unit { justify-content:flex-end; }
 .wxr-v .unit input { width:96px; text-align:right; font-weight:700; }

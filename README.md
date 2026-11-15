@@ -60,15 +60,16 @@ Rollladen · Licht · Garten  geplant, ausgegraut
 
 - **Start (Dashboard von Hauswerk):** Zustand des Hauses und frei wählbare **Widgets** aus allen Modulen: Heizwerk, Anwesenheit (mit Personen, Ort und Entfernung nach Hause), Wetter, Räume, Shortcuts (Szenen, Skripte, Schalter, Lichter), Fenster, Komfortzeiten, Heizdauer, Werte (beliebige Sensoren) und Wetterprognose (nächste Stunden oder Tage, Frost-Hinweis). Über „Anpassen“ hinzufügen, verschieben, umbenennen, entfernen und in drei Größen stellen: **klein** (nur das Wichtigste), **mittel** (Kennzahlen bzw. Liste) und **groß** (volle Breite mit allen Einzelheiten) – gilt für alle Benutzer.
 - **Zentrale Einstellungen (Zahnrad oben rechts):** gelten für ganz Hauswerk und alle Module – **Anwesenheit** (Personen per Tipp wählen mit Status „da“ oder Abstand in Metern, Wohnungs-Zone, Wartezeiten beim Gehen und Heimkommen, Urlaub, Gäste, Heimweg-Grenze in Metern, Entfernungs-Sensoren), **Urlaub** (von Hand, Zeitraum oder Kalender mit Stichworten), **Wetter**, **Darstellung**, **Widgets** der Startseite, **Module** im Überblick, **Protokoll** und **Berechtigungen**.
+- **Benachrichtigungen:** Nachrichten aufs Handy über die Home-Assistant-App (`notify.mobile_app_…`, mehrere Geräte wählbar, mit Testnachricht): **Fenster lange offen** (ab X Min., einmal je Öffnen), **Thermostat nicht erreichbar** (seit X Min.), **Frost erwartet** (Tiefstwert der Vorhersage der nächsten 3 Tage unter der Grenze „Kälteeinbruch“) und **Batterie schwach**. **Ruhezeit** (z. B. 22:00–07:00): Nachrichten werden zurückgehalten und danach gesendet, falls der Anlass noch besteht. Jede Nachricht steht auch im Protokoll unter „Nachrichten“.
 - **Wetter:** Wetterquelle und Außentemperatur (eigene Wetterstation statt Wetterdienst) wählen; dazu die aktuellen Werte (Wetterlage, gefühlte Temperatur, Feuchte, Wind, Sonne, Sonnenauf- und -untergang) und Grenzwerte: **Heizgrenze** (aus Heizwerk › Saison), **Kälteeinbruch** (Tiefstwert der nächsten 3 Tage) und **Sturm** (Böen der nächsten 24 Stunden). Wird eine Grenze erreicht, erscheint ein Hinweis unter der Glocke. Jede Zeile erklärt sich per „?“.
-- **Protokoll:** was wann warum entschieden wurde, 14 Tage lang und live – Anwesenheit, Saison (Sommerpause, Entkalken), Ziel & Heizung je Raum mit Begründung, Fenster, Von Hand (Thermostat, Home Assistant, Panel, Boost), Geräte (nicht/wieder erreichbar), Thermostat-Befehle und Einstellungen (mit Benutzer). Filter nach Raum und Kategorie (je Gerät gemerkt, Thermostat-Befehle standardmäßig aus) und Suche.
+- **Protokoll:** was wann warum entschieden wurde, 14 Tage lang und live – Nachrichten (gesendet oder in der Ruhezeit zurückgehalten), Anwesenheit, Saison (Sommerpause, Entkalken), Ziel & Heizung je Raum mit Begründung, Fenster, Von Hand (Thermostat, Home Assistant, Panel, Boost), Geräte (nicht/wieder erreichbar), Thermostat-Befehle und Einstellungen (mit Benutzer). Filter nach Raum und Kategorie (je Gerät gemerkt, Thermostat-Befehle standardmäßig aus) und Suche.
 - **Darstellung:** Design (wie Home Assistant, hell oder dunkel), Akzentfarbe (Auswahl oder eigene Farbe, auch fürs Logo), Hintergrund (Muster, **Tageszeit** – die Kopfzeile zeigt Nacht, Sonnenaufgang, Tag oder Sonnenuntergang nach `sun.sun` – oder schlicht) sowie Wetter und Uhrzeit oben rechts. Änderungen sind im Pop-up sofort als Vorschau zu sehen und gelten nach dem Speichern für alle. Die **Größe** (kompakt, normal, groß) merkt sich jedes Gerät selbst, z. B. groß auf dem Wand-Tablet.
-- **Heizwerk › Einstellungen:** nur was das Heizen betrifft – **Abwesenheit & Urlaub** (welche Temperatur, wenn niemand da ist oder Urlaub ist; Frostschutz nach langer Abwesenheit), **Saison**, **Heizpläne**, **Vorheizen**, **Frostschutz**, **Boost**, **Entkalkungsschutz**, **Kalibrierung** und die **Räume**. Ganz oben führt ein Eintrag zu den zentralen Einstellungen.
+- **Heizwerk › Einstellungen:** nur was das Heizen betrifft – **Abwesenheit & Urlaub** (welche Temperatur, wenn niemand da ist oder Urlaub ist; Frostschutz nach langer Abwesenheit), **Saison**, **Heizpläne**, **Vorheizen** (auch nach Wetter), **Feiertage**, **Lüften & Schimmelschutz**, **Frostschutz**, **Boost**, **Entkalkungsschutz**, **Kalibrierung** und die **Räume**. Ganz oben führt ein Eintrag zu den zentralen Einstellungen.
 - Beide Einstellungsseiten sind Listen mit Suche; ein Tipp öffnet die Einzelheiten als Pop-up.
 - **Entitätssuche** (überall, wo Geräte gewählt werden): gewählte Entitäten als Karten mit aktuellem Wert und Raum; darunter **Vorschläge** mit Trefferquote und Begründung (Geräteklasse, Name, Raum aus Home Assistant, erreichbar), **Nach Raum** gruppiert und **Filter** nach Art und Erreichbarkeit. Temperaturunterschiede zeigt Hauswerk überall in °C.
 - **Kopfzeile:** schrumpft beim Scrollen auf eine Zeile mit Logo, Reitern, Glocke und Zahnrad. Auf dem Handy gibt es stattdessen unten eine Leiste **Start · Heizwerk · Einstellungen**; im Modul Heizwerk bleibt dessen Unterleiste **Räume · Bericht · Einstellungen** sichtbar.
 - **Raumseite:** Ein Tipp auf den Raumnamen öffnet eine eigene Seite mit Raumkarte, Verlauf der letzten 24 Stunden (Raumtemperatur, Soll, Heizzeiten, offene Fenster), Geräten mit Live-Werten, Einstellungen im Überblick und den letzten 7 Tagen.
-- **Hinweise:** Glocke oben rechts mit Zahl. Ein Tipp listet alles, was zu beheben ist (z. B. Thermostat nicht erreichbar, Raum ohne Thermostat, Kalender nicht lesbar) und was gut zu wissen ist (z. B. Fenster lange offen, Raum feucht) – jeweils mit Sprung an die richtige Stelle.
+- **Hinweise:** Glocke oben rechts mit Zahl. Ein Tipp listet alles, was zu beheben ist (z. B. Thermostat nicht erreichbar, **Batterie schwach** an Thermostat, Fensterkontakt oder Sensor, Raum ohne Thermostat, Kalender nicht lesbar) und was gut zu wissen ist (z. B. Fenster lange offen, **Jetzt lüften**, Fenster vermutlich offen) – jeweils mit Sprung an die richtige Stelle.
 - **Räume:** schmales Banner mit Ø-Temperatur, Kurzurteil (z. B. „2 Räume unter Soll“), Wetter und Kennzahlen (heizende Räume, Fenster, Außen, Luftfeuchte, heute geheizt). Raumkacheln **detailliert** (Boost und „⋯“-Menü für Heizplan, Bearbeiten und Automatik; heutiger Zeitplan; nur der wichtigste Hinweis) oder **kompakt** (Übersicht vieler Räume); die Wahl merkt sich jedes Gerät.
 - Hell oder dunkel folgt dem Design von Home Assistant.
 
@@ -115,6 +116,12 @@ Alle Werte lassen sich je Raum ändern; seltene Feinheiten (Absenkgrenze, Fenste
 | Übersteuern | Raum › Erweitert | Bei großer Abweichung höheren/tieferen Sollwert senden, damit träge Thermostate schneller reagieren |
 | Kalibrieren | Raum › Erweitert | Offset-Entität des Thermostats (`number.*calibration*`/`*offset*`) auf den Raumsensor einstellen |
 | Ventil direkt steuern | Raum › Erweitert | Ventil-Entität (`number.*valve*`/`*position*`) proportional zum Abstand zum Soll |
+| Vorheizen nach Wetter | Heizwerk › Einstellungen › Vorheizen | Bezug 5 °C außen: je Grad kälter 4 % mehr Vorlauf, je Grad wärmer 4 % weniger (0,6- bis 1,8-fach). Lernende Räume rechnen ihre Aufheizgeschwindigkeit auf 5 °C um |
+| Feiertage wie Wochenende | Heizwerk › Einstellungen › Feiertage | Sensor der Integration „Arbeitstag“ (workday): ist er an einem Werktag aus, gelten die Zeiten von Samstag oder Sonntag |
+| Lüften & Schimmelschutz | Heizwerk › Einstellungen › Lüften | Hinweis „Jetzt lüften“, wenn drinnen ab X % Luftfeuchte und die Luft draußen trockener ist (absolute Feuchte, Taupunkt) |
+| Nach dem Duschen nachheizen | Raum › Geräte (mit Feuchtesensor) | Steigt die Luftfeuchte in 15 Min. um X Prozentpunkte, heizt der Raum für X Min. auf Komfort (höchstens einmal pro Stunde) |
+| Fenster ohne Kontakt erkennen | Raum › Vorheizen & Fenster | Fällt die Raumtemperatur in 5 Min. um X °C (Standard 1 °C), Fensterpause für X Min. (Standard 15) |
+| Batterie-Warnung | Hauswerk › Einstellungen › Benachrichtigungen | Batterie-Sensoren an den Geräten von Thermostaten, Fensterkontakten und Raumsensoren; unter X % Hinweis unter der Glocke und auf Wunsch Nachricht |
 
 ## Vorrang der Betriebsarten
 
@@ -142,12 +149,12 @@ Danach kann **Warm genug** einen Raum noch abschalten (außer beim Boost).
 ```
 custom_components/hauswerk/
   __init__.py       Einstieg, Panel, Module (hass.data["hauswerk"]: "log", "haus", "heizen")
-  core.py           Hauswerk-Kern für alle Module: Anwesenheit, Urlaub (auch Kalender), Wetter, Darstellung,
-                    Widgets, Berechtigungen (config/.storage/hauswerk.haus)
+  core.py           Hauswerk-Kern für alle Module: Anwesenheit, Urlaub (auch Kalender), Wetter (Frost-Vorhersage),
+                    Benachrichtigungen mit Ruhezeit, Darstellung, Widgets, Berechtigungen (config/.storage/hauswerk.haus)
   logic.py          Modul Heizwerk: Regel-Logik ohne Home-Assistant-Abhängigkeit (getestet)
   controller.py     Modul Heizwerk: Speicher, Zustandsüberwachung, Ansteuerung der Thermostate, Statistik
   log.py            Protokoll für alle Module (config/.storage/hauswerk.protokoll, 14 Tage)
-  api.py            WebSocket-Befehle fürs Panel (hauswerk/heizen/get, /subscribe, /room/save …, hauswerk/log/get, /subscribe)
+  api.py            WebSocket-Befehle fürs Panel (hauswerk/heizen/get, /subscribe, /room/save …, hauswerk/log/get, /subscribe, hauswerk/notify/test)
   sensor.py, switch.py, entity.py
   brand/            Logo und Symbol für Home Assistant (icon.png, logo.png, dark_logo.png, je mit @2x)
   frontend/hauswerk-panel.js   Panel als Web-Komponente, ohne Build-Schritt

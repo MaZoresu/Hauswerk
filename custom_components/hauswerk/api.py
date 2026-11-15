@@ -97,6 +97,13 @@ ROOM_SCHEMA = vol.Schema(
         vol.Optional("target_offset"): _opt(vol.All(vol.Coerce(float), vol.Range(min=-5, max=5))),
         vol.Optional("calibration_entities", default=[]): ENTITY_LIST,
         vol.Optional("valve_entities", default=[]): ENTITY_LIST,
+        # Fenster ohne Kontakt: Temperatursturz erkennen
+        vol.Optional("window_detect"): _opt(bool),
+        vol.Optional("window_detect_drop"): _opt(vol.All(vol.Coerce(float), vol.Range(min=0.3, max=5))),
+        vol.Optional("window_detect_min"): _opt(vol.All(vol.Coerce(int), vol.Range(min=5, max=60))),
+        # Nach dem Duschen nachheizen (Minuten, 0 = aus) ab einem Feuchte-Anstieg in Prozentpunkten
+        vol.Optional("shower_boost"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=120))),
+        vol.Optional("shower_rise"): _opt(vol.All(vol.Coerce(float), vol.Range(min=3, max=40))),
     },
     extra=vol.REMOVE_EXTRA,
 )
@@ -167,6 +174,23 @@ SETTINGS_SCHEMA = vol.Schema(
         # Wetter-Hinweise
         vol.Optional("cold_snap_temp"): vol.All(vol.Coerce(float), vol.Range(min=-30, max=25)),
         vol.Optional("storm_kmh"): vol.All(vol.Coerce(float), vol.Range(min=20, max=200)),
+        # Benachrichtigungen
+        vol.Optional("notify_targets"): vol.All([vol.All(str, vol.Match(r"^[a-z0-9_]+$"))], vol.Length(max=10)),
+        vol.Optional("notify_window"): bool,
+        vol.Optional("notify_window_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=720)),
+        vol.Optional("notify_offline"): bool,
+        vol.Optional("notify_offline_min"): vol.All(vol.Coerce(int), vol.Range(min=1, max=720)),
+        vol.Optional("notify_frost"): bool,
+        vol.Optional("notify_battery"): bool,
+        vol.Optional("notify_quiet"): bool,
+        vol.Optional("notify_quiet_from"): _hm,
+        vol.Optional("notify_quiet_to"): _hm,
+        vol.Optional("battery_low"): vol.All(vol.Coerce(int), vol.Range(min=5, max=60)),
+        # Vorheizen nach Wetter, Feiertage, Lüften
+        vol.Optional("preheat_weather"): bool,
+        vol.Optional("workday_entity"): _opt(vol.All(str, vol.Match(r"^binary_sensor\.[a-z0-9_]+$"))),
+        vol.Optional("workday_as"): vol.All(vol.Coerce(int), vol.In([5, 6])),
+        vol.Optional("vent_rh"): vol.All(vol.Coerce(int), vol.Range(min=0, max=95)),
     },
     extra=vol.REMOVE_EXTRA,
 )
@@ -453,6 +477,21 @@ async def ws_calendar_import(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"], {"blocks": blocks})
 
 
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/notify/test"})
+@require_editor
+@websocket_api.async_response
+async def ws_notify_test(hass: HomeAssistant, connection, msg) -> None:
+    """Testnachricht an die gewählten Apps."""
+    haus = _haus(hass)
+    if haus is None:
+        return _not_ready(connection, msg)
+    if not haus.settings.get("notify_targets"):
+        connection.send_error(msg["id"], "no_targets", "Erst eine App auswählen und speichern")
+        return
+    await haus.async_test_notify(by=_who(connection))
+    connection.send_result(msg["id"])
+
+
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/log/get"})
 @callback
 def ws_log_get(hass: HomeAssistant, connection, msg) -> None:
@@ -491,6 +530,7 @@ COMMANDS = (
     ws_plan_save,
     ws_plan_delete,
     ws_calendar_import,
+    ws_notify_test,
     ws_log_get,
     ws_log_subscribe,
 )

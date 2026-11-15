@@ -41,6 +41,11 @@ SETTING_LABELS = {
     "calibration_interval": "Kalibrierung", "allow_users": "Berechtigungen", "start_widgets": "Widgets",
     "look_theme": "Darstellung", "look_accent": "Darstellung", "look_background": "Darstellung",
     "look_header_weather": "Darstellung", "look_header_clock": "Darstellung",
+    "notify_targets": "Benachrichtigungen an", "notify_window": "Benachrichtigungen", "notify_window_min": "Benachrichtigungen",
+    "notify_offline": "Benachrichtigungen", "notify_offline_min": "Benachrichtigungen", "notify_frost": "Benachrichtigungen",
+    "notify_battery": "Benachrichtigungen", "notify_quiet": "Ruhezeit", "notify_quiet_from": "Ruhezeit", "notify_quiet_to": "Ruhezeit",
+    "battery_low": "Batterie-Warnung", "preheat_weather": "Vorheizen nach Wetter", "workday_entity": "Arbeitstag-Sensor",
+    "workday_as": "Feiertage wie", "vent_rh": "Lüften-Hinweis",
 }
 
 PANEL_URL = "hauswerk"
@@ -86,6 +91,18 @@ HOUSE_DEFAULTS = {
     "look_header_weather": True,  # Außentemperatur und Wetter oben rechts
     "look_header_clock": False,   # Uhrzeit oben rechts (z. B. für Wand-Tablets)
     "allow_users": False,         # auch Nicht-Admins dürfen Einstellungen, Räume und Pläne ändern
+    # Benachrichtigungen aufs Handy (Home-Assistant-App: notify.mobile_app_…)
+    "notify_targets": [],         # Dienste ohne "notify.", z. B. "mobile_app_pixel_8"
+    "notify_window": True,        # Fenster lange offen
+    "notify_window_min": 30,      # … ab so vielen Minuten
+    "notify_offline": True,       # Thermostat oder Sensor nicht erreichbar
+    "notify_offline_min": 15,     # … seit so vielen Minuten
+    "notify_frost": True,         # Frost erwartet (Grenze: cold_snap_temp)
+    "notify_battery": True,       # Batterie schwach
+    "notify_quiet": True,         # Ruhezeit: Nachrichten erst danach senden
+    "notify_quiet_from": "22:00",
+    "notify_quiet_to": "07:00",
+    "battery_low": 20,            # Batterie-Warnung unter so viel Prozent
 }
 HOUSE_KEYS = frozenset(HOUSE_DEFAULTS)
 
@@ -116,10 +133,19 @@ HEAT_DEFAULTS = {
     "preheat_mode": "fixed",      # smart = lernend | fixed = feste Zeit | off = aus
     "lead_radiator": 15,          # Minuten bei fester Zeit, Heizkörper
     "lead_floor": 120,            # Minuten bei fester Zeit, Flächenheizung
+    "preheat_weather": False,     # Vorlaufzeit nach Außentemperatur anpassen (kälter = früher)
+    # Feiertage: Sensor „Arbeitstag“ (workday); aus an einem Werktag = Zeiten von workday_as
+    "workday_entity": None,       # binary_sensor.* der Integration „Arbeitstag“
+    "workday_as": 6,              # 5 = wie Samstag, 6 = wie Sonntag
+    # Lüften: Hinweis, wenn drinnen ab dieser Luftfeuchte und draußen trockenere Luft (0 = aus)
+    "vent_rh": 65,
 }
 
 # Alle Einstellungen zusammen (so sieht sie das Panel)
 DEFAULT_SETTINGS = {**HOUSE_DEFAULTS, **HEAT_DEFAULTS}
+
+FORECAST_REFRESH = 1800  # Sekunden zwischen zwei Abfragen der Wettervorhersage (Frost-Nachricht)
+NOTIFY_REPEAT = 12 * 3600  # dieselbe Nachricht frühestens nach so vielen Sekunden erneut
 
 CALENDAR_REFRESH = 300  # Sekunden zwischen zwei Abfragen des Urlaubskalenders
 
