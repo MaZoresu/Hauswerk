@@ -69,6 +69,12 @@ DEFAULT_SETTINGS = {
     "allow_users": False,         # auch Nicht-Admins dürfen Einstellungen, Räume und Pläne ändern
     "weather_entity": None,       # weather.* für das Banner (leer = erste gefundene)
     "start_widgets": None,        # Widgets der Startseite (None = Grundauswahl im Panel)
+    # Darstellung des Panels (für alle Benutzer; die Größe merkt sich jedes Gerät selbst)
+    "look_theme": "auto",         # auto = wie Home Assistant | light | dark
+    "look_accent": None,          # "#rrggbb" oder None = Türkis
+    "look_background": "pattern", # pattern = Muster | daytime = Kopfzeile nach Tageszeit | plain = schlicht
+    "look_header_weather": True,  # Außentemperatur und Wetter oben rechts
+    "look_header_clock": False,   # Uhrzeit oben rechts (z. B. für Wand-Tablets)
 }
 
 CALENDAR_REFRESH = 300  # Sekunden zwischen zwei Abfragen des Urlaubskalenders

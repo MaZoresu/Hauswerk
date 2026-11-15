@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.14.0";
+const VERSION = "0.15.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -171,7 +171,13 @@ const COMING = [
 ];
 const SLUGS = { start: "start", house: "einstellungen", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])) };
 // Pop-ups, die zu den zentralen Hauswerk-Einstellungen gehören (alle anderen gehören zu Heizwerk)
-const HOUSE_POPS = ["presence", "vacation", "weather", "access"];
+const HOUSE_POPS = ["presence", "vacation", "weather", "access", "look"];
+// Akzentfarben der Darstellung: [gespeicherter Wert (null = Standard), Name, Anzeigefarbe]
+const ACCENTS = [
+  [null, "Türkis", "#14b8a6"], ["#0ea5e9", "Himmelblau"], ["#3b82f6", "Blau"], ["#8b5cf6", "Violett"],
+  ["#ec4899", "Pink"], ["#f43f5e", "Rot"], ["#f59e0b", "Orange"], ["#84cc16", "Grün"],
+];
+const SKIES = [["night", "Nacht"], ["dawn", "Sonnenaufgang"], ["day", "Tag"], ["dusk", "Sonnenuntergang"]];
 const DEFAULT_VIEW = "start";
 
 const esc = (v) =>
@@ -220,8 +226,8 @@ class HauswerkPanel extends HTMLElement {
   set hass(hass) {
     const first = !this._hass;
     this._hass = hass;
-    // Hell oder dunkel wie in Home Assistant eingestellt (Profil › Design)
-    this.toggleAttribute("dark", !!hass.themes?.darkMode);
+    // Design, Akzentfarbe, Hintergrund und Größe (Hauswerk › Einstellungen › Darstellung)
+    this._applyLook(this._pop?.id === "look" ? this._settings : null);
     if (first) this._init();
     // Startseite mit Shortcuts, Werten, Wetter oder Fenstern: Änderungen in HA zeigen (höchstens alle 3 s)
     else if (this._tab === "start" && this._data && !this._busy && Date.now() - (this._hassAt || 0) > 3000 &&
@@ -232,6 +238,64 @@ class HauswerkPanel extends HTMLElement {
   }
   get hass() {
     return this._hass;
+  }
+
+  /** Darstellung anwenden: aus den gespeicherten Einstellungen oder (Vorschau) aus dem offenen Pop-up. */
+  _applyLook(src) {
+    const p = src || this._data?.settings || {};
+    const theme = p.look_theme || "auto";
+    // auto = hell oder dunkel wie in Home Assistant eingestellt (Profil › Design)
+    this.toggleAttribute("dark", theme === "dark" || (theme === "auto" && !!this._hass?.themes?.darkMode));
+    const c = /^#[0-9a-f]{6}$/i.test(p.look_accent || "") ? p.look_accent : null;
+    if (c) {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16) / 255);
+      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      // im hellen Design etwas dunkler, damit Text in der Akzentfarbe auf Weiß lesbar bleibt
+      this.style.setProperty("--accent", this.hasAttribute("dark") ? c : `color-mix(in srgb, ${c} 82%, #000)`);
+      this.style.setProperty("--ink", lum > 0.6 ? "#1f2328" : "#fff");
+    } else {
+      this.style.removeProperty("--accent");
+      this.style.removeProperty("--ink");
+    }
+    const bg = p.look_background || "pattern";
+    this.setAttribute("bg", bg);
+    if (bg === "daytime") this.setAttribute("sky", this._skyPhase());
+    else this.removeAttribute("sky");
+    this.setAttribute("size", this._lookSize());
+  }
+
+  /** Tageszeit für den Himmel in der Kopfzeile: aus sun.sun, sonst aus der Uhrzeit. */
+  _skyPhase() {
+    const s = this._hass?.states?.["sun.sun"];
+    const el = Number(s?.attributes?.elevation);
+    if (s && !isNaN(el)) {
+      if (el > 6) return "day";
+      if (el < -6) return "night";
+      return s.attributes.rising ? "dawn" : "dusk";
+    }
+    const h = new Date().getHours();
+    return h < 6 || h >= 21 ? "night" : h < 8 ? "dawn" : h < 18 ? "day" : "dusk";
+  }
+
+  /** Größe der Oberfläche: nur auf diesem Gerät gemerkt. */
+  _lookSize() {
+    try {
+      return localStorage.getItem("hauswerk.groesse") || "m";
+    } catch (e) {
+      return "m";
+    }
+  }
+
+  /** Uhrzeit und Wetter oben rechts (je nach Darstellung). */
+  _headInfo() {
+    const p = this._data.settings;
+    const parts = [];
+    if (p.look_header_clock) parts.push(`<span class="hclock">${new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</span>`);
+    if (p.look_header_weather !== false) {
+      const w = this._weather();
+      if (w) parts.push(`<span class="hwx" title="${esc(w.name)}: ${esc(w.label)}"><ha-icon icon="${w.icon}"></ha-icon>${fmt(w.temp)}°</span>`);
+    }
+    return parts.length ? `<div class="hinfo">${parts.join("")}</div>` : "";
   }
   set narrow(value) {
     this._narrow = value;
@@ -246,6 +310,11 @@ class HauswerkPanel extends HTMLElement {
     if (this._hass && this._data && !this._unsub) this._subscribe();
     window.addEventListener("location-changed", this._onLocation);
     window.addEventListener("popstate", this._onLocation);
+    // Uhrzeit in der Kopfzeile aktuell halten (ohne die Seite neu zu zeichnen)
+    this._clock = setInterval(() => {
+      const c = this.shadowRoot.querySelector(".hclock");
+      if (c) c.textContent = new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    }, 15000);
     this._timer = setInterval(() => {
       this._reports = {};
       if (["start", "overview", "report"].includes(this._tab)) this._renderMain();
@@ -255,6 +324,7 @@ class HauswerkPanel extends HTMLElement {
     window.removeEventListener("location-changed", this._onLocation);
     window.removeEventListener("popstate", this._onLocation);
     clearInterval(this._timer);
+    clearInterval(this._clock);
     if (this._io) this._io.disconnect();
     for (const sub of Object.values(this._fcSubs || {})) sub.then((u) => u()).catch(() => {});
     this._fcSubs = {};
@@ -506,6 +576,7 @@ class HauswerkPanel extends HTMLElement {
         <div class="brand">${LOGO}</div>
         <div class="ttl"><small>HAUSWERK</small><b>${esc(title)}</b><span>Haussteuerung · Version ${VERSION}</span></div>
         <div class="hacts">
+          ${this._data ? this._headInfo() : ""}
           ${(() => {
             if (!this._data) return "";
             const h = this._hints();
@@ -573,6 +644,7 @@ class HauswerkPanel extends HTMLElement {
       main.innerHTML = `<section class="card empty"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><h2>Hauswerk antwortet nicht</h2><p>${esc(this._error)}</p></section>`;
       return;
     }
+    this._applyLook(this._pop?.id === "look" ? this._settings : null);
     this._renderChrome();
     // Hintergrund passend zum Bereich: Startseite oder Heizen
     this.setAttribute("view", MODULES[0].views.includes(this._tab) ? "heat" : "start");
@@ -2010,7 +2082,10 @@ class HauswerkPanel extends HTMLElement {
         { g: "Haus", id: "vacation", icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub", sum: vac, on: s.vacation, words: "kalender zeitraum stichwort ferien reise" },
         { g: "Haus", id: "weather", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter",
           sum: `${p.weather_entity ? this._entityName(p.weather_entity) : "automatisch"}${p.outside_sensor ? ` · Außen: ${this._entityName(p.outside_sensor)}` : ""}`, words: "wetter außentemperatur sensor prognose" },
-        { g: "Startseite", start: true, icon: "mdi:view-dashboard-edit-outline", c: "#2dd4bf", title: "Widgets",
+        { g: "Darstellung", id: "look", icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung",
+          sum: `${{ auto: "Wie Home Assistant", light: "Hell", dark: "Dunkel" }[p.look_theme || "auto"]} · Akzent ${(ACCENTS.find(([v]) => v === (p.look_accent || null)) || [0, "eigene Farbe"])[1]} · Hintergrund ${{ pattern: "Muster", daytime: "Tageszeit", plain: "schlicht" }[p.look_background || "pattern"]}`,
+          words: "design farbe akzent hell dunkel hintergrund tageszeit himmel uhr uhrzeit wetter kopfzeile größe tablet" },
+        { g: "Darstellung", start: true, icon: "mdi:view-dashboard-edit-outline", c: "#2dd4bf", title: "Widgets der Startseite",
           sum: `${n} Widget${n === 1 ? "" : "s"} · für alle Benutzer gleich`, words: "start dashboard widget übersicht anpassen" },
         ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => v === "settings") || m.views[0], icon: m.icon, c: "#fb923c", title: m.name,
           sum: `${rooms.length} ${rooms.length === 1 ? "Raum" : "Räume"} · Heizpläne, Vorheizen, Saison und mehr`, words: "heizen heizung räume module" })),
@@ -2127,6 +2202,8 @@ class HauswerkPanel extends HTMLElement {
   _renderPop() {
     const host = this.shadowRoot.getElementById("pop");
     if (!host) return;
+    // Darstellung: Änderungen sofort als Vorschau zeigen, beim Abbrechen wieder die gespeicherten
+    this._applyLook(this._pop?.id === "look" ? this._settings : null);
     if (!this._pop) {
       host.innerHTML = "";
       return;
@@ -2381,6 +2458,43 @@ class HauswerkPanel extends HTMLElement {
             <div class="field"><span><ha-icon icon="mdi:thermometer"></ha-icon> Außentemperatur (leer = vom Wetter)</span>${this._picker("outside_sensor", p.outside_sensor ? [p.outside_sensor] : [])}</div>
             <p class="muted small">Der Außensensor wird auch für die Sommerpause nach Außentemperatur genutzt.</p>`,
         };
+
+      case "look": {
+        const acc = p.look_accent || null;
+        const known = ACCENTS.some(([v]) => v === acc);
+        const bg = p.look_background || "pattern";
+        const now = this._skyPhase();
+        const size = this._lookSize();
+        const bgText = {
+          pattern: "Dezentes Muster je Bereich: Glut und aufsteigende Wärme bei Heizwerk, Punkte auf der Startseite.",
+          daytime: "Die Kopfzeile folgt dem Sonnenstand (sun.sun, sonst der Uhrzeit): Nacht, Sonnenaufgang, Tag und Sonnenuntergang.",
+          plain: "Ruhiger, einfarbiger Hintergrund – gut für Wand-Tablets.",
+        }[bg];
+        return {
+          icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung", sub: "Hauswerk · für alle Module und Benutzer",
+          body: `
+            ${head("mdi:theme-light-dark", "Design")}
+            <div class="field">${segs("look_theme", [["auto", "Wie Home Assistant", "mdi:home-assistant"], ["light", "Hell", "mdi:white-balance-sunny"], ["dark", "Dunkel", "mdi:weather-night"]], "auto")}</div>
+            ${head("mdi:palette-outline", "Akzentfarbe")}
+            <div class="swatches">
+              ${ACCENTS.map(([v, name, show]) => `<button class="sw ${acc === v ? "on" : ""}" style="--c:${show || v}" data-action="look-accent" data-v="${v || ""}" title="${name}" aria-label="${name}" ${dis}></button>`).join("")}
+              <label class="sw custom ${known ? "" : "on"}" style="--c:${known ? "#94a3b8" : acc}" title="Eigene Farbe"><input type="color" data-look-color value="${known ? "#14b8a6" : acc}" aria-label="Eigene Farbe" ${dis}></label>
+              <span class="muted small">Eigene</span>
+            </div>
+            ${head("mdi:image-filter-hdr", "Hintergrund")}
+            <div class="field">${segs("look_background", [["pattern", "Muster", "mdi:texture-box"], ["daytime", "Tageszeit", "mdi:weather-sunset"], ["plain", "Schlicht", "mdi:square-rounded-outline"]], "pattern")}</div>
+            <p class="muted small">${bgText}</p>
+            ${bg === "daytime" ? `<div class="skies">${SKIES.map(([k, l]) => `<div class="skyc"><div class="sky ${k === now ? "on" : ""}" style="background:var(--sky-${k})">${k === now ? "<em>jetzt</em>" : ""}</div><small>${l}</small></div>`).join("")}</div>` : ""}
+            ${head("mdi:page-layout-header", "Kopfzeile")}
+            <label class="check"><span><b>Wetter anzeigen</b><small>Außentemperatur und Wetterlage oben rechts. Die Quelle stellst du unter Hauswerk › Wetter ein.</small></span>${sw("look_header_weather")}</label>
+            <label class="check"><span><b>Uhrzeit anzeigen</b><small>Praktisch für Wand-Tablets. Auf dem Handy ausgeblendet.</small></span>${sw("look_header_clock")}</label>
+            ${head("mdi:cellphone-cog", "Auf diesem Gerät")}
+            <div class="field"><span>Größe</span><div class="segs small">${[["s", "Kompakt", "mdi:format-font-size-decrease"], ["m", "Normal", "mdi:format-size"], ["l", "Groß", "mdi:format-font-size-increase"]]
+              .map(([v, l, i]) => `<button class="seg ${size === v ? "on" : ""}" data-action="look-size" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${l}</button>`)
+              .join("")}</div></div>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Die Größe gilt nur für dieses Gerät und sofort – z. B. größer auf dem Wand-Tablet, kompakter am Handy. Alles andere gilt nach dem Speichern für alle.</p>`,
+        };
+      }
 
       case "access":
         return {
@@ -2846,6 +2960,12 @@ class HauswerkPanel extends HTMLElement {
       if (isChange) this._renderMain();
       return;
     }
+    if (t.dataset.lookColor !== undefined && this._settings) {
+      this._settings.look_accent = t.value;
+      if (isChange) this._renderPop();
+      else this._applyLook(this._settings);
+      return;
+    }
     if (t.dataset.set && this._settings) {
       const key = t.dataset.set;
       if (t.type === "checkbox") this._settings[key] = t.checked;
@@ -3281,6 +3401,19 @@ class HauswerkPanel extends HTMLElement {
         this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : "settings");
         if (el.dataset.sub) this._openPop(el.dataset.sub);
         break;
+      case "look-accent":
+        this._settings.look_accent = el.dataset.v || null;
+        this._renderPop();
+        break;
+      case "look-size":
+        try {
+          localStorage.setItem("hauswerk.groesse", el.dataset.v);
+        } catch (err) {
+          /* ohne Speicher: gilt bis zum Neuladen */
+        }
+        this.setAttribute("size", el.dataset.v);
+        this._renderPop();
+        break;
       case "start-edit":
         this._wEdit = true;
         this._setView("start");
@@ -3356,7 +3489,7 @@ class HauswerkPanel extends HTMLElement {
 /* Eigenes Zeichen: Flamme in einem Thermostat-Ring */
 const LOGO = `
 <svg viewBox="0 0 48 48" aria-hidden="true">
-  <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#2dd4bf"/><stop offset="1" stop-color="#0e7490"/></linearGradient></defs>
+  <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:color-mix(in srgb, var(--accent) 80%, #fff)"/><stop offset="1" style="stop-color:color-mix(in srgb, var(--accent) 60%, #000)"/></linearGradient></defs>
   <rect width="48" height="48" rx="13" fill="url(#lg)"/>
   <circle cx="24" cy="24" r="13" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="3" stroke-dasharray="61 82" transform="rotate(135 24 24)" stroke-linecap="round"/>
   <path d="M24 14c1.2 3.6 5.5 5.6 5.5 10.2A5.5 5.5 0 0 1 18.5 24c0-2.3 1.2-3.7 2.3-4.8.2 1.6 1 2.6 2 2.9-.3-3 .2-5.6 1.2-8.1z" fill="#fff"/>
@@ -3393,7 +3526,7 @@ code { background:var(--card2); padding:1px 6px; border-radius:6px; font-size:12
 
 /* Kopfleiste (fest oben) mit Modul-Reitern */
 .top { position:sticky; top:0; z-index:6; padding:8px max(16px, calc((100% - 1180px) / 2 + 20px)) 0;
-  background:linear-gradient(135deg, color-mix(in srgb, #2dd4bf 20%, var(--bg)), color-mix(in srgb, #60a5fa 14%, var(--bg)));
+  background:linear-gradient(135deg, color-mix(in srgb, var(--accent) 20%, var(--bg)), color-mix(in srgb, #60a5fa 14%, var(--bg)));
   border-bottom:1px solid var(--line); }
 .bar { display:flex; align-items:center; gap:12px; min-height:58px; }
 .menu { all:unset; cursor:pointer; width:40px; height:40px; border-radius:50%; display:grid; place-items:center; flex:none; }
@@ -4278,6 +4411,54 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .room-t h4, .wh b, .sr-t b, .stit b, .shead h3, .rm-name, .prow b, .wrow b, .mt-t b, .ev b { font-size:var(--fs-title) !important; }
 .room-t small, .sr-t small, .wrow small, .prow small, .wmini small, .ev small, .kv, .rs-top, .room-note, .muted.small, .trend, .gm .gl, .rm-mode { font-size:var(--fs-sub) !important; }
 .room-temp span, .wbig small, .hero .hero-big span, .rm-temp small { font-size:14px !important; }
+/* Darstellung: Himmel nach Tageszeit, schlichter Hintergrund, Größe, Uhrzeit und Wetter oben rechts */
+:host {
+  --sky-night:radial-gradient(1.5px 1.5px at 12% 30%, #fff, transparent), radial-gradient(1px 1px at 32% 62%, #fffc, transparent),
+    radial-gradient(1.5px 1.5px at 58% 22%, #fff, transparent), radial-gradient(1px 1px at 76% 52%, #fffb, transparent),
+    radial-gradient(1px 1px at 90% 18%, #fffc, transparent), linear-gradient(165deg, #0b1026 0%, #1b2557 60%, #34386f 100%);
+  --sky-dawn:radial-gradient(60% 120% at 80% 120%, rgba(253,186,116,.9), transparent 70%), linear-gradient(165deg, #3b2c5f 0%, #a8507a 60%, #f39b62 100%);
+  --sky-day:radial-gradient(18% 60% at 88% 20%, rgba(255,247,200,.95), transparent 70%), linear-gradient(165deg, #3b82f6 0%, #7cb7fb 55%, #cfe6ff 100%);
+  --sky-dusk:radial-gradient(60% 120% at 20% 120%, rgba(251,146,60,.9), transparent 70%), linear-gradient(165deg, #251b48 0%, #873c69 60%, #ef8547 100%);
+}
+:host([sky]) .top { border-bottom-color:transparent; color:var(--text); }
+:host([sky="night"]) .top { background:var(--sky-night); }
+:host([sky="dawn"]) .top { background:var(--sky-dawn); }
+:host([sky="day"]) .top { background:var(--sky-day); }
+:host([sky="dusk"]) .top { background:var(--sky-dusk); }
+:host([sky="night"]) .top, :host([sky="dawn"]) .top, :host([sky="dusk"]) .top {
+  --text:#fff; --muted:rgba(255,255,255,.78); --card:rgba(255,255,255,.13); --line:rgba(255,255,255,.2); --line2:rgba(255,255,255,.35); }
+:host([sky="day"]) .top { --text:#0b2545; --muted:rgba(11,37,69,.72); --card:rgba(255,255,255,.6); --line:rgba(255,255,255,.7); --line2:rgba(255,255,255,.9); }
+:host([sky]) .top .ttl small { color:var(--text); opacity:.85; }
+:host([sky]) .top .mtab, :host([sky]) .top .bell, :host([sky]) .top .hinfo { backdrop-filter:blur(8px); }
+:host([bg="plain"]) { background-image:none !important; }
+:host([size="s"]) .top, :host([size="s"]) .app, :host([size="s"]) .bnav, :host([size="s"]) .sheet, :host([size="s"]) .toast { zoom:.9; }
+:host([size="l"]) .top, :host([size="l"]) .app, :host([size="l"]) .bnav, :host([size="l"]) .sheet, :host([size="l"]) .toast { zoom:1.15; }
+.hinfo { display:flex; align-items:center; gap:10px; padding:0 12px; height:42px; box-sizing:border-box; border-radius:14px; background:var(--card); border:1px solid var(--line); font-weight:700; font-size:15px; white-space:nowrap; }
+.hwx { display:inline-flex; align-items:center; gap:5px; }
+.hwx ha-icon { --mdc-icon-size:20px; color:#f59e0b; }
+.hclock { font-variant-numeric:tabular-nums; }
+.hclock + .hwx { padding-left:10px; border-left:1px solid var(--line2); }
+.top.slim .hinfo { height:36px; border-radius:12px; font-size:13.5px; }
+.bell.gear ha-icon { --mdc-icon-size:21px; }
+.swatches { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:6px; }
+.sw { all:unset; cursor:pointer; position:relative; width:38px; height:38px; border-radius:50%; background:var(--c); box-shadow:inset 0 0 0 1px rgba(0,0,0,.12); display:grid; place-items:center; }
+.sw.on { box-shadow:0 0 0 3px var(--card), 0 0 0 5px var(--c); }
+.sw.on::after { content:""; width:12px; height:12px; border-radius:50%; background:#fff; box-shadow:0 0 0 2px rgba(0,0,0,.25); }
+.sw.custom { background:conic-gradient(#ef4444, #f59e0b, #84cc16, #0ea5e9, #8b5cf6, #ec4899, #ef4444); }
+.sw.custom input { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; padding:0; border:none; }
+.sw[disabled] { cursor:default; opacity:.6; }
+.skies { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; margin:4px 0 8px; }
+.skyc { display:flex; flex-direction:column; gap:4px; min-width:0; }
+.skyc small { font-size:12px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sky { position:relative; height:58px; border-radius:12px; border:2px solid transparent; }
+.sky.on { border-color:var(--accent); }
+.sky em { position:absolute; left:6px; top:5px; font-style:normal; font-size:10px; font-weight:800; padding:1px 7px; border-radius:99px; background:var(--accent); color:var(--ink); }
+@media (max-width:600px) {
+  .hclock { display:none; }
+  .hclock + .hwx { border:none; padding:0; }
+  .hinfo { padding:0 9px; height:38px; font-size:14px; }
+  .skies { grid-template-columns:repeat(2, 1fr); }
+}
 .toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:11px 20px; border-radius:12px; z-index:30; font-size:14px; font-weight:600; box-shadow:0 10px 30px rgba(0,0,0,.4); }
 
 @media (max-width:820px) {

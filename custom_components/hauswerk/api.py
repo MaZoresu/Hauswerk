@@ -157,6 +157,12 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("allow_users"): bool,
         vol.Optional("weather_entity"): _opt(ENTITY),
         vol.Optional("start_widgets"): _opt(vol.All([WIDGET_SCHEMA], vol.Length(max=24))),
+        # Darstellung
+        vol.Optional("look_theme"): vol.In(["auto", "light", "dark"]),
+        vol.Optional("look_accent"): _opt(vol.Match(r"^#[0-9a-fA-F]{6}$")),
+        vol.Optional("look_background"): vol.In(["pattern", "daytime", "plain"]),
+        vol.Optional("look_header_weather"): bool,
+        vol.Optional("look_header_clock"): bool,
     },
     extra=vol.REMOVE_EXTRA,
 )
