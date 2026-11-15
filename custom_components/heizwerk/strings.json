@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Heizwerk",
+        "description": "Heizwerk einrichten. Räume, Heizpläne und Einstellungen pflegst du danach im Seitenmenü unter „Heizwerk“."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Heizwerk ist bereits eingerichtet."
+    }
+  }
+}

@@ -1,0 +1,439 @@
+"""WebSocket-Befehle für das Heizwerk-Panel."""
+from __future__ import annotations
+
+from functools import wraps
+from typing import Any
+
+import voluptuous as vol
+
+from homeassistant.components import websocket_api
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
+
+from .const import DOMAIN
+from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, parse_hm
+
+
+def _hm(value: Any) -> str:
+    """'HH:MM' (Sekunden, wie manche Geräte sie mitschicken, werden abgeschnitten)."""
+    try:
+        total = parse_hm(value)
+    except (ValueError, AttributeError) as err:
+        raise vol.Invalid(f"Ungültige Uhrzeit: {value}") from err
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def _opt(validator):
+    return vol.Any(None, validator)
+
+
+TEMP = vol.All(vol.Coerce(float), vol.Range(min=5, max=30))
+ENTITY = vol.All(str, vol.Match(r"^[a-z0-9_]+\.[a-z0-9_]+$"))
+ENTITY_LIST = vol.All([ENTITY], vol.Length(max=20))
+MINUTES = vol.All(vol.Coerce(int), vol.Range(min=0, max=240))
+
+BLOCK_SCHEMA = vol.Schema(
+    {
+        vol.Required("start"): _hm,
+        vol.Required("end"): _hm,
+        vol.Optional("days", default=[0, 1, 2, 3, 4, 5, 6]): [vol.All(vol.Coerce(int), vol.Range(min=0, max=6))],
+        vol.Optional("temp"): _opt(TEMP),
+    },
+    extra=vol.REMOVE_EXTRA,
+)
+
+ROOM_SCHEMA = vol.Schema(
+    {
+        vol.Optional("id"): _opt(str),
+        vol.Required("name"): vol.All(str, vol.Strip, vol.Length(min=1, max=60)),
+        vol.Required("type"): vol.In([TYPE_RADIATOR, TYPE_FLOOR]),
+        vol.Optional("icon"): _opt(str),
+        vol.Optional("enabled", default=True): bool,
+        vol.Optional("allow_manual", default=True): bool,
+        vol.Optional("climates", default=[]): ENTITY_LIST,
+        vol.Optional("windows", default=[]): ENTITY_LIST,
+        vol.Optional("temp_sensor"): _opt(str),
+        vol.Optional("humidity_sensor"): _opt(str),
+        vol.Optional("comfort", default=21.0): TEMP,
+        vol.Optional("eco", default=18.0): TEMP,
+        vol.Optional("window_delay"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=7200))),
+        vol.Optional("resume_delay"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=3600))),
+        vol.Optional("pause_mode"): _opt(vol.In(["frost", "off"])),
+        vol.Optional("lead_min"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=600))),
+        vol.Optional("max_setback"): _opt(vol.All(vol.Coerce(float), vol.Range(min=0, max=15))),
+        vol.Optional("compensation"): _opt(bool),
+        vol.Optional("schedule", default=[]): vol.All([BLOCK_SCHEMA], vol.Length(max=50)),
+        # Komfort/Eco aus Helfer-Entitäten
+        vol.Optional("comfort_entity"): _opt(ENTITY),
+        vol.Optional("eco_entity"): _opt(ENTITY),
+        # Präsenzmelder
+        vol.Optional("presence_sensor"): _opt(ENTITY),
+        vol.Optional("presence_mode", default="plan"): vol.In(["plan", "always"]),
+        vol.Optional("presence_on"): _opt(MINUTES),
+        vol.Optional("presence_off"): _opt(MINUTES),
+        # Feinregelung
+        vol.Optional("min_instead_of_off", default=False): bool,
+        vol.Optional("off_above"): _opt(vol.All(vol.Coerce(float), vol.Range(min=0, max=5))),
+        vol.Optional("aggressive_range"): _opt(vol.All(vol.Coerce(float), vol.Range(min=0, max=5))),
+        vol.Optional("aggressive_offset"): _opt(vol.All(vol.Coerce(float), vol.Range(min=0, max=5))),
+        vol.Optional("calibration", default=False): bool,
+        vol.Optional("valve_control", default=False): bool,
+        vol.Optional("valve_diff"): _opt(vol.All(vol.Coerce(float), vol.Range(min=0.2, max=5))),
+        vol.Optional("valve_max"): _opt(vol.All(vol.Coerce(float), vol.Range(min=10, max=100))),
+        # Vorheizen: feste Vorlaufzeit oder lernend
+        vol.Optional("preheat_mode"): _opt(vol.In(["fixed", "smart", "off"])),
+        # Gemeinsamer Heizplan (leer = eigener Plan des Raums)
+        vol.Optional("plan_id"): _opt(str),
+        vol.Optional("preheat_max"): _opt(vol.All(vol.Coerce(int), vol.Range(min=10, max=600))),
+        # Zeitplan aus Home Assistant statt eigenem Heizplan
+        vol.Optional("schedule_entity"): _opt(ENTITY),
+        vol.Optional("presence_schedule"): _opt(ENTITY),
+        # Fenster-Temperatur je Raum (leer = Frostschutz)
+        vol.Optional("window_temp"): _opt(TEMP),
+        # Manuelle Änderungen getrennt nach Herkunft
+        vol.Optional("manual_device"): _opt(bool),
+        vol.Optional("manual_ui"): _opt(bool),
+        # Fester Ausgleich und selbst gewählte Kalibrier-/Ventil-Entitäten
+        vol.Optional("target_offset"): _opt(vol.All(vol.Coerce(float), vol.Range(min=-5, max=5))),
+        vol.Optional("calibration_entities", default=[]): ENTITY_LIST,
+        vol.Optional("valve_entities", default=[]): ENTITY_LIST,
+    },
+    extra=vol.REMOVE_EXTRA,
+)
+
+WIDGET_TYPES = ["heat", "presence", "weather", "rooms", "shortcuts", "windows", "schedule", "report", "values", "forecast"]
+WIDGET_SCHEMA = vol.Schema(
+    {
+        vol.Required("id"): vol.All(str, vol.Length(min=1, max=20)),
+        vol.Required("type"): vol.In(WIDGET_TYPES),
+        vol.Optional("size", default="m"): vol.In(["s", "m", "l", "w"]),  # klein, mittel, groß (w = alt für groß)
+        vol.Optional("title"): _opt(vol.All(str, vol.Length(max=40))),
+        vol.Optional("entities", default=[]): ENTITY_LIST,
+        vol.Optional("mode"): _opt(vol.In(["hourly", "daily"])),  # Wetterprognose
+    },
+    extra=vol.REMOVE_EXTRA,
+)
+
+SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Optional("frost_temp"): TEMP,
+        vol.Optional("away_temp"): TEMP,
+        vol.Optional("away_delay"): vol.All(vol.Coerce(int), vol.Range(min=0, max=240)),
+        vol.Optional("vacation_temp"): TEMP,
+        vol.Optional("vacation"): bool,
+        vol.Optional("vacation_from"): _opt(vol.Match(r"^\d{4}-\d{2}-\d{2}$")),
+        vol.Optional("vacation_to"): _opt(vol.Match(r"^\d{4}-\d{2}-\d{2}$")),
+        vol.Optional("persons"): ENTITY_LIST,
+        vol.Optional("presence_force"): _opt(vol.In(["away"])),
+        vol.Optional("arrive_delay"): MINUTES,
+        vol.Optional("guest"): bool,
+        vol.Optional("party"): bool,
+        vol.Optional("proximity_sensors"): ENTITY_LIST,
+        vol.Optional("proximity_km"): vol.All(vol.Coerce(float), vol.Range(min=0, max=200)),
+        vol.Optional("summer_mode"): vol.In(["off", "auto", "on", "entity"]),
+        vol.Optional("season_entity"): _opt(ENTITY),
+        vol.Optional("summer_fallback"): vol.In(["keep", "heat", "summer"]),
+        vol.Optional("away_mode"): vol.In(["temp", "offset"]),
+        vol.Optional("away_offset"): vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
+        vol.Optional("away_action"): vol.In(["lower", "off"]),
+        vol.Optional("long_away_days"): vol.All(vol.Coerce(float), vol.Range(min=0, max=60)),
+        vol.Optional("eco_force"): bool,
+        vol.Optional("calibration_interval"): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
+        vol.Optional("outside_sensor"): _opt(ENTITY),
+        vol.Optional("summer_temp"): vol.All(vol.Coerce(float), vol.Range(min=5, max=30)),
+        vol.Optional("summer_action"): vol.In(["off", "frost"]),
+        vol.Optional("liming"): bool,
+        vol.Optional("liming_day"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
+        vol.Optional("liming_time"): _hm,
+        vol.Optional("liming_minutes"): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
+        vol.Optional("liming_winter"): bool,
+        vol.Optional("boost_minutes"): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
+        vol.Optional("vacation_source"): vol.In(["off", "period", "calendar"]),
+        vol.Optional("vacation_calendar"): _opt(ENTITY),
+        vol.Optional("vacation_keywords"): _opt(vol.All(str, vol.Length(max=200))),
+        vol.Optional("preheat_mode"): vol.In(["smart", "fixed", "off"]),
+        vol.Optional("lead_radiator"): vol.All(vol.Coerce(int), vol.Range(min=0, max=600)),
+        vol.Optional("lead_floor"): vol.All(vol.Coerce(int), vol.Range(min=0, max=600)),
+        vol.Optional("allow_users"): bool,
+        vol.Optional("weather_entity"): _opt(ENTITY),
+        vol.Optional("start_widgets"): _opt(vol.All([WIDGET_SCHEMA], vol.Length(max=24))),
+    },
+    extra=vol.REMOVE_EXTRA,
+)
+
+PLAN_SCHEMA = vol.Schema(
+    {
+        vol.Optional("id"): _opt(str),
+        vol.Required("name"): vol.All(str, vol.Strip, vol.Length(min=1, max=60)),
+        vol.Optional("schedule", default=[]): vol.All([BLOCK_SCHEMA], vol.Length(max=50)),
+        # Statt fester Zeitfenster einem Kalender folgen (Termin = Komfort)
+        vol.Optional("calendar"): _opt(vol.All(str, vol.Match(r"^calendar\.[a-z0-9_]+$"))),
+        vol.Optional("keyword"): _opt(vol.All(str, vol.Length(max=200))),
+    },
+    extra=vol.REMOVE_EXTRA,
+)
+
+
+def _ctl(hass: HomeAssistant):
+    return hass.data.get(DOMAIN)
+
+
+def _may_edit(hass: HomeAssistant, connection) -> bool:
+    """Admins immer; andere Benutzer nur, wenn ein Admin es in den Einstellungen erlaubt hat."""
+    if connection.user.is_admin:
+        return True
+    ctl = _ctl(hass)
+    return bool(ctl and ctl.settings.get("allow_users"))
+
+
+def require_editor(func):
+    """Wie require_admin, aber mit der Freigabe „Alle Benutzer dürfen ändern“."""
+
+    @wraps(func)
+    def wrapper(hass: HomeAssistant, connection, msg):
+        if not _may_edit(hass, connection):
+            connection.send_error(
+                msg["id"],
+                "unauthorized",
+                "Nur Administratoren dürfen das ändern. Ein Admin kann es unter Einstellungen › Berechtigungen für alle freigeben.",
+            )
+            return None
+        return func(hass, connection, msg)
+
+    return wrapper
+
+
+def _not_ready(connection, msg) -> None:
+    connection.send_error(msg["id"], "not_ready", "Heizwerk ist nicht eingerichtet")
+
+
+@websocket_api.websocket_command({vol.Required("type"): "heizwerk/get"})
+@callback
+def ws_get(hass: HomeAssistant, connection, msg) -> None:
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    connection.send_result(
+        msg["id"],
+        {
+            "settings": ctl.settings,
+            "rooms": ctl.rooms,
+            "plans": ctl.plans,
+            # Soll-Sensor je Raum (für den Verlauf auf der Raumseite)
+            "target_sensors": {
+                room_id: er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"heizwerk_{room_id}_target")
+                for room_id in ctl.rooms
+            },
+            "status": ctl.status(),
+            "defaults": TYPE_DEFAULTS,
+            "modes": MODES,
+            "is_admin": _may_edit(hass, connection),
+            "user_admin": connection.user.is_admin,
+        },
+    )
+
+
+@websocket_api.websocket_command({vol.Required("type"): "heizwerk/subscribe"})
+@callback
+def ws_subscribe(hass: HomeAssistant, connection, msg) -> None:
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+
+    @callback
+    def forward(status: dict) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], status))
+
+    connection.subscriptions[msg["id"]] = ctl.subscribe(forward)
+    connection.send_result(msg["id"])
+    forward(ctl.status())
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "heizwerk/room/save", vol.Required("room"): dict}
+)
+@require_editor
+@websocket_api.async_response
+async def ws_room_save(hass: HomeAssistant, connection, msg) -> None:
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    try:
+        room = ROOM_SCHEMA(msg["room"])
+    except vol.Invalid as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    if room.get("id") and room["id"] not in ctl.rooms:
+        room["id"] = None
+    saved = await ctl.async_save_room(room)
+    connection.send_result(msg["id"], saved)
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "heizwerk/room/delete", vol.Required("room_id"): str}
+)
+@require_editor
+@websocket_api.async_response
+async def ws_room_delete(hass: HomeAssistant, connection, msg) -> None:
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    await ctl.async_delete_room(msg["room_id"])
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "heizwerk/settings/save", vol.Required("settings"): dict}
+)
+@require_editor
+@websocket_api.async_response
+async def ws_settings_save(hass: HomeAssistant, connection, msg) -> None:
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    try:
+        settings = SETTINGS_SCHEMA(msg["settings"])
+    except vol.MultipleInvalid as err:
+        first = err.errors[0]
+        field = ".".join(str(p) for p in first.path) or "?"
+        connection.send_error(msg["id"], "invalid_format", f"Ungültiger Wert bei „{field}“: {first.msg}")
+        return
+    except vol.Invalid as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    if not connection.user.is_admin:
+        settings.pop("allow_users", None)  # die Freigabe selbst ändern nur Admins
+    await ctl.async_save_settings(settings)
+    connection.send_result(msg["id"], ctl.settings)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "heizwerk/override",
+        vol.Required("room_id"): str,
+        vol.Optional("temp"): vol.Any(None, TEMP),
+        vol.Optional("hours"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0.25, max=72))),
+        vol.Optional("boost", default=False): bool,
+    }
+)
+@websocket_api.async_response
+async def ws_override(hass: HomeAssistant, connection, msg) -> None:
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    if msg["room_id"] not in ctl.rooms:
+        connection.send_error(msg["id"], "not_found", "Raum nicht gefunden")
+        return
+    await ctl.async_set_override(msg["room_id"], msg.get("temp"), msg.get("hours"), msg["boost"])
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "heizwerk/report",
+        vol.Optional("days", default=7): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
+    }
+)
+@callback
+def ws_report(hass: HomeAssistant, connection, msg) -> None:
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    connection.send_result(msg["id"], ctl.report(msg["days"]))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "heizwerk/preheat/reset", vol.Required("room_id"): str}
+)
+@require_editor
+@websocket_api.async_response
+async def ws_preheat_reset(hass: HomeAssistant, connection, msg) -> None:
+    """Gelernte Aufheizgeschwindigkeit eines Raums vergessen (z. B. nach einem Umbau)."""
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    ctl.heat_rates.pop(msg["room_id"], None)
+    ctl._save()
+    await ctl.async_evaluate()
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "heizwerk/plan/save", vol.Required("plan"): dict}
+)
+@require_editor
+@websocket_api.async_response
+async def ws_plan_save(hass: HomeAssistant, connection, msg) -> None:
+    """Gemeinsamen Heizplan anlegen oder ändern."""
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    try:
+        plan = PLAN_SCHEMA(msg["plan"])
+    except vol.Invalid as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    if plan.get("id") and plan["id"] not in ctl.plans:
+        plan["id"] = None
+    connection.send_result(msg["id"], await ctl.async_save_plan(plan))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "heizwerk/plan/delete", vol.Required("plan_id"): str}
+)
+@require_editor
+@websocket_api.async_response
+async def ws_plan_delete(hass: HomeAssistant, connection, msg) -> None:
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    await ctl.async_delete_plan(msg["plan_id"])
+    connection.send_result(msg["id"], {"rooms": ctl.rooms, "plans": ctl.plans})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "heizwerk/calendar/import",
+        vol.Required("entity_id"): vol.All(str, vol.Match(r"^calendar\.[a-z0-9_]+$")),
+        vol.Optional("keyword"): _opt(vol.All(str, vol.Length(max=200))),
+        vol.Optional("days", default=7): vol.All(vol.Coerce(int), vol.Range(min=1, max=14)),
+    }
+)
+@require_editor
+@websocket_api.async_response
+async def ws_calendar_import(hass: HomeAssistant, connection, msg) -> None:
+    """Termine eines Kalenders als Zeitfenster für einen Heizplan lesen (wird nicht gespeichert)."""
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    try:
+        blocks = await ctl.async_import_calendar(msg["entity_id"], msg.get("keyword"), msg["days"])
+    except Exception as err:  # noqa: BLE001 - Fehler des Kalenders ans Panel melden
+        connection.send_error(msg["id"], "calendar_error", f"Kalender nicht lesbar: {err}")
+        return
+    connection.send_result(msg["id"], {"blocks": blocks})
+
+
+COMMANDS = (
+    ws_get,
+    ws_subscribe,
+    ws_room_save,
+    ws_room_delete,
+    ws_settings_save,
+    ws_override,
+    ws_report,
+    ws_preheat_reset,
+    ws_plan_save,
+    ws_plan_delete,
+    ws_calendar_import,
+)
+
+
+@callback
+def async_register(hass: HomeAssistant) -> None:
+    key = f"{DOMAIN}_ws_registered"
+    if hass.data.get(key):
+        return
+    for command in COMMANDS:
+        websocket_api.async_register_command(hass, command)
+    hass.data[key] = True

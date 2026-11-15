@@ -1,0 +1,73 @@
+"""Schalter: Urlaub (global) und Automatik je Raum."""
+from __future__ import annotations
+
+from typing import Any
+
+from homeassistant.components.switch import SwitchEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from .const import DOMAIN
+from .entity import HeizwerkEntity, RoomEntity, setup_room_entities
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    ctl = hass.data[DOMAIN]
+    async_add_entities(
+        [
+            SettingSwitch(ctl, "vacation", "heizwerk_vacation", "Heizwerk Urlaub", "mdi:palm-tree"),
+            SettingSwitch(ctl, "guest", "heizwerk_guest", "Heizwerk Gäste", "mdi:account-group-outline"),
+            SettingSwitch(ctl, "party", "heizwerk_party", "Heizwerk Party", "mdi:party-popper"),
+            SettingSwitch(ctl, "liming", "heizwerk_liming", "Heizwerk Entkalken", "mdi:water-sync"),
+            SettingSwitch(ctl, "eco_force", "heizwerk_eco_force", "Heizwerk Eco erzwingen", "mdi:leaf"),
+        ]
+    )
+    setup_room_entities(
+        hass, entry, async_add_entities, lambda ctl, room_id: [RoomAutoSwitch(ctl, room_id)]
+    )
+
+
+class SettingSwitch(HeizwerkEntity, SwitchEntity):
+    """Schaltet eine globale Einstellung (Urlaub, Gäste, Party, Entkalken)."""
+
+    def __init__(self, controller, key: str, unique_id: str, name: str, icon: str) -> None:
+        super().__init__(controller)
+        self._key = key
+        self._attr_unique_id = unique_id
+        self._attr_name = name
+        self._attr_icon = icon
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.controller.settings.get(self._key))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.controller.async_save_settings({self._key: True})
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.controller.async_save_settings({self._key: False})
+
+
+class RoomAutoSwitch(RoomEntity, SwitchEntity):
+    _attr_icon = "mdi:radiator"
+
+    @property
+    def unique_id(self) -> str:
+        return f"heizwerk_{self.room_id}_auto"
+
+    @property
+    def name(self) -> str:
+        return f"Heizwerk {self.room.get('name', self.room_id)} Automatik"
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.room.get("enabled", True))
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.controller.async_set_room_enabled(self.room_id, True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.controller.async_set_room_enabled(self.room_id, False)
