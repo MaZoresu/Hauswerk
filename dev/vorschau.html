@@ -22,13 +22,16 @@ const states = {
   "sensor.kueche_temperatur": st("unavailable", { friendly_name: "Küche Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   "binary_sensor.wohnzimmer_fenster": st("off", { friendly_name: "Wohnzimmer Fenster links", device_class: "window" }),
   "binary_sensor.flur_bewegung": st("off", { friendly_name: "Flur Bewegung", device_class: "motion" }),
-  "climate.wohnzimmer": st("heat", { friendly_name: "Thermostat Wohnzimmer", current_temperature: 20.4, temperature: 21, hvac_action: "heating" }),
+  "climate.wohnzimmer": st("heat", { friendly_name: "Thermostat Wohnzimmer", current_temperature: 20.4, temperature: 21, hvac_action: "heating", pi_heating_demand: 42 }),
   "climate.bad": st("heat", { friendly_name: "Thermostat Bad", current_temperature: 22.1, temperature: 22 }),
   "binary_sensor.fenster_bad": st("off", { friendly_name: "Fenster Bad", device_class: "window" }),
   "weather.home": st("cloudy", { friendly_name: "OpenWeatherMap", temperature: 6.1, apparent_temperature: 3.2, humidity: 81, wind_speed: 14.6, wind_gust_speed: 31, wind_speed_unit: "km/h", supported_features: 3 }),
   "sensor.garten_temp": st("6.4", { friendly_name: "Wetterstation Garten Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   "zone.home": st("0", { latitude: 51.34, longitude: 12.37 }),
   "binary_sensor.arbeitstag": st("on", { friendly_name: "Arbeitstag" }),
+  "climate.bad_heizkoerper": st("heat", { friendly_name: "Heizkörper Bad", current_temperature: 23.5, temperature: 24, valve_position: 35 }),
+  "sensor.fbh_bad_stellantrieb": st("60", { friendly_name: "Fußbodenheizung Bad Stellantrieb", unit_of_measurement: "%" }),
+  "device_tracker.handy_julia": st("not_home", { friendly_name: "Handy Julia" }),
   "sensor.bad_feuchte": st("72", { friendly_name: "Bad Luftfeuchte", device_class: "humidity", unit_of_measurement: "%" }),
   "sun.sun": st("below_horizon", { elevation: -30, rising: false, next_rising: "2026-11-16T06:25:00Z", next_setting: "2026-11-16T15:21:00Z" }),
 };
@@ -48,7 +51,7 @@ const rooms = {
   a1: { id: "a1", name: "Wohnzimmer", type: "heizkoerper", comfort: 21, eco: 18, climates: ["climate.wohnzimmer"], windows: [], enabled: true,
     schedule: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "06:00", end: "22:00" }] },
   b2: { id: "b2", name: "Bad", type: "flaeche", comfort: 22, eco: 19, climates: ["climate.bad"], windows: ["binary_sensor.fenster_bad"], enabled: true,
-    humidity_sensor: "sensor.bad_feuchte", shower_boost: 30,
+    humidity_sensor: "sensor.bad_feuchte", shower_boost: 30, show_entities: ["climate.bad_heizkoerper", "sensor.fbh_bad_stellantrieb"],
     schedule: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "05:30", end: "08:00" }] },
 };
 const status = {
@@ -81,6 +84,7 @@ const hass = {
     if (msg.type === "hauswerk/heizen/settings/save") return Object.assign(settings, msg.settings);
     if (msg.type === "history/history_during_period") return {};
     if (msg.type === "hauswerk/notify/test") return null;
+    if (msg.type === "person/create") { states["person." + msg.name.toLowerCase()] = st("unknown", { friendly_name: msg.name }); return { id: msg.name.toLowerCase(), name: msg.name }; }
     if (msg.type === "hauswerk/log/get") {
       const T = (m) => Date.now() / 1000 - m * 60;
       return { days: 14, entries: [

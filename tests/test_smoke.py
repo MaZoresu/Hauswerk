@@ -335,3 +335,34 @@ def test_fenster_erkennung_duschen_feiertag_wetter(hw):
     assert any(t.startswith("Nach dem Duschen") for t in titles)
     assert "Fensterpause beginnt" in titles and "Fensterpause endet" in titles
     assert any("vermutlich offen" in (e.get("why") or "") for e in log.entries)
+
+
+def test_benachrichtigungsart(hw):
+    """Nur Protokoll, Wichtig (auch in der Ruhezeit, mit Priorität) und Mitteilung in Home Assistant."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 16, 7, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"notify_targets": ["mobile_app_pixel"], "notify_ha": True, "notify_quiet": True,
+                                        "notify_quiet_from": "00:00", "notify_quiet_to": "23:59",
+                                        "notify_window": "log", "notify_frost": "important", "notify_battery": False})
+        assert haus.notify_mode("battery") == "off" and haus.notify_mode("offline") == "normal"
+        haus.notify("window:x", "window", "Fenster lange offen", "Bad: 31 Min.")
+        haus.notify("frost", "frost", "Frost erwartet", "Tiefstwert -3,0 °C")
+        haus.notify("battery:x", "battery", "Batterie schwach", "12 %")
+        await asyncio.sleep(0)
+        pushes = [(s, d) for dom, s, d in hass.calls if dom == "notify"]
+        assert [d["title"] for _s, d in pushes] == ["Frost erwartet"]  # Fenster nur Protokoll, Batterie aus
+        assert pushes[0][1]["data"]["push"]["interruption-level"] == "time-sensitive"
+        created = [d for dom, s, d in hass.calls if (dom, s) == ("persistent_notification", "create")]
+        assert created and created[0]["notification_id"] == "hauswerk_frost"
+        haus.clear("frost")
+        await asyncio.sleep(0)
+        assert ("persistent_notification", "dismiss", {"notification_id": "hauswerk_frost"}) in hass.calls
+        return log
+
+    log = asyncio.run(run())
+    whys = [e.get("why", "") for e in log.entries if e["cat"] == "notify"]
+    assert any("nur Protokoll" in w for w in whys) and any("wichtig gesendet" in w for w in whys)

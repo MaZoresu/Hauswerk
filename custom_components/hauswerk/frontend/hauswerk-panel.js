@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.19.0";
+const VERSION = "0.20.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -127,6 +127,11 @@ const PICKERS = {
   calibration_entities: { scope: "room", multi: true, domains: ["number"] },
   valve_entities: { scope: "room", multi: true, domains: ["number"] },
   workday_entity: { scope: "settings", multi: false, domains: ["binary_sensor"] },
+  sun_entity: { scope: "settings", multi: false, domains: ["sun"] },
+  // Personen hinzufügen: wählt aus Personen und Trackern, die gewählten stehen schon als Chips da
+  person_add: { scope: "settings", multi: true, domains: ["person", "device_tracker"], noCards: true },
+  // Weitere Geräte im Raum, nur zur Anzeige (z. B. Ventil eines Heizkörper-Thermostats, Stellantrieb der Fußbodenheizung)
+  show_entities: { scope: "room", multi: true, domains: ["climate", "sensor", "number", "valve", "cover", "binary_sensor"] },
 };
 // Entitätssuche: Wörter im Namen, die zum Feld passen, und passende Geräteklassen
 const PICK_HINTS = {
@@ -145,6 +150,8 @@ const PICK_HINTS = {
   schedule_entity: ["heiz", "zeitplan", "schedule"],
   vacation_calendar: ["urlaub", "familie", "ferien"],
   workday_entity: ["arbeitstag", "workday", "werktag", "feiertag"],
+  person_add: ["person", "handy", "phone", "iphone", "pixel", "galaxy"],
+  show_entities: ["ventil", "valve", "stellantrieb", "stellung", "position", "demand", "heizkörper", "heizkoerper", "fußboden", "fussboden", "thermostat"],
 };
 const PICK_CLASSES = {
   windows: ["window", "door", "opening", "garage_door"],
@@ -325,7 +332,7 @@ class HauswerkPanel extends HTMLElement {
 
   /** Tageszeit für den Himmel in der Kopfzeile: aus sun.sun, sonst aus der Uhrzeit. */
   _skyPhase() {
-    const s = this._hass?.states?.["sun.sun"];
+    const s = this._hass?.states?.[this._data?.settings?.sun_entity || "sun.sun"];
     const el = Number(s?.attributes?.elevation);
     if (s && !isNaN(el)) {
       if (el > 6) return "day";
@@ -1472,6 +1479,11 @@ class HauswerkPanel extends HTMLElement {
     if (s.windows_open) icons.push(si("mdi:window-open-variant", "#22d3ee", s.window_pending ? "Fenster offen – Pause beginnt gleich" : "Fenster offen"));
     if (s.occupied === true) icons.push(si("mdi:account-check-outline", "#fbbf24", "Präsenzmelder: jemand im Raum"));
     else if (s.occupied === false) icons.push(si("mdi:account-off-outline", "var(--muted)", "Präsenzmelder: niemand im Raum"));
+    const valves = [...(room.climates || []), ...(room.show_entities || [])].map((id) => this._valveOf(id)).filter((v) => v != null);
+    if (valves.length) {
+      const v = Math.max(...valves);
+      icons.push(si("mdi:valve", v > 0 ? "#fb923c" : "var(--muted)", `Ventil${valves.length > 1 ? "e (höchster Wert)" : ""}: ${fmt(v, 0)} % offen`, `${fmt(v, 0)} %`));
+    }
     const hum = humidityInfo(s.humidity);
     if (hum) icons.push(si(hum.i, hum.t ? hum.c : "var(--muted)", `Luftfeuchte ${fmt(s.humidity, 0)} %${hum.t ? " – " + hum.t : ""}`, `${fmt(s.humidity, 0)} %`));
     const tr = !["aus", "fenster", "sommer", "entkalken", "warm", "boost"].includes(mode) ? trend(s.room_temp, s.target) : null;
@@ -1549,12 +1561,21 @@ class HauswerkPanel extends HTMLElement {
       ...(room.climates || []).map((id) => {
         const st = S[id];
         const bad = !st || ["unavailable", "unknown"].includes(st.state);
-        return dev("mdi:thermostat", "Thermostat", id, bad ? "nicht erreichbar" : `${val(id, "current_temperature")} → ${val(id, "temperature")}${st.attributes.hvac_action === "heating" ? " · heizt" : ""}`, !bad);
+        const v = this._valveOf(id);
+        return dev("mdi:thermostat", "Thermostat · stellt ein", id, bad ? "nicht erreichbar" : `${val(id, "current_temperature")} → ${val(id, "temperature")}${st.attributes.hvac_action === "heating" ? " · heizt" : ""}${v != null ? ` · Ventil ${fmt(v, 0)} %` : ""}`, !bad);
       }),
       ...(room.windows || []).map((id) => {
         const st = S[id];
         const open = st && ["on", "open", "opening", "true"].includes(String(st.state).toLowerCase());
         return dev(open ? "mdi:window-open-variant" : "mdi:window-closed-variant", "Fenster", id, !st ? "fehlt" : open ? "offen" : "zu", !!st);
+      }),
+      ...(room.show_entities || []).map((id) => {
+        const st = S[id];
+        const bad = !st || ["unavailable", "unknown"].includes(st.state);
+        const v = this._valveOf(id);
+        const dom = id.split(".")[0];
+        const label = v != null ? "Ventil" : dom === "climate" ? "Thermostat · nur Anzeige" : `${DOMAIN_LABEL[dom] || dom} · nur Anzeige`;
+        return dev(v != null ? "mdi:valve" : dom === "climate" ? "mdi:thermostat-box" : "mdi:eye-outline", label, id, bad ? "nicht erreichbar" : v != null ? `${fmt(v, 0)} % offen${dom === "climate" ? ` · ${esc(this._fmtState(st))}` : ""}` : esc(this._fmtState(st)), !bad);
       }),
       room.temp_sensor ? dev("mdi:thermometer", "Raumsensor", room.temp_sensor, val(room.temp_sensor), !!S[room.temp_sensor]) : "",
       room.humidity_sensor ? dev("mdi:water-percent", "Luftfeuchte", room.humidity_sensor, val(room.humidity_sensor), !!S[room.humidity_sensor]) : "",
@@ -2197,8 +2218,8 @@ class HauswerkPanel extends HTMLElement {
           sum: `${p.weather_entity ? this._entityName(p.weather_entity) : "Wetter automatisch"}${p.outside_sensor ? ` · Außen: ${this._entityName(p.outside_sensor)}` : ""} · Kälte < ${fmt(p.cold_snap_temp ?? 0)} °C · Sturm ab ${fmt(p.storm_kmh ?? 70, 0)} km/h`,
           warn: this._wxAlerts().length > 0, words: "wetter außentemperatur sensor prognose sonne kälteeinbruch sturm frost heizgrenze" },
         { g: "Haus", id: "notify", icon: "mdi:cellphone-message", c: "#0ea5e9", title: "Benachrichtigungen",
-          sum: (p.notify_targets || []).length
-            ? `${(p.notify_targets || []).map((x) => this._notifyName(x)).join(", ")}${p.notify_quiet ? ` · Ruhezeit ${p.notify_quiet_from || "22:00"}–${p.notify_quiet_to || "07:00"}` : ""}`
+          sum: (p.notify_targets || []).length || p.notify_ha
+            ? `${[...(p.notify_targets || []).map((x) => this._notifyName(x)), ...(p.notify_ha ? ["Home Assistant"] : [])].join(", ")}${p.notify_quiet ? ` · Ruhezeit ${p.notify_quiet_from || "22:00"}–${p.notify_quiet_to || "07:00"}` : ""}`
             : "Noch keine App gewählt – Nachrichten nur im Protokoll",
           words: "handy app nachricht push benachrichtigung fenster batterie frost ruhezeit thermostat" },
         { g: "Darstellung", id: "look", icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung",
@@ -2530,9 +2551,16 @@ class HauswerkPanel extends HTMLElement {
           icon: "mdi:home-account", c: "#8b5cf6", title: "Anwesenheit", sub: "Hauswerk · gilt für alle Module",
           body: `
             <span class="pstate" style="--c:${state[2]}"><ha-icon icon="${state[0]}"></ha-icon>${state[1]}</span>
+            <div class="wxsrcs">
+              <div class="wxsrc">${row("who", "Wer wohnt hier?", "Tippen zum Aus- und Abwählen", `<div class="pchips">${persons.map(chip).join("") || `<span class="muted small">Keine Personen in Home Assistant</span>`}</div>`,
+                "Gewählte Personen zählen, sobald sie in der Wohnung sind (über die Ortung ihres Handys in Home Assistant). Sind alle weg, gilt das Haus nach der Wartezeit als abwesend. Ohne gewählte Personen gibt es kein automatisches „Abwesend“. Über „Hinzufügen“ wählst du auch Handys oder Tracker (device_tracker) direkt; „Neue Person“ legt eine Person in Home Assistant an.", true)}
+              <div class="wxr-pk">${this._picker("person_add", p.persons || [])}
+                ${this._data.user_admin ? (this._newPerson != null ? `
+                <div class="newp"><input type="text" maxlength="40" data-newp placeholder="Name, z. B. Julia" value="${esc(this._newPerson)}"><button class="primary small" data-action="person-create"><ha-icon icon="mdi:account-plus-outline"></ha-icon>Anlegen</button><button class="link tiny" data-action="person-new">Abbrechen</button></div>
+                <p class="muted small">Legt die Person in Home Assistant an. Damit Hauswerk sie orten kann, ordnest du ihr danach unter Einstellungen › Personen ihr Handy zu.</p>`
+                : `<button class="pk-add" data-action="person-new"><ha-icon icon="mdi:account-plus-outline"></ha-icon>Neue Person in Home Assistant anlegen</button>`) : ""}</div></div>
+            </div>
             <div class="wxrows">
-              ${row("who", "Wer wohnt hier?", "Tippen zum Aus- und Abwählen", `<div class="pchips">${persons.map(chip).join("") || `<span class="muted small">Keine Personen in Home Assistant</span>`}</div>`,
-                "Gewählte Personen zählen, sobald sie in der Wohnung sind (über die Ortung ihres Handys in Home Assistant). Sind alle weg, gilt das Haus nach der Wartezeit als abwesend. Ohne gewählte Personen gibt es kein automatisches „Abwesend“.", true)}
               ${row("zone", "Wohnung (Zone)", "wo „zu Hause“ ist", `<select data-set="home_zone" ${dis}>${zones.map((z) => `<option value="${esc(z)}" ${(p.home_zone || "zone.home") === z ? "selected" : ""}>${esc(z === "zone.home" && this._entityName(z) === z ? "Home (Zuhause)" : this._entityName(z))}</option>`).join("")}</select>`,
                 "Die Zone aus Home Assistant, in der eine Person als zu Hause gilt – meist „Home“. Abstände rechnet Hauswerk zur Mitte dieser Zone.", true)}
               ${row("delay", "Absenken nach", "damit kurze Wege nichts auslösen", step("away_delay", 10),
@@ -2665,7 +2693,14 @@ class HauswerkPanel extends HTMLElement {
         const all = [...new Set([...services, ...chosen])];
         const chip = (x) => `<button class="pchip ${chosen.has(x) ? "on" : ""}" data-action="notify-toggle" data-id="${esc(x)}" aria-pressed="${chosen.has(x)}" ${dis}><i></i>${esc(this._notifyName(x))}${chosen.has(x) && !services.includes(x) ? " · fehlt" : ""}</button>`;
         const row = (k, title, sub, value, text, ctl) => this._setRow(k, title, sub, value, text, ctl);
-        const saved = (this._data.settings.notify_targets || []).length;
+        const saved = (this._data.settings.notify_targets || []).length || this._data.settings.notify_ha;
+        // Art je Anlass (früher an/aus)
+        for (const k of ["notify_window", "notify_offline", "notify_frost", "notify_battery"]) {
+          if (p[k] === true || p[k] == null) p[k] = "normal";
+          else if (p[k] === false) p[k] = "off";
+        }
+        const MODES_N = [["off", "Aus", "mdi:bell-off-outline"], ["log", "Protokoll", "mdi:text-box-outline"], ["normal", "Normal", "mdi:bell-outline"], ["important", "Wichtig", "mdi:bell-alert-outline"]];
+        const kind = (key, title, sub, extra, text) => `<div class="wxsrc">${row(key, title, sub, extra || "", text, !!extra)}<div class="wxr-pk">${segs(key, MODES_N, "normal").replace('class="segs small"', 'class="segs small n4"')}</div></div>`;
         return {
           icon: "mdi:cellphone-message", c: "#0ea5e9", title: "Benachrichtigungen", sub: "Hauswerk · aufs Handy über die Home-Assistant-App",
           body: `
@@ -2673,17 +2708,22 @@ class HauswerkPanel extends HTMLElement {
               ${row("apps", "An wen?", "Geräte mit der Home-Assistant-App", `<div class="pchips">${all.map(chip).join("") || `<span class="muted small">Keine App gefunden</span>`}</div>`,
                 "Jedes Handy mit der Home-Assistant-App bringt einen Dienst „notify.mobile_app_…“ mit. Gewählte Geräte bekommen die Nachrichten als Push-Mitteilung. Ohne Auswahl landen sie nur im Protokoll.", true)}
             </div>
-            ${saved && this._admin ? `<button class="secondary small" data-action="notify-test"><ha-icon icon="mdi:send-outline"></ha-icon>Testnachricht senden</button>` : ""}
-            ${head("mdi:bell-ring-outline", "Wann?")}
             <div class="wxrows">
-              ${row("nwin", "Fenster lange offen", `ab ${p.notify_window_min ?? 30} Min.`, `<div class="nrow">${minutes("notify_window_min", 30, 5, 720, 5)}${sw("notify_window")}</div>`,
-                "Steht ein Fenster eines Raums so lange offen, kommt eine Nachricht – einmal je Öffnen.", true)}
-              ${row("noff", "Thermostat nicht erreichbar", `seit ${p.notify_offline_min ?? 15} Min.`, `<div class="nrow">${minutes("notify_offline_min", 15, 1, 720, 5)}${sw("notify_offline")}</div>`,
-                "Meldet sich ein Thermostat so lange nicht mehr (z. B. Funk weg, Batterie leer), kommt eine Nachricht. Kommt es zurück, ist die Sache erledigt.", true)}
-              ${row("nfrost", "Frost erwartet", `Vorhersage unter ${fmt(p.cold_snap_temp ?? 0)} °C · Grenze unter Wetter`, sw("notify_frost"),
+              ${row("nha", "Auch in Home Assistant", "als Mitteilung in der Seitenleiste (Glocke)", sw("notify_ha"),
+                "Zusätzlich zur App erscheint die Nachricht als Mitteilung in Home Assistant und verschwindet von selbst, sobald der Anlass erledigt ist (z. B. Fenster zu).")}
+            </div>
+            ${saved && this._admin ? `<button class="secondary small" data-action="notify-test"><ha-icon icon="mdi:send-outline"></ha-icon>Testnachricht senden</button>` : ""}
+            ${head("mdi:bell-ring-outline", "Wann und wie?")}
+            <p class="muted small">Je Anlass: <b>Aus</b> · <b>Protokoll</b> (nur dort, kein Push) · <b>Normal</b> (Push, in der Ruhezeit zurückgehalten) · <b>Wichtig</b> (sofort, auch in der Ruhezeit; durchbricht „Nicht stören“ auf dem iPhone, hohe Priorität auf Android).</p>
+            <div class="wxsrcs">
+              ${kind("notify_window", "Fenster lange offen", `ab ${p.notify_window_min ?? 30} Min.`, minutes("notify_window_min", 30, 5, 720, 5),
+                "Steht ein Fenster eines Raums so lange offen, kommt eine Nachricht – einmal je Öffnen.")}
+              ${kind("notify_offline", "Thermostat nicht erreichbar", `seit ${p.notify_offline_min ?? 15} Min.`, minutes("notify_offline_min", 15, 1, 720, 5),
+                "Meldet sich ein Thermostat so lange nicht mehr (z. B. Funk weg, Batterie leer), kommt eine Nachricht. Kommt es zurück, ist die Sache erledigt.")}
+              ${kind("notify_frost", "Frost erwartet", `Vorhersage unter ${fmt(p.cold_snap_temp ?? 0)} °C · Grenze unter Wetter`, "",
                 "Sagt die Wettervorhersage für die nächsten 3 Tage einen Tiefstwert unter der Grenze „Kälteeinbruch“ (Hauswerk › Wetter) voraus, kommt eine Nachricht.")}
-              ${row("nbat", "Batterie schwach", `unter ${p.battery_low ?? 20} %`, `<div class="nrow">${minutes("battery_low", 20, 5, 60, 5, "%")}${sw("notify_battery")}</div>`,
-                "Hauswerk sucht an Thermostaten, Fensterkontakten und Raumsensoren nach Batterie-Sensoren. Liegt einer unter der Grenze, erscheint ein Hinweis unter der Glocke – und auf Wunsch eine Nachricht. Die Grenze gilt auch für die Glocke.", true)}
+              ${kind("notify_battery", "Batterie schwach", `unter ${p.battery_low ?? 20} %`, minutes("battery_low", 20, 5, 60, 5, "%"),
+                "Hauswerk sucht an Thermostaten, Fensterkontakten und Raumsensoren nach Batterie-Sensoren. Liegt einer unter der Grenze, erscheint ein Hinweis unter der Glocke – und je nach Art eine Nachricht. Die Grenze gilt auch für die Glocke.")}
             </div>
             ${head("mdi:sleep", "Ruhezeit")}
             <div class="wxrows">
@@ -2825,7 +2865,8 @@ class HauswerkPanel extends HTMLElement {
         const wid = p.weather_entity || weathers[0];
         const w = wid ? S[wid] : null;
         const a = w?.attributes || {};
-        const sun = S["sun.sun"];
+        const sunId = p.sun_entity || "sun.sun";
+        const sun = S[sunId];
         const sa = sun?.attributes || {};
         const label = (WEATHER[w?.state] || [null, w?.state || "–"])[1];
         const own = p.outside_sensor && S[p.outside_sensor] ? parseFloat(S[p.outside_sensor].state) : null;
@@ -2851,6 +2892,9 @@ class HauswerkPanel extends HTMLElement {
               <div class="wxsrc">${row("out", "Außentemperatur von", p.outside_sensor ? "eigene Wetterstation statt Wetterdienst" : "leer = vom Wetterdienst", "",
                 "Ein eigener Temperatursensor misst meist genauer als der Wetterdienst. Die Vorhersage kommt weiterhin vom Wetterdienst. Heizwerk nutzt ihn auch für die Sommerpause nach Außentemperatur.")}
               <div class="wxr-pk">${this._picker("outside_sensor", p.outside_sensor ? [p.outside_sensor] : [])}</div></div>
+              <div class="wxsrc">${row("sunsrc", "Sonnenstand", sun ? "für Tageszeit, Sonnenauf- und -untergang" : "nicht gefunden – Integration „Sonne“ hinzufügen", "",
+                "Die Entität der Home-Assistant-Integration „Sonne“ (meist sun.sun). Hauswerk nutzt sie für die Darstellung nach Tageszeit und zeigt Sonnenauf- und -untergang – künftig auch für Rollläden.")}
+              <div class="wxr-pk">${this._picker("sun_entity", [p.sun_entity || (S["sun.sun"] ? "sun.sun" : null)].filter(Boolean))}</div></div>
             </div>
             ${head("mdi:clock-outline", "Jetzt")}
             ${w ? `
@@ -2860,10 +2904,10 @@ class HauswerkPanel extends HTMLElement {
               ${row("hum", "Feuchte", "", a.humidity != null ? `${fmt(a.humidity, 0)} %` : "–", "Relative Luftfeuchte draußen laut Wetterdienst.")}
               ${row("wind", "Wind", a.wind_gust_speed != null ? `Böen ${fmt(a.wind_gust_speed)} ${esc(unit)}` : "", a.wind_speed != null ? `${fmt(a.wind_speed)} ${esc(unit)}` : "–",
                 "Mittlere Windgeschwindigkeit laut Wetterdienst; Böen, falls der Dienst sie liefert.")}
-              ${row("sun", "Sonne", sun ? `Höhe ${fmt(sa.elevation)}°` : "sun.sun fehlt", sun ? (sun.state === "above_horizon" ? "über dem Horizont" : "unter dem Horizont") : "–",
-                "Aus der Home-Assistant-Integration „Sonne“ (sun.sun). Hauswerk nutzt sie für die Darstellung nach Tageszeit – künftig auch für Rollläden.")}
-              ${row("rise", "Sonnenaufgang", "nächster Sonnenaufgang", hhmm(sa.next_rising), "Nächster Sonnenaufgang laut sun.sun.")}
-              ${row("set", "Sonnenuntergang", "nächster Sonnenuntergang", hhmm(sa.next_setting), "Nächster Sonnenuntergang laut sun.sun.")}
+              ${row("sun", "Sonne", sun ? `Höhe ${fmt(sa.elevation)}°` : `${esc(sunId)} fehlt`, sun ? (sun.state === "above_horizon" ? "über dem Horizont" : "unter dem Horizont") : "–",
+                "Aus der Home-Assistant-Integration „Sonne“ (oben unter „Sonnenstand“ wählbar). Hauswerk nutzt sie für die Darstellung nach Tageszeit – künftig auch für Rollläden.")}
+              ${row("rise", "Sonnenaufgang", "nächster Sonnenaufgang", hhmm(sa.next_rising), "Nächster Sonnenaufgang laut Sonnenstand-Entität.")}
+              ${row("set", "Sonnenuntergang", "nächster Sonnenuntergang", hhmm(sa.next_setting), "Nächster Sonnenuntergang laut Sonnenstand-Entität.")}
             </div>` : `<p class="note warn"><ha-icon icon="mdi:weather-cloudy-alert"></ha-icon>Keine Wetter-Entität gefunden – z. B. die Integration „Met.no“ oder „OpenWeatherMap“ einrichten.</p>`}
             ${head("mdi:alert-outline", "Grenzwerte")}
             <div class="wxrows">
@@ -3022,7 +3066,7 @@ class HauswerkPanel extends HTMLElement {
     // Reiter mit Punkt, sobald dort etwas eingerichtet ist
     const TABS_D = [
       ["basis", "mdi:home-edit-outline", "Raum", false],
-      ["devices", "mdi:thermostat", "Geräte", !!r.presence_sensor],
+      ["devices", "mdi:thermostat", "Geräte", !!r.presence_sensor || !!(r.show_entities || []).length],
       ["window", "mdi:clock-fast", "Vorheizen & Fenster", !!r.window_detect || ["window_delay", "resume_delay", "lead_min", "max_setback", "pause_mode", "preheat_mode", "preheat_max"].some((k) => r[k] != null && r[k] !== "") || r.min_instead_of_off],
       ["control", "mdi:tune-variant", "Regelung", !!(r.compensation || r.calibration || r.valve_control || r.comfort_entity || r.eco_entity || Number(r.off_above) > 0 || Number(r.aggressive_range) > 0)],
     ];
@@ -3054,7 +3098,9 @@ class HauswerkPanel extends HTMLElement {
         ${check("enabled", "mdi:robot-outline", "Automatik aktiv", "Aus: Heizwerk lässt die Thermostate dieses Raums in Ruhe.", { on: r.enabled !== false })}`,
 
       devices: () => `
-        <div class="field"><span><ha-icon icon="mdi:thermostat"></ha-icon> Thermostate</span>${this._picker("climates", r.climates || [])}</div>
+        <div class="field"><span><ha-icon icon="mdi:thermostat"></ha-icon> Thermostate – Heizwerk stellt diese ein (z. B. das Wandthermostat)</span>${this._picker("climates", r.climates || [])}</div>
+        <div class="field"><span><ha-icon icon="mdi:eye-outline"></ha-icon> Weitere Geräte – nur anzeigen</span>${this._picker("show_entities", r.show_entities || [])}</div>
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Z. B. Heizkörper-Thermostat oder Stellantrieb der Fußbodenheizung: Heizwerk zeigt Ventilöffnung und Werte an der Raumkarte und auf der Raumseite, stellt aber nichts daran ein.</p>
         <div class="field"><span><ha-icon icon="mdi:window-closed-variant"></ha-icon> Fenster- und Türkontakte</span>${this._picker("windows", r.windows || [])}</div>
         <div class="row2">
           <div class="field"><span><ha-icon icon="mdi:thermometer"></ha-icon> Raumtemperatur</span>${this._picker("temp_sensor", r.temp_sensor ? [r.temp_sensor] : [])}</div>
@@ -3243,6 +3289,24 @@ class HauswerkPanel extends HTMLElement {
     return areaId ? this._hass.areas?.[areaId]?.name || null : null;
   }
 
+  /** Ventilöffnung in % einer Entität (Thermostat-Attribut, Ventil/Stellantrieb oder %-Sensor), sonst null. */
+  _valveOf(id) {
+    const st = this._hass?.states?.[id];
+    if (!st || ["unavailable", "unknown"].includes(st.state)) return null;
+    const a = st.attributes || {};
+    const d = id.split(".")[0];
+    const num = (v) => (v === null || v === undefined || v === "" || isNaN(Number(v)) ? null : Number(v));
+    if (d === "climate") {
+      for (const k of ["valve_position", "valve_opening", "pi_heating_demand", "heating_demand", "position", "valve"]) {
+        if (num(a[k]) != null) return num(a[k]);
+      }
+      return null;
+    }
+    if (d === "valve" || d === "cover") return num(a.current_position);
+    if ((d === "sensor" || d === "number") && a.unit_of_measurement === "%" && a.device_class !== "battery" && a.device_class !== "humidity") return num(st.state);
+    return null;
+  }
+
   _fmtState(st) {
     if (!st) return "nicht gefunden";
     if (["unavailable", "unknown"].includes(st.state)) return "nicht erreichbar";
@@ -3270,7 +3334,7 @@ class HauswerkPanel extends HTMLElement {
     const cfg = PICKERS[field];
     const S = this._pkState(field);
     const open = this._admin && S.open;  // erst nach „Hinzufügen“ bzw. „Ändern“
-    const cards = selected
+    const cards = (cfg.noCards ? [] : selected)
       .map((id) => {
         const st = this._hass.states[id];
         const area = this._areaOf(id);
@@ -3418,6 +3482,7 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _pickerValue(field) {
+    if (field === "person_add") return this._settings?.persons || [];
     if (field === "plan_calendar") return this._plan?.calendar ? [this._plan.calendar] : [];
     const target = this._pickerTarget(field);
     if (!target) return [];
@@ -3427,6 +3492,11 @@ class HauswerkPanel extends HTMLElement {
 
   _setPickerValue(field, values) {
     const cfg = PICKERS[field];
+    if (field === "person_add") {
+      this._settings.persons = values;
+      this._refreshSettings();
+      return;
+    }
     const target = this._pickerTarget(field);
     target[field] = cfg.multi ? values : values[0] || null;
     if (["temp_sensor", "presence_sensor"].includes(field) && this._dialog) {
@@ -3439,7 +3509,7 @@ class HauswerkPanel extends HTMLElement {
       this._renderMain();
       return;
     }
-    if (["outside_sensor", "weather_entity", "vacation_calendar", "import_calendar", "w_weather"].includes(field)) {
+    if (["outside_sensor", "weather_entity", "sun_entity", "vacation_calendar", "import_calendar", "w_weather"].includes(field)) {
       this._refreshSettings();
       return;
     }
@@ -3449,6 +3519,10 @@ class HauswerkPanel extends HTMLElement {
   // ------------------------------------------------------------ Ereignisse
   _onInput(e, isChange = false) {
     const t = e.target;
+    if (t.dataset.newp !== undefined) {
+      this._newPerson = t.value;
+      return;
+    }
     if (t.dataset.pickerInput) {
       const field = t.dataset.pickerInput;
       this._pkState(field).q = t.value;
@@ -3985,6 +4059,35 @@ class HauswerkPanel extends HTMLElement {
         this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : "settings");
         if (el.dataset.sub) this._openPop(el.dataset.sub);
         break;
+      case "person-new":
+        this._newPerson = this._newPerson == null ? "" : null;
+        this._renderPop();
+        if (this._newPerson != null) this.shadowRoot.querySelector("[data-newp]")?.focus();
+        break;
+      case "person-create": {
+        const name = (this._newPerson || "").trim();
+        if (!name) {
+          this._toast("Bitte einen Namen eingeben");
+          break;
+        }
+        try {
+          await this._hass.callWS({ type: "person/create", name });
+        } catch (err) {
+          this._toast(`Person nicht angelegt: ${err.message || err}`);
+          break;
+        }
+        // Die neue Entität (person.…) erscheint kurz danach in Home Assistant
+        let id = null;
+        for (let i = 0; i < 20 && !id; i++) {
+          id = Object.keys(this._hass.states).find((e) => e.startsWith("person.") && this._hass.states[e].attributes.friendly_name === name);
+          if (!id) await new Promise((res) => setTimeout(res, 150));
+        }
+        if (id) this._settings.persons = [...new Set([...(this._settings.persons || []), id])];
+        this._newPerson = null;
+        this._refreshSettings();
+        this._toast(id ? `${name} angelegt und ausgewählt` : `${name} angelegt – erscheint gleich in der Liste`);
+        break;
+      }
       case "notify-toggle": {
         const list = new Set(this._settings.notify_targets || []);
         if (list.has(el.dataset.id)) list.delete(el.dataset.id);
@@ -5061,7 +5164,7 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 /* Gleichmäßiges Widget-Raster: klein und mittel gleich hoch, groß nach Inhalt */
 .wdg.sz-s, .wdg.sz-m { height:236px; }
 .wdg .wb { min-height:0; overflow-y:auto; overflow-x:hidden; scrollbar-width:thin; margin-right:-6px; padding-right:6px; }
-.wdg.sz-s .wb, .wdg.sz-m .wb { mask-image:linear-gradient(180deg, #000 calc(100% - 14px), transparent); -webkit-mask-image:linear-gradient(180deg, #000 calc(100% - 14px), transparent); }
+.wdg.sz-s .wb, .wdg.sz-m .wb { padding-bottom:16px; mask-image:linear-gradient(180deg, #000 calc(100% - 14px), transparent); -webkit-mask-image:linear-gradient(180deg, #000 calc(100% - 14px), transparent); }
 @media (max-width:700px) {
   .wdg.sz-s { height:176px; }
   .wdg.sz-m { height:auto; max-height:340px; }
@@ -5175,6 +5278,12 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .wxsrcs { display:grid; gap:8px; margin-bottom:6px; }
 .wxsrc { background:var(--card2); border-radius:14px; }
 .wxr-pk { padding:0 14px 12px; }
+.newp { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+.newp input { flex:1; min-width:160px; }
+.wxsrc .segs { margin-top:2px; }
+.wxsrc .segs.small.n4 { grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; }
+.wxsrc .segs.small.n4 .seg { padding:9px 4px; font-size:12.5px; gap:4px; }
+@media (max-width:420px) { .wxsrc .segs.small.n4 .seg ha-icon { display:none; } }
 .nrow { display:flex; align-items:center; gap:10px; justify-content:flex-end; }
 .nrow .unit input { width:76px; }
 .nrow input[type=time] { width:auto; }

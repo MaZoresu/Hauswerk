@@ -45,7 +45,8 @@ SETTING_LABELS = {
     "notify_offline": "Benachrichtigungen", "notify_offline_min": "Benachrichtigungen", "notify_frost": "Benachrichtigungen",
     "notify_battery": "Benachrichtigungen", "notify_quiet": "Ruhezeit", "notify_quiet_from": "Ruhezeit", "notify_quiet_to": "Ruhezeit",
     "battery_low": "Batterie-Warnung", "preheat_weather": "Vorheizen nach Wetter", "workday_entity": "Arbeitstag-Sensor",
-    "workday_as": "Feiertage wie", "vent_rh": "Lüften-Hinweis",
+    "workday_as": "Feiertage wie", "vent_rh": "Lüften-Hinweis", "sun_entity": "Sonne",
+    "notify_ha": "Mitteilung in Home Assistant",
 }
 
 PANEL_URL = "hauswerk"
@@ -83,6 +84,7 @@ HOUSE_DEFAULTS = {
     "outside_sensor": None,       # eigene Außentemperatur statt Wetterdienst
     "cold_snap_temp": 0.0,        # Kälteeinbruch: Tiefstwert der nächsten 3 Tage darunter
     "storm_kmh": 70.0,            # Sturm: Böen der nächsten 24 Stunden ab dieser Stärke
+    "sun_entity": "sun.sun",      # Sonnenstand (Darstellung nach Tageszeit, später Rollläden)
     # Startseite, Darstellung, Berechtigungen
     "start_widgets": None,        # Widgets der Startseite (None = Grundauswahl im Panel)
     "look_theme": "auto",         # auto = wie Home Assistant | light | dark
@@ -92,13 +94,16 @@ HOUSE_DEFAULTS = {
     "look_header_clock": False,   # Uhrzeit oben rechts (z. B. für Wand-Tablets)
     "allow_users": False,         # auch Nicht-Admins dürfen Einstellungen, Räume und Pläne ändern
     # Benachrichtigungen aufs Handy (Home-Assistant-App: notify.mobile_app_…)
+    # Art je Anlass: off = aus | log = nur Protokoll | normal = Push | important = wichtig (auch in der Ruhezeit,
+    # durchbricht „Nicht stören“ auf dem iPhone, hohe Priorität auf Android)
     "notify_targets": [],         # Dienste ohne "notify.", z. B. "mobile_app_pixel_8"
-    "notify_window": True,        # Fenster lange offen
+    "notify_window": "normal",    # Fenster lange offen
     "notify_window_min": 30,      # … ab so vielen Minuten
-    "notify_offline": True,       # Thermostat oder Sensor nicht erreichbar
+    "notify_offline": "normal",   # Thermostat nicht erreichbar
     "notify_offline_min": 15,     # … seit so vielen Minuten
-    "notify_frost": True,         # Frost erwartet (Grenze: cold_snap_temp)
-    "notify_battery": True,       # Batterie schwach
+    "notify_frost": "normal",     # Frost erwartet (Grenze: cold_snap_temp)
+    "notify_battery": "normal",   # Batterie schwach
+    "notify_ha": False,           # zusätzlich als Mitteilung in Home Assistant (Glocke in der Seitenleiste)
     "notify_quiet": True,         # Ruhezeit: Nachrichten erst danach senden
     "notify_quiet_from": "22:00",
     "notify_quiet_to": "07:00",

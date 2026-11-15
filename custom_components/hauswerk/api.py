@@ -31,6 +31,7 @@ TEMP = vol.All(vol.Coerce(float), vol.Range(min=5, max=30))
 ENTITY = vol.All(str, vol.Match(r"^[a-z0-9_]+\.[a-z0-9_]+$"))
 ENTITY_LIST = vol.All([ENTITY], vol.Length(max=20))
 MINUTES = vol.All(vol.Coerce(int), vol.Range(min=0, max=240))
+NOTIFY_MODE = vol.Any(bool, vol.In(["off", "log", "normal", "important"]))
 
 BLOCK_SCHEMA = vol.Schema(
     {
@@ -104,6 +105,8 @@ ROOM_SCHEMA = vol.Schema(
         # Nach dem Duschen nachheizen (Minuten, 0 = aus) ab einem Feuchte-Anstieg in Prozentpunkten
         vol.Optional("shower_boost"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=120))),
         vol.Optional("shower_rise"): _opt(vol.All(vol.Coerce(float), vol.Range(min=3, max=40))),
+        # Weitere Geräte nur zur Anzeige (z. B. Heizkörper-Thermostat oder Stellantrieb neben dem Wandthermostat)
+        vol.Optional("show_entities", default=[]): ENTITY_LIST,
     },
     extra=vol.REMOVE_EXTRA,
 )
@@ -176,12 +179,14 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("storm_kmh"): vol.All(vol.Coerce(float), vol.Range(min=20, max=200)),
         # Benachrichtigungen
         vol.Optional("notify_targets"): vol.All([vol.All(str, vol.Match(r"^[a-z0-9_]+$"))], vol.Length(max=10)),
-        vol.Optional("notify_window"): bool,
+        vol.Optional("notify_window"): NOTIFY_MODE,
         vol.Optional("notify_window_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=720)),
-        vol.Optional("notify_offline"): bool,
+        vol.Optional("notify_offline"): NOTIFY_MODE,
         vol.Optional("notify_offline_min"): vol.All(vol.Coerce(int), vol.Range(min=1, max=720)),
-        vol.Optional("notify_frost"): bool,
-        vol.Optional("notify_battery"): bool,
+        vol.Optional("notify_frost"): NOTIFY_MODE,
+        vol.Optional("notify_battery"): NOTIFY_MODE,
+        vol.Optional("notify_ha"): bool,
+        vol.Optional("sun_entity"): _opt(vol.All(str, vol.Match(r"^sun\.[a-z0-9_]+$"))),
         vol.Optional("notify_quiet"): bool,
         vol.Optional("notify_quiet_from"): _hm,
         vol.Optional("notify_quiet_to"): _hm,
@@ -485,8 +490,8 @@ async def ws_notify_test(hass: HomeAssistant, connection, msg) -> None:
     haus = _haus(hass)
     if haus is None:
         return _not_ready(connection, msg)
-    if not haus.settings.get("notify_targets"):
-        connection.send_error(msg["id"], "no_targets", "Erst eine App auswählen und speichern")
+    if not haus.settings.get("notify_targets") and not haus.settings.get("notify_ha"):
+        connection.send_error(msg["id"], "no_targets", "Erst eine App oder Home Assistant auswählen und speichern")
         return
     await haus.async_test_notify(by=_who(connection))
     connection.send_result(msg["id"])

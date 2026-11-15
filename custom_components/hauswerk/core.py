@@ -33,7 +33,6 @@ from .const import (
 from .log import Protokoll, log_settings
 from .logic import distance_km, in_quiet_hours, is_vacation, keyword_match, keywords
 
-NOTIFY_KINDS = {"window": "Fenster", "offline": "Erreichbarkeit", "frost": "Frost", "battery": "Batterie"}
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -349,38 +348,56 @@ class Haus:
         names = []
         for target in self.settings.get("notify_targets") or []:
             names.append(target.removeprefix("mobile_app_").replace("_", " ").title())
+        if self.settings.get("notify_ha"):
+            names.append("Home Assistant")
         return ", ".join(names)
+
+    def notify_mode(self, kind: str) -> str:
+        """Art der Benachrichtigung je Anlass: off | log | normal | important (früher an/aus)."""
+        value = self.settings.get(f"notify_{kind}", "normal")
+        if value is True:
+            return "normal"
+        if value is False or value is None:
+            return "off"
+        return value if value in ("off", "log", "normal", "important") else "normal"
 
     @callback
     def notify(self, key: str, kind: str, title: str, message: str,
                room: str | None = None, room_name: str | None = None) -> None:
-        """Nachricht aufs Handy (falls für diese Art eingeschaltet) und immer ins Protokoll.
+        """Nachricht je nach Art: aufs Handy (normal oder wichtig), nur ins Protokoll oder gar nicht.
 
         Dieselbe Nachricht (key) kommt erst wieder, wenn sie mit clear() erledigt ist oder
-        NOTIFY_REPEAT vergangen ist. In der Ruhezeit wird sie zurückgehalten und danach gesendet,
-        falls der Anlass dann noch besteht.
+        NOTIFY_REPEAT vergangen ist. In der Ruhezeit werden normale Nachrichten zurückgehalten
+        und danach gesendet, falls der Anlass dann noch besteht; wichtige kommen sofort.
         """
-        if not self.settings.get(f"notify_{kind}", True):
+        mode = self.notify_mode(kind)
+        if mode == "off":
             return
         self._active.add(key)
         now = dt_util.utcnow().timestamp()
         if key in self._queued or now - self._sent.get(key, 0) < NOTIFY_REPEAT:
             return
         self._sent[key] = now
+        important = mode == "important"
         targets = self.settings.get("notify_targets") or []
-        if not targets:
+        if mode == "log":
+            how = "nur Protokoll"
+        elif not targets and not self.settings.get("notify_ha"):
             how = "nur hier – keine App unter Benachrichtigungen gewählt"
-        elif self._quiet():
+        elif self._quiet() and not important:
             self._queued[key] = (title, message, room, room_name)
             how = f"Ruhezeit – wird um {self.settings.get('notify_quiet_to')} gesendet, falls noch aktuell"
         else:
-            self._send(title, message)
-            how = f"gesendet an {self._target_names()}"
+            self._send(title, message, important, key)
+            how = f"{'wichtig ' if important else ''}gesendet an {self._target_names()}"
         self.log.add("notify", title, f"{message} · {how}", room, room_name)
 
     @callback
     def clear(self, key: str) -> None:
         """Anlass erledigt (z. B. Fenster zu): Nachricht darf beim nächsten Mal wieder kommen."""
+        if key in self._sent and self.settings.get("notify_ha"):
+            self.hass.async_create_task(self._async_call(
+                "persistent_notification", "dismiss", {"notification_id": self._ha_id(key)}))
         self._active.discard(key)
         self._sent.pop(key, None)
         self._queued.pop(key, None)
@@ -392,20 +409,40 @@ class Haus:
         queued, self._queued = self._queued, {}
         for key, (title, message, room, room_name) in queued.items():
             if key in self._active:
-                self._send(title, message)
+                self._send(title, message, False, key)
                 self.log.add("notify", title, f"{message} · nach der Ruhezeit gesendet an {self._target_names()}", room, room_name)
 
-    @callback
-    def _send(self, title: str, message: str) -> None:
-        for target in self.settings.get("notify_targets") or []:
-            self.hass.async_create_task(self._async_send(target, title, message))
+    @staticmethod
+    def _ha_id(key: str) -> str:
+        return "hauswerk_" + "".join(c if c.isalnum() else "_" for c in key)
 
-    async def _async_send(self, target: str, title: str, message: str) -> None:
+    @callback
+    def _send(self, title: str, message: str, important: bool = False, key: str | None = None) -> None:
+        payload: dict[str, Any] = {"title": title, "message": message}
+        if important:
+            # iPhone: durchbricht „Nicht stören“ (zeitkritisch); Android: hohe Priorität, sofort zustellen
+            payload["data"] = {"push": {"interruption-level": "time-sensitive"}, "priority": "high", "ttl": 0,
+                               "channel": "Hauswerk wichtig", "importance": "high"}
+        for target in self.settings.get("notify_targets") or []:
+            self.hass.async_create_task(self._async_send(target, payload))
+        if self.settings.get("notify_ha"):
+            data = {"title": title, "message": message}
+            if key:
+                data["notification_id"] = self._ha_id(key)
+            self.hass.async_create_task(self._async_call("persistent_notification", "create", data))
+
+    async def _async_send(self, target: str, payload: dict[str, Any]) -> None:
         try:
-            await self.hass.services.async_call("notify", target, {"title": title, "message": message}, blocking=True)
+            await self.hass.services.async_call("notify", target, payload, blocking=True)
         except Exception as err:  # noqa: BLE001 - App weg oder umbenannt: nur protokollieren
             _LOGGER.warning("Benachrichtigung an notify.%s fehlgeschlagen: %s", target, err)
             self.log.add("notify", "Nachricht nicht zugestellt", f"notify.{target}: {err}")
+
+    async def _async_call(self, domain: str, service: str, data: dict[str, Any]) -> None:
+        try:
+            await self.hass.services.async_call(domain, service, data, blocking=True)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("%s.%s fehlgeschlagen: %s", domain, service, err)
 
     async def async_test_notify(self, by: str | None = None) -> None:
         """Testnachricht aus dem Panel (ohne Ruhezeit)."""
