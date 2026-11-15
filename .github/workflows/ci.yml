@@ -44,4 +44,5 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
-          ignore: brands
+          # Beschreibung, Themen und Lizenz braucht HACS nur für die Aufnahme in den HACS-Standardkatalog
+          ignore: brands description topics license

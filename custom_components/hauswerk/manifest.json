@@ -1,6 +1,10 @@
 {
   "domain": "hauswerk",
   "name": "Hauswerk",
+  "after_dependencies": [
+    "person",
+    "device_tracker"
+  ],
   "codeowners": [
     "@MaZoresu"
   ],
@@ -10,10 +14,6 @@
     "http",
     "panel_custom",
     "websocket_api"
-  ],
-  "after_dependencies": [
-    "person",
-    "device_tracker"
   ],
   "documentation": "https://github.com/MaZoresu/Hauswerk",
   "integration_type": "service",
