@@ -30,6 +30,8 @@ const states = {
   "zone.home": st("0", { latitude: 51.34, longitude: 12.37 }),
   "binary_sensor.arbeitstag": st("on", { friendly_name: "Arbeitstag" }),
   "climate.bad_heizkoerper": st("heat", { friendly_name: "Heizkörper Bad", current_temperature: 23.5, temperature: 24, valve_position: 35 }),
+  "switch.fussbodenheizung_bad": st("on", { friendly_name: "Fußbodenheizung Bad" }),
+  "switch.fussbodenheizung_flur": st("off", { friendly_name: "Fußbodenheizung Flur" }),
   "sensor.fbh_bad_stellantrieb": st("60", { friendly_name: "Fußbodenheizung Bad Stellantrieb", unit_of_measurement: "%" }),
   "device_tracker.handy_julia": st("not_home", { friendly_name: "Handy Julia" }),
   "sensor.bad_feuchte": st("72", { friendly_name: "Bad Luftfeuchte", device_class: "humidity", unit_of_measurement: "%" }),
@@ -51,7 +53,7 @@ const rooms = {
   a1: { id: "a1", name: "Wohnzimmer", type: "heizkoerper", comfort: 21, eco: 18, climates: ["climate.wohnzimmer"], windows: [], enabled: true,
     schedule: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "06:00", end: "22:00" }] },
   b2: { id: "b2", name: "Bad", type: "flaeche", comfort: 22, eco: 19, climates: ["climate.bad"], windows: ["binary_sensor.fenster_bad"], enabled: true,
-    humidity_sensor: "sensor.bad_feuchte", shower_boost: 30, show_entities: ["climate.bad_heizkoerper", "sensor.fbh_bad_stellantrieb"],
+    humidity_sensor: "sensor.bad_feuchte", shower_boost: 30, show_entities: ["climate.bad_heizkoerper", "switch.fussbodenheizung_bad"],
     schedule: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "05:30", end: "08:00" }] },
 };
 const status = {

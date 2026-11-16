@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.20.1";
+const VERSION = "0.20.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -131,7 +131,7 @@ const PICKERS = {
   // Personen hinzufügen: wählt aus Personen und Trackern, die gewählten stehen schon als Chips da
   person_add: { scope: "settings", multi: true, domains: ["person", "device_tracker"], noCards: true },
   // Weitere Geräte im Raum, nur zur Anzeige (z. B. Ventil eines Heizkörper-Thermostats, Stellantrieb der Fußbodenheizung)
-  show_entities: { scope: "room", multi: true, domains: ["climate", "sensor", "number", "valve", "cover", "binary_sensor"] },
+  show_entities: { scope: "room", multi: true, domains: ["climate", "switch", "sensor", "number", "valve", "cover", "binary_sensor", "input_boolean"] },
 };
 // Entitätssuche: Wörter im Namen, die zum Feld passen, und passende Geräteklassen
 const PICK_HINTS = {
@@ -151,7 +151,7 @@ const PICK_HINTS = {
   vacation_calendar: ["urlaub", "familie", "ferien"],
   workday_entity: ["arbeitstag", "workday", "werktag", "feiertag"],
   person_add: ["person", "handy", "phone", "iphone", "pixel", "galaxy"],
-  show_entities: ["ventil", "valve", "stellantrieb", "stellung", "position", "demand", "heizkörper", "heizkoerper", "fußboden", "fussboden", "thermostat"],
+  show_entities: ["ventil", "valve", "stellantrieb", "stellung", "position", "demand", "heizkörper", "heizkoerper", "fußboden", "fussboden", "fbh", "heizkreis", "thermostat"],
 };
 const PICK_CLASSES = {
   windows: ["window", "door", "opening", "garage_door"],
@@ -1479,11 +1479,11 @@ class HauswerkPanel extends HTMLElement {
     if (s.windows_open) icons.push(si("mdi:window-open-variant", "#22d3ee", s.window_pending ? "Fenster offen – Pause beginnt gleich" : "Fenster offen"));
     if (s.occupied === true) icons.push(si("mdi:account-check-outline", "#fbbf24", "Präsenzmelder: jemand im Raum"));
     else if (s.occupied === false) icons.push(si("mdi:account-off-outline", "var(--muted)", "Präsenzmelder: niemand im Raum"));
-    const valves = [...(room.climates || []), ...(room.show_entities || [])].map((id) => this._valveOf(id)).filter((v) => v != null);
-    if (valves.length) {
-      const v = Math.max(...valves);
-      icons.push(si("mdi:valve", v > 0 ? "#fb923c" : "var(--muted)", `Ventil${valves.length > 1 ? "e (höchster Wert)" : ""}: ${fmt(v, 0)} % offen`, `${fmt(v, 0)} %`));
-    }
+    const dv = this._devIndicators(room);
+    if (dv.valve != null)
+      icons.push(si("mdi:valve", dv.valve > 0 ? "#fb923c" : "var(--muted)", `Ventil${dv.valves > 1 ? "e (höchster Wert)" : ""}: ${fmt(dv.valve, 0)} % offen`, `${fmt(dv.valve, 0)} %`));
+    if (dv.floor)
+      icons.push(si("mdi:heating-coil", dv.floor.on ? "#f97316" : "var(--muted)", `${dv.floor.label} ${dv.floor.on ? "an – heizt" : "aus"}: ${dv.floor.names}`, dv.floor.on ? "an" : "aus"));
     const hum = humidityInfo(s.humidity);
     if (hum) icons.push(si(hum.i, hum.t ? hum.c : "var(--muted)", `Luftfeuchte ${fmt(s.humidity, 0)} %${hum.t ? " – " + hum.t : ""}`, `${fmt(s.humidity, 0)} %`));
     const tr = !["aus", "fenster", "sommer", "entkalken", "warm", "boost"].includes(mode) ? trend(s.room_temp, s.target) : null;
@@ -1574,6 +1574,8 @@ class HauswerkPanel extends HTMLElement {
         const bad = !st || ["unavailable", "unknown"].includes(st.state);
         const v = this._valveOf(id);
         const dom = id.split(".")[0];
+        const sw = this._switchOf(id);
+        if (sw != null) return dev("mdi:heating-coil", `${this._floorLabel(room)} · nur Anzeige`, id, bad ? "nicht erreichbar" : sw ? "an – heizt" : "aus", !bad);
         const label = v != null ? "Ventil" : dom === "climate" ? "Thermostat · nur Anzeige" : `${DOMAIN_LABEL[dom] || dom} · nur Anzeige`;
         return dev(v != null ? "mdi:valve" : dom === "climate" ? "mdi:thermostat-box" : "mdi:eye-outline", label, id, bad ? "nicht erreichbar" : v != null ? `${fmt(v, 0)} % offen${dom === "climate" ? ` · ${esc(this._fmtState(st))}` : ""}` : esc(this._fmtState(st)), !bad);
       }),
@@ -1804,6 +1806,11 @@ class HauswerkPanel extends HTMLElement {
           <button class="rm-name rlink" data-action="room-page" data-id="${room.id}" title="Raum öffnen">${esc(room.name)}</button>
           ${s.heating ? `<ha-icon class="rm-fire" icon="mdi:fire" title="Heizt"></ha-icon>` : ""}
           ${s.windows_open ? `<ha-icon class="rm-win" icon="mdi:window-open-variant" title="Fenster offen"></ha-icon>` : ""}
+          ${(() => {
+            const dv = this._devIndicators(room);
+            return (dv.valve != null ? `<span class="rm-dev ${dv.valve > 0 ? "on" : ""}" title="Ventil ${fmt(dv.valve, 0)} % offen"><ha-icon icon="mdi:valve"></ha-icon>${fmt(dv.valve, 0)}%</span>` : "")
+              + (dv.floor ? `<span class="rm-dev ${dv.floor.on ? "on" : ""}" title="${esc(dv.floor.label)} ${dv.floor.on ? "an" : "aus"}"><ha-icon icon="mdi:heating-coil"></ha-icon></span>` : "");
+          })()}
           ${this._admin ? `<button class="icon tiny" data-action="room-edit" data-id="${room.id}" title="Bearbeiten"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
         </div>
         <div class="rm-body">
@@ -3281,6 +3288,33 @@ class HauswerkPanel extends HTMLElement {
     const ent = this._hass.entities?.[id];
     const areaId = ent?.area_id || (ent?.device_id ? this._hass.devices?.[ent.device_id]?.area_id : null);
     return areaId ? this._hass.areas?.[areaId]?.name || null : null;
+  }
+
+  /** An/aus eines Stellantriebs oder Heizkreises (switch, input_boolean, binary_sensor), sonst null. */
+  _switchOf(id) {
+    const d = id.split(".")[0];
+    if (!["switch", "input_boolean", "binary_sensor"].includes(d)) return null;
+    const st = this._hass?.states?.[id];
+    if (!st || !["on", "off"].includes(st.state)) return null;
+    return st.state === "on";
+  }
+
+  _floorLabel(room) {
+    return room.type === "flaeche" ? "Fußbodenheizung" : "Stellantrieb";
+  }
+
+  /** Anzeige-Geräte eines Raums zusammengefasst: höchste Ventilöffnung und Fußbodenheizung an/aus. */
+  _devIndicators(room) {
+    const ids = [...(room.climates || []), ...(room.show_entities || [])];
+    const valves = ids.map((id) => this._valveOf(id)).filter((v) => v != null);
+    const sws = (room.show_entities || []).map((id) => [id, this._switchOf(id)]).filter(([, v]) => v != null);
+    return {
+      valve: valves.length ? Math.max(...valves) : null,
+      valves: valves.length,
+      floor: sws.length
+        ? { on: sws.some(([, v]) => v), label: this._floorLabel(room), names: sws.map(([id, v]) => `${this._entityName(id)} ${v ? "an" : "aus"}`).join(", ") }
+        : null,
+    };
   }
 
   /** Ventilöffnung in % einer Entität (Thermostat-Attribut, Ventil/Stellantrieb oder %-Sensor), sonst null. */
@@ -4946,6 +4980,9 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .rsched .dbar.mini { height:8px; }
 /* Kompakte Raumkacheln */
 .rooms.compact { grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:10px; }
+.rm-dev { display:inline-flex; align-items:center; gap:2px; font-size:11px; font-weight:700; color:var(--muted); }
+.rm-dev ha-icon { --mdc-icon-size:16px; }
+.rm-dev.on { color:#f97316; }
 .rmini { position:relative; overflow:hidden; display:flex; flex-direction:column; gap:8px; padding:12px 12px 12px 15px; border-radius:16px; background:var(--card); border:1px solid var(--line); }
 .rmini::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--rc); }
 .rmini.off { opacity:.62; }
