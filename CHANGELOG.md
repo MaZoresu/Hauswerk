@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.24.1 – 2026-11-16
+
+### Neu
+- **Eigene Symbole für Heizwerk und Rollwerk:** gleiche Hausform wie das Hauswerk-Logo – Heizwerk in Orange mit Heizkörper, Rollwerk in Blau mit Rollladen. Sie stehen in den Modul-Reitern, in der unteren Leiste am Handy und unter *Einstellungen › Module*. Das Hauswerk-Logo bleibt unverändert.
+
 ## 0.24.0 – 2026-11-16
 
 ### Neu

@@ -9,8 +9,8 @@ Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite 
 
 | Modul | Stand |
 |---|---|
-| **Heizwerk** | fertig – raumweise Heizungsregelung (früher eine eigene Integration) |
-| **Rollwerk** | neu – Rollläden nach Sonne, Uhrzeit, Hitze und Sturm, mit Aussperrschutz |
+| <img src="docs/icons/heizwerk.svg" height="20"> **Heizwerk** | fertig – raumweise Heizungsregelung (früher eine eigene Integration) |
+| <img src="docs/icons/rollwerk.svg" height="20"> **Rollwerk** | neu – Rollläden nach Sonne, Uhrzeit, Hitze und Sturm, mit Aussperrschutz |
 | Licht | geplant |
 | Garten | geplant |
 

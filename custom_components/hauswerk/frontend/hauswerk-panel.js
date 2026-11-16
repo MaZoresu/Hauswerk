@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.24.0";
+const VERSION = "0.24.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -225,8 +225,8 @@ const SHUT_VIEWS = [
   { id: "shutset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
 ];
 const MODULES = [
-  { id: "heizen", no: 1, name: "Heizwerk", icon: "mdi:radiator", views: HEAT_VIEWS.map((v) => v.id) },
-  { id: "rollwerk", no: 2, name: "Rollwerk", icon: "mdi:window-shutter", views: SHUT_VIEWS.map((v) => v.id) },
+  { id: "heizen", no: 1, name: "Heizwerk", icon: "mdi:radiator", logo: "heizen", views: HEAT_VIEWS.map((v) => v.id) },
+  { id: "rollwerk", no: 2, name: "Rollwerk", icon: "mdi:window-shutter", logo: "rollwerk", views: SHUT_VIEWS.map((v) => v.id) },
 ];
 // Geplante Module: nur ausgegraut angezeigt, noch ohne Funktion.
 const COMING = [
@@ -602,11 +602,11 @@ class HauswerkPanel extends HTMLElement {
     const f = this._data ? this._facts() : null;
     const on = (ids) => (ids.includes(this._tab) ? "on" : "");
     const item = (tab, ids, icon, label, badge = "") =>
-      `<button class="bn ${on(ids)}" data-action="tab" data-tab="${tab}"><span class="bi"><ha-icon icon="${icon}"></ha-icon>${badge}</span><span>${label}</span></button>`;
+      `<button class="bn ${on(ids)}" data-action="tab" data-tab="${tab}"><span class="bi">${modIcon(icon)}${badge}</span><span>${label}</span></button>`;
     return [
       item("start", ["start"], "mdi:view-dashboard-outline", "Start"),
       ...MODULES.map((m) =>
-        item(m.views.includes(this._tab) ? this._tab : m.views[0], m.views, m.icon, m.name,
+        item(m.views.includes(this._tab) ? this._tab : m.views[0], m.views, m.logo ? `logo:${m.logo}` : m.icon, m.name,
           m.id === "heizen" && f && (f.open || f.heating) ? `<em class="${f.open ? "warn" : ""}">${f.open || f.heating}</em>` : "")
       ),
       item("house", ["house", "log"], "mdi:cog-outline", "Einstellungen"),
@@ -688,7 +688,7 @@ class HauswerkPanel extends HTMLElement {
     };
     const tab = (id, name, icon, target) => `
       <button class="mtab ${id === "start" ? (this._tab === "start" ? "active" : "") : mod?.id === id ? "active" : ""}" data-action="tab" data-tab="${target}">
-        <ha-icon icon="${icon}"></ha-icon><span class="mt"><b>${name}</b></span>${badge(id)}
+        ${modIcon(icon)}<span class="mt"><b>${name}</b></span>${badge(id)}
       </button>`;
     const soon = (m) => `
       <button class="mtab soon" disabled title="${m.name}: kommt später" aria-label="${m.name}, noch nicht verfügbar">
@@ -713,7 +713,7 @@ class HauswerkPanel extends HTMLElement {
       </div>
       <nav class="mtabs">
         ${tab("start", "Start", "mdi:view-dashboard-outline", "start")}
-        ${MODULES.map((m) => tab(m.id, m.name, m.icon, mod?.id === m.id ? this._tab : m.views[0])).join("")}
+        ${MODULES.map((m) => tab(m.id, m.name, m.logo ? `logo:${m.logo}` : m.icon, mod?.id === m.id ? this._tab : m.views[0])).join("")}
         ${COMING.map(soon).join("")}
       </nav>`;
   }
@@ -2544,7 +2544,7 @@ class HauswerkPanel extends HTMLElement {
           words: "design farbe akzent hell dunkel hintergrund tageszeit himmel uhr uhrzeit wetter kopfzeile größe tablet" },
         { g: "Darstellung", start: true, icon: "mdi:view-dashboard-edit-outline", c: "#2dd4bf", title: "Widgets der Startseite",
           sum: `${n} Widget${n === 1 ? "" : "s"} · für alle Benutzer gleich`, words: "start dashboard widget übersicht anpassen" },
-        ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => v === "settings" || v === "shutset") || m.views[0], icon: m.icon, c: m.id === "rollwerk" ? "#0ea5e9" : "#fb923c", title: m.name,
+        ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => v === "settings" || v === "shutset") || m.views[0], icon: `logo:${m.logo}`, c: m.id === "rollwerk" ? "#0ea5e9" : "#fb923c", title: m.name,
           sum: m.id === "rollwerk" ? `${(p.rw_covers || []).length} Rollläden · Zeiten, Sonnenschutz, Sturm` : `${rooms.length} ${rooms.length === 1 ? "Raum" : "Räume"} · Heizpläne, Vorheizen, Saison und mehr`,
           words: m.id === "rollwerk" ? "rollwerk rollladen rollo module" : "heizen heizung räume module" })),
         ...COMING.map((m) => ({ g: "Module", soon: true, icon: m.icon, c: "#94a3b8", title: m.name, sum: "Kommt später", words: `${m.name.toLowerCase()} module` })),
@@ -2777,7 +2777,7 @@ class HauswerkPanel extends HTMLElement {
                 : `data-action="pop-open" data-pop="${r.id}"`;
       return `
         <button class="srow ${r.warn ? "warn" : ""} ${r.off || r.soon ? "off" : ""}" ${attrs}>
-          <span class="sr-ic" style="--c:${r.c}"><ha-icon icon="${esc(r.icon)}"></ha-icon></span>
+          <span class="sr-ic ${String(r.icon).startsWith("logo:") ? "logo" : ""}" style="--c:${r.c}">${modIcon(r.icon)}</span>
           <span class="sr-t"><b>${esc(r.title)}${r.on ? ` <em class="badge ok">AKTIV</em>` : ""}${r.off ? ` <em class="badge">AUTOMATIK AUS</em>` : ""}${r.soon ? ` <em class="badge">BALD</em>` : ""}</b><small>${esc(r.sum)}</small></span>
           ${r.soon ? "" : `<ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon>`}
         </button>`;
@@ -4883,6 +4883,37 @@ class HauswerkPanel extends HTMLElement {
 }
 
 /* Eigenes Zeichen: Flamme in einem Thermostat-Ring */
+// Symbole der Module – gleiche Hausform wie das Hauswerk-Logo, eigene Farbe und eigenes Innenleben
+const MODULE_LOGOS = {
+  heizen: `<svg viewBox="0 0 48 48" aria-hidden="true">
+  <defs><linearGradient id="hwlg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fdba74"/><stop offset="1" stop-color="#c2410c"/></linearGradient></defs>
+  <rect width="48" height="48" rx="13" fill="url(#hwlg)"/>
+  <path d="M10.5 23.5 24 11.5l13.5 12" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M14.8 21.8V34.2a2.8 2.8 0 0 0 2.8 2.8h12.8a2.8 2.8 0 0 0 2.8-2.8V21.8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="18.6" y="22.6" width="3" height="10.8" rx="1.5" fill="#fff"/>
+  <rect x="22.5" y="22.6" width="3" height="10.8" rx="1.5" fill="#fde68a"/>
+  <rect x="26.4" y="22.6" width="3" height="10.8" rx="1.5" fill="#fff" opacity=".6"/>
+</svg>`,
+  rollwerk: `<svg viewBox="0 0 48 48" aria-hidden="true">
+  <defs><linearGradient id="rwlg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7dd3fc"/><stop offset="1" stop-color="#0369a1"/></linearGradient></defs>
+  <rect width="48" height="48" rx="13" fill="url(#rwlg)"/>
+  <path d="M10.5 23.5 24 11.5l13.5 12" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M14.8 21.8V34.2a2.8 2.8 0 0 0 2.8 2.8h12.8a2.8 2.8 0 0 0 2.8-2.8V21.8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="18.6" y="22.6" width="10.8" height="3" rx="1.5" fill="#fff"/>
+  <rect x="18.6" y="26.6" width="10.8" height="3" rx="1.5" fill="#fff" opacity=".6"/>
+  <rect x="18.6" y="30.6" width="10.8" height="3" rx="1.5" fill="#fdba74"/>
+</svg>`,
+};
+/** ha-icon oder – bei „logo:<modul>“ – das eigene Symbol des Moduls. */
+// Jede Kopie bekommt eigene IDs für den Farbverlauf: sonst bleibt sie leer, wenn die erste Kopie verborgen ist.
+let logoNo = 0;
+const modIcon = (icon) => {
+  const svg = String(icon).startsWith("logo:") && MODULE_LOGOS[icon.slice(5)];
+  if (!svg) return `<ha-icon icon="${icon}"></ha-icon>`;
+  const n = ++logoNo;
+  return `<span class="mlogo">${svg.replace(/id="(\w+)"/g, `id="$1${n}"`).replace(/url\(#(\w+)\)/g, `url(#$1${n})`)}</span>`;
+};
+
 const LOGO = `
 <svg viewBox="0 0 48 48" aria-hidden="true">
   <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" style="stop-color:color-mix(in srgb, var(--accent) 75%, #fff)"/><stop offset="1" style="stop-color:color-mix(in srgb, var(--accent) 65%, #000)"/></linearGradient></defs>
@@ -5649,6 +5680,12 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .segs.small.rw-fac .seg { padding:8px 0; font-size:12.5px; justify-content:center; }
 select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--line2); background:var(--card); color:var(--text); font:inherit; }
 @media (max-width:600px) { .rw-grid { grid-template-columns:1fr; } .segs.small.rw-fac { grid-template-columns:repeat(5, minmax(0, 1fr)); } }
+.mlogo { display:inline-flex; width:24px; height:24px; flex:none; border-radius:7px; filter:drop-shadow(0 1px 2px rgba(0,0,0,.18)); }
+.mlogo svg { width:100%; height:100%; display:block; }
+.mtab .mlogo { width:22px; height:22px; }
+.mtab.active .mlogo { filter:drop-shadow(0 1px 3px rgba(0,0,0,.28)); }
+.sr-ic.logo { background:none !important; box-shadow:none; }
+.sr-ic.logo .mlogo { width:100%; height:100%; border-radius:12px; }
 .vh { display:flex; flex-direction:column; gap:6px; margin-top:4px; }
 .vh-row { display:grid; grid-template-columns:110px minmax(0, 1fr); gap:10px; align-items:center; }
 .vh-name { font-size:13px; font-weight:600; display:flex; flex-direction:column; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -5818,6 +5855,7 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
   .bn { all:unset; cursor:pointer; flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:5px 0; border-radius:12px; font-size:11px; font-weight:600; color:var(--muted); }
   .bn .bi { position:relative; display:grid; place-items:center; width:54px; height:28px; border-radius:99px; }
   .bn ha-icon { --mdc-icon-size:22px; }
+  .bn .mlogo { width:26px; height:26px; }
   .bn.on { color:var(--text); }
   .bn.on .bi { background:color-mix(in srgb, var(--accent) 18%, transparent); color:var(--accent); }
   .bn em { position:absolute; top:-3px; right:6px; min-width:16px; height:16px; padding:0 4px; box-sizing:border-box; border-radius:99px; font-style:normal; font-size:10px; font-weight:800; display:grid; place-items:center; background:#fb923c; color:#1f1300; }
@@ -5876,6 +5914,7 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .top.slim .mtabs { order:2; flex:1; min-width:0; padding:0; gap:6px; }
 .top.slim .mtab { padding:6px 12px; }
 .top.slim .mtab > ha-icon { --mdc-icon-size:18px; }
+.top.slim .mtab .mlogo { width:18px; height:18px; border-radius:5px; }
 .top.slim .mtab .mt b { font-size:14px; }
 .top.slim .hacts { order:3; }
 .top.slim .bell { width:36px; height:36px; border-radius:12px; }
