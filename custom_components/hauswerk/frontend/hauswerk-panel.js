@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.27.0";
+const VERSION = "0.28.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2260,7 +2260,7 @@ class HauswerkPanel extends HTMLElement {
     if (!covers.length)
       return `<section class="card empty"><ha-icon icon="mdi:window-shutter"></ha-icon><h2>Noch keine Rollläden</h2>
         <p>Wähle die Rollläden, die Rollwerk fahren soll – morgens auf, abends zu, Sonnenschutz, Lüften und Sturmschutz.</p>
-        ${this._admin ? `<button class="primary" data-action="pop-open" data-pop="rwcovers"><ha-icon icon="mdi:plus"></ha-icon>Rollläden wählen</button>` : ""}</section>`;
+        ${this._admin ? `<button class="primary" data-action="cwiz-open"><ha-icon icon="mdi:auto-fix"></ha-icon>Rollladen hinzufügen</button>` : ""}</section>`;
     const pos = covers.map((c) => this._rwPos(c.st)).filter((x) => x != null);
     const nOpen = pos.filter((x) => x >= 95).length;
     const nClosed = pos.filter((x) => x <= 5).length;
@@ -2272,7 +2272,7 @@ class HauswerkPanel extends HTMLElement {
       <section class="card rw-sum">
         <div class="rw-sum-h">
           <div><small class="muted">Rollwerk · heute</small><h2>${nOpen} offen · ${nClosed} zu${pos.length - nOpen - nClosed ? ` · ${pos.length - nOpen - nClosed} halb` : ""}</h2></div>
-          <div class="rw-all"><button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="open"><ha-icon icon="mdi:arrow-up"></ha-icon>Alle hoch</button><button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="close"><ha-icon icon="mdi:arrow-down"></ha-icon>Alle runter</button></div>
+          <div class="rw-all">${this._admin ? `<button class="secondary small" data-action="cwiz-open" title="Rollladen hinzufügen"><ha-icon icon="mdi:plus"></ha-icon></button>` : ""}<button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="open"><ha-icon icon="mdi:arrow-up"></ha-icon>Alle hoch</button><button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="close"><ha-icon icon="mdi:arrow-down"></ha-icon>Alle runter</button></div>
         </div>
         <div class="kv2s">
           ${fact("mdi:weather-sunset-up", first.up ? first.up.join("–") : "–", "öffnen · frühestens–spätestens")}
@@ -2380,6 +2380,7 @@ class HauswerkPanel extends HTMLElement {
     const s = this._rwStatus || {};
     const profiles = this._rwProfiles();
     const rows = [
+      { g: "Rollläden", id: "cwiz", icon: "mdi:auto-fix", c: "#0ea5e9", title: "Rollladen hinzufügen", sum: "Assistent: Richtung, Fensterkontakt, Raum und Verhalten in sechs Schritten", words: "assistent neu hinzufügen rollladen" },
       { g: "Rollläden", id: "rwcovers", icon: "mdi:window-shutter-settings", c: "#0ea5e9", title: "Welche Rollläden?",
         sum: covers.length ? `${covers.length} gewählt` : "Noch keine gewählt", warn: !covers.length, words: "rollladen rollo jalousie auswahl geräte" },
       ...covers.map((c) => ({
@@ -2514,7 +2515,11 @@ class HauswerkPanel extends HTMLElement {
         const sym = (v) => (v == null ? "–" : v ? "✓" : "✗");
         body = `<div class="wxrows">${row("sf", "Sonnenschutz", "tagsüber gegen Hitze und Blendung", feat("shading"))}</div>
           ${has("shading") ? `${lbl("Wohin zeigt das Fenster?")}${this._rwCompass(p)}
-          <div class="rwsent">Beschatten, wenn die Sonne aufs Fenster scheint und es draußen wärmer als ${num("temp2_min", 18, -10, 45, 0.5, "°C")} ist – Rollladen dann auf ${num("pos_shading", 25, 0, 100, 5, "%")}.</div>
+          ${(() => {
+            const tok = (k, def, step, min, max, unit) => `<span class="tok"><button class="tok-b" data-action="rwp-step" data-k="${k}" data-d="${-step}" data-def="${def}" data-min="${min}" data-max="${max}" ${dis} aria-label="weniger">−</button><b>${fmt(p[k] ?? def, step < 1 ? 1 : 0)}${unit}</b><button class="tok-b" data-action="rwp-step" data-k="${k}" data-d="${step}" data-def="${def}" data-min="${min}" data-max="${max}" ${dis} aria-label="mehr">+</button></span>`;
+            const dir = p.window_dir != null ? `<span class="tok txt">${this._rwDirName(p.window_dir)}</span>` : `<span class="tok txt warn">Richtung?</span>`;
+            return `<div class="rwsent"><ha-icon icon="mdi:sun-thermometer-outline"></ha-icon><p>Beschatten, wenn die Sonne aufs Fenster nach ${dir} scheint, mindestens ${tok("elevation_min", 25, 5, 0, 80, "°")} hoch steht und es draußen wärmer als ${tok("temp2_min", 18, 1, 5, 40, " °C")} ist. Der Rollladen fährt dann auf ${tok("pos_shading", 25, 5, 0, 100, " %")} – und wieder hoch, sobald eins davon nicht mehr stimmt.</p></div>`;
+          })()}
           ${note("Außentemperatur aus Hauswerk › Wetter. Wartezeit 5 Minuten, damit kurze Sonne nichts auslöst.", "mdi:home-cog-outline")}
           ${live.length ? `${lbl("Jetzt")}<div class="evlist">${live.map(([id, c]) => `<div class="ev ${c.shading ? "live" : ""}"><ha-icon icon="${c.shading ? "mdi:sun-thermometer-outline" : "mdi:window-shutter"}"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${RW_SHADE_CONDS.filter(([k]) => c.shade_start[k] != null).map(([k, l]) => `${l} ${sym(c.shade_start[k])}`).join(" · ")}</small></span>${c.shading ? `<em class="badge">AKTIV</em>` : ""}</div>`).join("")}</div>` : ""}
           ${exBox(`${lbl("Beschattung beginnt, wenn …")}<small class="muted">alle davon</small>${chips("shade_start_and", RW_SHADE_CONDS)}<small class="muted">eins davon</small>${chips("shade_start_or", RW_SHADE_CONDS)}
@@ -2582,6 +2587,168 @@ class HauswerkPanel extends HTMLElement {
       foot: `<button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
         ${this._admin ? `<button class="primary" data-action="rwp-save"><ha-icon icon="mdi:content-save-outline"></ha-icon>${isNew ? "Anlegen" : "Speichern"}</button>` : ""}`,
     };
+  }
+
+  // ------------------------------------------------------------ Assistent „Rollladen hinzufügen“
+  _cwizDraft() {
+    return { step: 0, covers: [], contacts: {}, use: "wohnen", shade: true, temp: 24, mode: "sun", pick: null,
+      prof: { window_dir: null, azimuth_start: 95, azimuth_end: 265 } };
+  }
+
+  _cwizOpen() {
+    this._openPop("cwiz", this._cwizDraft());
+  }
+
+  /** Fenster- und Türkontakte im Bereich eines Rollladens: offen (Tür/Fenster) und gekippt (Name mit „kipp“/„tilt“). */
+  _cwizContacts(coverId) {
+    const S = this._hass.states;
+    const area = this._hass.entities?.[coverId]?.area_id || this._hass.devices?.[this._hass.entities?.[coverId]?.device_id]?.area_id;
+    const ids = area ? this._areaEntities(area) : [];
+    const contacts = ids.filter((id) => id.startsWith("binary_sensor.") && ["door", "window", "opening", "garage_door"].includes(S[id]?.attributes?.device_class));
+    const tilted = contacts.find((id) => /kipp|tilt/.test(`${id} ${S[id]?.attributes?.friendly_name || ""}`.toLowerCase()));
+    const open = contacts.find((id) => id !== tilted && S[id]?.attributes?.device_class === "door") || contacts.find((id) => id !== tilted);
+    return { all: contacts, open: open || null, tilted: tilted || null };
+  }
+
+  /** Passt ein vorhandenes Verhalten? Gleiche Richtung, gleiche Art (Schlafzimmer), gleicher Sonnenschutz. */
+  _cwizMatch(d) {
+    const sleep = d.use === "schlafen";
+    return this._rwProfiles().find((p) => Number(p.window_dir) === Number(d.prof.window_dir) && !!p.resident_sensor === false
+      && (p.features || []).includes("shading") === d.shade && (sleep ? /schlaf/i.test(p.name) : !/schlaf/i.test(p.name))) || null;
+  }
+
+  _cwizPop() {
+    const d = this._pop.draft;
+    const S = this._hass.states;
+    const steps = ["Rollladen", "Richtung", "Fenster", "Raum", "Verhalten", "Fertig"];
+    const name = (id) => esc(this._entityName(id));
+    const bar = `<div class="wiz-bar">${steps.map((s, i) => `<button class="wiz-dot ${i === d.step ? "on" : i < d.step ? "done" : ""}" data-action="cwiz-go" data-i="${i}" ${i > d.step && !this._cwizOk(i - 1) ? "disabled" : ""}><i>${i < d.step ? "✓" : i + 1}</i><span>${s}</span></button>`).join("")}</div>`;
+    const tick = (on, radio = false) => `<ha-icon icon="${radio ? (on ? "mdi:radiobox-marked" : "mdi:radiobox-blank") : on ? "mdi:checkbox-marked" : "mdi:checkbox-blank-outline"}"></ha-icon>`;
+    let body = "";
+    switch (d.step) {
+      case 0: {
+        const have = new Set(this._data.settings.rw_covers || []);
+        const all = Object.keys(S).filter((id) => id.startsWith("cover.") && !have.has(id) && !(S[id].attributes?.entity_id || []).length);
+        const groups = new Map();
+        for (const id of all) {
+          const a = this._areaOf(id) || "Ohne Bereich";
+          if (!groups.has(a)) groups.set(a, []);
+          groups.get(a).push(id);
+        }
+        body = `<p class="muted">Welche Rollläden sollen dazukommen? Mehrere gleichzeitig gehen auch – z. B. alle Fenster einer Seite, sie bekommen dann dasselbe Verhalten.</p>
+          ${all.length ? [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([a, ids]) => `<div class="lbl">${esc(a)}</div>${ids.map((id) => `<button class="wiz-dev ${d.covers.includes(id) ? "on" : ""}" data-action="cwiz-cover" data-id="${esc(id)}">${tick(d.covers.includes(id))}<span class="grow"><b>${name(id)}</b><small>${esc(this._fmtState(S[id]))}${S[id].attributes?.current_position != null ? ` · ${S[id].attributes.current_position} %` : ""}</small></span></button>`).join("")}`).join("")
+            : `<p class="note"><ha-icon icon="mdi:check-all"></ha-icon>Alle Rollläden sind schon in Rollwerk.</p>`}`;
+        break;
+      }
+      case 1:
+        body = `<p class="muted">Wohin zeigt das Fenster${d.covers.length > 1 ? " (bei allen gewählten)" : ""}? Danach richtet sich der Sonnenschutz.</p>${this._rwCompass(d.prof)}
+          <button class="wiz-dev ${d.prof.window_dir == null ? "on" : ""}" data-action="cwiz-nodir">${tick(d.prof.window_dir == null, true)}<span class="grow"><b>Weiß nicht / egal</b><small>ohne Sonnenschutz nach Richtung</small></span></button>`;
+        break;
+      case 2:
+        body = `<p class="muted">Gibt es einen Kontakt am Fenster oder an der Tür? Dann sperrt dich der Rollladen nicht aus und lüftet bei gekipptem Fenster.</p>
+          ${d.covers.map((cid) => {
+            const f = this._cwizContacts(cid);
+            const c = d.contacts[cid] || {};
+            const opts = [...new Set([...f.all, c.open, c.tilted].filter(Boolean))];
+            const sel = (k) => `<select data-cwiz="${esc(cid)}" data-k="${k}"><option value="">keiner</option>${Object.keys(S).filter((id) => id.startsWith("binary_sensor.") && (["door", "window", "opening"].includes(S[id].attributes?.device_class) || opts.includes(id))).sort((a, b) => (opts.includes(b) - opts.includes(a)) || this._entityName(a).localeCompare(this._entityName(b), "de")).map((id) => `<option value="${esc(id)}" ${c[k] === id ? "selected" : ""}>${name(id)}${this._areaOf(id) ? ` (${esc(this._areaOf(id))})` : ""}</option>`).join("")}</select>`;
+            return `<div class="cwiz-c"><b><ha-icon icon="mdi:window-shutter"></ha-icon>${name(cid)}</b>
+              <label class="field"><span><ha-icon icon="mdi:door-open"></ha-icon> ganz offen (Tür/Fenster)</span>${sel("open")}</label>
+              <label class="field"><span><ha-icon icon="mdi:window-open-variant"></ha-icon> gekippt</span>${sel("tilted")}</label>
+              ${f.all.length ? `<small class="muted">${f.all.length} Kontakt${f.all.length > 1 ? "e" : ""} im selben Bereich gefunden${c.open || c.tilted ? " und vorausgewählt" : ""}.</small>` : ""}</div>`;
+          }).join("")}`;
+        break;
+      case 3: {
+        const uses = [["wohnen", "Wohnraum", "mdi:sofa-outline", "morgens auf, abends zu"], ["schlafen", "Schlafzimmer", "mdi:bed-outline", "später auf, früher zu, bleibt beim Ausschlafen zu"],
+          ["kind", "Kinderzimmer", "mdi:teddy-bear", "früher zu"], ["neben", "Nebenraum", "mdi:door", "nur Sonnen- und Sturmschutz"]];
+        body = `<p class="muted">Was für ein Raum ist das?</p>
+          ${uses.map(([v, t, i, s]) => `<button class="wiz-type ${d.use === v ? "on" : ""}" data-action="cwiz-use" data-v="${v}"><ha-icon icon="${i}"></ha-icon><span><b>${t}</b><small>${s}</small></span></button>`).join("")}
+          <div class="lbl">Öffnen und schließen</div>
+          <div class="segs small">${[["sun", "Mit der Sonne", "mdi:weather-sunset"], ["time", "Nach Uhrzeit", "mdi:clock-outline"]].map(([v, l, i]) => `<button class="seg ${d.mode === v ? "on" : ""}" data-action="cwiz-mode" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div>
+          <div class="wxrows"><div class="wxr"><div class="wxr-l"><b>Sonnenschutz</b><small>${d.prof.window_dir == null ? "braucht die Richtung aus Schritt 2" : `bei Sonne aus ${this._rwDirName(d.prof.window_dir)}`}</small></div>
+            <div class="wxr-v"><label class="switch"><input type="checkbox" data-action="cwiz-shade" ${d.shade && d.prof.window_dir != null ? "checked" : ""} ${d.prof.window_dir == null ? "disabled" : ""}><span></span></label></div></div>
+          ${d.shade && d.prof.window_dir != null ? `<div class="wxr"><div class="wxr-l"><b>Ab Außentemperatur</b></div><div class="wxr-v"><div class="wiz-temp"><button class="sbtn" data-action="cwiz-t" data-d="-1">−</button><b>${fmt(d.temp, 0)} °C</b><button class="sbtn" data-action="cwiz-t" data-d="1">+</button></div></div></div>` : ""}</div>`;
+        break;
+      }
+      case 4: {
+        const match = this._cwizMatch(d);
+        if (d.pick == null) d.pick = match ? match.id : "new";
+        const opt = (v, t, s) => `<button class="wiz-dev ${d.pick === v ? "on" : ""}" data-action="cwiz-pick" data-v="${esc(v)}">${tick(d.pick === v, true)}<span class="grow"><b>${t}</b><small>${s}</small></span></button>`;
+        body = `<p class="muted">Rollläden mit gleichem Verhalten lassen sich später gemeinsam ändern.</p>
+          ${opt("new", `Neues Verhalten „${esc(this._cwizName(d))}“`, "aus deinen Antworten")}
+          ${this._rwProfiles().map((p) => opt(p.id, `„${esc(p.name)}“${match?.id === p.id ? " – passt" : ""}`, esc(this._rwProfSum(p)))).join("")}`;
+        break;
+      }
+      case 5: {
+        const line = (icon, t, v) => `<div class="kv"><ha-icon icon="${icon}"></ha-icon><span>${t}</span><b>${v}</b></div>`;
+        const cs = d.covers.filter((c) => d.contacts[c]?.open || d.contacts[c]?.tilted).length;
+        body = `<div class="wiz-sum">
+            ${line("mdi:window-shutter", "Rollläden", d.covers.map(name).join(", "))}
+            ${line("mdi:compass-outline", "Fenster zeigt nach", d.prof.window_dir == null ? "–" : this._rwDirName(d.prof.window_dir))}
+            ${line("mdi:door-open", "Mit Kontakt", `${cs} von ${d.covers.length}`)}
+            ${line("mdi:tune-variant", "Verhalten", d.pick === "new" ? `neu: „${esc(this._cwizName(d))}“` : `„${esc(this._rwProfName(d.pick))}“`)}
+            ${d.pick === "new" ? line("mdi:sun-thermometer-outline", "Sonnenschutz", d.shade && d.prof.window_dir != null ? `ab ${fmt(d.temp, 0)} °C außen` : "aus") : ""}
+          </div>${note2("Rollwerk fährt erst beim nächsten Wechsel (z. B. abends schließen) – nicht sofort nach dem Anlegen.")}`;
+        break;
+      }
+    }
+    function note2(t) { return `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${t}</p>`; }
+    const last = d.step === steps.length - 1;
+    return {
+      icon: "mdi:auto-fix", c: "#0ea5e9", title: "Rollladen hinzufügen", sub: `Schritt ${d.step + 1} von ${steps.length} · ${steps[d.step]}`,
+      body: bar + body,
+      foot: `${d.step ? `<button class="secondary" data-action="cwiz-go" data-i="${d.step - 1}"><ha-icon icon="mdi:chevron-left"></ha-icon>Zurück</button>` : `<button class="secondary" data-action="pop-close">Abbrechen</button>`}
+        ${last ? `<button class="primary" data-action="cwiz-save"><ha-icon icon="mdi:check"></ha-icon>Hinzufügen</button>`
+          : `<button class="primary" data-action="cwiz-go" data-i="${d.step + 1}" ${this._cwizOk(d.step) ? "" : "disabled"}>Weiter<ha-icon icon="mdi:chevron-right"></ha-icon></button>`}`,
+    };
+  }
+
+  _cwizOk(step) {
+    const d = this._pop?.draft || {};
+    return step === 0 ? d.covers?.length > 0 : true;
+  }
+
+  _cwizName(d) {
+    const dir = d.prof.window_dir != null ? this._rwDirName(d.prof.window_dir) : "";
+    const use = { schlafen: "Schlafzimmer", kind: "Kinderzimmer", neben: "Nebenraum" }[d.use] || "";
+    return [use, dir].filter(Boolean).join(" ") || "Wohnraum";
+  }
+
+  /** Neues Verhalten aus den Antworten: Kopie von „Standard“, angepasst an Raum, Richtung und Sonnenschutz. */
+  _cwizProfile(d) {
+    const base = clone(this._data.rollwerk?.profiles?.standard || {});
+    const f = new Set(["up", "down", "time"]);
+    if (d.mode === "sun") f.add("sun");
+    if (d.use === "neben") { f.delete("up"); f.delete("down"); }
+    const shade = d.shade && d.prof.window_dir != null;
+    if (shade) f.add("shading"); else f.delete("shading");
+    const p = { ...base, name: this._cwizName(d), features: [...f], time_mode: "times" };
+    if (d.prof.window_dir != null) Object.assign(p, { window_dir: d.prof.window_dir, azimuth_start: d.prof.azimuth_start, azimuth_end: d.prof.azimuth_end });
+    if (shade) p.temp2_min = d.temp;
+    if (d.use === "schlafen") Object.assign(p, { up_early: "07:30", up_late: "08:30", up_early_we: "09:00", up_late_we: "10:00", down_early: "19:00", down_late: "21:30", down_early_we: "19:30", down_late_we: "22:30" });
+    if (d.use === "kind") Object.assign(p, { down_early: "17:30", down_late: "20:00", down_early_we: "18:00", down_late_we: "20:30" });
+    if (d.mode === "time") for (const [a, b] of [["up_early", "up_late"], ["up_early_we", "up_late_we"], ["down_early", "down_late"], ["down_early_we", "down_late_we"]]) p[b] = p[a];
+    return p;
+  }
+
+  async _cwizSave() {
+    const d = this._pop.draft;
+    let pid = d.pick;
+    if (pid === "new") {
+      const res = await this._ws({ type: "hauswerk/rollwerk/profile/save", profile_id: null, profile: this._cwizProfile(d) });
+      this._data.rollwerk.profiles = res.profiles;
+      pid = res.profile_id;
+    }
+    const covers = [...new Set([...(this._data.settings.rw_covers || []), ...d.covers])];
+    this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { rw_covers: covers } });
+    for (const cid of d.covers) {
+      const c = d.contacts[cid] || {};
+      const res = await this._ws({ type: "hauswerk/rollwerk/cover/save", entity_id: cid, cover: { profile: pid, contact_open: c.open || null, contact_tilted: c.tilted || null, auto: true, storm: true } });
+      this._data.rollwerk.covers = res.covers;
+    }
+    const n = d.covers.length;
+    this._closePop();
+    this._renderMain();
+    this._toast(n === 1 ? `${this._entityName(d.covers[0])} hinzugefügt` : `${n} Rollläden hinzugefügt`);
   }
 
   _rwcPop(entityId) {
@@ -3063,6 +3230,10 @@ class HauswerkPanel extends HTMLElement {
 
   _popDef(id) {
     if (id === "rwiz") return this._wizPop();
+    if (id === "cwiz") {
+      if (!this._pop.draft.covers) Object.assign(this._pop.draft, this._cwizDraft());
+      return this._cwizPop();
+    }
     if (String(id).startsWith("rwc:")) return this._rwcPop(id.slice(4));
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (String(id).startsWith("rwp:")) { const [, pid, sec] = String(id).split(":"); return this._rwpPop(pid, RW_SECTIONS.some(([x]) => x === sec) ? sec : "tag"); }
@@ -4550,6 +4721,11 @@ class HauswerkPanel extends HTMLElement {
       t.style.setProperty("--v", `${t.value}%`);
       return;
     }
+    if (t.dataset.cwiz && this._pop?.id === "cwiz") {
+      const c = (this._pop.draft.contacts[t.dataset.cwiz] ||= {});
+      c[t.dataset.k] = t.value || null;
+      return;
+    }
     if (t.dataset.wiz && this._pop?.id === "rwiz") {
       this._pop.draft[t.dataset.wiz] = t.value;
       // Knopf „Weiter“ freigeben, ohne das Feld neu zu zeichnen (Fokus bleibt)
@@ -4765,6 +4941,63 @@ class HauswerkPanel extends HTMLElement {
       case "wiz-save":
         await this._wizSave();
         break;
+      case "cwiz-open":
+        this._cwizOpen();
+        break;
+      case "cwiz-go": {
+        const i = Number(el.dataset.i);
+        const d = this._pop.draft;
+        if (i > d.step && !this._cwizOk(d.step)) return;
+        if (d.step === 0 && i > 0) {
+          // Kontakte im Bereich vorschlagen (nur für neu gewählte Rollläden)
+          for (const cid of d.covers) if (!d.contacts[cid]) { const f = this._cwizContacts(cid); d.contacts[cid] = { open: f.open, tilted: f.tilted }; }
+        }
+        if (i === 4) d.pick = null;
+        d.step = i;
+        this._pop.keep = false;
+        this._renderPop();
+        break;
+      }
+      case "cwiz-cover": {
+        const d = this._pop.draft, id = el.dataset.id;
+        d.covers = d.covers.includes(id) ? d.covers.filter((x) => x !== id) : [...d.covers, id];
+        this._renderPop();
+        break;
+      }
+      case "cwiz-nodir":
+        Object.assign(this._pop.draft.prof, { window_dir: null, azimuth_start: 95, azimuth_end: 265 });
+        this._renderPop();
+        break;
+      case "cwiz-use":
+        this._pop.draft.use = el.dataset.v;
+        this._renderPop();
+        break;
+      case "cwiz-mode":
+        this._pop.draft.mode = el.dataset.v;
+        this._renderPop();
+        break;
+      case "cwiz-shade":
+        this._pop.draft.shade = el.checked;
+        this._renderPop();
+        break;
+      case "cwiz-t":
+        this._pop.draft.temp = Math.max(15, Math.min(35, this._pop.draft.temp + Number(el.dataset.d)));
+        this._renderPop();
+        break;
+      case "cwiz-pick":
+        this._pop.draft.pick = el.dataset.v;
+        this._renderPop();
+        break;
+      case "cwiz-save":
+        await this._cwizSave();
+        break;
+      case "rwp-step": {
+        const pr = this._pop.draft.prof, k = el.dataset.k;
+        const v = Number(pr[k] ?? el.dataset.def) + Number(el.dataset.d);
+        pr[k] = Math.max(Number(el.dataset.min), Math.min(Number(el.dataset.max), Math.round(v * 2) / 2));
+        this._renderPop();
+        break;
+      }
       case "room-edit":
         this._openRoom(this._data.rooms[el.dataset.id]);
         if (el.dataset.rtab && this._dialog) {
@@ -5949,8 +6182,19 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .cp-b text { font-size:11px; font-weight:700; text-anchor:middle; fill:var(--text); pointer-events:none; }
 .cp-b.on circle { fill:#0ea5e9; stroke:#0ea5e9; }
 .cp-b.on text { fill:#fff; }
-.rwsent { line-height:2.4; padding:10px 12px; border-radius:14px; background:var(--card2); margin-bottom:6px; }
-.rwsent .unit { display:inline-flex; vertical-align:middle; width:112px; }
+.rwsent { display:flex; gap:10px; padding:12px 14px; border-radius:16px; background:color-mix(in srgb, #f97316 8%, var(--card2)); border:1px solid color-mix(in srgb, #f97316 25%, transparent); margin-bottom:6px; }
+.rwsent > ha-icon { color:#f97316; flex:none; margin-top:4px; }
+.rwsent p { margin:0; line-height:2.3; font-size:15px; }
+.tok { display:inline-flex; align-items:center; gap:2px; vertical-align:middle; padding:1px 3px; border-radius:99px; background:var(--card); border:1px solid color-mix(in srgb, #f97316 45%, transparent); line-height:1.4; white-space:nowrap; }
+.tok b { padding:0 4px; font-weight:700; color:#c2410c; }
+.tok.txt { padding:2px 10px; font-weight:700; color:#0369a1; border-color:color-mix(in srgb, #0ea5e9 45%, transparent); }
+.tok.warn { color:#b45309; }
+.tok-b { all:unset; cursor:pointer; width:24px; height:24px; border-radius:50%; display:grid; place-items:center; font-weight:700; color:var(--muted); background:var(--card2); }
+.tok-b:active { background:var(--line2); }
+.cwiz-c { padding:12px; border:1px solid var(--line2); border-radius:14px; margin-bottom:10px; }
+.cwiz-c > b { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.cwiz-c > b ha-icon { color:#0ea5e9; }
+.cwiz-c select { width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--line2); background:var(--card); color:var(--text); font:inherit; }
 /* Raum-Assistent */
 .wiz-bar { display:flex; gap:4px; margin:-2px 0 16px; overflow-x:auto; scrollbar-width:none; }
 .wiz-dot { flex:1; min-width:52px; display:flex; flex-direction:column; align-items:center; gap:4px; border:0; background:none; color:var(--muted); font:inherit; font-size:11px; cursor:pointer; padding:0; }

@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.28.0 – 2026-11-16
+
+### Neu
+- **Assistent „Rollladen hinzufügen“** (Rollwerk › Rollläden „+“ oder Einstellungen) in sechs Schritten:
+  1. **Rollladen:** einen oder mehrere Rollläden wählen, nach Bereichen sortiert.
+  2. **Richtung:** am Kompass antippen, wohin das Fenster zeigt.
+  3. **Fenster:** Kontakte „ganz offen“ und „gekippt“; Kontakte im selben Bereich werden gefunden und vorausgewählt.
+  4. **Raum:** Wohnraum, Schlafzimmer, Kinderzimmer oder Nebenraum; mit der Sonne oder nach Uhrzeit; Sonnenschutz ab °C.
+  5. **Verhalten:** ein passendes vorhandenes wird vorgeschlagen, sonst ein neues aus den Antworten.
+  6. **Fertig:** Zusammenfassung und hinzufügen.
+- **Sonnenschutz in einem Satz:** „Beschatten, wenn die Sonne aufs Fenster nach Süd scheint, mindestens 25° hoch steht und es draußen wärmer als 24 °C ist. Der Rollladen fährt dann auf 25 % …“ – die Werte im Satz lassen sich direkt mit − und + ändern.
+
 ## 0.27.0 – 2026-11-16
 
 ### Neu

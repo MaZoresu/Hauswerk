@@ -164,10 +164,11 @@ Rollläden mit **Verhalten** (früher „Profile“) nach dem Vorbild der [Cover
 - **Rollläden-Seite:** nach Räumen aus Home Assistant, je Rollladen Stellung, was die Automatik gerade will und warum, ↑ ■ ↓ und Schieberegler; Hinweise für Beschattung, gekippt/offen, Bewohner schläft, von Hand – mit „Automatik übernimmt“.
 - **Verhalten:** jeder Rollladen nutzt ein Verhalten (z. B. „Standard“, „Süd mit Hitze“, „Schlafzimmer“) mit fünf Abschnitten. Zuerst nur das Wichtige, mit **Experte** alle Einstellungen der Cover Control Automation:
   - **Tagesablauf:** nach Uhrzeit oder mit der Sonne (früheste/späteste Zeit, Werktag und frei getrennt, Sonnenhöhe); Experte: Kalender, Helligkeit, „Arbeitstag morgen“.
-  - **Sonnenschutz:** Fensterrichtung per Kompass, „wärmer als X °C“ und Stellung; Experte: Bedingungen mit und/oder, Sonnenhöhe, Innen-/Außentemperatur, Helligkeit, Vorhersage, Wetterlage, Wartezeiten.
+  - **Sonnenschutz:** Fensterrichtung per Kompass und ein Satz mit − / + für Sonnenhöhe, Außentemperatur und Stellung; Experte: Bedingungen mit und/oder, Sonnenhöhe, Innen-/Außentemperatur, Helligkeit, Vorhersage, Wetterlage, Wartezeiten.
   - **Fenster & Lüften:** Tür offen = nicht herunterfahren (oder höchstens bis X %), gekippt = Lüftungsstellung.
   - **Ausnahmen:** niemand zu Hause (wie immer, tagsüber zu, beschattet) und Urlaub mit zufälligen Zeiten – beides aus Hauswerk › Anwesenheit/Urlaub; von Hand verstellt; Schlafzimmer-Schalter; Experte: Erzwingen.
   - **Feinheiten:** Name, Stellungen offen/zu; Experte: Toleranz, Fahrzeit, Verzögerung, Verhalten im Detail.
+- **Assistent „Rollladen hinzufügen“:** Rollläden wählen, Richtung am Kompass, Kontakte (im Bereich gefunden), Raum-Art und Sonnenschutz – passendes Verhalten wird vorgeschlagen oder neu angelegt.
 - **Tagesleiste:** je Verhalten und Rollladen – heute öffnen, Beschattung möglich, schließen – und „Als Nächstes“.
 - **Je Rollladen:** Verhalten, Kontakt „ganz offen“ und „gekippt“, Automatik und Sturmschutz an/aus.
 - **Sturmschutz:** ab der Sturmgrenze aus Hauswerk › Wetter hoch, Ende nach 15 Min. unter 80 %; Böen vom Wetterdienst oder dem Böen-Sensor unter Hauswerk › Wetter.

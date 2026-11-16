@@ -30,6 +30,9 @@ const states = {
   "cover.ra_kuche_rechts": st("open", { friendly_name: "Küche Rechts", current_position: 55, supported_features: 15, device_class: "shutter" }),
   "cover.ma_terasse": st("open", { friendly_name: "Küche Tür", current_position: 100, supported_features: 15, device_class: "shutter" }),
   "binary_sensor.terrassentuer": st("on", { friendly_name: "Terrassentür", device_class: "door" }),
+  "cover.ra_bad": st("closed", { friendly_name: "Rollladen Bad", current_position: 0, supported_features: 15, device_class: "shutter" }),
+  "cover.ra_bad_dach": st("open", { friendly_name: "Dachfenster Bad", current_position: 100, supported_features: 15, device_class: "shutter" }),
+  "binary_sensor.bad_fenster_gekippt": st("off", { friendly_name: "Bad Fenster gekippt", device_class: "window" }),
   "sensor.ccu3_duty_cycle_level": st("22", { friendly_name: "CCU3 Duty Cycle", unit_of_measurement: "%" }),
   "sensor.hmip_router_duty_cycle_level": st("9.5", { friendly_name: "Router Duty Cycle", unit_of_measurement: "%" }),
   "climate.wohnzimmer": st("heat", { model: "HmIP-WTH-2", friendly_name: "Wandthermostat Wohnzimmer", current_temperature: 20.4, temperature: 21, hvac_action: "heating", pi_heating_demand: 42 }),
@@ -102,7 +105,7 @@ const devices = { d1: { id: "d1", area_id: "wz" }, d2: { id: "d2", area_id: "bad
 const entities = {
   "climate.wohnzimmer": { entity_id: "climate.wohnzimmer", device_id: "d1" }, "sensor.wohnzimmer_temperatur": { device_id: "d1" },
   "binary_sensor.wohnzimmer_fenster": { area_id: "wz" }, "climate.bad": { device_id: "d2" }, "climate.bad_heizkoerper": { device_id: "d3" }, "sensor.bad_heizkoerper_ventil_offnungsgrad": { device_id: "d3" }, "sensor.wohnzimmer_ventil_offnungsgrad": { device_id: "d1" }, "sensor.bad_temperatur": { device_id: "d2" },
-  "binary_sensor.fenster_bad": { area_id: "bad" }, "sensor.kueche_temperatur": { area_id: "kueche" }, "sensor.garten_temp": { area_id: "garten" },
+  "binary_sensor.fenster_bad": { area_id: "bad" }, "cover.ra_bad": { area_id: "bad" }, "cover.ra_bad_dach": { area_id: "bad" }, "binary_sensor.bad_fenster_gekippt": { area_id: "bad" }, "sensor.kueche_temperatur": { area_id: "kueche" }, "sensor.garten_temp": { area_id: "garten" },
 };
 const hass = {
   services: { notify: { mobile_app_pixel_8: {}, mobile_app_ipad_kueche: {}, persistent_notification: {}, notify: {} } },
