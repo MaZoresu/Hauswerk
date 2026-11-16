@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.25.1";
+const VERSION = "0.26.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -236,6 +236,15 @@ const COMING = [
 const SLUGS = { start: "start", house: "einstellungen", log: "protokoll", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])),
   ...Object.fromEntries(SHUT_VIEWS.map((v) => [v.id, `rollwerk/${v.slug}`])) };
 // Pop-ups von Rollwerk (Einstellungen unter Rollwerk › Einstellungen)
+const WIZ_USES = [
+  { id: "wohnen", label: "Wohnzimmer", icon: "mdi:sofa-outline", comfort: 21, eco: 18, plan: "berufstaetig", match: /wohn|living|stube/ },
+  { id: "schlafen", label: "Schlafzimmer", icon: "mdi:bed-outline", comfort: 19, eco: 16.5, plan: "berufstaetig", match: /schlaf|bed/ },
+  { id: "kind", label: "Kinderzimmer", icon: "mdi:teddy-bear", comfort: 20, eco: 17.5, plan: "ganztags", match: /kind|kids|jugend/ },
+  { id: "bad", label: "Bad", icon: "mdi:shower", comfort: 22, eco: 18, plan: "bad", match: /bad|dusch|wc|toilet|bath/ },
+  { id: "kueche", label: "Küche / Essen", icon: "mdi:silverware-fork-knife", comfort: 20, eco: 17, plan: "berufstaetig", match: /k(ü|ue)che|kitchen|ess/ },
+  { id: "buero", label: "Büro", icon: "mdi:desk", comfort: 21, eco: 17, plan: "homeoffice", match: /b(ü|ue)ro|arbeit|office/ },
+  { id: "flur", label: "Flur / Sonstiges", icon: "mdi:door", comfort: 18, eco: 16, plan: "ganztags", match: /flur|diele|gang|treppe|keller|hall/ },
+];
 const RW_POPS = ["rwcovers", "rwstorm", "rwrecovery"];
 const RW_FEATURES = [["up", "Morgens öffnen"], ["down", "Abends schließen"], ["time", "Zeitsteuerung"], ["brightness", "Helligkeit"], ["sun", "Sonnenhöhe"], ["ventilate", "Lüften"], ["shading", "Beschattung"]];
 const RW_SECTIONS = [
@@ -3047,6 +3056,7 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _popDef(id) {
+    if (id === "rwiz") return this._wizPop();
     if (String(id).startsWith("rwc:")) return this._rwcPop(id.slice(4));
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (String(id).startsWith("rwp:")) { const [, pid, sec] = String(id).split(":"); return this._rwpPop(pid, sec || "fn"); }
@@ -3649,6 +3659,194 @@ class HauswerkPanel extends HTMLElement {
       }
     }
     return this._expert;
+  }
+
+  // ------------------------------------------------------------ Raum-Assistent
+  /** Entitäten eines Home-Assistant-Bereichs (direkt oder über das Gerät zugeordnet). */
+  _areaEntities(areaId) {
+    const E = this._hass.entities || {};
+    const D = this._hass.devices || {};
+    return Object.keys(this._hass.states).filter((id) => {
+      const e = E[id];
+      if (!e || e.hidden || e.entity_category) return false;
+      return (e.area_id || D[e.device_id]?.area_id) === areaId;
+    });
+  }
+
+  /** Was der Assistent in einem Bereich findet: Thermostate, Fenster, Sensoren, Fußbodenheizung. */
+  _wizScan(areaId) {
+    const used = new Set(this._rooms().flatMap((r) => r.climates || []));
+    const ids = areaId ? this._areaEntities(areaId) : [];
+    const S = this._hass.states;
+    const dc = (id) => S[id]?.attributes?.device_class;
+    const dom = (id) => id.split(".")[0];
+    const climates = ids.filter((id) => dom(id) === "climate" && this._devType(id) !== "Wärmeerzeuger");
+    return {
+      climates,
+      free: climates.filter((id) => !used.has(id)),
+      windows: ids.filter((id) => dom(id) === "binary_sensor" && ["window", "door", "opening", "garage_door"].includes(dc(id))),
+      temps: ids.filter((id) => dom(id) === "sensor" && dc(id) === "temperature"),
+      hums: ids.filter((id) => dom(id) === "sensor" && dc(id) === "humidity"),
+      floor: ids.filter((id) => this._devType(id) === "Fußbodenheizung"),
+    };
+  }
+
+  _wizOpen() {
+    this._openPop("rwiz", { step: 0, area: null, name: "", use: null, type: "heizkoerper", climates: [], assist: [], windows: [], temp: null, hum: null, show: [],
+      comfort: 21, eco: 18, plan: this._planList()[0]?.id ? `plan:${this._planList()[0].id}` : "preset:berufstaetig", open: false });
+  }
+
+  /** Bereich gewählt: Name und gefundene Geräte übernehmen, Nutzung am Namen erraten. */
+  _wizArea(areaId) {
+    const d = this._pop.draft;
+    const area = this._hass.areas?.[areaId];
+    const f = this._wizScan(areaId);
+    const name = area?.name || "";
+    const use = WIZ_USES.find((u) => u.match.test(name.toLowerCase()));
+    Object.assign(d, { area: areaId, name, climates: f.free.length ? f.free : f.climates, windows: f.windows, temp: f.temps[0] || null, hum: f.hums[0] || null, show: f.floor, assist: [] });
+    if (f.floor.length) d.type = "flaeche";
+    if (use) this._wizUse(use.id);
+  }
+
+  _wizUse(id) {
+    const d = this._pop.draft;
+    const u = WIZ_USES.find((x) => x.id === id);
+    if (!u) return;
+    Object.assign(d, { use: id, comfort: u.comfort, eco: u.eco });
+    if (!d.plan?.startsWith("plan:")) d.plan = `preset:${u.plan}`;
+  }
+
+  _wizPop() {
+    const d = this._pop.draft;
+    const steps = ["Raum", "Nutzung", "Heizung", "Geräte", "Zeiten", "Fertig"];
+    const S = this._hass.states;
+    const name = (id) => esc(this._entityName(id));
+    const bar = `<div class="wiz-bar">${steps.map((s, i) => `<button class="wiz-dot ${i === d.step ? "on" : i < d.step ? "done" : ""}" data-action="wiz-go" data-i="${i}" ${i > d.step && !this._wizOk(i - 1) ? "disabled" : ""}><i>${i < d.step ? "✓" : i + 1}</i><span>${s}</span></button>`).join("")}</div>`;
+    const tick = (on) => `<ha-icon icon="${on ? "mdi:checkbox-marked" : "mdi:checkbox-blank-outline"}"></ha-icon>`;
+    const devRow = (k, id, on, extra = "") => `<button class="wiz-dev ${on ? "on" : ""}" data-action="wiz-tog" data-k="${k}" data-id="${esc(id)}">${tick(on)}<span class="grow"><b>${esc(this._devType(id))}</b><small>${name(id)} · ${esc(this._fmtState(S[id]))}${this._areaOf(id) && !d.area ? ` · ${esc(this._areaOf(id))}` : ""}</small></span>${extra}</button>`;
+    const radio = (k, id, label) => `<button class="wiz-dev ${d[k] === id ? "on" : ""}" data-action="wiz-one" data-k="${k}" data-id="${esc(id || "")}"><ha-icon icon="${d[k] === id ? "mdi:radiobox-marked" : "mdi:radiobox-blank"}"></ha-icon><span class="grow"><b>${label}</b>${id ? `<small>${name(id)}</small>` : ""}</span></button>`;
+    let body = "";
+    switch (d.step) {
+      case 0: {
+        const areas = Object.values(this._hass.areas || {}).sort((a, b) => a.name.localeCompare(b.name, "de"));
+        const taken = new Set(this._rooms().map((r) => r.name.toLowerCase()));
+        body = `<p class="muted">Welcher Raum soll geheizt werden? Wähle einen Bereich aus Home Assistant – Thermostate, Fenster und Sensoren darin sucht der Assistent dann selbst.</p>
+          <div class="wiz-areas">${areas.map((a) => {
+            const f = this._wizScan(a.area_id);
+            const done = taken.has(a.name.toLowerCase()) || (f.climates.length && !f.free.length);
+            return `<button class="wiz-area ${d.area === a.area_id ? "on" : ""} ${done ? "done" : ""}" data-action="wiz-area" data-id="${esc(a.area_id)}">
+              <ha-icon icon="${a.icon || "mdi:door"}"></ha-icon><b>${esc(a.name)}</b>
+              <small>${done ? "schon angelegt" : f.climates.length ? `${f.climates.length} Thermostat${f.climates.length > 1 ? "e" : ""}${f.windows.length ? ` · ${f.windows.length} Fenster` : ""}` : "kein Thermostat"}</small></button>`;
+          }).join("")}</div>
+          <label class="field"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name des Raums</span><input type="text" data-wiz="name" value="${esc(d.name)}" placeholder="z. B. Wohnzimmer" maxlength="40"></label>
+          ${!areas.length ? `<p class="muted small">In Home Assistant sind keine Bereiche angelegt – dann einfach einen Namen eingeben, die Geräte wählst du im übernächsten Schritt.</p>` : ""}`;
+        break;
+      }
+      case 1:
+        body = `<p class="muted">Wofür wird <b>${esc(d.name)}</b> genutzt? Daraus schlägt der Assistent Temperaturen und Heizzeiten vor – ändern kannst du alles.</p>
+          <div class="wiz-areas">${WIZ_USES.map((u) => `<button class="wiz-area ${d.use === u.id ? "on" : ""}" data-action="wiz-use" data-id="${u.id}"><ha-icon icon="${u.icon}"></ha-icon><b>${u.label}</b><small>${fmt(u.comfort)} / ${fmt(u.eco)} °C</small></button>`).join("")}</div>`;
+        break;
+      case 2: {
+        const opt = (v, icon, t, s) => `<button class="wiz-type ${d.type === v ? "on" : ""}" data-action="wiz-type" data-v="${v}"><ha-icon icon="${icon}"></ha-icon><span><b>${t}</b><small>${s}</small></span></button>`;
+        body = `<p class="muted">Wie wird ${esc(d.name)} beheizt?</p>
+          ${opt("heizkoerper", "mdi:radiator", "Heizkörper", "reagiert schnell: kurze Vorheizzeit, Pause schon nach 1 Minute offenem Fenster")}
+          ${opt("flaeche", "mdi:heating-coil", "Fußbodenheizung", "träge: lange Vorheizzeit, wenig Absenkung, Pause erst nach 15 Minuten offenem Fenster")}
+          ${opt("misch", "mdi:home-thermometer", "Fußbodenheizung + Heizkörper", "Wandthermostat regelt die Fußbodenheizung, Heizkörper helfen nur bei Bedarf (Mischbetrieb)")}`;
+        break;
+      }
+      case 3: {
+        const f = this._wizScan(d.area);
+        const used = new Set(this._rooms().flatMap((r) => r.climates || []));
+        const other = Object.keys(S).filter((id) => id.startsWith("climate.") && !f.climates.includes(id) && !used.has(id) && this._devType(id) !== "Wärmeerzeuger")
+          .sort((a, b) => this._entityName(a).localeCompare(this._entityName(b), "de"));
+        const chosen = new Set(d.climates);
+        const extra = d.climates.filter((id) => !f.climates.includes(id));
+        const asst = (id) => d.type === "misch" && chosen.has(id) && this._thermoKind(id) !== "wall"
+          ? `<em class="wiz-role ${d.assist.includes(id) ? "on" : ""}" data-action="wiz-assist" data-id="${esc(id)}">${d.assist.includes(id) ? "Zusatz" : "folgt Wand"}</em>` : "";
+        const wins = Object.keys(S).filter((id) => id.startsWith("binary_sensor.") && ["window", "door", "opening"].includes(S[id].attributes?.device_class));
+        const winOther = wins.filter((id) => !f.windows.includes(id) && d.windows.includes(id));
+        body = `<div class="lbl">Thermostate</div>
+          ${f.climates.length ? f.climates.map((id) => devRow("climates", id, chosen.has(id), asst(id))).join("") : `<p class="muted small">In ${esc(d.name || "diesem Bereich")} hat der Assistent kein Thermostat gefunden.</p>`}
+          ${extra.map((id) => devRow("climates", id, true, asst(id))).join("")}
+          ${other.length ? `<label class="field"><span><ha-icon icon="mdi:plus"></ha-icon> Anderes Thermostat hinzufügen</span><select data-wiz-add="climates"><option value="">wählen …</option>${other.filter((id) => !chosen.has(id)).map((id) => `<option value="${esc(id)}">${name(id)}${this._areaOf(id) ? ` (${esc(this._areaOf(id))})` : ""}</option>`).join("")}</select></label>` : ""}
+          ${d.type === "misch" ? `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Tippe bei einem Heizkörper auf „folgt Wand“, um ihn zur <b>Zusatzheizung</b> zu machen (in der CCU vorher aus der Heizgruppe nehmen). Die anderen folgen weiter dem Wandthermostat.</p>` : ""}
+          <div class="lbl">Fenster & Türen</div>
+          ${f.windows.map((id) => devRow("windows", id, d.windows.includes(id))).join("")}${winOther.map((id) => devRow("windows", id, true)).join("")}
+          ${!f.windows.length ? `<p class="muted small">Keine Kontakte im Bereich – ohne Kontakt erkennt Hauswerk offene Fenster am Temperatursturz.</p>` : ""}
+          <label class="field"><span><ha-icon icon="mdi:plus"></ha-icon> Anderen Kontakt hinzufügen</span><select data-wiz-add="windows"><option value="">wählen …</option>${wins.filter((id) => !d.windows.includes(id)).map((id) => `<option value="${esc(id)}">${name(id)}${this._areaOf(id) ? ` (${esc(this._areaOf(id))})` : ""}</option>`).join("")}</select></label>
+          ${f.temps.length ? `<div class="lbl">Raumtemperatur messen mit</div>${radio("temp", null, "dem Thermostat")}${f.temps.map((id) => radio("temp", id, this._devType(id))).join("")}` : ""}
+          ${f.hums.length ? `<div class="lbl">Luftfeuchte</div>${radio("hum", null, "keine")}${f.hums.map((id) => radio("hum", id, this._devType(id))).join("")}` : ""}
+          ${f.floor.length ? `<div class="lbl">Nur anzeigen</div>${f.floor.map((id) => devRow("show", id, d.show.includes(id))).join("")}` : ""}`;
+        break;
+      }
+      case 4: {
+        const plans = this._planList();
+        const step = (k) => `<div class="wiz-temp"><button class="sbtn" data-action="wiz-t" data-k="${k}" data-d="-0.5">−</button><b>${fmt(d[k])} °C</b><button class="sbtn" data-action="wiz-t" data-k="${k}" data-d="0.5">+</button></div>`;
+        const planBtn = (v, t, s) => `<button class="wiz-dev ${d.plan === v ? "on" : ""}" data-action="wiz-plan" data-v="${v}"><ha-icon icon="${d.plan === v ? "mdi:radiobox-marked" : "mdi:radiobox-blank"}"></ha-icon><span class="grow"><b>${t}</b><small>${s}</small></span></button>`;
+        const blocks = (b) => b.map((x) => `${x.days.length === 7 ? "täglich" : x.days.length === 5 && x.days[0] === 0 ? "Mo–Fr" : x.days.length === 2 && x.days[0] === 5 ? "Sa–So" : x.days.map((i) => "MDMDFSS"[i]).join("")} ${x.start}–${x.end}`).join(" · ");
+        body = `<div class="wxrows">
+            <div class="wxr"><div class="wxr-l"><b>Komfort</b><small>wenn jemand im Raum ist</small></div><div class="wxr-v">${step("comfort")}</div></div>
+            <div class="wxr"><div class="wxr-l"><b>Eco</b><small>nachts und tagsüber ohne Nutzung</small></div><div class="wxr-v">${step("eco")}</div></div>
+          </div>
+          <div class="lbl">Heizzeiten (Komfort)</div>
+          ${plans.map((p) => planBtn(`plan:${p.id}`, `Plan „${esc(p.name)}“`, `gemeinsam mit anderen Räumen${p.calendar ? " · aus Kalender" : ""}`)).join("")}
+          ${Object.entries(PLAN_PRESETS).map(([k, p]) => planBtn(`preset:${k}`, `Eigener Plan: ${esc(p.label)}`, blocks(p.blocks))).join("")}
+          <p class="muted small">Die Zeiten kannst du danach unter <i>Heizpläne</i> genau einstellen.</p>`;
+        break;
+      }
+      case 5: {
+        const plan = d.plan.startsWith("plan:") ? `Plan „${esc(this._data.plans?.[d.plan.slice(5)]?.name || "")}“` : esc(PLAN_PRESETS[d.plan.slice(7)]?.label || "");
+        const line = (icon, t, v) => `<div class="kv"><ha-icon icon="${icon}"></ha-icon><span>${t}</span><b>${v}</b></div>`;
+        const warn = !d.climates.length;
+        body = `<div class="wiz-sum">
+            ${line("mdi:door", "Raum", esc(d.name))}
+            ${line("mdi:radiator", "Heizung", { heizkoerper: "Heizkörper", flaeche: "Fußbodenheizung", misch: "Fußbodenheizung + Heizkörper" }[d.type])}
+            ${line("mdi:thermostat", "Thermostate", d.climates.length ? `${d.climates.length}${d.assist.length ? ` (${d.assist.length} Zusatz)` : ""}` : "keins")}
+            ${line("mdi:window-open-variant", "Fenster", d.windows.length || "keine")}
+            ${line("mdi:thermometer", "Messen mit", d.temp ? name(d.temp) : "Thermostat")}
+            ${line("mdi:sofa-outline", "Komfort / Eco", `${fmt(d.comfort)} / ${fmt(d.eco)} °C`)}
+            ${line("mdi:calendar-clock", "Heizzeiten", plan)}
+          </div>
+          ${warn ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>Ohne Thermostat kann Heizwerk den Raum nicht regeln – du kannst es später unter <i>Geräte</i> eintragen.</p>` : ""}
+          <button class="wiz-dev ${d.open ? "on" : ""}" data-action="wiz-open">${tick(d.open)}<span class="grow"><b>Danach alle Einstellungen öffnen</b><small>Vorheizen, Fenster, Regelung, Experte …</small></span></button>`;
+        break;
+      }
+    }
+    const last = d.step === steps.length - 1;
+    return {
+      icon: "mdi:auto-fix", c: "#fb923c", title: "Raum anlegen", sub: `Schritt ${d.step + 1} von ${steps.length} · ${steps[d.step]}`,
+      body: bar + body,
+      foot: `${d.step ? `<button class="secondary" data-action="wiz-go" data-i="${d.step - 1}"><ha-icon icon="mdi:chevron-left"></ha-icon>Zurück</button>` : `<button class="secondary" data-action="wiz-expert" title="Ohne Assistent: alle Felder auf einmal">Ohne Assistent</button>`}
+        ${last ? `<button class="primary" data-action="wiz-save"><ha-icon icon="mdi:check"></ha-icon>Raum anlegen</button>`
+          : `<button class="primary" data-action="wiz-go" data-i="${d.step + 1}" ${this._wizOk(d.step) ? "" : "disabled"}>Weiter<ha-icon icon="mdi:chevron-right"></ha-icon></button>`}`,
+    };
+  }
+
+  /** Darf es nach diesem Schritt weitergehen? */
+  _wizOk(step) {
+    const d = this._pop?.draft || {};
+    if (step === 0) return !!String(d.name || "").trim();
+    if (step === 1) return !!d.use;
+    return true;
+  }
+
+  /** Raum aus dem Assistenten bauen und speichern. */
+  async _wizSave() {
+    const d = this._pop.draft;
+    const room = { name: d.name.trim(), type: d.type === "misch" ? "flaeche" : d.type, comfort: d.comfort, eco: Math.min(d.eco, d.comfort), climates: d.climates, windows: d.windows,
+      enabled: true, allow_manual: true, schedule: [] };
+    if (d.temp) room.temp_sensor = d.temp;
+    if (d.hum) room.humidity_sensor = d.hum;
+    if (d.show.length) room.show_entities = d.show;
+    if (d.type === "misch" && d.assist.length) room.assist_entities = d.assist;
+    if (d.plan.startsWith("plan:")) room.plan_id = d.plan.slice(5);
+    else room.schedule = clone(PLAN_PRESETS[d.plan.slice(7)]?.blocks || PLAN_PRESETS.berufstaetig.blocks);
+    const saved = await this._saveRoom(room);
+    if (!saved) return;
+    const open = d.open;
+    this._closePop();
+    this._toast(`${saved.name} angelegt`);
+    if (open) this._openRoom(saved);
   }
 
   _openRoom(room) {
@@ -4343,6 +4541,19 @@ class HauswerkPanel extends HTMLElement {
       t.style.setProperty("--v", `${t.value}%`);
       return;
     }
+    if (t.dataset.wiz && this._pop?.id === "rwiz") {
+      this._pop.draft[t.dataset.wiz] = t.value;
+      // Knopf „Weiter“ freigeben, ohne das Feld neu zu zeichnen (Fokus bleibt)
+      const next = this.shadowRoot.querySelector('.sheet-foot [data-action="wiz-go"].primary');
+      if (next) next.disabled = !this._wizOk(this._pop.draft.step);
+      return;
+    }
+    if (t.dataset.wizAdd && this._pop?.id === "rwiz" && isChange && t.value) {
+      const d = this._pop.draft;
+      d[t.dataset.wizAdd] = [...new Set([...d[t.dataset.wizAdd], t.value])];
+      this._renderPop();
+      return;
+    }
     if (t.dataset.rwp && this._pop?.draft?.prof) {
       const k = t.dataset.rwp, kind = t.dataset.kind;
       this._pop.draft.prof[k] = kind === "bool" ? t.checked : kind === "num" ? (t.value === "" ? null : Number(t.value)) : t.value || null;
@@ -4481,7 +4692,69 @@ class HauswerkPanel extends HTMLElement {
         this._renderMain();
         break;
       case "room-new":
+        this._wizOpen();
+        break;
+      case "wiz-go": {
+        const i = Number(el.dataset.i);
+        if (i > this._pop.draft.step && !this._wizOk(this._pop.draft.step)) return;
+        this._pop.draft.step = i;
+        this._pop.keep = false;
+        this._renderPop();
+        break;
+      }
+      case "wiz-area":
+        this._wizArea(el.dataset.id);
+        this._renderPop();
+        break;
+      case "wiz-use":
+        this._wizUse(el.dataset.id);
+        this._pop.draft.step = 2;
+        this._pop.keep = false;
+        this._renderPop();
+        break;
+      case "wiz-type":
+        this._pop.draft.type = el.dataset.v;
+        if (el.dataset.v !== "misch") this._pop.draft.assist = [];
+        this._renderPop();
+        break;
+      case "wiz-tog": {
+        const d = this._pop.draft, k = el.dataset.k, id = el.dataset.id;
+        d[k] = d[k].includes(id) ? d[k].filter((x) => x !== id) : [...d[k], id];
+        if (k === "climates") d.assist = d.assist.filter((x) => d.climates.includes(x));
+        this._renderPop();
+        break;
+      }
+      case "wiz-assist": {
+        e.stopPropagation?.();
+        const d = this._pop.draft, id = el.dataset.id;
+        d.assist = d.assist.includes(id) ? d.assist.filter((x) => x !== id) : [...d.assist, id];
+        this._renderPop();
+        break;
+      }
+      case "wiz-one":
+        this._pop.draft[el.dataset.k] = el.dataset.id || null;
+        this._renderPop();
+        break;
+      case "wiz-t": {
+        const d = this._pop.draft;
+        d[el.dataset.k] = Math.max(5, Math.min(30, Math.round((d[el.dataset.k] + Number(el.dataset.d)) * 2) / 2));
+        this._renderPop();
+        break;
+      }
+      case "wiz-plan":
+        this._pop.draft.plan = el.dataset.v;
+        this._renderPop();
+        break;
+      case "wiz-open":
+        this._pop.draft.open = !this._pop.draft.open;
+        this._renderPop();
+        break;
+      case "wiz-expert":
+        this._closePop();
         this._openRoom(null);
+        break;
+      case "wiz-save":
+        await this._wizSave();
         break;
       case "room-edit":
         this._openRoom(this._data.rooms[el.dataset.id]);
@@ -5584,6 +5857,39 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .rrow:first-child { border-top:none; }
 .rrow small { display:block; color:var(--muted); font-size:12px; }
 
+/* Raum-Assistent */
+.wiz-bar { display:flex; gap:4px; margin:-2px 0 16px; overflow-x:auto; scrollbar-width:none; }
+.wiz-dot { flex:1; min-width:52px; display:flex; flex-direction:column; align-items:center; gap:4px; border:0; background:none; color:var(--muted); font:inherit; font-size:11px; cursor:pointer; padding:0; }
+.wiz-dot i { font-style:normal; width:26px; height:26px; border-radius:50%; display:grid; place-items:center; background:var(--card2); border:1px solid var(--line2); font-weight:700; font-size:12px; }
+.wiz-dot.on { color:var(--text); font-weight:600; }
+.wiz-dot.on i { background:#fb923c; border-color:#fb923c; color:#fff; }
+.wiz-dot.done i { background:color-mix(in srgb, #fb923c 18%, var(--card2)); color:#c2410c; border-color:color-mix(in srgb, #fb923c 40%, transparent); }
+.wiz-dot:disabled { opacity:.45; cursor:default; }
+.wiz-areas { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:8px; margin:10px 0 14px; }
+.wiz-area { display:flex; flex-direction:column; align-items:flex-start; gap:3px; text-align:left; padding:12px; border-radius:14px; border:1px solid var(--line2); background:var(--card2); color:var(--text); font:inherit; cursor:pointer; }
+.wiz-area ha-icon { color:#fb923c; margin-bottom:2px; }
+.wiz-area small { color:var(--muted); font-size:12px; }
+.wiz-area.on { border-color:#fb923c; background:color-mix(in srgb, #fb923c 12%, var(--card2)); box-shadow:0 0 0 1px #fb923c inset; }
+.wiz-area.done { opacity:.55; }
+.wiz-type { width:100%; display:flex; align-items:flex-start; gap:12px; text-align:left; padding:14px; margin-bottom:8px; border-radius:14px; border:1px solid var(--line2); background:var(--card2); color:var(--text); font:inherit; cursor:pointer; }
+.wiz-type ha-icon { color:#fb923c; flex:none; }
+.wiz-type span { display:flex; flex-direction:column; gap:3px; }
+.wiz-type small { color:var(--muted); }
+.wiz-type.on { border-color:#fb923c; box-shadow:0 0 0 1px #fb923c inset; background:color-mix(in srgb, #fb923c 10%, var(--card2)); }
+.wiz-dev { width:100%; display:flex; align-items:center; gap:10px; text-align:left; padding:10px 12px; margin-bottom:6px; border-radius:12px; border:1px solid var(--line2); background:var(--card); color:var(--text); font:inherit; cursor:pointer; }
+.wiz-dev > ha-icon { color:var(--muted); flex:none; }
+.wiz-dev .grow { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.wiz-dev small { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; }
+.wiz-dev.on { border-color:color-mix(in srgb, #fb923c 50%, transparent); background:color-mix(in srgb, #fb923c 7%, var(--card)); }
+.wiz-dev.on > ha-icon { color:#fb923c; }
+.wiz-role { font-style:normal; font-size:12px; padding:4px 10px; border-radius:99px; border:1px solid var(--line2); background:var(--card2); white-space:nowrap; }
+.wiz-role.on { background:#fb923c; color:#fff; border-color:#fb923c; }
+.wiz-temp { display:flex; align-items:center; gap:10px; }
+.wiz-temp b { min-width:64px; text-align:center; font-size:17px; }
+.wiz-sum { display:flex; flex-direction:column; gap:2px; margin-bottom:12px; }
+.wiz-sum .kv { display:flex; align-items:center; gap:10px; padding:9px 2px; border-bottom:1px solid var(--line2); }
+.wiz-sum .kv ha-icon { color:#fb923c; }
+.wiz-sum .kv span { flex:1; color:var(--muted); }
 /* Entitätsauswahl */
 .picker { position:relative; }
 .chips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }

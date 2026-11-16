@@ -116,6 +116,7 @@ const hass = {
     if (msg.type === "hauswerk/rollwerk/profile/delete") { delete rwProfiles[msg.profile_id]; return { profiles: rwProfiles, covers: rwCovers }; }
     if (msg.type === "hauswerk/heizen/report") return report(msg.days);
     if (msg.type === "hauswerk/heizen/settings/save") return Object.assign(settings, msg.settings);
+    if (msg.type === "hauswerk/heizen/room/save") { const r = { ...msg.room, id: msg.room.id || "neu_" + Date.now() }; rooms[r.id] = r; return r; }
     if (msg.type === "history/history_during_period") return {};
     if (msg.type === "hauswerk/notify/test") return null;
     if (msg.type === "person/create") { states["person." + msg.name.toLowerCase()] = st("unknown", { friendly_name: msg.name }); return { id: msg.name.toLowerCase(), name: msg.name }; }

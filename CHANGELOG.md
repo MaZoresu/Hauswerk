@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.26.0 – 2026-11-16
+
+### Neu
+- **Assistent „Raum anlegen“** in Heizwerk, in sechs Schritten:
+  1. **Raum:** Bereich aus Home Assistant wählen; der Name wird übernommen. Bereiche, die schon angelegt sind, erscheinen ausgegraut.
+  2. **Nutzung:** Wohnzimmer, Schlafzimmer, Kinderzimmer, Bad, Küche, Büro oder Flur. Daraus kommen Vorschläge für Komfort/Eco und Heizzeiten; am Raumnamen wird die Nutzung vorausgewählt.
+  3. **Heizung:** Heizkörper, Fußbodenheizung oder beides (Mischbetrieb).
+  4. **Geräte:** Thermostate, Fenster-/Türkontakte, Temperatur- und Feuchtesensor sowie der Schalter der Fußbodenheizung werden im Bereich gefunden und vorausgewählt; andere lassen sich hinzufügen. Im Mischbetrieb wird je Heizkörper „Zusatz“ oder „folgt Wand“ gewählt.
+  5. **Zeiten:** Komfort und Eco; dazu ein gemeinsamer Heizplan oder eine Vorlage.
+  6. **Fertig:** Zusammenfassung, wahlweise danach alle Einstellungen des Raums öffnen.
+- „Ohne Assistent“ öffnet wie bisher den vollständigen Raum-Dialog.
+
 ## 0.25.1 – 2026-11-16
 
 ### Geändert

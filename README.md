@@ -91,6 +91,7 @@ Alle Werte lassen sich je Raum ändern; seltene Feinheiten (Absenkgrenze, Fenste
 
 | Funktion | Wo | Was sie tut |
 |---|---|---|
+| Raum-Assistent | Heizwerk › Räume › „Raum anlegen“ | Schritt für Schritt: Bereich aus Home Assistant, Nutzung (Temperatur-Vorschläge), Heizungsart inkl. Mischbetrieb, Geräte automatisch aus dem Bereich, Komfort/Eco und Heizzeiten. „Ohne Assistent“ öffnet den vollen Dialog |
 | Wartezeit beim Heimkommen | Hauswerk › Einstellungen › Anwesenheit | Erst nach X Minuten zu Hause wird wieder normal geheizt |
 | Vorheizen: Lernen, feste Zeit oder aus | Heizwerk › Einstellungen › Vorheizen, je Raum unter Vorheizen & Fenster änderbar | Feste Zeit getrennt für Heizkörper und Flächenheizung. Lernend: misst je Raum, wie schnell er warm wird (°C pro Stunde), und startet so früh, dass die Komforttemperatur pünktlich erreicht ist (höchstens X Minuten vorher) |
 | Gemeinsame Heizpläne | Heizpläne, im Raum unter „Heizplan“ auswählen | Ein Plan für mehrere Räume; Komfort/Eco bleiben je Raum. Beim Löschen behalten die Räume die Zeiten als eigenen Plan |
