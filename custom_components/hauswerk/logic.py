@@ -624,25 +624,57 @@ def find_references(value: Any, ids: set[str], found: set[str] | None = None, de
     return found
 
 
-_WALL = ("wth", "bwth", "sth", "wandthermostat", "wall_thermostat", "wall thermostat", "raumthermostat")
-_TRV = ("etrv", "trv", "heizkörper", "heizkorper", "heizkoerper", "radiator", "stellantrieb")
+# Gerätemodelle verschiedener Hersteller (Kleinschreibung, Teilwort genügt)
+TRV_MODELS = (
+    "trv",            # Homematic IP eTRV, Sonoff TRVZB, Hive TRV001, Drayton iTRV, Bosch TRV_GEN2, Shelly TRV
+    "rt-dn",          # Homematic HM-CC-RT-DN
+    "bth-ra",         # Bosch Heizkörper-Thermostat (Zigbee)
+    "radiator",       # Bosch „Radiator Thermostat II“, tado „Smart Radiator Thermostat“
+    "va01", "va02", "va04",  # tado Heizkörper-Thermostat (V3+, X)
+    "nrv",            # Netatmo Smarte Heizkörperventile
+    "srts",           # Aqara Thermostat E1
+    "spzb",           # Eurotronic Spirit Zigbee
+    "hr91", "hr92",   # Honeywell evohome
+    "ally",           # Danfoss Ally
+    "dect 300", "dect 301", "dect 302", "comet",  # AVM FRITZ!DECT, Comet DECT
+    "eve thermo",     # Eve Thermo
+    "zk03840",        # Viessmann ViCare Heizkörper-Thermostat
+    "heizkörper", "heizkorper",
+)
+WALL_MODELS = (
+    "wth", "bwth", "sth",  # Homematic IP Wandthermostate (WTH, BWTH, STH/STHD)
+    "tc-it",          # Homematic HM-TC-IT-WM
+    "bth-rm",         # Bosch Raumthermostat (Zigbee)
+    "rth",            # Bosch „Room Thermostat II“ (RTH2)
+    "room thermostat", "raumthermostat", "wall", "wand",
+    "ru01", "ru02", "su02",  # tado Smart Thermostat (Funk/verkabelt)
+    "t87rf",          # Honeywell evohome
+    "roomstat",       # Drayton Wiser
+    "natherm", "nathermostat",  # Netatmo Thermostat
+    "w100",           # Aqara Climate Sensor W100
+    "bht-",           # Moes/Beca Wandthermostate
+    "ct100", "ct200", # Bosch EasyControl
+    "nest", "ecobee",
+)
+_WALL_NAME = ("wth", "wandthermostat", "wall_thermostat", "wall thermostat", "raumthermostat", "room thermostat")
+_TRV_NAME = ("etrv", "trv", "heizkörper", "heizkorper", "heizkoerper", "radiator", "stellantrieb", "ventil")
 
 
 def thermostat_kind(model: str | None, entity_id: str, name: str | None = None) -> str | None:
     """'wall' für Wandthermostate, 'trv' für Heizkörper-Thermostate, sonst None.
 
-    Das Modell (z. B. HmIP-WTH-2, HmIP-eTRV-2) gilt vor dem Namen.
+    Erst das Modell (Homematic, Bosch, tado, Netatmo, Danfoss, Aqara, AVM, Honeywell …), dann der Name.
     """
     model_l = (model or "").lower()
     if model_l:
-        if any(w in model_l for w in ("wth", "sth", "wall")):
-            return "wall"
-        if "trv" in model_l:
+        if any(w in model_l for w in TRV_MODELS):
             return "trv"
+        if any(w in model_l for w in WALL_MODELS):
+            return "wall"
     text = f"{entity_id} {name or ''}".lower()
-    if any(w in text for w in _WALL):
+    if any(w in text for w in _WALL_NAME):
         return "wall"
-    if any(w in text for w in _TRV):
+    if any(w in text for w in _TRV_NAME):
         return "trv"
     return None
 

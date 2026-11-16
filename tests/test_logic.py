@@ -326,6 +326,12 @@ def test_thermostat_kind():
     assert L.thermostat_kind(None, "climate.heizkoerper_bad") == "trv"
     assert L.thermostat_kind(None, "climate.wohnzimmer", "Wandthermostat Wohnzimmer") == "wall"
     assert L.thermostat_kind("Thermostat X", "climate.bad") is None
+    # andere Hersteller
+    for model in ("TRV_GEN2", "BTH-RA", "Radiator Thermostat II", "VA02", "NRV", "SRTS-A01", "TRVZB", "HR92",
+                  "eTRV0100", "FRITZ!DECT 301", "Eve Thermo", "HM-CC-RT-DN", "SPZB0001"):
+        assert L.thermostat_kind(model, "climate.x") == "trv", model
+    for model in ("BTH-RM", "Room Thermostat II", "RU02", "T87RF", "NATherm1", "HM-TC-IT-WM-W-EU", "HmIP-BWTH", "BHT-002"):
+        assert L.thermostat_kind(model, "climate.x") == "wall", model
 
 
 def test_radio_should_send():

@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.23.2";
+const VERSION = "0.23.3";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -163,6 +163,12 @@ const PICK_CLASSES = {
   humidity_sensor: ["humidity"],
   outside_sensor: ["temperature"],
 };
+// Gerätemodelle verschiedener Hersteller (wie logic.py TRV_MODELS / WALL_MODELS)
+const TRV_MODELS = ["trv", "rt-dn", "bth-ra", "radiator", "va01", "va02", "va04", "nrv", "srts", "spzb", "hr91", "hr92", "ally",
+  "dect 300", "dect 301", "dect 302", "comet", "eve thermo", "zk03840", "heizkörper", "heizkorper"];
+const WALL_MODELS = ["wth", "bwth", "sth", "tc-it", "bth-rm", "rth", "room thermostat", "raumthermostat", "wall", "wand",
+  "ru01", "ru02", "su02", "t87rf", "roomstat", "natherm", "w100", "bht-", "ct100", "ct200", "nest", "ecobee"];
+
 const DC_LABEL = {
   temperature: "Temperatur", humidity: "Feuchte", window: "Fenster", door: "Tür", opening: "Öffnung", garage_door: "Garagentor",
   motion: "Bewegung", occupancy: "Belegung", presence: "Präsenz", distance: "Entfernung", battery: "Batterie", power: "Leistung",
@@ -3454,7 +3460,8 @@ class HauswerkPanel extends HTMLElement {
         || (/fenster|window/.test(txt) ? "Fensterkontakt" : /präsenz|presence|bewegung|motion/.test(txt) ? "Präsenzmelder" : "Melder");
     }
     if (dom === "sensor") {
-      if (a.unit_of_measurement === "%" && /ventil|valve|heating_demand/.test(txt)) return "Ventilöffnung";
+      if (a.unit_of_measurement === "%" && /ventil|valve|st(ö|oe)(ß|ss)el|tappet|heating_demand|pi_heating/.test(txt)) return "Ventilöffnung";
+      if (a.unit_of_measurement === "%" && /heating_power|heizleistung|_heating$/.test(txt)) return "Heizleistung";
       if (/duty_cycle/.test(txt)) return "Funk-Auslastung";
       return { temperature: "Temperatursensor", humidity: "Feuchtesensor", battery: "Batterie", distance: "Entfernung", power: "Leistung",
         energy: "Energie", illuminance: "Helligkeit", pressure: "Luftdruck", carbon_dioxide: "CO₂-Sensor" }[dc] || "Sensor";
@@ -3468,12 +3475,16 @@ class HauswerkPanel extends HTMLElement {
   /** Wandthermostat („wall“), Heizkörper-Thermostat („trv“) oder unbekannt – nach Modell, sonst Name. */
   _thermoKind(id) {
     const st = this._hass?.states?.[id];
-    const model = String(st?.attributes?.model || "").toLowerCase();
-    if (/wth|sth|wall/.test(model)) return "wall";
-    if (/trv/.test(model)) return "trv";
+    // Modell aus dem Zustand, sonst aus dem Geräte-Register (Homematic, Bosch, tado, Netatmo, Danfoss, Aqara, AVM …)
+    const dev = this._hass?.devices?.[this._hass?.entities?.[id]?.device_id];
+    const model = String(st?.attributes?.model || dev?.model || "").toLowerCase();
+    if (model) {
+      if (TRV_MODELS.some((w) => model.includes(w))) return "trv";
+      if (WALL_MODELS.some((w) => model.includes(w))) return "wall";
+    }
     const txt = `${id} ${st?.attributes?.friendly_name || ""}`.toLowerCase();
-    if (/wth|wandthermostat|wall_thermostat|raumthermostat/.test(txt)) return "wall";
-    if (/trv|heizk(ö|o|oe)rper|radiator|stellantrieb/.test(txt)) return "trv";
+    if (/wth|wandthermostat|wall_thermostat|wall thermostat|raumthermostat|room thermostat/.test(txt)) return "wall";
+    if (/trv|heizk(ö|o|oe)rper|radiator|stellantrieb|ventil/.test(txt)) return "trv";
     return null;
   }
 
@@ -3524,7 +3535,9 @@ class HauswerkPanel extends HTMLElement {
     const dev = reg[id]?.device_id;
     let found = [];
     if (dev) {
-      const words = /ventil|valve|stellung|heating_demand|heizbedarf|pi_heating/i;
+      // Homematic „Ventilöffnungsgrad“, Bosch „Ventilstößel“ (valvetappet), Zigbee „pi_heating_demand“/„position“,
+      // tado „Heizleistung“ (sensor.*_heating), Netatmo „heating_power_request“
+      const words = /ventil|valve|stellung|st(ö|oe)(ß|ss)el|tappet|heating_demand|heizbedarf|pi_heating|heating_power|heizleistung|_heating$|position/i;
       const cands = Object.entries(reg)
         .map(([eid, e]) => ({ ...e, entity_id: eid }))
         .filter((e) => e.device_id === dev && e.entity_id !== id && !e.hidden && words.test(`${e.entity_id} ${e.name || ""} ${e.translation_key || ""}`));
@@ -3547,7 +3560,7 @@ class HauswerkPanel extends HTMLElement {
     const d = id.split(".")[0];
     const num = (v) => (v === null || v === undefined || v === "" || isNaN(Number(v)) ? null : Number(v));
     if (d === "climate") {
-      for (const k of ["valve_position", "valve_opening", "pi_heating_demand", "heating_demand", "position", "valve"]) {
+      for (const k of ["valve_position", "valve_opening", "valve_tappet", "pi_heating_demand", "heating_demand", "heating_power_request", "heating_power", "position", "valve"]) {
         if (num(a[k]) != null) return num(a[k]);
       }
       // Viele Thermostate (z. B. Homematic IP, Zigbee) melden die Ventilöffnung als eigenen Sensor am selben Gerät.

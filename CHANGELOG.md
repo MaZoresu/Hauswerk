@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.23.3 – 2026-11-16
+
+### Neu
+- **Thermostate anderer Hersteller erkennen:** Wandthermostat oder Heizkörper-Thermostat erkennt Hauswerk jetzt auch bei Bosch (Smart Home, Zigbee BTH-RA/BTH-RM, EasyControl), tado, Netatmo, Danfoss Ally, Aqara, AVM FRITZ!DECT, Honeywell evohome, Drayton Wiser, Eurotronic, Eve, Sonoff, Hive, Shelly, Viessmann, Homematic (klassisch) u. a. – am Modell aus dem Geräte-Register, sonst am Namen. Das gilt für die Überschriften, die Rollen und die Kopplung.
+- **Ventilöffnung weiterer Hersteller:** auch Bosch „Ventilstößel“, tado „Heizleistung“ und Netatmo „heating_power_request“ werden als Ventilöffnung bzw. Heizleistung angezeigt.
+
 ## 0.23.2 – 2026-11-16
 
 ### Geändert
