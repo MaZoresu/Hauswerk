@@ -514,3 +514,22 @@ def test_mischbetrieb(hw):
     log = asyncio.run(run())
     titles = [e["title"] for e in log.entries]
     assert "Heizkörper hilft nach" in titles and "Heizkörper aus – Fußbodenheizung allein" in titles
+
+
+def test_rolle_selbst(hw):
+    """Heizkörper mit Rolle „Selbst“ folgt nicht dem Wandthermostat, sondern wird direkt gestellt."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 16, 9, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("climate.wth", "heat", {"current_temperature": 20.0, "temperature": 18.0, "model": "HmIP-WTH-2"}, "WTH")
+        hass.set("climate.trv", "heat", {"current_temperature": 20.0, "temperature": 18.0, "model": "HMIP-eTRV"}, "TRV")
+        log, haus, ctl = await _setup(hw, hass)
+        await ctl.async_save_room({"id": "k", "name": "Küche", "comfort": 21, "eco": 18, "enabled": True,
+                                   "climates": ["climate.wth", "climate.trv"], "pair_exclude": ["climate.trv"],
+                                   "schedule": [{"days": [0, 1, 2, 3, 4, 5, 6], "start": "06:00", "end": "22:00"}]})
+        assert ctl.status()["rooms"]["k"]["followers"] == []
+        assert {d["entity_id"] for dom, s, d in hass.calls if s == "set_temperature"} == {"climate.wth", "climate.trv"}
+
+    asyncio.run(run())

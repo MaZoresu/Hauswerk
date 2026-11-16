@@ -26,7 +26,7 @@ const states = {
   "climate.wohnzimmer_heizkoerper": st("heat", { friendly_name: "Heizkörper Wohnzimmer", current_temperature: 21.2, temperature: 21, model: "HMIP-eTRV" }),
   "sensor.ccu3_duty_cycle_level": st("22", { friendly_name: "CCU3 Duty Cycle", unit_of_measurement: "%" }),
   "sensor.hmip_router_duty_cycle_level": st("9.5", { friendly_name: "Router Duty Cycle", unit_of_measurement: "%" }),
-  "climate.wohnzimmer": st("heat", { friendly_name: "Thermostat Wohnzimmer", current_temperature: 20.4, temperature: 21, hvac_action: "heating", pi_heating_demand: 42 }),
+  "climate.wohnzimmer": st("heat", { model: "HmIP-WTH-2", friendly_name: "Wandthermostat Wohnzimmer", current_temperature: 20.4, temperature: 21, hvac_action: "heating", pi_heating_demand: 42 }),
   "climate.bad": st("heat", { friendly_name: "Thermostat Bad", current_temperature: 22.1, temperature: 22 }),
   "binary_sensor.fenster_bad": st("off", { friendly_name: "Fenster Bad", device_class: "window" }),
   "weather.home": st("cloudy", { friendly_name: "OpenWeatherMap", temperature: 6.1, apparent_temperature: 3.2, humidity: 81, wind_speed: 14.6, wind_gust_speed: 31, wind_speed_unit: "km/h", supported_features: 3 }),

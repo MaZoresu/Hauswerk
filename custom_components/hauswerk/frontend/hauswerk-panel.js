@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.23.0";
+const VERSION = "0.23.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -3218,26 +3218,7 @@ class HauswerkPanel extends HTMLElement {
 
       devices: () => `
         <div class="field"><span><ha-icon icon="mdi:thermostat"></ha-icon> Thermostate – Heizwerk stellt diese ein (z. B. das Wandthermostat)</span>${this._picker("climates", r.climates || [])}</div>
-        ${(r.climates || []).length > 1 ? (() => {
-          const rs = this._status?.rooms?.[r.id] || {};
-          const fol = rs.followers || [];
-          const brk = rs.pair_broken || [];
-          const state = r.pair_mode === "off" ? "Hauswerk stellt alle Thermostate selbst."
-            : fol.length ? `Gekoppelt: ${fol.map((x) => esc(this._entityName(x))).join(", ")} folg${fol.length > 1 ? "en" : "t"} dem Wandthermostat – Hauswerk stellt nur das Wandthermostat.`
-            : brk.length ? `${brk.map((x) => esc(this._entityName(x))).join(", ")} folgt dem Wandthermostat nicht – Hauswerk stellt es selbst.`
-            : "Kein Paar aus Wandthermostat und Heizkörper-Thermostat erkannt.";
-          return `<div class="field"><span><ha-icon icon="mdi:link-variant"></ha-icon> Wandthermostat und Heizkörper gekoppelt</span>
-            ${segs("pair-mode", r.pair_mode || "auto", [["auto", "Automatisch erkennen", "mdi:link-variant"], ["off", "Alle selbst stellen", "mdi:link-variant-off"]])}</div>
-            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${state} Bei Homematic IP steuert das Wandthermostat die Heizkörper-Thermostate seiner Heizgruppe selbst. Hauswerk erkennt das am Gerätemodell (z. B. HmIP-WTH und HmIP-eTRV) und prüft laufend: weicht ein Heizkörper länger als 15 Minuten ab, stellt Hauswerk ihn wieder selbst. Das spart Funkbefehle.</p>`;
-        })() : ""}
-        ${(r.climates || []).length > 1 ? (() => {
-          const sel = r.assist_entities || [];
-          const as = this._status?.rooms?.[r.id]?.assist;
-          return `<div class="field"><span><ha-icon icon="mdi:radiator"></ha-icon> Mischbetrieb – Heizkörper als Zusatzheizung</span>
-            <div class="pills">${(r.climates || []).map((id) => `<button class="pill ${sel.includes(id) ? "on" : ""}" data-action="assist-toggle" data-id="${esc(id)}"><ha-icon class="pi" icon="${sel.includes(id) ? "mdi:check" : "mdi:radiator"}"></ha-icon>${esc(this._entityName(id))}</button>`).join("")}</div></div>
-            ${sel.length ? `<label class="field narrow"><span><ha-icon icon="mdi:thermometer-chevron-down"></ha-icon> Heizkörper hilft nach ab</span><div class="unit"><input type="number" step="0.1" min="0.2" max="3" data-room="assist_diff" value="${r.assist_diff ?? ""}" placeholder="0,5"><i>°C unter Soll</i></div></label>` : ""}
-            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${sel.length && as ? `Gerade: Heizkörper ${as.on ? "<b>heizt mit</b>" : "<b>zu</b> – Fußbodenheizung allein"}. ` : ""}Für Räume mit Fußbodenheizung und Heizkörper: Die Fußbodenheizung (über das Wandthermostat) trägt die Grundlast. Gewählte Heizkörper stellt Hauswerk selbst – auf Frostschutz (zu), solange der Boden reicht, und auf das Raum-Soll, wenn der Raum zu weit darunter liegt, beim Vorheizen und beim Boost. Ihren Messfehler am Heizkörper gleicht Hauswerk mit der Temperatur des Wandthermostats aus. Diese Heizkörper müssen in der CCU <b>aus der Heizgruppe</b> genommen und auf <b>manuell</b> gestellt sein; alle anderen Heizkörper bleiben in der Gruppe und folgen weiter dem Wandthermostat.</p>`;
-        })() : ""}
+        ${(r.climates || []).length > 1 ? this._rolesBlock(r) : ""}
         <div class="field"><span><ha-icon icon="mdi:eye-outline"></ha-icon> Weitere Geräte – nur anzeigen</span>${this._picker("show_entities", r.show_entities || [])}</div>
         <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Z. B. Heizkörper-Thermostat oder Stellantrieb der Fußbodenheizung: Heizwerk zeigt Ventilöffnung und Werte an der Raumkarte und auf der Raumseite, stellt aber nichts daran ein.</p>
         <div class="field"><span><ha-icon icon="mdi:window-closed-variant"></ha-icon> Fenster- und Türkontakte</span>${this._picker("windows", r.windows || [])}</div>
@@ -3453,6 +3434,53 @@ class HauswerkPanel extends HTMLElement {
         ? { on: sws.some(([, v]) => v), label: this._floorLabel(room), names: sws.map(([id, v]) => `${this._entityName(id)} ${v ? "an" : "aus"}`).join(", ") }
         : null,
     };
+  }
+
+  /** Wandthermostat („wall“), Heizkörper-Thermostat („trv“) oder unbekannt – nach Modell, sonst Name. */
+  _thermoKind(id) {
+    const st = this._hass?.states?.[id];
+    const model = String(st?.attributes?.model || "").toLowerCase();
+    if (/wth|sth|wall/.test(model)) return "wall";
+    if (/trv/.test(model)) return "trv";
+    const txt = `${id} ${st?.attributes?.friendly_name || ""}`.toLowerCase();
+    if (/wth|wandthermostat|wall_thermostat|raumthermostat/.test(txt)) return "wall";
+    if (/trv|heizk(ö|o|oe)rper|radiator|stellantrieb/.test(txt)) return "trv";
+    return null;
+  }
+
+  /** Rolle der Thermostate eines Raums: stellt ein · folgt dem Wandthermostat · selbst · Zusatzheizung. */
+  _rolesBlock(r) {
+    const rs = this._status?.rooms?.[r.id] || {};
+    const climates = r.climates || [];
+    const hasWall = climates.some((id) => this._thermoKind(id) === "wall");
+    const assist = new Set(r.assist_entities || []);
+    const own = new Set(r.pair_exclude || []);
+    const role = (id) => assist.has(id) ? "assist" : this._thermoKind(id) === "wall" ? "main"
+      : !hasWall || r.pair_mode === "off" || own.has(id) ? "own" : "follow";
+    const rows = climates.map((id) => {
+      const ro = role(id);
+      const kind = this._thermoKind(id);
+      const v = this._valveOf(id);
+      let state = "";
+      if (ro === "follow") state = (rs.pair_broken || []).includes(id) ? "folgt nicht – Hauswerk stellt selbst" : (rs.followers || []).includes(id) ? "folgt ✓" : "";
+      if (ro === "assist" && rs.assist) state = rs.assist.on ? "heizt mit" : "zu – Boden reicht";
+      const sub = [kind === "wall" ? "Wandthermostat" : kind === "trv" ? "Heizkörper" : "Thermostat", state, v != null ? `Ventil ${fmt(v, 0)} %` : ""].filter(Boolean).join(" · ");
+      const opts = [...(hasWall ? [["follow", "Folgt Wand", "mdi:link-variant"]] : []), ["own", "Selbst", "mdi:tune-variant"], ["assist", "Zusatz", "mdi:radiator"]];
+      return `<div class="role">
+        <div class="role-h"><ha-icon icon="${kind === "wall" ? "mdi:thermostat-box" : "mdi:radiator"}"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${esc(sub)}</small></span>
+          ${ro === "main" ? `<em class="role-main">stellt ein</em>` : ""}</div>
+        ${ro === "main" ? "" : `<div class="segs small ${hasWall ? "n3" : "n2"}">${opts.map(([k, l, i]) => `<button class="seg ${ro === k ? "on" : ""}" data-action="role-set" data-id="${esc(id)}" data-v="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div>`}
+      </div>`;
+    }).join("");
+    const anyAssist = climates.some((id) => role(id) === "assist");
+    return `<div class="field"><span><ha-icon icon="mdi:thermostat"></ha-icon> Rolle der Thermostate</span>
+      <div class="roles">${rows}</div>
+      ${anyAssist ? `<label class="field narrow"><span><ha-icon icon="mdi:thermometer-chevron-down"></ha-icon> Zusatz-Heizkörper helfen ab</span><div class="unit"><input type="number" step="0.1" min="0.2" max="3" data-room="assist_diff" value="${r.assist_diff ?? ""}" placeholder="0,5"><i>°C unter Soll</i></div></label>` : ""}
+      <details class="role-help"><summary><ha-icon icon="mdi:help-circle-outline"></ha-icon> Was bedeuten die Rollen?</summary>
+        <p><b>Folgt Wand</b> – in der CCU-Heizgruppe des Wandthermostats; Hauswerk stellt nur das Wandthermostat (spart Funk). Folgt er 15 Min. nicht, stellt Hauswerk ihn selbst.</p>
+        <p><b>Selbst</b> – Hauswerk stellt ihn wie das Wandthermostat auf das Raum-Soll.</p>
+        <p><b>Zusatz</b> – Mischbetrieb: zu, solange die Fußbodenheizung reicht; heizt mit ab X °C unter Soll, beim Vorheizen und Boost. In der CCU aus der Heizgruppe nehmen und auf „Manu“ stellen.</p>
+      </details></div>`;
   }
 
   /** %-Sensoren für die Ventilöffnung am selben Gerät wie das Thermostat (Sensoren vor Zahlen-Entitäten). */
@@ -4125,18 +4153,23 @@ class HauswerkPanel extends HTMLElement {
         if (this._pop) this._renderPop();
         this._toast("Wird beim nächsten Aufheizen neu gelernt");
         break;
-      case "assist-toggle": {
+      case "role-set": {
         const room = this._dialog.room;
-        const sel = new Set(room.assist_entities || []);
-        sel.has(el.dataset.id) ? sel.delete(el.dataset.id) : sel.add(el.dataset.id);
-        room.assist_entities = [...sel];
+        const id = el.dataset.id;
+        const assist = new Set(room.assist_entities || []);
+        // „Alle selbst stellen“ von früher in einzelne Rollen umrechnen
+        const own = new Set(room.pair_mode === "off"
+          ? (room.climates || []).filter((c) => this._thermoKind(c) !== "wall" && !assist.has(c)) : room.pair_exclude || []);
+        room.pair_mode = null;
+        assist.delete(id);
+        own.delete(id);
+        if (el.dataset.v === "assist") assist.add(id);
+        if (el.dataset.v === "own") own.add(id);
+        room.assist_entities = [...assist];
+        room.pair_exclude = [...own];
         this._renderDialog();
         break;
       }
-      case "pair-mode":
-        this._dialog.room.pair_mode = el.dataset.v === "auto" ? null : el.dataset.v;
-        this._renderDialog();
-        break;
       case "presence-mode":
         this._dialog.room.presence_mode = el.dataset.v;
         this._renderDialog();
@@ -5205,6 +5238,22 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .rq-quick { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
 .segs.small.rq-dur { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:6px; }
 .segs.small.rq-dur .seg { padding:10px 2px; font-size:12.5px; white-space:nowrap; }
+.roles { display:flex; flex-direction:column; gap:8px; }
+.role { background:var(--card2); border-radius:14px; padding:10px 12px; display:flex; flex-direction:column; gap:8px; }
+.role-h { display:flex; align-items:center; gap:10px; }
+.role-h > ha-icon { --mdc-icon-size:22px; color:var(--accent); }
+.role-h .grow { display:flex; flex-direction:column; min-width:0; }
+.role-h b { font-size:14.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.role-h small { color:var(--muted); font-size:12.5px; }
+.role-main { font-style:normal; font-size:12px; font-weight:700; padding:3px 9px; border-radius:99px; background:color-mix(in srgb, var(--accent) 16%, var(--card)); color:var(--accent); white-space:nowrap; }
+.role .segs.small { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; margin:0; }
+.role .segs.small.n2 { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+.role .segs.small .seg { padding:8px 4px; font-size:12.5px; white-space:nowrap; justify-content:center; gap:5px; }
+.role .segs.small .seg ha-icon { --mdc-icon-size:16px; }
+.role-help { margin-top:8px; font-size:13px; color:var(--muted); }
+.role-help summary { cursor:pointer; display:inline-flex; align-items:center; gap:6px; color:var(--accent); font-weight:600; list-style:none; }
+.role-help summary::-webkit-details-marker { display:none; }
+.role-help p { margin:8px 0 0; line-height:1.4; }
 .rq-more { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
 .rq-more .qbtn { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; padding:10px 14px; border-radius:12px; background:var(--card2); font-size:13.5px; font-weight:600; color:var(--text); }
 .rq-more .qbtn ha-icon { --mdc-icon-size:18px; color:var(--accent); }

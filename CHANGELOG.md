@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.23.1 – 2026-11-16
+
+### Geändert
+- **Rolle der Thermostate:** Kopplung und Mischbetrieb unter *Raum › Geräte* sind zu einer übersichtlichen Liste zusammengefasst. Jedes Thermostat steht mit Art, Zustand und Ventilöffnung da; das Wandthermostat „stellt ein“, jeder Heizkörper bekommt per Tipp eine Rolle: **Folgt Wand** (Heizgruppe der CCU), **Selbst** (Hauswerk stellt ihn auf das Raum-Soll) oder **Zusatz** (Mischbetrieb). Die Erklärung steht aufklappbar unter „Was bedeuten die Rollen?“. Die Rolle „Selbst“ gibt es jetzt je Heizkörper statt nur für den ganzen Raum.
+
 ## 0.23.0 – 2026-11-16
 
 ### Neu

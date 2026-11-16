@@ -352,7 +352,8 @@ class Heizen:
         """
         if room.get("pair_mode") == "off":
             return set()
-        assist = set(room.get("assist_entities") or [])
+        # Zusatzheizung und „selbst stellen“ gewählte Thermostate folgen nie dem Wandthermostat
+        assist = set(room.get("assist_entities") or []) | set(room.get("pair_exclude") or [])
         climates = [c for c in room.get("climates") or [] if c not in assist]
         walls = [c for c in climates if self._kind(c) == "wall"]
         trvs = [c for c in climates if self._kind(c) == "trv"]
