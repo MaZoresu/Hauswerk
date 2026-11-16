@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.28.0";
+const VERSION = "0.29.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2386,7 +2386,8 @@ class HauswerkPanel extends HTMLElement {
       ...covers.map((c) => ({
         g: "Rollläden", id: `rwc:${c.id}`, icon: "mdi:window-shutter", c: c.cfg.auto === false ? "#94a3b8" : "#38bdf8",
         title: this._entityName(c.id), off: c.cfg.auto === false,
-        sum: [`Verhalten „${this._rwProfName(c.cfg.profile)}“`, c.cfg.contact_open || c.cfg.contact_tilted ? "mit Fensterkontakt" : "", c.cfg.storm === false ? "ohne Sturmschutz" : ""].filter(Boolean).join(" · "),
+        sum: (() => { const room = this._rwRoomFor(c.id); const own = c.cfg.contact_open || c.cfg.contact_tilted; const inh = this._rwRoomContacts(room);
+          return [`Verhalten „${this._rwProfName(c.cfg.profile)}“`, room ? `Raum ${room.name}` : "", own ? "eigene Kontakte" : c.cfg.contacts !== "none" && room && (inh.open.length || inh.tilted.length) ? "Fenster aus Heizwerk" : "", c.cfg.storm === false ? "ohne Sturmschutz" : ""].filter(Boolean).join(" · "); })(),
         words: `${c.id} verhalten profil fenster tür kontakt`,
       })),
       ...profiles.map((x) => {
@@ -2529,7 +2530,7 @@ class HauswerkPanel extends HTMLElement {
               ${row("el1", "Sonnenhöhe mindestens", "", num("elevation_min", 25, 0, 90, 1, "°"), "Tief stehende Sonne wird oft von Nachbarhäusern oder Bäumen verdeckt.")}${row("el2", "Sonnenhöhe höchstens", "", num("elevation_max", 90, 0, 90, 1, "°"))}
               ${row("t2h", "Spielraum außen", "", num("temp2_hyst", 0.2, 0, 5, 0.1, "°C"))}</div>
             <label class="field"><span><ha-icon icon="mdi:thermometer"></ha-icon> Eigener Außensensor (leer = Hauswerk › Wetter)</span>${ent("temp2_sensor", dc("temperature", "sensor"), "aus Hauswerk › Wetter")}</label>
-            <label class="field"><span><ha-icon icon="mdi:home-thermometer-outline"></ha-icon> Temperatur innen</span>${ent("temp1_sensor", dc("temperature", "sensor"))}</label>
+            <label class="field"><span><ha-icon icon="mdi:home-thermometer-outline"></ha-icon> Temperatur innen (leer = Raumtemperatur aus Heizwerk)</span>${ent("temp1_sensor", dc("temperature", "sensor"), "aus dem Heizwerk-Raum")}</label>
             <div class="wxrows">${row("t1", "Innen ab", "", num("temp1_min", 18, 0, 40, 0.5, "°C"))}${row("t1h", "Spielraum innen", "", num("temp1_hyst", 0.2, 0, 5, 0.1, "°C"))}</div>
             <label class="field"><span><ha-icon icon="mdi:brightness-5"></ha-icon> Helligkeitssensor</span>${ent("shade_brightness_sensor", dc("illuminance", "sensor"))}</label>
             <div class="wxrows">${row("sb1", "Beginnt ab", "", num("shade_bright_start", 35000, 0, 200000, 100, "lx"))}${row("sb2", "Endet unter", "", num("shade_bright_end", 25000, 0, 200000, 100, "lx"))}
@@ -2547,7 +2548,8 @@ class HauswerkPanel extends HTMLElement {
         body = `${lbl("Tür ganz offen")}${choice("pos_lockout", [["", "Nicht herunterfahren"], ["30", "Höchstens 30 %"], ["50", "Höchstens 50 %"]], "rwp-lock")}
           ${note("So sperrt dich die Terrassentür nicht aus. Hochfahren geht immer.", "mdi:door-open")}
           <div class="wxrows">${row("vf", "Fenster gekippt: lüften", "Rollladen auf Lüftungsstellung", feat("ventilate"))}${has("ventilate") ? row("pv", "Lüftungsstellung", "", num("pos_ventilate", 30, 0, 100, 5, "%")) : ""}</div>
-          ${lbl("Kontakte")}${mine.length ? `<div class="evlist">${mine.map(([id, c]) => `<div class="ev"><ha-icon icon="mdi:window-shutter"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${[c.contact_open ? `offen: ${esc(this._entityName(c.contact_open))}` : "", c.contact_tilted ? `gekippt: ${esc(this._entityName(c.contact_tilted))}` : ""].filter(Boolean).join(" · ") || "kein Kontakt"}</small></span><button class="link" data-action="pop-open" data-pop="rwc:${esc(id)}">ändern</button></div>`).join("")}</div>` : note("Noch kein Rollladen nutzt dieses Verhalten.")}
+          ${lbl("Kontakte")}${mine.length ? `<div class="evlist">${mine.map(([id, c]) => `<div class="ev"><ha-icon icon="mdi:window-shutter"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${(() => { const own = c.contact_open || c.contact_tilted; const k = own ? { open: [c.contact_open].filter(Boolean), tilted: [c.contact_tilted].filter(Boolean) } : c.contacts === "none" ? { open: [], tilted: [] } : this._rwRoomContacts(this._rwRoomFor(id));
+              return [k.open.length ? `offen: ${k.open.map((e) => esc(this._entityName(e))).join(", ")}` : "", k.tilted.length ? `gekippt: ${k.tilted.map((e) => esc(this._entityName(e))).join(", ")}` : ""].filter(Boolean).join(" · ") + (!own && (k.open.length || k.tilted.length) ? " · aus Heizwerk" : "") || "kein Kontakt"; })()}</small></span><button class="link" data-action="pop-open" data-pop="rwc:${esc(id)}">ändern</button></div>`).join("")}</div>` : note("Noch kein Rollladen nutzt dieses Verhalten.")}
           ${exBox(`${lbl("Lüften")}${checks("vent_options", RW_VENT)}${lbl("Aussperrschutz auch bei gekipptem Fenster")}${checks("lockout_tilted", RW_LOCK_TILTED)}`)}`;
         break;
       }
@@ -2651,10 +2653,16 @@ class HauswerkPanel extends HTMLElement {
             const c = d.contacts[cid] || {};
             const opts = [...new Set([...f.all, c.open, c.tilted].filter(Boolean))];
             const sel = (k) => `<select data-cwiz="${esc(cid)}" data-k="${k}"><option value="">keiner</option>${Object.keys(S).filter((id) => id.startsWith("binary_sensor.") && (["door", "window", "opening"].includes(S[id].attributes?.device_class) || opts.includes(id))).sort((a, b) => (opts.includes(b) - opts.includes(a)) || this._entityName(a).localeCompare(this._entityName(b), "de")).map((id) => `<option value="${esc(id)}" ${c[k] === id ? "selected" : ""}>${name(id)}${this._areaOf(id) ? ` (${esc(this._areaOf(id))})` : ""}</option>`).join("")}</select>`;
+            const room = this._rwRoomFor(cid, "");
+            const inh = this._rwRoomContacts(room);
+            if (c.inherit) return `<div class="cwiz-c"><b><ha-icon icon="mdi:window-shutter"></ha-icon>${name(cid)}</b>
+              <div class="evlist">${[...inh.open.map((e) => [e, "ganz offen – nicht herunterfahren", "mdi:door-open"]), ...inh.tilted.map((e) => [e, "gekippt – lüften", "mdi:window-open-variant"])].map(([e, role, icon]) => `<div class="ev"><ha-icon icon="${icon}"></ha-icon><span class="grow"><b>${name(e)}</b><small>${role}</small></span></div>`).join("")}</div>
+              <small class="muted"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon> Aus Heizwerk › ${esc(room.name)} übernommen – auch die Raumtemperatur. <button class="link inline" data-action="cwiz-own" data-id="${esc(cid)}">Eigene wählen</button></small></div>`;
             return `<div class="cwiz-c"><b><ha-icon icon="mdi:window-shutter"></ha-icon>${name(cid)}</b>
               <label class="field"><span><ha-icon icon="mdi:door-open"></ha-icon> ganz offen (Tür/Fenster)</span>${sel("open")}</label>
               <label class="field"><span><ha-icon icon="mdi:window-open-variant"></ha-icon> gekippt</span>${sel("tilted")}</label>
-              ${f.all.length ? `<small class="muted">${f.all.length} Kontakt${f.all.length > 1 ? "e" : ""} im selben Bereich gefunden${c.open || c.tilted ? " und vorausgewählt" : ""}.</small>` : ""}</div>`;
+              ${f.all.length ? `<small class="muted">${f.all.length} Kontakt${f.all.length > 1 ? "e" : ""} im selben Bereich gefunden${c.open || c.tilted ? " und vorausgewählt" : ""}.</small>` : ""}
+              ${room && (inh.open.length || inh.tilted.length) ? `<small class="muted"> <button class="link inline" data-action="cwiz-inherit" data-id="${esc(cid)}">Doch aus Heizwerk › ${esc(room.name)} übernehmen</button></small>` : room ? `<small class="muted"> Im Heizwerk-Raum „${esc(room.name)}“ sind keine Fensterkontakte eingetragen.</small>` : ""}</div>`;
           }).join("")}`;
         break;
       case 3: {
@@ -2680,10 +2688,12 @@ class HauswerkPanel extends HTMLElement {
       }
       case 5: {
         const line = (icon, t, v) => `<div class="kv"><ha-icon icon="${icon}"></ha-icon><span>${t}</span><b>${v}</b></div>`;
-        const cs = d.covers.filter((c) => d.contacts[c]?.open || d.contacts[c]?.tilted).length;
+        const cs = d.covers.filter((c) => d.contacts[c]?.open || d.contacts[c]?.tilted || d.contacts[c]?.inherit).length;
+        const rooms = [...new Set(d.covers.map((c) => this._rwRoomFor(c, "")?.name).filter(Boolean))];
         body = `<div class="wiz-sum">
             ${line("mdi:window-shutter", "Rollläden", d.covers.map(name).join(", "))}
             ${line("mdi:compass-outline", "Fenster zeigt nach", d.prof.window_dir == null ? "–" : this._rwDirName(d.prof.window_dir))}
+            ${line("mdi:home-thermometer-outline", "Raum aus Heizwerk", rooms.length ? rooms.map(esc).join(", ") : "–")}
             ${line("mdi:door-open", "Mit Kontakt", `${cs} von ${d.covers.length}`)}
             ${line("mdi:tune-variant", "Verhalten", d.pick === "new" ? `neu: „${esc(this._cwizName(d))}“` : `„${esc(this._rwProfName(d.pick))}“`)}
             ${d.pick === "new" ? line("mdi:sun-thermometer-outline", "Sonnenschutz", d.shade && d.prof.window_dir != null ? `ab ${fmt(d.temp, 0)} °C außen` : "aus") : ""}
@@ -2751,6 +2761,38 @@ class HauswerkPanel extends HTMLElement {
     this._toast(n === 1 ? `${this._entityName(d.covers[0])} hinzugefügt` : `${n} Rollläden hinzugefügt`);
   }
 
+  // ------------------------------------------------------------ Raum aus Heizwerk (wie im Backend)
+  _rwAreaId(id) {
+    const e = this._hass.entities?.[id];
+    return e?.area_id || this._hass.devices?.[e?.device_id]?.area_id || null;
+  }
+
+  /** Heizwerk-Raum eines Rollladens: gewählt, sonst über den Bereich (Thermostat/Fenster im selben Bereich) oder den Namen. */
+  _rwRoomFor(coverId, choice = this._data.rollwerk?.covers?.[coverId]?.room) {
+    const rooms = this._data.rooms || {};
+    if (choice === "none") return null;
+    if (choice && rooms[choice]) return { ...rooms[choice], auto: false };
+    const area = this._rwAreaId(coverId);
+    const areaName = String(this._hass.areas?.[area]?.name || "").trim().toLowerCase();
+    const hit = Object.values(rooms).find((r) => area && [...(r.climates || []), ...(r.windows || [])].some((e) => this._rwAreaId(e) === area))
+      || Object.values(rooms).find((r) => areaName && String(r.name).trim().toLowerCase() === areaName);
+    return hit ? { ...hit, auto: true } : null;
+  }
+
+  /** Fenster eines Heizwerk-Raums: Türen = ganz offen (Aussperrschutz), Fenster = gekippt (Lüften). */
+  _rwRoomContacts(room) {
+    const open = [], tilted = [];
+    for (const e of room?.windows || []) {
+      if (!/^(binary_sensor|input_boolean)\./.test(e)) continue;
+      const st = this._hass.states[e];
+      const txt = `${e} ${st?.attributes?.friendly_name || ""}`.toLowerCase();
+      if (/kipp|tilt/.test(txt)) tilted.push(e);
+      else if (["door", "garage_door"].includes(st?.attributes?.device_class) || /t(ü|ue)r|door/.test(txt)) open.push(e);
+      else tilted.push(e);
+    }
+    return { open, tilted };
+  }
+
   _rwcPop(entityId) {
     const d = this._pop.draft;
     if (!d.cfg) d.cfg = clone(this._data.rollwerk?.covers?.[entityId] || {});
@@ -2765,6 +2807,10 @@ class HauswerkPanel extends HTMLElement {
     const rs = this._rwStatus?.covers?.[entityId] || {};
     const pid = c.profile || "standard";
     const profiles = this._rwProfiles();
+    const autoRoom = this._rwRoomFor(entityId, "");
+    const room = this._rwRoomFor(entityId, c.room);
+    const inh = this._rwRoomContacts(room);
+    const cmode = c.contacts === "none" ? "none" : c.contact_open || c.contact_tilted || d.own || !room ? "own" : "heizwerk";
     return {
       icon: "mdi:window-shutter", c: "#0ea5e9", title: "Rollladen", sub: `${esc(this._entityName(entityId))}${rs.area ? ` · ${esc(rs.area)}` : ""}`,
       body: `
@@ -2773,9 +2819,16 @@ class HauswerkPanel extends HTMLElement {
           <div class="segs small">${profiles.map((x) => `<button class="seg ${x.id === pid ? "on" : ""}" data-action="rwc-set" data-k="profile" data-v="${esc(x.id)}" ${dis}>${esc(x.name)}</button>`).join("")}</div></div>
         ${this._rwDayBar(this._rwStatus?.timelines?.[pid])}
         <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${esc(this._rwProfSum({ id: pid, ...(this._data.rollwerk?.profiles?.[pid] || {}) }))} · <button class="link inline" data-action="pop-open" data-pop="rwp:${esc(pid)}:tag">Verhalten bearbeiten</button></p>
-        <label class="field"><span><ha-icon icon="mdi:door-open"></ha-icon> Kontakt „ganz offen“ – Aussperrschutz</span>${sel("contact_open")}</label>
-        <label class="field"><span><ha-icon icon="mdi:window-open-variant"></ha-icon> Kontakt „gekippt“ – Lüften</span>${sel("contact_tilted")}</label>
-        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Ganz offen: der Rollladen fährt nicht herunter, bis zu ist – so sperrt dich die Terrassentür nicht aus. Gekippt: Lüftungsstellung (Verhalten › Fenster & Lüften). Ein Kontakt mit mehreren Zuständen (offen/gekippt) kann bei beiden stehen.</p>
+        <label class="field"><span><ha-icon icon="mdi:home-thermometer-outline"></ha-icon> Raum aus Heizwerk</span>
+          <select data-rwc="room" ${dis}><option value="">${autoRoom ? `automatisch: ${esc(autoRoom.name)}` : "automatisch (keiner gefunden)"}</option>${Object.values(this._data.rooms || {}).sort((a, b) => a.name.localeCompare(b.name, "de")).map((r) => `<option value="${esc(r.id)}" ${c.room === r.id ? "selected" : ""}>${esc(r.name)}</option>`).join("")}<option value="none" ${c.room === "none" ? "selected" : ""}>keiner</option></select></label>
+        <div class="lbl">Fenster- und Türkontakte</div>
+        <div class="segs small">${[["heizwerk", "Aus Heizwerk", !room], ["own", "Eigene"], ["none", "Keine"]].map(([v, l, off]) => `<button class="seg ${cmode === v ? "on" : ""}" data-action="rwc-cmode" data-v="${v}" ${off || dis ? "disabled" : ""}>${l}</button>`).join("")}</div>
+        ${cmode === "heizwerk" ? `<div class="evlist">${[...inh.open.map((e) => [e, "ganz offen – nicht herunterfahren", "mdi:door-open"]), ...inh.tilted.map((e) => [e, "gekippt – Lüftungsstellung", "mdi:window-open-variant"])].map(([e, role, icon]) => `<div class="ev"><ha-icon icon="${icon}"></ha-icon><span class="grow"><b>${esc(this._entityName(e))}</b><small>${role}</small></span></div>`).join("") || `<p class="muted small">Im Raum „${esc(room?.name || "")}“ sind keine Fensterkontakte eingetragen.</p>`}</div>
+          <p class="muted small"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon>Aus Heizwerk › ${esc(room?.name || "")}: Türen sperren das Herunterfahren, Fenster lüften. Neue Kontakte trägst du einmal im Raum ein – <button class="link inline" data-action="room-edit" data-id="${esc(room?.id || "")}" data-rtab="devices">Raum öffnen</button>. Die Raumtemperatur nutzt der Sonnenschutz („innen wärmer als“).</p>` : ""}
+        ${cmode === "own" ? `<label class="field"><span><ha-icon icon="mdi:door-open"></ha-icon> Kontakt „ganz offen“ – Aussperrschutz</span>${sel("contact_open")}</label>
+          <label class="field"><span><ha-icon icon="mdi:window-open-variant"></ha-icon> Kontakt „gekippt“ – Lüften</span>${sel("contact_tilted")}</label>
+          <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Nur nötig, wenn der Kontakt nicht schon im Heizwerk-Raum steht – z. B. eine Tür, die fürs Heizen keine Rolle spielt.</p>` : ""}
+        ${cmode === "none" ? `<p class="muted small"><ha-icon icon="mdi:alert-outline"></ha-icon>Ohne Kontakt fährt der Rollladen auch bei offener Tür herunter.</p>` : ""}
         ${rs.reason ? `<div class="rq-facts"><span style="--c:#0ea5e9"><ha-icon icon="mdi:robot-outline"></ha-icon>${esc(rs.reason)}${rs.target != null ? ` → ${rs.target} %` : ""}</span>${rs.up ? `<span><ha-icon icon="mdi:weather-sunset-up"></ha-icon>${rs.up.join("–")}</span>` : ""}${rs.down ? `<span><ha-icon icon="mdi:weather-sunset-down"></ha-icon>${rs.down.join("–")}</span>` : ""}</div>` : ""}`,
       foot: `<button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
         ${this._admin ? `<button class="primary" data-action="rwc-save" data-id="${esc(entityId)}"><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>` : ""}`,
@@ -4748,6 +4801,7 @@ class HauswerkPanel extends HTMLElement {
     if (t.dataset.rwc && this._pop?.draft?.cfg) {
       const k = t.dataset.rwc;
       this._pop.draft.cfg[k] = t.type === "checkbox" ? t.checked : t.type === "number" ? (t.value === "" ? null : Number(t.value)) : t.value || null;
+      if (k === "room" && isChange) this._renderPop();
       if (t.type === "checkbox" && isChange) this._renderPop();
       return;
     }
@@ -4950,7 +5004,13 @@ class HauswerkPanel extends HTMLElement {
         if (i > d.step && !this._cwizOk(d.step)) return;
         if (d.step === 0 && i > 0) {
           // Kontakte im Bereich vorschlagen (nur für neu gewählte Rollläden)
-          for (const cid of d.covers) if (!d.contacts[cid]) { const f = this._cwizContacts(cid); d.contacts[cid] = { open: f.open, tilted: f.tilted }; }
+          for (const cid of d.covers) {
+            if (d.contacts[cid]) continue;
+            const room = this._rwRoomFor(cid, "");
+            const inh = this._rwRoomContacts(room);
+            if (room && (inh.open.length || inh.tilted.length)) d.contacts[cid] = { inherit: true, room: room.id };
+            else { const f = this._cwizContacts(cid); d.contacts[cid] = { open: f.open, tilted: f.tilted, room: room?.id || null }; }
+          }
         }
         if (i === 4) d.pick = null;
         d.step = i;
@@ -4964,6 +5024,17 @@ class HauswerkPanel extends HTMLElement {
         this._renderPop();
         break;
       }
+      case "cwiz-own": {
+        const cid = el.dataset.id;
+        const f = this._cwizContacts(cid);
+        this._pop.draft.contacts[cid] = { open: f.open, tilted: f.tilted };
+        this._renderPop();
+        break;
+      }
+      case "cwiz-inherit":
+        this._pop.draft.contacts[el.dataset.id] = { inherit: true };
+        this._renderPop();
+        break;
       case "cwiz-nodir":
         Object.assign(this._pop.draft.prof, { window_dir: null, azimuth_start: 95, azimuth_end: 265 });
         this._renderPop();
@@ -4999,6 +5070,7 @@ class HauswerkPanel extends HTMLElement {
         break;
       }
       case "room-edit":
+        if (this._pop) this._closePop();
         this._openRoom(this._data.rooms[el.dataset.id]);
         if (el.dataset.rtab && this._dialog) {
           this._dialog.tab = el.dataset.rtab;
@@ -5622,6 +5694,14 @@ class HauswerkPanel extends HTMLElement {
         this._closePop();
         this._renderMain();
         this._toast("Verhalten gelöscht");
+        break;
+      }
+      case "rwc-cmode": {
+        const d = this._pop.draft, v = el.dataset.v;
+        d.own = v === "own";
+        d.cfg.contacts = v === "none" ? "none" : null;
+        if (v !== "own") Object.assign(d.cfg, { contact_open: null, contact_tilted: null });
+        this._renderPop();
         break;
       }
       case "rwc-save": {

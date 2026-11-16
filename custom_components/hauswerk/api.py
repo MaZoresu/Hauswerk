@@ -531,6 +531,8 @@ _CONTACT = _opt(vol.All(str, vol.Match(r"^(binary_sensor|input_boolean|sensor)\.
 COVER_SCHEMA = vol.Schema(
     {
         vol.Optional("profile"): vol.All(str, vol.Length(min=1, max=40)),
+        vol.Optional("room"): _opt(vol.All(str, vol.Length(max=40))),
+        vol.Optional("contacts"): _opt(vol.In(["none"])),
         vol.Optional("contact_open"): _CONTACT,
         vol.Optional("contact_tilted"): _CONTACT,
         vol.Optional("storm"): bool,

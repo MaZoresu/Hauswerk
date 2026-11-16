@@ -22,7 +22,7 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import SHUTTER_STORAGE_KEY, WINDOW_OPEN_STATES
+from .const import DOMAIN, MODULE_HEATING, SHUTTER_STORAGE_KEY, WINDOW_OPEN_STATES
 from .core import Haus, async_calendar_events, parse_when
 from .log import Protokoll, log_settings
 from .logic import FACADES, parse_hm, shade_conditions, shade_wanted
@@ -251,6 +251,8 @@ class Rollwerk:
         for entity_id in self.settings.get("rw_covers") or []:
             cfg = self.covers.get(entity_id) or {}
             ids.update(e for e in (cfg.get("contact_open"), cfg.get("contact_tilted")) if e)
+            opens, tilted, _src = self.contacts(entity_id)
+            ids.update(opens + tilted)
             prof = self.profile(entity_id)
             ids.update(prof.get(k) for k in ("resident_sensor", "force_pause", "force_up", "force_down",
                                               "force_ventilate", "force_shading", "shading_alt_entity") if prof.get(k))
@@ -271,6 +273,7 @@ class Rollwerk:
         self.hass.async_create_task(self.async_evaluate())
 
     async def _async_tick(self, _now=None) -> None:
+        self._track()  # Fenster der Heizwerk-Räume können sich geändert haben
         await self._async_refresh()
         await self.async_evaluate()
 
@@ -376,6 +379,80 @@ class Rollwerk:
                 area_id = getattr(device, "area_id", None)
             area = ar.async_get(self.hass).async_get_area(area_id) if area_id else None
             return area.name if area else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _area_id(self, entity_id: str) -> str | None:
+        try:
+            entry = er.async_get(self.hass).async_get(entity_id)
+            if entry is None:
+                return None
+            if entry.area_id:
+                return entry.area_id
+            device = dr.async_get(self.hass).async_get(entry.device_id) if entry.device_id else None
+            return getattr(device, "area_id", None)
+        except Exception:  # noqa: BLE001
+            return None
+
+    # ------------------------------------------------------------ Raum aus Heizwerk
+    def _heizwerk(self):
+        return (self.hass.data.get(DOMAIN) or {}).get(MODULE_HEATING)
+
+    def room_of(self, entity_id: str) -> tuple[str | None, dict | None, bool]:
+        """Heizwerk-Raum eines Rollladens: gewählt, sonst über den Bereich gefunden. (id, Raum, automatisch?)"""
+        ctl = self._heizwerk()
+        rooms = getattr(ctl, "rooms", None) or {}
+        choice = (self.covers.get(entity_id) or {}).get("room")
+        if choice == "none" or not rooms:
+            return None, None, False
+        if choice and choice in rooms:
+            return choice, rooms[choice], False
+        area_id = self._area_id(entity_id)
+        area_name = (self._area(entity_id) or "").strip().lower()
+        for room_id, room in rooms.items():
+            if area_id and any(self._area_id(e) == area_id for e in (room.get("climates") or []) + (room.get("windows") or [])):
+                return room_id, room, True
+        for room_id, room in rooms.items():
+            if area_name and str(room.get("name") or "").strip().lower() == area_name:
+                return room_id, room, True
+        return None, None, False
+
+    def contacts(self, entity_id: str) -> tuple[list[str], list[str], str | None]:
+        """Kontakte „ganz offen“ und „gekippt“: eigene am Rollladen, sonst die Fenster des Heizwerk-Raums.
+
+        Aus Heizwerk: Türkontakte zählen als „ganz offen“ (Aussperrschutz), Fensterkontakte als „gekippt“
+        (Lüftungsstellung) – ein offenes Fenster sperrt niemanden aus.
+        """
+        cfg = self.covers.get(entity_id) or {}
+        own_open, own_tilted = cfg.get("contact_open"), cfg.get("contact_tilted")
+        if own_open or own_tilted or cfg.get("contacts") == "none":
+            return [e for e in [own_open] if e], [e for e in [own_tilted] if e], "own" if own_open or own_tilted else None
+        _rid, room, _auto = self.room_of(entity_id)
+        if not room:
+            return [], [], None
+        opens, tilted = [], []
+        for e in room.get("windows") or []:
+            if not e.startswith(("binary_sensor.", "input_boolean.")):
+                continue
+            state = self.hass.states.get(e)
+            text = f"{e} {state.name if state is not None else ''}".lower()
+            dc = state.attributes.get("device_class") if state is not None else None
+            if "kipp" in text or "tilt" in text:
+                tilted.append(e)
+            elif dc in ("door", "garage_door") or "tür" in text or "tuer" in text or "door" in text:
+                opens.append(e)
+            else:
+                tilted.append(e)
+        return opens, tilted, "heizwerk" if opens or tilted else None
+
+    def room_temp(self, entity_id: str) -> float | None:
+        """Raumtemperatur aus Heizwerk (Raumsensor, sonst Wandthermostat)."""
+        ctl = self._heizwerk()
+        _rid, room, _auto = self.room_of(entity_id)
+        if not room or ctl is None or not hasattr(ctl, "_room_values"):
+            return None
+        try:
+            return ctl._room_values(room)[0]
         except Exception:  # noqa: BLE001
             return None
 
@@ -550,7 +627,8 @@ class Rollwerk:
         rt["day"] = day
         return day, rt.get("why_day" if day else "why_night") or "Zeit"
 
-    def _shading(self, prof: dict, rt: dict, now: float, azimuth: float | None, elevation: float | None) -> tuple[bool, dict]:
+    def _shading(self, prof: dict, rt: dict, now: float, azimuth: float | None, elevation: float | None,
+                 room_temp: float | None = None) -> tuple[bool, dict]:
         """Beschattung an/aus nach den Bedingungen des Profils, mit Wartezeiten."""
         fc = self._fc.get(prof.get("forecast_entity") or self.haus.weather_entity() or "") or {}
         weather = self.hass.states.get(prof.get("forecast_entity") or self.haus.weather_entity() or "")
@@ -560,7 +638,7 @@ class Rollwerk:
         values = {
             "azimuth": azimuth, "elevation": elevation,
             "brightness": self._num(prof.get("shade_brightness_sensor")),
-            "temp1": self._num(prof.get("temp1_sensor")), "temp2": temp2,
+            "temp1": self._num(prof.get("temp1_sensor")) if prof.get("temp1_sensor") else room_temp, "temp2": temp2,
             "forecast_temp": fc.get("tmax"),
             "forecast_weather": fc.get("condition") or (weather.state if weather is not None else None),
             "custom": self._on(prof.get("shade_custom")) if prof.get("shade_custom") else None,
@@ -611,7 +689,7 @@ class Rollwerk:
         day, why = self._day_phase(entity_id, prof, rt, now, now_min, elevation)
         shading, info = (False, {})
         if "shading" in feats and day:
-            shading, info = self._shading(prof, rt, now, azimuth, elevation)
+            shading, info = self._shading(prof, rt, now, azimuth, elevation, self.room_temp(entity_id))
         elif rt.get("shading"):
             rt["shading"] = False
         rt["shade_info"] = info
@@ -669,8 +747,11 @@ class Rollwerk:
             target, reason, cat = None, "heute schon einmal geschlossen", "none"
 
         # Fenster/Tür: offen = Aussperrschutz (nicht herunter) bzw. volle Lüftung, gekippt = Lüftungsstellung
-        is_open = self._contact(cfg.get("contact_open"))
-        tilted = self._contact(cfg.get("contact_tilted")) and not is_open
+        opens, tilts, _src = self.contacts(entity_id)
+        open_now = [e for e in opens if self._contact(e)]
+        tilt_now = [e for e in tilts if self._contact(e)]
+        is_open = bool(open_now)
+        tilted = bool(tilt_now) and not is_open
         lock_tilted = set(prof.get("lockout_tilted") or [])
         base_target = target
         if is_open:
@@ -680,15 +761,15 @@ class Rollwerk:
             else:
                 floor = int(pos) if pos is not None else p_open
             if target is None or target < floor:
-                target, reason, cat = floor, f"{self._name(cfg['contact_open'])} offen – nicht herunterfahren", "ventilation"
+                target, reason, cat = floor, f"{self._name(open_now[0])} offen – nicht herunterfahren", "ventilation"
         elif tilted and "ventilate" in feats and not (cat == "shading" and "shading_over_ventilation" in vent_opts):
             lock_here = (cat == "close" and "lockout_tilted_closing" in lock_tilted) or (
                 cat == "shading" and "lockout_tilted_shading_start" in lock_tilted) or (
                 cat == "open" and rt.get("shade_ended_on") == today and "lockout_tilted_shading_end" in lock_tilted)
             if lock_here and pos is not None and (target is None or target < pos):
-                target, reason, cat = int(pos), f"{self._name(cfg['contact_tilted'])} gekippt – Aussperrschutz", "ventilation"
+                target, reason, cat = int(pos), f"{self._name(tilt_now[0])} gekippt – Aussperrschutz", "ventilation"
             elif target is None or target < p_vent or ("ventilation_if_lower_enabled" in vent_opts and (target or 0) > p_vent and cat != "open"):
-                target, reason, cat = p_vent, f"{self._name(cfg['contact_tilted'])} gekippt – lüften", "ventilation"
+                target, reason, cat = p_vent, f"{self._name(tilt_now[0])} gekippt – lüften", "ventilation"
         rt["vent_active"] = is_open or tilted
         if rt.get("vent_was") and not rt["vent_active"] and "prevent_opening_after_ventilation_end" in behavior and base_target is not None \
                 and pos is not None and base_target > pos:
@@ -926,6 +1007,8 @@ class Rollwerk:
             prof = self.profile(entity_id)
             up, down = self._windows(prof)
             info = rt.get("shade_info") or {}
+            contacts = self.contacts(entity_id)
+            room = self.room_of(entity_id)
             covers[entity_id] = {
                 "area": self._area(entity_id),
                 "profile": cfg.get("profile") or "standard",
@@ -934,8 +1017,11 @@ class Rollwerk:
                 "shade_start": info.get("start"), "shade_end": info.get("end"),
                 "blocked": rt.get("blocked"),
                 "manual": bool(rt.get("manual_at")),
-                "contact_open": self._contact(cfg.get("contact_open")),
-                "contact_tilted": self._contact(cfg.get("contact_tilted")),
+                "contact_open": any(self._contact(e) for e in contacts[0]),
+                "contact_tilted": any(self._contact(e) for e in contacts[1]),
+                "contacts": {"open": contacts[0], "tilted": contacts[1], "src": contacts[2]},
+                "room": {"id": room[0], "name": (room[1] or {}).get("name"), "auto": room[2]} if room[0] else None,
+                "room_temp": self.room_temp(entity_id),
                 "resident": self._on(prof.get("resident_sensor")) if prof.get("resident_sensor") else None,
                 "up": [hm(up[0]), hm(up[1])] if up else None,
                 "down": [hm(down[0]), hm(down[1])] if down else None,

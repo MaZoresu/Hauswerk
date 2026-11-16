@@ -170,7 +170,7 @@ Rollläden mit **Verhalten** (früher „Profile“) nach dem Vorbild der [Cover
   - **Feinheiten:** Name, Stellungen offen/zu; Experte: Toleranz, Fahrzeit, Verzögerung, Verhalten im Detail.
 - **Assistent „Rollladen hinzufügen“:** Rollläden wählen, Richtung am Kompass, Kontakte (im Bereich gefunden), Raum-Art und Sonnenschutz – passendes Verhalten wird vorgeschlagen oder neu angelegt.
 - **Tagesleiste:** je Verhalten und Rollladen – heute öffnen, Beschattung möglich, schließen – und „Als Nächstes“.
-- **Je Rollladen:** Verhalten, Kontakt „ganz offen“ und „gekippt“, Automatik und Sturmschutz an/aus.
+- **Je Rollladen:** Verhalten, Raum aus Heizwerk (automatisch über den Bereich), Kontakte (aus dem Heizwerk-Raum: Türen = ganz offen, Fenster = gekippt – oder eigene), Automatik und Sturmschutz an/aus. Die Raumtemperatur aus Heizwerk zählt beim Sonnenschutz als Innentemperatur.
 - **Sturmschutz:** ab der Sturmgrenze aus Hauswerk › Wetter hoch, Ende nach 15 Min. unter 80 %; Böen vom Wetterdienst oder dem Böen-Sensor unter Hauswerk › Wetter.
 - **Nach Neustart:** nichts, verpasste Wechsel nachholen oder immer auf Sollstellung.
 

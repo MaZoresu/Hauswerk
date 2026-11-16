@@ -709,3 +709,39 @@ def test_rollwerk_anwesenheit_und_tagesleiste(hw):
     tl = st["timelines"]["standard"]
     assert tl["open"] == "06:00" and tl["close"] == "16:00" and tl["shade"] == []
     assert st["covers"]["cover.wz"]["next"] == "16:00 schließt"
+
+
+def test_rollwerk_raum_aus_heizwerk(hw):
+    """Rollladen im selben Bereich wie ein Heizwerk-Raum: Fenster und Raumtemperatur kommen von dort."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 7, 16, 20, 1, tzinfo=timezone.utc)  # 21:01 lokal
+        hass = Hass()
+        for eid in ("cover.wz", "climate.wz", "binary_sensor.wz_fenster", "binary_sensor.wz_tuer"):
+            REG[eid] = types.SimpleNamespace(entity_id=eid, device_id=None, area_id="wohnen", domain=eid.split(".")[0], disabled_by=None)
+        hass.set("cover.wz", "open", {"current_position": 100, "supported_features": 15}, "Rollladen Wohnzimmer")
+        hass.set("climate.wz", "heat", {"current_temperature": 23.5, "temperature": 21}, "Wandthermostat")
+        hass.set("binary_sensor.wz_fenster", "on", {"device_class": "window"}, "Fenster Wohnzimmer")
+        hass.set("binary_sensor.wz_tuer", "off", {"device_class": "door"}, "Terrassentür")
+        hass.set("sun.sun", "below_horizon", {"azimuth": 300, "elevation": -5}, "Sonne")
+        log, haus, ctl = await _setup(hw, hass)
+        hass.data["hauswerk"] = {"heizen": ctl}
+        await ctl.async_save_room({"id": "wz", "name": "Wohnzimmer", "type": "heizkoerper", "comfort": 21, "eco": 18,
+                                   "climates": ["climate.wz"], "windows": ["binary_sensor.wz_fenster", "binary_sensor.wz_tuer"]})
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        await rw.async_start()
+        await rw.async_save_profile("standard", dict(rw.profiles["standard"], features=["up", "down", "time", "ventilate"],
+                                                     down_early="21:00", down_late="21:00", delay_random=0))
+        await rw.async_save_settings({"rw_covers": ["cover.wz"]})
+        return rw, hass
+
+    rw, hass = asyncio.run(run())
+    st = rw.status()["covers"]["cover.wz"]
+    assert st["room"]["name"] == "Wohnzimmer" and st["room"]["auto"]
+    assert st["contacts"] == {"open": ["binary_sensor.wz_tuer"], "tilted": ["binary_sensor.wz_fenster"], "src": "heizwerk"}
+    assert st["room_temp"] == 23.5
+    # Fenster (gekippt) offen beim Schließen -> Lüftungsstellung statt zu
+    assert hass.calls[-1] == ("cover", "set_cover_position", {"entity_id": "cover.wz", "position": 30})
+    assert "gekippt – lüften" in st["reason"]

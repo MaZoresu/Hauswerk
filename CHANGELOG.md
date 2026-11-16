@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.29.0 – 2026-11-16
+
+### Neu
+- **Rollladen kennt seinen Heizwerk-Raum:** Rollwerk findet den Raum über den Bereich in Home Assistant (Thermostat oder Fensterkontakt im selben Bereich, sonst gleicher Name); im Rollladen-Dialog lässt er sich auch fest wählen oder abschalten.
+- **Kontakte aus Heizwerk:** Die Fensterkontakte des Raums gelten automatisch auch für den Rollladen – Türen als „ganz offen“ (nicht herunterfahren), Fenster als „gekippt“ (Lüftungsstellung). Eigene Kontakte am Rollladen sind nur noch nötig, wenn ein Kontakt fürs Heizen keine Rolle spielt; „Keine“ schaltet es ab.
+- **Raumtemperatur aus Heizwerk** für den Sonnenschutz („innen wärmer als“), wenn kein eigener Sensor gewählt ist.
+- Der Assistent „Rollladen hinzufügen“ übernimmt Kontakte und Raum aus Heizwerk, statt sie neu abzufragen.
+
 ## 0.28.0 – 2026-11-16
 
 ### Neu
