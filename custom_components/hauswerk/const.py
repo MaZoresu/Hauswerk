@@ -57,7 +57,7 @@ SETTING_LABELS = {
     "demand_valve": "Wärmeanforderung", "rw_covers": "Rollwerk: Rollläden", "rw_storm": "Rollwerk: Sturmschutz", "rw_wind_entity": "Rollwerk: Sturmschutz", "rw_recovery": "Rollwerk: Nach Neustart", "demand_hold": "Wärmeanforderung", "demand_preheat": "Wärmeanforderung",
     "kw_solar": "Kraftwerk: Solar", "kw_grid": "Kraftwerk: Netz", "kw_grid_export": "Kraftwerk: Netz", "kw_grid_invert": "Kraftwerk: Netz",
     "kw_battery": "Kraftwerk: Batterie", "kw_battery_invert": "Kraftwerk: Batterie", "kw_battery_soc": "Kraftwerk: Batterie",
-    "kw_home": "Kraftwerk: Hausverbrauch", "kw_consumers": "Kraftwerk: Verbraucher",
+    "kw_home": "Kraftwerk: Hausverbrauch", "kw_consumers": "Kraftwerk: Verbraucher", "kw_names": "Kraftwerk: Verbraucher",
     "radio_entities": "Funk-Auslastung", "radio_limit": "Funk-Grenze", "pair_mode": "Kopplung",
 }
 

@@ -211,6 +211,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("kw_battery_soc"): _opt(SENSOR),
         vol.Optional("kw_home"): _opt(SENSOR),
         vol.Optional("kw_consumers"): vol.All([SENSOR], vol.Length(max=20)),
+        vol.Optional("kw_names"): vol.All(dict, vol.Length(max=20), {SENSOR: vol.All(str, vol.Length(max=40))}),
         vol.Optional("demand_entity"): _opt(vol.All(str, vol.Match(r"^climate\.[a-z0-9_]+$"))),
         vol.Optional("demand_action"): vol.In(["lower", "off"]),
         vol.Optional("demand_low"): vol.All(vol.Coerce(float), vol.Range(min=5, max=25)),

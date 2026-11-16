@@ -189,7 +189,7 @@ Einstellungen aus Version 0.24 werden beim ersten Start übernommen (je Fassade 
 Zeigt, woher der Strom kommt und wohin er fließt (Kraftwerk › Energiefluss):
 
 - **Energiefluss live:** Solar, Netz (Bezug oder Einspeisung), Batterie (lädt/entlädt, Ladestand) und Haus als Kreise; animierte Linien zeigen, wer wen versorgt – Solar zuerst ins Haus, dann in die Batterie, der Rest ins Netz. Am Haus steht, wie viel Prozent gerade selbst gedeckt sind.
-- **Verbraucher jetzt:** einzelne Geräte mit Leistungsmessung (Wärmepumpe, Wallbox …) mit Anteil am Hausverbrauch; der Rest erscheint als „Sonstiges“.
+- **Verbraucher jetzt:** einzelne Geräte mit Leistungsmessung (Wärmepumpe, Wallbox …) mit eigenem Namen, passendem Symbol (nach dem Namen gewählt) und Anteil am Hausverbrauch; der Rest erscheint als „Sonstiges“.
 - **Heute und Verlauf** (Heute, 7 Tage, 30 Tage, 12 Monate): erzeugt, verbraucht, Netzbezug, eingespeist, Batterie, **Eigenverbrauch** und **Autarkie** in %, Kosten bzw. Ertrag. Balken je Stunde, Tag oder Monat: Verbrauch aus Solar, Batterie und Netz, darunter die Einspeisung.
 - **Einstellungen:** nur die Leistungs-Sensoren (W/kW) für Solar, Netz (mit Vorzeichen oder Bezug/Einspeisung getrennt, Vorzeichen umkehrbar), Batterie (+ Ladestand), Hausverbrauch (sonst errechnet) und Verbraucher. **Automatisch erkennen** schlägt sie vor – aus dem Energie-Dashboard, von denselben Geräten wie die dort eingetragenen Zähler oder nach Namen.
 - **Nichts doppelt:** Zähler (kWh) und Preise kommen aus dem **Energie-Dashboard von Home Assistant** und dessen Statistik.

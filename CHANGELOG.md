@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.36.0 – 2026-11-16
+
+### Neu
+- **Kraftwerk › Verbraucher mit eigenem Namen:** Unter Einstellungen › Verbraucher lässt sich jedem Verbraucher ein Name geben (leer = Name aus Home Assistant).
+- **Symbol nach dem Namen:** Kraftwerk wählt das Symbol passend zum Namen – z. B. Wärmepumpe, Wallbox/E-Auto, Waschmaschine, Trockner, Spülmaschine, Kühlschrank, Herd, Backofen, Heizstab/Boiler, Klima, Pool/Pumpe, Fernseher, Server, Router, Computer, Licht. Das Symbol ändert sich schon beim Tippen und erscheint unter „Verbraucher jetzt“.
+
 ## 0.35.0 – 2026-11-16
 
 ### Neu

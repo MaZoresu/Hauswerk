@@ -877,7 +877,8 @@ def test_kraftwerk(hw):
         kw = hw.Kraftwerk(hass, log, haus)
         await kw.async_load()
         assert kw.settings["kw_solar"] == [] and kw.settings["kw_grid"] is None
-        await kw.async_save_settings({"kw_solar": ["sensor.pv"], "kw_grid": "sensor.netz", "rw_covers": ["cover.x"]}, by="Jens")
+        await kw.async_save_settings({"kw_solar": ["sensor.pv"], "kw_grid": "sensor.netz", "rw_covers": ["cover.x"], "kw_names": {"sensor.wp": "Wärmepumpe"}}, by="Jens")
+        assert kw.settings["kw_names"] == {"sensor.wp": "Wärmepumpe"}
         assert "rw_covers" not in kw.settings
         e = log.entries[-1]
         assert e["mod"] == "kraftwerk" and "Kraftwerk: Solar" in e["why"] and "Jens" in e["why"]

@@ -28,6 +28,7 @@ KW_DEFAULTS: dict[str, Any] = {
     "kw_battery_soc": None,      # Ladestand in %
     "kw_home": None,             # Hausverbrauch, falls gemessen (sonst errechnet)
     "kw_consumers": [],          # einzelne Verbraucher (Wärmepumpe, Wallbox …)
+    "kw_names": {},              # eigene Namen der Verbraucher: {sensor: "Wärmepumpe"}
 }
 KW_KEYS = frozenset(KW_DEFAULTS)
 

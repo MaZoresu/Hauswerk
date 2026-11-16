@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.35.0";
+const VERSION = "0.36.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -255,6 +255,18 @@ const MODULES = [
   { id: "kraftwerk", no: 3, name: "Kraftwerk", icon: "mdi:solar-power-variant", logo: "kraftwerk", views: KW_VIEWS.map((v) => v.id) },
 ];
 const SUB_VIEWS = [...HEAT_VIEWS, ...SHUT_VIEWS, ...KW_VIEWS];
+// Symbol eines Verbrauchers nach seinem Namen (erster Treffer zählt)
+const KW_ICONS = [
+  [/w(ä|ae)rmepumpe|heat ?pump|\bwp\b/, "mdi:heat-pump-outline"], [/wallbox|e-?auto|\bev\b|lades(ä|ae)ule|laden|charger|auto/, "mdi:ev-station"],
+  [/wasch|washer/, "mdi:washing-machine"], [/trockner|dryer/, "mdi:tumble-dryer"], [/sp(ü|ue)l|dishwasher/, "mdi:dishwasher"],
+  [/k(ü|ue)hl|gefrier|fridge|freezer/, "mdi:fridge-outline"], [/herd|kochfeld|induktion|stove|cooktop/, "mdi:stove"], [/backofen|ofen|oven/, "mdi:toaster-oven"],
+  [/mikrowelle|microwave/, "mdi:microwave"], [/kaffee|espresso|coffee/, "mdi:coffee-maker-outline"], [/wasserkocher|kettle/, "mdi:kettle-outline"],
+  [/heizstab|boiler|warmwasser|durchlauf|speicher ?wasser/, "mdi:water-boiler"], [/klima|air ?con|split/, "mdi:air-conditioner"],
+  [/pool|teich|pumpe|pump/, "mdi:pump"], [/sauna|infrarot/, "mdi:fire"], [/heiz/, "mdi:radiator"], [/l(ü|ue)ft|ventilator|fan/, "mdi:fan"],
+  [/fernseh|\btv\b|beamer|heimkino|soundbar/, "mdi:television"], [/server|\bnas\b|rack/, "mdi:server"], [/router|netzwerk|switch|wlan|fritz/, "mdi:router-wireless"],
+  [/computer|\bpc\b|b(ü|ue)ro|desk|monitor|gaming/, "mdi:desktop-tower-monitor"], [/drucker|printer/, "mdi:printer"], [/licht|lampe|leuchte|light/, "mdi:lightbulb-outline"],
+  [/aquarium|terrarium/, "mdi:fishbowl-outline"], [/rasen|m(ä|ae)her|garten|garage|werkstatt/, "mdi:hammer-wrench"], [/akku|batterie|speicher/, "mdi:battery-charging-outline"],
+];
 const KW_POPS = ["kwdetect", "kwsolar", "kwgrid", "kwbatt", "kwhome", "kwcons"];
 // Geplante Module: nur ausgegraut angezeigt, noch ohne Funktion.
 const COMING = [
@@ -2447,9 +2459,21 @@ class HauswerkPanel extends HTMLElement {
     const bh = Math.min(dis, h - sh);
     const gh = Math.max(0, h - sh - bh);
     const bg = Math.max(0, dis - bh);
-    const cons = (p.kw_consumers || []).map((id) => ({ id, name: this._entityName(id), w: W(id) })).sort((a, b) => (b.w ?? -1) - (a.w ?? -1));
+    const cons = (p.kw_consumers || []).map((id) => ({ id, name: this._kwConsName(id, p), icon: this._kwConsIcon(id, p), w: W(id) })).sort((a, b) => (b.w ?? -1) - (a.w ?? -1));
     return { solar, grid, batt, soc, home, measured: measured != null, f: { sh, sb, sg, gh, gb, bh, bg }, cons,
       has: { solar: solarIds.length > 0, grid: !!p.kw_grid, batt: !!p.kw_battery } };
+  }
+
+  /** Name eines Verbrauchers: eigener Name, sonst Name der Entität. */
+  _kwConsName(id, p = this._data?.settings || {}) {
+    return String(p.kw_names?.[id] || "").trim() || this._entityName(id);
+  }
+
+  /** Symbol nach dem Namen (eigener Name zuerst, dann Name und ID der Entität). */
+  _kwConsIcon(id, p = this._data?.settings || {}) {
+    const hay = [p.kw_names?.[id], this._entityName(id), id].filter(Boolean).map((x) => String(x).toLowerCase());
+    for (const h of hay) for (const [re, icon] of KW_ICONS) if (re.test(h)) return icon;
+    return "mdi:power-plug-outline";
   }
 
   /** Texte und Linien des Fluss-Bilds – für das erste Zeichnen und die Live-Aktualisierung. */
@@ -2542,7 +2566,7 @@ class HauswerkPanel extends HTMLElement {
     const known = fl.cons.reduce((a, c) => a + Math.max(0, c.w ?? 0), 0);
     const rows = [...fl.cons, ...(home > known + 5 ? [{ id: "", name: "Sonstiges", w: home - known, rest: true }] : [])];
     const max = Math.max(1, home, ...rows.map((c) => c.w ?? 0));
-    return rows.map((c) => `<div class="kc-row ${c.rest ? "rest" : ""}"><span class="grow"><b>${esc(c.name)}</b>
+    return rows.map((c) => `<div class="kc-row ${c.rest ? "rest" : ""}"><span class="kc-ic"><ha-icon icon="${c.rest ? "mdi:dots-horizontal" : c.icon}"></ha-icon></span><span class="grow"><b>${esc(c.name)}</b>
       <span class="kc-bar"><i style="width:${Math.max(0, Math.min(100, ((c.w ?? 0) / max) * 100)).toFixed(1)}%"></i></span></span>
       <em>${this._kwFmt(c.w)}${home > 5 && c.w != null ? `<small>${fmt((Math.max(0, c.w) / home) * 100, 0)} %</small>` : ""}</em></div>`).join("");
   }
@@ -2762,7 +2786,7 @@ class HauswerkPanel extends HTMLElement {
       { g: "Leistung jetzt", id: "kwhome", icon: "mdi:home-lightning-bolt-outline", c: "#0ea5e9", title: "Hausverbrauch",
         sum: p.kw_home ? `${names([p.kw_home])} · jetzt ${this._kwFmt(fl.home)}` : `errechnet aus Solar, Netz und Batterie${fl.home != null ? ` · jetzt ${this._kwFmt(fl.home)}` : ""}`, words: "haus verbrauch last" },
       { g: "Leistung jetzt", id: "kwcons", icon: "mdi:power-plug-outline", c: "#64748b", title: "Verbraucher",
-        sum: (p.kw_consumers || []).length ? names(p.kw_consumers) : "z. B. Wärmepumpe, Wallbox, Waschmaschine – optional", words: "verbraucher wärmepumpe wallbox steckdose geräte" },
+        sum: (p.kw_consumers || []).length ? p.kw_consumers.map((id) => this._kwConsName(id, p)).join(", ") : "z. B. Wärmepumpe, Wallbox, Waschmaschine – optional", words: "verbraucher wärmepumpe wallbox steckdose geräte" },
       { g: "Tageswerte", act: "kw-energy", icon: "mdi:chart-box-outline", c: "#10b981", title: "Energie-Dashboard von Home Assistant",
         sum: !P ? "wird gelesen …" : P.ok ? [P.solar.length ? "Solar ✓" : "", P.imp.length ? "Netzbezug ✓" : "", P.exp.length ? "Einspeisung ✓" : "", P.bin.length || P.bout.length ? "Batterie ✓" : "", P.cost.length || P.priceImp != null ? "Preise ✓" : "ohne Preise"].filter(Boolean).join(" · ") : "Noch nicht eingerichtet – dort Netz und Solar eintragen",
         warn: !!P && !P.ok, words: "energie dashboard kwh zähler preis kosten statistik" },
@@ -2858,10 +2882,19 @@ class HauswerkPanel extends HTMLElement {
           body: `<p class="muted">Leer lassen: Kraftwerk rechnet den Verbrauch aus Solar + Netz + Batterie. Nur wählen, wenn dein Wechselrichter oder Energiemanager ihn selbst misst.</p>
             <div class="field"><span><ha-icon icon="mdi:home-lightning-bolt-outline"></ha-icon> Hausverbrauch</span>${this._picker("kw_home", p.kw_home)}</div>
             ${live(`jetzt ${this._kwFmt(fl.home)} · ${fl.measured ? "gemessen" : "errechnet"}`, "#0ea5e9")}` };
-      case "kwcons":
+      case "kwcons": {
+        const ids = p.kw_consumers || [];
+        // Namen entfernter Verbraucher nicht mitschleppen
+        if (p.kw_names) p.kw_names = Object.fromEntries(Object.entries(p.kw_names).filter(([k, v]) => ids.includes(k) && String(v || "").trim()));
+        const names = ids.length ? `<div class="lbl">Namen und Symbole</div><div class="kwnames">${ids.map((id) => `
+            <label class="kwname"><span class="kc-ic"><ha-icon icon="${this._kwConsIcon(id, p)}" data-kwicon="${esc(id)}"></ha-icon></span>
+              <span class="grow"><input type="text" maxlength="40" data-kwname="${esc(id)}" value="${esc(p.kw_names?.[id] || "")}" placeholder="${esc(this._entityName(id))}" ${this._admin ? "" : "disabled"}>
+              <small>${esc(id)} · jetzt ${this._kwFmt(this._kwW(id))}</small></span></label>`).join("")}</div>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Leer lassen = Name aus Home Assistant. Das Symbol wählt Kraftwerk nach dem Namen, z. B. Wärmepumpe, Wallbox, Waschmaschine, Trockner, Spülmaschine, Kühlschrank, Herd, Heizstab, Klima, Pool, Fernseher, Server, Licht.</p>` : "";
         return { icon: "mdi:power-plug-outline", c: "#64748b", title: "Verbraucher", sub: "Kraftwerk · optional",
           body: `<p class="muted">Einzelne Geräte mit Leistungsmessung, z. B. Wärmepumpe, Wallbox, Waschmaschine oder Mess-Steckdosen. Sie erscheinen unter dem Energiefluss mit ihrem Anteil am Hausverbrauch.</p>
-            <div class="field"><span><ha-icon icon="mdi:power-plug-outline"></ha-icon> Verbraucher</span>${this._picker("kw_consumers", p.kw_consumers || [])}</div>` };
+            <div class="field"><span><ha-icon icon="mdi:power-plug-outline"></ha-icon> Verbraucher</span>${this._picker("kw_consumers", ids)}</div>${names}` };
+      }
     }
     return { icon: "mdi:help", c: "#94a3b8", title: id, body: "" };
   }
@@ -5551,6 +5584,16 @@ class HauswerkPanel extends HTMLElement {
       t.style.setProperty("--v", `${t.value}%`);
       return;
     }
+    if (t.dataset.kwname && this._pop?.id === "kwcons") {
+      const p = this._settings;
+      p.kw_names = { ...(p.kw_names || {}) };
+      if (t.value.trim()) p.kw_names[t.dataset.kwname] = t.value;
+      else delete p.kw_names[t.dataset.kwname];
+      // nur das Symbol tauschen, damit das Feld den Fokus behält
+      const ic = this.shadowRoot.querySelector(`[data-kwicon="${CSS.escape(t.dataset.kwname)}"]`);
+      if (ic) ic.setAttribute("icon", this._kwConsIcon(t.dataset.kwname, p));
+      return;
+    }
     if (t.dataset.cwizname !== undefined && this._pop?.id === "cwiz") {
       this._pop.draft.name = t.value;
       return;
@@ -7612,6 +7655,13 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .kc { display:grid; gap:10px; }
 .kc-row { display:flex; align-items:center; gap:12px; }
 .kc-row b { display:block; font-size:13.5px; }
+.kc-ic { width:34px; height:34px; border-radius:11px; flex:none; display:grid; place-items:center; background:color-mix(in srgb, #0ea5e9 13%, transparent); color:#0ea5e9; }
+.kc-ic ha-icon { --mdc-icon-size:19px; }
+.kc-row.rest .kc-ic { background:var(--card2); color:var(--muted); }
+.kwnames { display:grid; gap:8px; margin:6px 0 8px; }
+.kwname { display:flex; align-items:center; gap:10px; }
+.kwname input { width:100%; box-sizing:border-box; }
+.kwname small { display:block; color:var(--muted); font-size:11px; margin-top:3px; overflow-wrap:anywhere; }
 .kc-bar { display:block; height:7px; border-radius:99px; background:var(--card2); margin-top:4px; overflow:hidden; }
 .kc-bar i { display:block; height:100%; border-radius:99px; background:#0ea5e9; }
 .kc-row.rest .kc-bar i { background:var(--muted); opacity:.5; }
