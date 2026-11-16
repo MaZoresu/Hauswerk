@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.30.1";
+const VERSION = "0.31.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -247,6 +247,17 @@ const WIZ_USES = [
   { id: "buero", label: "Büro", icon: "mdi:desk", comfort: 21, eco: 17, plan: "homeoffice", match: /b(ü|ue)ro|arbeit|office/ },
   { id: "flur", label: "Flur / Sonstiges", icon: "mdi:door", comfort: 18, eco: 16, plan: "ganztags", match: /flur|diele|gang|treppe|keller|hall/ },
 ];
+// Empfehlungen für den Sonnenschutz je Fensterrichtung (Faustwerte: Sonnenstand Mitteleuropa, Hitzeeintrag, Blendung)
+const RW_SHADE_SUGGEST = {
+  0: { span: 60, elevation_min: 5, elevation_max: 40, temp2_min: 26, pos_shading: 40, why: "Nordfenster bekommen kaum direkte Sonne – höchstens im Hochsommer früh morgens und spät abends. Sonnenschutz ist meist nicht nötig; wenn, dann nur bei großer Hitze." },
+  45: { span: 70, elevation_min: 5, elevation_max: 45, temp2_min: 24, pos_shading: 40, why: "Nur früh morgens flache Sonne: blendet, heizt aber wenig, weil die Luft noch kühl ist. Erst bei richtig warmen Tagen beschatten." },
+  90: { span: 75, elevation_min: 5, elevation_max: 60, temp2_min: 22, pos_shading: 30, why: "Morgensonne bis gegen 11 Uhr, flach und blendend. Wer ab 22 °C beschattet, hält den Raum vor der Mittagshitze kühl." },
+  135: { span: 75, elevation_min: 15, elevation_max: 70, temp2_min: 22, pos_shading: 25, why: "Vormittags- und Mittagssonne. Ab etwa 15° Höhe scheint sie über Nachbarhäuser und Bäume ins Fenster." },
+  180: { span: 75, elevation_min: 25, elevation_max: 65, temp2_min: 21, pos_shading: 25, why: "Die Mittagssonne steht hoch – ein Dachüberstand schützt dann oft schon (daher bis 65°). Flache Wintersonne unter 25° wärmt gratis und bleibt draußen nicht ausgesperrt." },
+  225: { span: 75, elevation_min: 10, elevation_max: 60, temp2_min: 20, pos_shading: 20, why: "Nachmittagssonne trifft auf schon warme Luft – nach West die heißeste Seite. Früh und kräftig beschatten." },
+  270: { span: 75, elevation_min: 3, elevation_max: 50, temp2_min: 20, pos_shading: 15, why: "Abendsonne ist flach, kommt zur heißesten Tageszeit und scheint tief ins Zimmer. Schon ab geringer Höhe stark beschatten." },
+  315: { span: 70, elevation_min: 3, elevation_max: 35, temp2_min: 24, pos_shading: 40, why: "Nur im Sommer späte, flache Abendsonne. Beschatten lohnt vor allem an heißen Tagen und gegen Blendung." },
+};
 const RW_TIME_DEFAULTS = { up_early: "06:00", up_late: "08:00", up_early_we: "07:00", up_late_we: "08:00", down_early: "16:00", down_late: "22:00",
   down_early_we: "16:00", down_late_we: "22:00", stage1_time: "18:00", reset_time: "00:01" };
 const RW_POPS = ["rwcovers", "rwstorm", "rwrecovery"];
@@ -291,6 +302,7 @@ const LOG_CATS = {
   window: { name: "Fenster", icon: "mdi:window-open-variant", c: "#3b82f6" },
   manual: { name: "Von Hand", icon: "mdi:hand-back-right-outline", c: "#a78bfa" },
   health: { name: "Geräte", icon: "mdi:heart-pulse", c: "#f43f5e" },
+  shutter: { name: "Rollläden", icon: "mdi:window-shutter", c: "#0ea5e9" },
   command: { name: "Thermostat-Befehle", icon: "mdi:access-point", c: "#94a3b8", off: true },
   settings: { name: "Einstellungen", icon: "mdi:cog-outline", c: "#64748b" },
   notify: { name: "Nachrichten", icon: "mdi:message-badge-outline", c: "#0ea5e9" },
@@ -2406,6 +2418,8 @@ class HauswerkPanel extends HTMLElement {
         sum: p.rw_storm !== false ? `hoch ab ${fmt(p.storm_kmh ?? 70, 0)} km/h Böen${s.gust != null ? ` · jetzt ${fmt(s.gust, 0)} km/h` : ""}` : "Aus", words: "sturm wind böen schutz" },
       { g: "Allgemein", id: "rwrecovery", icon: "mdi:restart", c: "#64748b", title: "Nach Neustart",
         sum: { never: "nichts nachholen", outage: "verpasste Wechsel nachholen", always: "immer auf Sollstellung fahren" }[p.rw_recovery || "never"], words: "neustart stromausfall nachholen recovery" },
+      { g: "Allgemein", act: "rw-log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll",
+        sum: "Fahrten, Übersteuerungen von Hand und Einstellungs-Änderungen von Rollwerk", words: "protokoll log fahrten verlauf änderungen" },
       { g: "Allgemein", go: "house", icon: "mdi:home-cog-outline", c: "#94a3b8", title: "Aus Hauswerk übernommen",
         sum: "Anwesenheit, Urlaub, Feiertage, Sonnenstand, Wetter, Sturmgrenze und Böen-Sensor – gelten für alle Module", words: "anwesenheit urlaub sonne wetter feiertage hauswerk" },
     ];
@@ -2435,6 +2449,14 @@ class HauswerkPanel extends HTMLElement {
       }
     }
     return { icon: "mdi:help", c: "#94a3b8", title: id, body: "" };
+  }
+
+  /** Empfohlene Werte für eine Fensterrichtung (auf 45° gerundet). */
+  _rwSuggest(dir) {
+    if (dir == null || dir === "") return null;
+    const key = (Math.round(((Number(dir) % 360) + 360) % 360 / 45) * 45) % 360;
+    const s = RW_SHADE_SUGGEST[key];
+    return { ...s, dir: key, azimuth_start: (key - s.span + 360) % 360, azimuth_end: (key + s.span) % 360 };
   }
 
   /** Kompass: Fensterrichtung antippen; Sonnenschutz-Bereich und Sonne jetzt. */
@@ -2538,9 +2560,21 @@ class HauswerkPanel extends HTMLElement {
         body = `<div class="wxrows">${row("sf", "Sonnenschutz", "tagsüber gegen Hitze und Blendung", feat("shading"))}</div>
           ${has("shading") ? `${lbl("Wohin zeigt das Fenster?")}${this._rwCompass(p)}
           ${(() => {
+            const s = this._rwSuggest(p.window_dir);
+            if (!s) return "";
+            const keys = ["azimuth_start", "azimuth_end", "elevation_min", "elevation_max", "temp2_min", "pos_shading"];
+            const same = keys.every((k) => Number(p[k]) === Number(s[k]));
+            return `<div class="rwsug ${same ? "ok" : ""}"><div class="rwsug-h"><ha-icon icon="${same ? "mdi:check-decagram" : "mdi:lightbulb-on-outline"}"></ha-icon><b>Empfehlung für ${this._rwDirName(s.dir)}fenster</b></div>
+              <p>${s.why}</p>
+              <div class="rwsug-v"><span>Sonne ${s.azimuth_start}–${s.azimuth_end}°</span><span>Höhe ${s.elevation_min}–${s.elevation_max}°</span><span>ab ${s.temp2_min} °C außen</span><span>auf ${s.pos_shading} %</span></div>
+              ${same ? `<small class="muted">Deine Einstellungen entsprechen der Empfehlung.</small>` : this._admin ? `<button class="secondary small" data-action="rwp-suggest"><ha-icon icon="mdi:auto-fix"></ha-icon>Empfehlung übernehmen</button>` : ""}</div>`;
+          })()}
+          ${(() => {
             const tok = (k, def, step, min, max, unit) => `<span class="tok"><button class="tok-b" data-action="rwp-step" data-k="${k}" data-d="${-step}" data-def="${def}" data-min="${min}" data-max="${max}" ${dis} aria-label="weniger">−</button><b>${fmt(p[k] ?? def, step < 1 ? 1 : 0)}${unit}</b><button class="tok-b" data-action="rwp-step" data-k="${k}" data-d="${step}" data-def="${def}" data-min="${min}" data-max="${max}" ${dis} aria-label="mehr">+</button></span>`;
             const dir = p.window_dir != null ? `<span class="tok txt">${this._rwDirName(p.window_dir)}</span>` : `<span class="tok txt warn">Richtung?</span>`;
-            return `<div class="rwsent"><ha-icon icon="mdi:sun-thermometer-outline"></ha-icon><p>Beschatten, wenn die Sonne aufs Fenster nach ${dir} scheint, mindestens ${tok("elevation_min", 25, 5, 0, 80, "°")} hoch steht und es draußen wärmer als ${tok("temp2_min", 18, 1, 5, 40, " °C")} ist. Der Rollladen fährt dann auf ${tok("pos_shading", 25, 5, 0, 100, " %")} – und wieder hoch, sobald eins davon nicht mehr stimmt.</p></div>`;
+            const sg = this._rwSuggest(p.window_dir);
+            const hint = (k, unit) => (sg && Number(p[k]) !== Number(sg[k]) ? `<small class="rwhint">empfohlen ${sg[k]}${unit}</small>` : "");
+            return `<div class="rwsent"><ha-icon icon="mdi:sun-thermometer-outline"></ha-icon><p>Beschatten, wenn die Sonne aufs Fenster nach ${dir} scheint, mindestens ${tok("elevation_min", 25, 5, 0, 80, "°")}${hint("elevation_min", "°")} hoch steht und es draußen wärmer als ${tok("temp2_min", 18, 1, 5, 40, " °C")}${hint("temp2_min", " °C")} ist. Der Rollladen fährt dann auf ${tok("pos_shading", 25, 5, 0, 100, " %")}${hint("pos_shading", " %")} – und wieder hoch, sobald eins davon nicht mehr stimmt.</p></div>`;
           })()}
           ${note("Außentemperatur aus Hauswerk › Wetter. Wartezeit 5 Minuten, damit kurze Sonne nichts auslöst.", "mdi:home-cog-outline")}
           ${live.length ? `${lbl("Jetzt")}<div class="evlist">${live.map(([id, c]) => `<div class="ev ${c.shading ? "live" : ""}"><ha-icon icon="${c.shading ? "mdi:sun-thermometer-outline" : "mdi:window-shutter"}"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${RW_SHADE_CONDS.filter(([k]) => c.shade_start[k] != null).map(([k, l]) => `${l} ${sym(c.shade_start[k])}`).join(" · ")}</small></span>${c.shading ? `<em class="badge">AKTIV</em>` : ""}</div>`).join("")}</div>` : ""}
@@ -2700,7 +2734,7 @@ class HauswerkPanel extends HTMLElement {
           ${uses.map(([v, t, i, s]) => `<button class="wiz-type ${d.use === v ? "on" : ""}" data-action="cwiz-use" data-v="${v}"><ha-icon icon="${i}"></ha-icon><span><b>${t}</b><small>${s}</small></span></button>`).join("")}
           <div class="lbl">Öffnen und schließen</div>
           <div class="segs small">${[["sun", "Mit der Sonne", "mdi:weather-sunset"], ["time", "Nach Uhrzeit", "mdi:clock-outline"]].map(([v, l, i]) => `<button class="seg ${d.mode === v ? "on" : ""}" data-action="cwiz-mode" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div>
-          <div class="wxrows"><div class="wxr"><div class="wxr-l"><b>Sonnenschutz</b><small>${d.prof.window_dir == null ? "braucht die Richtung aus Schritt 2" : `bei Sonne aus ${this._rwDirName(d.prof.window_dir)}`}</small></div>
+          <div class="wxrows"><div class="wxr"><div class="wxr-l"><b>Sonnenschutz</b><small>${d.prof.window_dir == null ? "braucht die Richtung aus Schritt 2" : `bei Sonne aus ${this._rwDirName(d.prof.window_dir)} – Werte nach Empfehlung`}</small></div>
             <div class="wxr-v"><label class="switch"><input type="checkbox" data-action="cwiz-shade" ${d.shade && d.prof.window_dir != null ? "checked" : ""} ${d.prof.window_dir == null ? "disabled" : ""}><span></span></label></div></div>
           ${d.shade && d.prof.window_dir != null ? `<div class="wxr"><div class="wxr-l"><b>Ab Außentemperatur</b></div><div class="wxr-v"><div class="wiz-temp"><button class="sbtn" data-action="cwiz-t" data-d="-1">−</button><b>${fmt(d.temp, 0)} °C</b><button class="sbtn" data-action="cwiz-t" data-d="1">+</button></div></div></div>` : ""}</div>`;
         break;
@@ -2761,6 +2795,8 @@ class HauswerkPanel extends HTMLElement {
     if (shade) f.add("shading"); else f.delete("shading");
     const p = { ...base, name: this._cwizName(d), features: [...f], time_mode: "times" };
     if (d.prof.window_dir != null) Object.assign(p, { window_dir: d.prof.window_dir, azimuth_start: d.prof.azimuth_start, azimuth_end: d.prof.azimuth_end });
+    const sg = this._rwSuggest(d.prof.window_dir);
+    if (sg) Object.assign(p, { elevation_min: sg.elevation_min, elevation_max: sg.elevation_max, pos_shading: sg.pos_shading });
     if (shade) p.temp2_min = d.temp;
     if (d.use === "schlafen") Object.assign(p, { up_early: "07:30", up_late: "08:30", up_early_we: "09:00", up_late_we: "10:00", down_early: "19:00", down_late: "21:30", down_early_we: "19:30", down_late_we: "22:30" });
     if (d.use === "kind") Object.assign(p, { down_early: "17:30", down_late: "20:00", down_early_we: "18:00", down_late_we: "20:30" });
@@ -3109,6 +3145,19 @@ class HauswerkPanel extends HTMLElement {
         list = null;
       }
       this._logCatSet = new Set(Array.isArray(list) ? list : Object.keys(LOG_CATS).filter((k) => !LOG_CATS[k].off));
+      // neue Kategorien (z. B. „Rollläden“) bei gemerkter Auswahl einmal dazunehmen
+      let known = null;
+      try {
+        known = JSON.parse(localStorage.getItem("hauswerk.protokoll.bekannt") || "null");
+      } catch (e) {
+        known = null;
+      }
+      if (Array.isArray(list)) for (const k of Object.keys(LOG_CATS)) if (!LOG_CATS[k].off && !(known || ["presence", "season", "target", "window", "manual", "health", "command", "settings", "notify"]).includes(k)) this._logCatSet.add(k);
+      try {
+        localStorage.setItem("hauswerk.protokoll.bekannt", JSON.stringify(Object.keys(LOG_CATS)));
+      } catch (e) {
+        /* ohne Speicher */
+      }
     }
     return this._logCatSet;
   }
@@ -3128,6 +3177,9 @@ class HauswerkPanel extends HTMLElement {
           <div class="grow"><h2>Protokoll</h2><small>Was wann warum entschieden wurde · ${L.days || 14} Tage</small></div>
           <span class="lg-live ${L.live ? "on" : ""}" id="lg-live">${this._logLiveHtml()}</span>
         </div>
+        <div class="lg-chips">${[["", "Alles", "mdi:home-outline", "#94a3b8"], ["heizwerk", "Heizwerk & Haus", "logo:heizen", "#fb923c"], ["rollwerk", "Rollwerk", "logo:rollwerk", "#0ea5e9"]]
+          .map(([id, name, icon, c]) => `<button class="lg-cat lg-mod ${(this._logMod || "") === id ? "on" : ""}" style="--c:${c}" data-action="log-mod" data-id="${id}">${String(icon).startsWith("logo:") ? `<span class="lg-logo">${modIcon(icon)}</span>` : `<ha-icon icon="${icon}"></ha-icon>`}${name}</button>`)
+          .join("")}</div>
         <div class="lg-chips">${[["", "Alle Räume", "#94a3b8"], ...rooms.map((r) => [r.id, r.name, this._roomColor(r.id)])]
           .map(([id, name, c]) => `<button class="lg-room ${sel === id ? "on" : ""}" style="--c:${c}" data-action="log-room" data-id="${id}"><i></i>${esc(name)}</button>`)
           .join("")}</div>
@@ -3170,6 +3222,8 @@ class HauswerkPanel extends HTMLElement {
       const e = L.entries[i];
       if (!cats.has(e.cat) && LOG_CATS[e.cat]) continue;
       if (room && e.room !== room) continue;
+      if (this._logMod === "rollwerk" && e.mod !== "rollwerk") continue;
+      if (this._logMod === "heizwerk" && e.mod === "rollwerk") continue;
       if (q && !`${e.title} ${e.why || ""} ${roomName(e)} ${LOG_CATS[e.cat]?.name || ""}`.toLowerCase().includes(q)) continue;
       hits.push(e);
     }
@@ -3196,7 +3250,7 @@ class HauswerkPanel extends HTMLElement {
           <time>${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</time>
           <span class="lg-i" style="--c:${def.c}" title="${esc(def.name || "")}"><ha-icon icon="${def.icon}"></ha-icon></span>
           <div class="lg-b">
-            <div class="lg-t">${rn ? `<span class="lg-badge" style="--c:${rc}">${esc(rn)}</span>` : ""}<b>${esc(e.title)}</b></div>
+            <div class="lg-t">${e.mod === "rollwerk" ? `<span class="lg-badge" style="--c:#0ea5e9">Rollwerk</span>` : ""}${rn ? `<span class="lg-badge" style="--c:${rc}">${esc(rn)}</span>` : ""}<b>${esc(e.title)}</b></div>
             ${e.why ? `<p><b>${lead}:</b> ${esc(e.why)}</p>` : ""}
           </div>
         </div>`;
@@ -3238,7 +3292,9 @@ class HauswerkPanel extends HTMLElement {
             ? `data-action="room-new" ${this._admin ? "" : "disabled"}`
             : r.start
               ? `data-action="start-edit" ${this._admin ? "" : "disabled"}`
-              : r.go
+              : r.act
+                ? `data-action="${r.act}"`
+                : r.go
                 ? `data-action="tab" data-tab="${r.go}"`
                 : `data-action="pop-open" data-pop="${r.id}"`;
       return `
@@ -5586,6 +5642,16 @@ class HauswerkPanel extends HTMLElement {
         this._help = { ...(this._help || {}), [el.dataset.k]: !this._help?.[el.dataset.k] };
         this._renderPop();
         break;
+      case "log-mod":
+        this._logMod = el.dataset.id || "";
+        this._logLimit = 200;
+        this._renderMain();
+        break;
+      case "rw-log":
+        this._logMod = "rollwerk";
+        this._logRoom = "";
+        this._setView("log");
+        break;
       case "log-room":
         this._logRoom = el.dataset.id || "";
         this._logLimit = 200;
@@ -5668,12 +5734,26 @@ class HauswerkPanel extends HTMLElement {
         break;
       }
       case "rwp-dir": {
-        const pr = this._pop.draft.prof;
-        const dir = Number(el.dataset.v);
-        pr.window_dir = dir;
-        pr.azimuth_start = (dir - 75 + 360) % 360;
-        pr.azimuth_end = (dir + 75) % 360;
+        const d = this._pop.draft;
+        const pr = d.prof;
+        const first = pr.window_dir == null;
+        const s = this._rwSuggest(Number(el.dataset.v));
+        pr.window_dir = s.dir;
+        pr.azimuth_start = s.azimuth_start;
+        pr.azimuth_end = s.azimuth_end;
+        // erste Wahl der Richtung: Empfehlung gleich übernehmen (im Assistenten immer)
+        if (first || d.covers) Object.assign(pr, { elevation_min: s.elevation_min, elevation_max: s.elevation_max, temp2_min: s.temp2_min, pos_shading: s.pos_shading });
+        if (d.covers) d.temp = s.temp2_min;
         this._renderPop();
+        break;
+      }
+      case "rwp-suggest": {
+        const pr = this._pop.draft.prof;
+        const s = this._rwSuggest(pr.window_dir);
+        if (s) Object.assign(pr, { azimuth_start: s.azimuth_start, azimuth_end: s.azimuth_end, elevation_min: s.elevation_min, elevation_max: s.elevation_max, temp2_min: s.temp2_min, pos_shading: s.pos_shading });
+        if (s?.dir === 0) pr.features = (pr.features || []).filter((f) => f !== "shading");
+        this._renderPop();
+        this._toast(s?.dir === 0 ? "Empfehlung übernommen – Sonnenschutz für Nordfenster aus" : "Empfehlung übernommen – noch speichern");
         break;
       }
       case "rwp-lock":
@@ -6705,6 +6785,17 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .rw-range { flex:1; min-width:60px; accent-color:var(--accent); height:28px; }
 .segs.small.rw-fac { display:grid; grid-template-columns:repeat(9, minmax(0, 1fr)); gap:4px; }
 .segs.small.rw-fac .seg { padding:8px 0; font-size:12.5px; justify-content:center; }
+.rwsug { padding:12px 14px; margin:4px 0 12px; border-radius:16px; background:color-mix(in srgb, #eab308 9%, var(--card)); border:1px solid color-mix(in srgb, #eab308 40%, transparent); }
+.rwsug.ok { background:color-mix(in srgb, #22c55e 8%, var(--card)); border-color:color-mix(in srgb, #22c55e 40%, transparent); }
+.rwsug-h { display:flex; align-items:center; gap:8px; }
+.rwsug-h ha-icon { color:#ca8a04; }
+.rwsug.ok .rwsug-h ha-icon { color:#16a34a; }
+.rwsug p { margin:6px 0 8px; font-size:13px; line-height:1.45; color:var(--muted); }
+.rwsug-v { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+.rwsug-v span { padding:3px 9px; border-radius:99px; background:var(--card2); font-size:12px; font-weight:600; }
+.rwhint { display:inline-block; margin:0 4px; padding:0 7px; border-radius:99px; font-size:11px; line-height:1.6; color:#a16207; background:color-mix(in srgb, #eab308 15%, transparent); vertical-align:middle; }
+.lg-logo { display:inline-flex; width:16px; height:16px; }
+.lg-logo svg { width:16px; height:16px; }
 .rwdel { padding:12px 14px; margin-bottom:12px; border-radius:14px; border:1px solid color-mix(in srgb, #ef4444 45%, transparent); background:color-mix(in srgb, #ef4444 8%, var(--card)); }
 .rwdel > b { display:flex; align-items:center; gap:8px; color:#dc2626; margin-bottom:8px; }
 .rwdel select { width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--line2); background:var(--card); color:var(--text); font:inherit; }

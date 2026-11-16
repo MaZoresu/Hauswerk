@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.31.0 – 2026-11-16
+
+### Neu
+- **Sonnenschutz-Empfehlung je Himmelsrichtung:** Sobald die Fensterrichtung gewählt ist, zeigt das Profil eine Empfehlung mit Begründung – Sonnenbereich, Sonnenhöhe von/bis, ab welcher Außentemperatur und auf wie viel % (z. B. West: ab 3° Höhe, ab 20 °C, auf 15 %; Süd: 25–65°, ab 21 °C, auf 25 %; Nord: meist nicht nötig). „Empfehlung übernehmen“ setzt alle Werte; im Satz steht neben abweichenden Werten „empfohlen …“. Bei der ersten Wahl der Richtung und im Assistenten werden die Werte gleich übernommen.
+- **Rollwerk im Protokoll:**
+  - Jede Fahrt steht unter der neuen Kategorie **„Rollläden“** – mit Grund und vorheriger Stellung.
+  - Ebenso: Übersteuerungen von Hand, „Automatik wartet“ und der Sturmschutz.
+  - **Profil-Änderungen** stehen mit Vorher → Nachher (z. B. „Beschatten ab außen 22 °C → 24 °C“) und Benutzer.
+  - **Rollladen-Änderungen** (Profil, Kontakte, Automatik, Raum) ebenso.
+  - Einträge sind dem Heizwerk-Raum des Rollladens zugeordnet.
+  - Neuer Filter **Alles · Heizwerk & Haus · Rollwerk**; Rollwerk › Einstellungen › Protokoll öffnet direkt die Rollwerk-Einträge.
+
 ## 0.30.1 – 2026-11-16
 
 ### Geändert

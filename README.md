@@ -164,7 +164,7 @@ Rollläden mit **Profilen** nach dem Vorbild der [Cover Control Automation (CCA)
 - **Rollläden-Seite:** nach Räumen aus Home Assistant, je Rollladen Stellung, was die Automatik gerade will und warum, ↑ ■ ↓ und Schieberegler; Hinweise für Beschattung, gekippt/offen, Bewohner schläft, von Hand – mit „Automatik übernimmt“.
 - **Profile:** jeder Rollladen nutzt ein Profil (z. B. „Standard“, „Süd mit Hitze“, „Schlafzimmer“) mit fünf Abschnitten; Profile lassen sich anlegen, kopieren und löschen (die Rollläden bekommen dann ein gewähltes Ersatzprofil). Zuerst nur das Wichtige, mit **Experte** alle Einstellungen der Cover Control Automation:
   - **Tagesablauf:** nach Uhrzeit oder mit der Sonne (früheste/späteste Zeit, Werktag und frei getrennt, Sonnenhöhe), Stellungen in % für öffnen und schließen; abends wahlweise **in zwei Stufen** (Stufe 1 auf X % ab Sonnenrichtung, -höhe oder Uhrzeit, Stufe 2 zur spätesten Zeit ganz zu – beide schaltbar); Experte: Kalender, Helligkeit, „Arbeitstag morgen“.
-  - **Sonnenschutz:** Fensterrichtung per Kompass und ein Satz mit − / + für Sonnenhöhe, Außentemperatur und Stellung; Experte: Bedingungen mit und/oder, Sonnenhöhe, Innen-/Außentemperatur, Helligkeit, Vorhersage, Wetterlage, Wartezeiten.
+  - **Sonnenschutz:** Fensterrichtung per Kompass mit **Empfehlung je Himmelsrichtung** (übernehmbar) und ein Satz mit − / + für Sonnenhöhe, Außentemperatur und Stellung; Experte: Bedingungen mit und/oder, Sonnenhöhe, Innen-/Außentemperatur, Helligkeit, Vorhersage, Wetterlage, Wartezeiten.
   - **Fenster & Lüften:** Tür offen = nicht herunterfahren (oder höchstens bis X %), gekippt = Lüftungsstellung.
   - **Ausnahmen:** niemand zu Hause (wie immer, tagsüber zu, beschattet) und Urlaub mit zufälligen Zeiten – beides aus Hauswerk › Anwesenheit/Urlaub; von Hand verstellt; Schlafzimmer-Schalter; Experte: Erzwingen.
   - **Feinheiten:** Name, alle Stellungen; Experte: Toleranz, Fahrzeit, Verzögerung, Regeln im Detail.
@@ -173,6 +173,8 @@ Rollläden mit **Profilen** nach dem Vorbild der [Cover Control Automation (CCA)
 - **Je Rollladen:** Profil, Raum aus Heizwerk (automatisch über den Bereich), Kontakte (aus dem Heizwerk-Raum: Türen = ganz offen, Fenster = gekippt – oder eigene), Automatik und Sturmschutz an/aus. Die Raumtemperatur aus Heizwerk zählt beim Sonnenschutz als Innentemperatur.
 - **Sturmschutz:** ab der Sturmgrenze aus Hauswerk › Wetter hoch, Ende nach 15 Min. unter 80 %; Böen vom Wetterdienst oder dem Böen-Sensor unter Hauswerk › Wetter.
 - **Nach Neustart:** nichts, verpasste Wechsel nachholen oder immer auf Sollstellung.
+
+**Protokoll:** jede Fahrt (Kategorie „Rollläden“, mit Grund und vorheriger Stellung), Übersteuerungen von Hand, Sturmschutz sowie Änderungen an Profilen und Rollläden mit Vorher → Nachher; Filter „Rollwerk“.
 
 Einstellungen aus Version 0.24 werden beim ersten Start übernommen (je Fassade ein Profil). Anwesenheit, Urlaub, Feiertage, Sonnenstand, Wetter und Sturmgrenze stellt man nur einmal unter Hauswerk ein. Alles steht im Protokoll.
 

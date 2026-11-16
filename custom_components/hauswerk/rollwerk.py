@@ -120,6 +120,58 @@ PROFILE_SPEC: dict[str, tuple[Any, str]] = {
     "force_ventilate": (None, "entity"), "force_shading": (None, "entity"),
 }
 PROFILE_DEFAULTS = {k: (list(v) if isinstance(v, list) else v) for k, (v, _kind) in PROFILE_SPEC.items()}
+# Für das Protokoll: was im Profil geändert wurde (Bezeichnung, Einheit)
+PROFILE_LABELS: dict[str, tuple[str, str]] = {
+    "name": ("Name", ""), "features": ("Funktionen", ""), "time_mode": ("Zeiten aus", ""),
+    "pos_open": ("Offen", " %"), "pos_close": ("Geschlossen", " %"), "pos_ventilate": ("Lüften", " %"),
+    "pos_lockout": ("Tür offen höchstens", " %"), "pos_shading": ("Beschattung", " %"), "pos_shading_alt": ("Beschattung anders", " %"),
+    "up_early": ("Öffnen frühestens", ""), "up_late": ("Öffnen spätestens", ""), "up_early_we": ("Öffnen frühestens (frei)", ""),
+    "up_late_we": ("Öffnen spätestens (frei)", ""), "down_early": ("Schließen frühestens", ""), "down_late": ("Schließen spätestens", ""),
+    "down_early_we": ("Schließen frühestens (frei)", ""), "down_late_we": ("Schließen spätestens (frei)", ""),
+    "close_stage1": ("Zwei Stufen", ""), "stage1_trigger": ("Stufe 1 nach", ""), "stage1_azimuth": ("Stufe 1 ab Richtung", "°"),
+    "stage1_elevation": ("Stufe 1 unter Sonnenhöhe", "°"), "stage1_time": ("Stufe 1 um", ""), "pos_stage1": ("Stufe 1", " %"),
+    "close_stage2": ("Stufe 2", ""), "sun_up": ("Öffnen ab Sonnenhöhe", "°"), "sun_down": ("Schließen ab Sonnenhöhe", "°"),
+    "window_dir": ("Fensterrichtung", "°"), "azimuth_start": ("Sonne von", "°"), "azimuth_end": ("Sonne bis", "°"),
+    "elevation_min": ("Sonnenhöhe mind.", "°"), "elevation_max": ("Sonnenhöhe höchstens", "°"), "temp2_min": ("Beschatten ab außen", " °C"),
+    "temp1_min": ("Beschatten ab innen", " °C"), "shade_wait_start": ("Warten vor Beschattung", " s"), "shade_wait_end": ("Warten vor Ende", " s"),
+    "away_mode": ("Niemand zu Hause", ""), "vacation_random": ("Urlaub verschieben", " Min."), "manual_block": ("Von Hand hält", ""),
+    "resident_sensor": ("Schlaf-Schalter", ""), "delay_random": ("Verzögerung zufällig", " s"),
+}
+CHOICE_LABEL = {"azimuth": "Sonnenrichtung", "elevation": "Sonnenhöhe", "time": "Uhrzeit", "times": "Uhrzeiten", "calendar": "Kalender",
+                "normal": "wie immer", "closed": "tagsüber zu", "shade": "beschattet"}
+
+
+def _fmt_value(value: Any, unit: str) -> str:
+    if value is None or value == "" or value == []:
+        return "–"
+    if isinstance(value, bool):
+        return "an" if value else "aus"
+    if isinstance(value, list):
+        return f"{len(value)} gewählt"
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, str):
+        return CHOICE_LABEL.get(value, value)
+    return f"{value:g}{unit}" if isinstance(value, float) else f"{value}{unit}"
+
+
+def profile_changes(old: dict, new: dict) -> str:
+    """Kurzer Text, was sich geändert hat: „Beschatten ab außen 22 → 24 °C, Stufe 1 50 %“."""
+    parts, other = [], 0
+    for key in PROFILE_SPEC:
+        a, b = old.get(key, PROFILE_DEFAULTS.get(key)), new.get(key, PROFILE_DEFAULTS.get(key))
+        if a == b or (isinstance(a, (int, float)) and isinstance(b, (int, float)) and float(a) == float(b)):
+            continue
+        if key in PROFILE_LABELS:
+            label, unit = PROFILE_LABELS[key]
+            parts.append(f"{label} {_fmt_value(a, unit)} → {_fmt_value(b, unit)}")
+        else:
+            other += 1
+    if other:
+        parts.append(f"{other} weitere Einstellung{'en' if other > 1 else ''}")
+    return ", ".join(parts[:6]) + (f" (+{len(parts) - 6})" if len(parts) > 6 else "")
+
+
 CATEGORY_LABEL = {"open": "Öffnen", "close": "Schließen", "shading": "Beschattung", "ventilation": "Lüften",
                   "storm": "Sturmschutz", "force": "Erzwungen", "resident": "Bewohner"}
 
@@ -306,7 +358,7 @@ class Rollwerk:
         changed = [k for k, v in settings.items() if self.settings.get(k) != v]
         if not changed:
             return
-        log_settings(self.log, settings, changed, by)
+        log_settings(self.log, settings, changed, by, module="rollwerk")
         self.settings.update(settings)
         for entity_id in self.settings.get("rw_covers") or []:
             self.covers.setdefault(entity_id, {"profile": "standard"})
@@ -315,10 +367,26 @@ class Rollwerk:
         await self.async_evaluate()
 
     async def async_save_cover(self, entity_id: str, cfg: dict[str, Any], by: str | None = None) -> None:
+        old = self.covers.get(entity_id) or {}
         self.covers[entity_id] = cfg
         self._save()
         self._track()
-        self.log.add("settings", f"Rollladen {self._name(entity_id)} geändert", f"Panel{f' · von {by}' if by else ''}")
+        names = {"profile": "Profil", "contact_open": "Kontakt offen", "contact_tilted": "Kontakt gekippt", "auto": "Automatik",
+                 "storm": "Sturmschutz", "room": "Raum", "contacts": "Kontakte"}
+        diff = []
+        for key, label in names.items():
+            a, b = old.get(key), cfg.get(key)
+            if a == b or (key in ("auto", "storm") and (a is None or a is True) and (b is None or b is True)):
+                continue
+            if key == "profile":
+                a, b = (self.profiles.get(a or "standard") or {}).get("name", a), (self.profiles.get(b or "standard") or {}).get("name", b)
+            elif key.startswith("contact_"):
+                a, b = (self._name(a) if a else None), (self._name(b) if b else None)
+            elif key == "contacts":
+                a, b = ("keine" if a == "none" else "aus Heizwerk"), ("keine" if b == "none" else "aus Heizwerk")
+            diff.append(f"{label} {_fmt_value(a, '')} → {_fmt_value(b, '')}")
+        self._log("settings", f"Rollladen {self._name(entity_id)} geändert",
+                  f"{', '.join(diff) or 'ohne Änderung'} · Panel{f' · von {by}' if by else ''}", entity_id)
         await self.async_evaluate()
 
     async def async_save_profile(self, pid: str | None, profile: dict[str, Any], by: str | None = None) -> str:
@@ -328,11 +396,14 @@ class Rollwerk:
             while pid in self.profiles:
                 pid, n = f"{base}_{n}", n + 1
         new = pid not in self.profiles
+        old = dict(self.profiles.get(pid) or {})
         self.profiles[pid] = {k: v for k, v in profile.items() if k in PROFILE_SPEC}
         self._save()
         self._track()
-        self.log.add("settings", f"Rollwerk-Profil „{profile.get('name')}“ {'angelegt' if new else 'geändert'}",
-                     f"Panel{f' · von {by}' if by else ''}")
+        users = [e for e, c in self.covers.items() if (c.get("profile") or "standard") == pid and e in (self.settings.get("rw_covers") or [])]
+        what = "angelegt" if new else profile_changes(old, self.profiles[pid]) or "ohne Änderung"
+        self._log("settings", f"Profil „{profile.get('name')}“ {'angelegt' if new else 'geändert'}",
+                  f"{'' if new else what + ' · '}{len(users)} Rollläden · Panel{f' · von {by}' if by else ''}")
         await self.async_evaluate()
         return pid
 
@@ -351,7 +422,7 @@ class Rollwerk:
         self._save()
         self._track()
         new_name = self.profiles[replace_with].get("name")
-        self.log.add("settings", f"Rollwerk-Profil „{name}“ gelöscht",
+        self._log("settings", f"Profil „{name}“ gelöscht",
                      f"{moved} Rollläden nutzen jetzt „{new_name}“{f' · von {by}' if by else ''}" if moved else (f"von {by}" if by else None))
         await self.async_evaluate()
 
@@ -374,11 +445,20 @@ class Rollwerk:
                 rt["moved_at"] = None
         names = ", ".join(self._name(e) for e in entity_ids[:4]) + (" …" if len(entity_ids) > 4 else "")
         what = {"open": "hoch", "close": "runter", "stop": "Stopp", "resume": "Automatik übernimmt wieder"}.get(action, f"auf {position} %")
-        self.log.add("manual", f"Rollladen {what}", f"{names} · im Panel{f' · von {by}' if by else ''}")
+        self._log("manual", f"Rollladen {what}", f"{names} · im Panel{f' · von {by}' if by else ''}",
+                  entity_ids[0] if len(entity_ids) == 1 else None)
         if action == "resume":
             await self.async_evaluate()
 
     # ------------------------------------------------------------ Helfer
+    def _log(self, cat: str, title: str, why: str | None = None, entity_id: str | None = None) -> None:
+        """Protokoll-Eintrag von Rollwerk – mit Heizwerk-Raum des Rollladens (für den Raumfilter)."""
+        room_id = room_name = None
+        if entity_id:
+            room_id, room, _auto = self.room_of(entity_id)
+            room_name = (room or {}).get("name") or self._area(entity_id)
+        self.log.add(cat, title, why, room=room_id, room_name=room_name, module="rollwerk")
+
     def _name(self, entity_id: str | None) -> str:
         state = self.hass.states.get(entity_id) if entity_id else None
         return state.name if state is not None else str(entity_id)
@@ -849,7 +929,7 @@ class Rollwerk:
         elif not self.settings.get("rw_storm", True):
             self._storm = False
         if self._storm != storm_before:
-            self.log.add("season", "Sturmschutz: Rollläden hoch" if self._storm else "Sturmschutz beendet",
+            self._log("shutter", "Sturmschutz: Rollläden hoch" if self._storm else "Sturmschutz beendet",
                          f"Böen {gust:.0f} km/h · Grenze {limit:.0f} km/h" if gust is not None else None)
         self._gust = gust
         last_run = float(self._persist.get("last_run") or 0)
@@ -875,7 +955,8 @@ class Rollwerk:
             if last is not None and pos is not None and abs(pos - last) > max(tol, 1) and not ours and not initial:
                 rt["manual_at"] = now
                 rt["manual_pos"] = pos
-                self.log.add("manual", f"{self._name(entity_id)} von Hand auf {pos:.0f} %", "manuelle Übersteuerung")
+                self._log("manual", f"{self._name(entity_id)} von Hand auf {pos:.0f} %",
+                          "Taster, App oder Automation – Rollwerk merkt sich das als Übersteuerung", entity_id)
             rt["last_pos"] = pos
             self._manual_reset(entity_id, prof, rt, now, local, pos)
             target, reason, cat = self._decide(entity_id, cfg, prof, rt, now, now_min, azimuth, elevation, pos)
@@ -893,6 +974,10 @@ class Rollwerk:
             block = set(prof.get("manual_block") or [])
             cat_block = {"open": "opening", "close": "closing", "shading": "shading", "ventilation": "ventilation"}.get(cat)
             if rt.get("manual_at") and cat_block in block:
+                if rt.get("blocked") != "von Hand übersteuert" or rt.get("blocked_target") != target:
+                    self._log("shutter", f"{self._name(entity_id)}: Automatik wartet",
+                              f"wollte {target} % ({reason}) – bleibt, weil von Hand verstellt", entity_id)
+                rt["blocked_target"] = target
                 rt["blocked"] = "von Hand übersteuert"
                 continue
             rt["blocked"] = None
@@ -938,13 +1023,15 @@ class Rollwerk:
             rt["manual_at"] = None
             if prof.get("manual_recover"):
                 rt["sent"] = None  # zurück zur aktuellen Sollstellung
-            self.log.add("manual", f"{self._name(entity_id)}: Übersteuerung zurückgesetzt", done)
+            self._log("manual", f"{self._name(entity_id)}: Übersteuerung zurückgesetzt", done, entity_id)
 
     async def _schedule_move(self, entity_id: str, target: int, reason: str, delay: float) -> None:
         async def go(_now=None) -> None:
             self._rt.setdefault(entity_id, {})["moved_at"] = dt_util.utcnow().timestamp()
             await self._move(entity_id, target)
-            self.log.add("command", f"{self._name(entity_id)} → {'auf' if target >= 100 else 'zu' if target == 0 else f'{target} %'}", reason)
+            pos_now = self._pos(entity_id)
+            self._log("shutter", f"{self._name(entity_id)} {'auf' if target >= 100 else 'zu' if target == 0 else f'auf {target} %'}",
+                      f"{reason}{f' · vorher {pos_now:.0f} %' if pos_now is not None else ''}", entity_id)
         if delay <= 0:
             await go()
         else:

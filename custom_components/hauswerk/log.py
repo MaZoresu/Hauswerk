@@ -12,10 +12,10 @@ from homeassistant.util import dt as dt_util
 from .const import LOG_DAYS, LOG_MAX, LOG_STORAGE_KEY, SETTING_LABELS
 
 # Kategorien (das Panel zeigt sie als Filter)
-CATEGORIES = ("presence", "season", "target", "window", "manual", "health", "command", "settings")
+CATEGORIES = ("presence", "season", "target", "window", "manual", "health", "command", "settings", "shutter")
 
 
-def log_settings(log: "Protokoll", settings: dict[str, Any], changed: list[str], by: str | None) -> None:
+def log_settings(log: "Protokoll", settings: dict[str, Any], changed: list[str], by: str | None, module: str | None = None) -> None:
     """Geänderte Einstellungen ins Protokoll: „Urlaub an“ bzw. „Einstellungen geändert“ mit Quelle."""
     labels = list(dict.fromkeys(SETTING_LABELS.get(k, k) for k in changed))
     only = changed[0]
@@ -24,7 +24,7 @@ def log_settings(log: "Protokoll", settings: dict[str, Any], changed: list[str],
     else:
         title = "Einstellungen geändert"
     source = f"Panel · von {by}" if by else "Home Assistant (Schalter oder Automation)"
-    log.add("settings", title, f"{', '.join(labels)} · {source}")
+    log.add("settings", title, f"{', '.join(labels)} · {source}", module=module)
 
 
 class Protokoll:
@@ -59,8 +59,11 @@ class Protokoll:
         why: str | None = None,
         room: str | None = None,
         room_name: str | None = None,
+        module: str | None = None,
     ) -> None:
         entry = {"ts": round(dt_util.utcnow().timestamp(), 1), "cat": cat, "title": title}
+        if module:
+            entry["mod"] = module
         if why:
             entry["why"] = why
         if room:

@@ -795,3 +795,34 @@ def test_rollwerk_zwei_stufen(hw):
     steps, reason1, reason2, rw = asyncio.run(run())
     assert steps == [100, 50, 0, 50]
     assert reason1 == "Abends Stufe 1 (Sonne ab 250°)" and reason2 == "Abends Stufe 2 (späteste Zeit)"
+
+
+def test_rollwerk_protokoll(hw):
+    """Profil-Änderungen mit Vorher/Nachher, Fahrten als „Rollwerk“ im Protokoll."""
+    rwmod = importlib.import_module("hw.rollwerk")
+    text = rwmod.profile_changes({"temp2_min": 22, "pos_stage1": 50}, {"temp2_min": 24, "pos_stage1": 50, "close_stage1": True})
+    assert text == "Zwei Stufen aus → an, Beschatten ab außen 22 °C → 24 °C"
+
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 7, 16, 20, 1, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("cover.wz", "open", {"current_position": 100, "supported_features": 15}, "Wohnzimmer")
+        hass.set("sun.sun", "below_horizon", {"azimuth": 300, "elevation": -5}, "Sonne")
+        log, haus, ctl = await _setup(hw, hass)
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        await rw.async_start()
+        await rw.async_save_profile("standard", dict(rw.profiles["standard"], down_early="21:00", down_late="21:00", delay_random=0), by="Jens")
+        await rw.async_save_settings({"rw_covers": ["cover.wz"]}, by="Jens")
+        return log
+
+    log = asyncio.run(run())
+    rw_entries = [e for e in log.entries if e.get("mod") == "rollwerk"]
+    titles = [e["title"] for e in rw_entries]
+    assert "Profil „Standard“ geändert" in titles and "Wohnzimmer zu" in titles
+    prof = next(e for e in rw_entries if e["title"] == "Profil „Standard“ geändert")
+    assert "Schließen frühestens 16:00 → 21:00" in prof["why"] and "von Jens" in prof["why"]
+    move = next(e for e in rw_entries if e["title"] == "Wohnzimmer zu")
+    assert move["cat"] == "shutter" and "vorher 100 %" in move["why"]
