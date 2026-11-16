@@ -159,7 +159,7 @@ Danach kann **Warm genug** einen Raum noch abschalten (außer beim Boost).
 
 # Modul Rollwerk
 
-Rollläden mit **Profilen** nach dem Vorbild der [Cover Control Automation (CCA)](https://github.com/hvorragend/ha-blueprints) – ohne Blueprint und YAML, alles im Panel (Rollwerk › Rollläden und Rollwerk › Einstellungen).
+Rollläden mit **Verhalten** (früher „Profile“) nach dem Vorbild der [Cover Control Automation (CCA)](https://github.com/hvorragend/ha-blueprints) – ohne Blueprint und YAML, alles im Panel (Rollwerk › Rollläden und Rollwerk › Einstellungen).
 
 - **Rollläden-Seite:** nach Räumen aus Home Assistant, je Rollladen Stellung, was die Automatik gerade will und warum, ↑ ■ ↓ und Schieberegler; Hinweise für Beschattung, gekippt/offen, Bewohner schläft, von Hand – mit „Automatik übernimmt“.
 - **Verhalten:** jeder Rollladen nutzt ein Verhalten (z. B. „Standard“, „Süd mit Hitze“, „Schlafzimmer“) mit fünf Abschnitten. Zuerst nur das Wichtige, mit **Experte** alle Einstellungen der Cover Control Automation:
