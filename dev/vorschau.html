@@ -123,6 +123,8 @@ const hass = {
   states, areas, devices, entities, themes: { darkMode: false }, user: { is_admin: true },
   callWS: async (msg) => {
     wsLog.push(msg.type);
+    (window.hwSent = window.hwSent || []).push(JSON.parse(JSON.stringify(msg)));  // für die Klicktests
+    if (msg.type === "system_log/write") return null;
     if (msg.type === "hauswerk/heizen/get") return { settings, rooms, plans: {}, target_sensors: {}, status, defaults, modes: {}, is_admin: true, user_admin: true, rollwerk: { covers: rwCovers, profiles: rwProfiles, status: rwStatus } };
     if (msg.type === "hauswerk/rollwerk/command") return null;
     if (msg.type === "hauswerk/rollwerk/cover/save") { rwCovers[msg.entity_id] = msg.cover; return { covers: rwCovers, profiles: rwProfiles }; }

@@ -2,6 +2,17 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.37.0 – 2026-11-16
+
+### Neu
+- **Fehler sichtbar statt leerer Seite:** Bricht eine Seite, ein Fenster, der Raum-Dialog oder ein Widget ab, erscheint „Hier ist etwas schiefgelaufen“ mit der Fehlermeldung, **Diagnose kopieren** (Version, Seite, Fehler, Browser – in der App ohne Zwischenablage zum Markieren), **Neu laden** und **Zur Startseite**. Schlägt ein Knopf fehl, sagt eine Meldung „Das hat nicht geklappt: …“. Jeder Panel-Fehler steht zusätzlich im Protokoll von Home Assistant (Einstellungen › System › Protokolle, `custom_components.hauswerk.panel`). Die Regelung läuft davon unberührt weiter.
+
+### Behoben
+- **Kraftwerk:** Die Fenster Netz, Batterie und Hausverbrauch ließen sich nicht öffnen, sobald dort ein Sensor gewählt war. Gefunden von den neuen Klicktests.
+
+### Intern
+- **Panel-Klicktests bei jeder Version** (GitHub „Prüfen“ › Panel-Klicktests): öffnen im Browser jede Seite über ihre Adresse, jedes Widget in jeder Größe, „Widget hinzufügen“ für jedes Widget, jedes Einstellungs-Fenster aller Module (mit Ändern und Speichern), Räume, Rollwerk-Profile und -Rollläden, den Rollladen-Assistenten und Kraftwerk. Alles, was das Panel dabei an Home Assistant schickt, wird gegen die echten Prüfregeln des Backends getestet – so wären die Fehler aus 0.34.1 und 0.34.2 vor dem Release aufgefallen.
+
 ## 0.36.0 – 2026-11-16
 
 ### Neu

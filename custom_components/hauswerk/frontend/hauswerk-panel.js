@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.36.0";
+const VERSION = "0.37.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -566,8 +566,48 @@ class HauswerkPanel extends HTMLElement {
       return await this._hass.callWS(msg);
     } catch (err) {
       this._toast(err.message || "Fehler beim Speichern");
+      if (err && typeof err === "object") err.hwShown = true;
       throw err;
     }
+  }
+
+  // ------------------------------------------------------------ Fehler sichtbar machen
+  /** Fehler merken, in der Konsole und im Protokoll von Home Assistant melden (je Meldung einmal). */
+  _fail(where, err) {
+    const msg = String(err?.message || err || "unbekannter Fehler");
+    const stack = String(err?.stack || "").split("\n").slice(0, 8).join("\n");
+    this._lastErr = { where, msg, stack, at: new Date().toISOString(), tab: this._tab, pop: this._pop?.id || null };
+    console.error(`Hauswerk: Fehler in ${where}`, err);
+    this._errSent = this._errSent || new Set();
+    const key = `${where}|${msg}`;
+    if (!this._errSent.has(key) && this._admin) {
+      this._errSent.add(key);
+      this._hass?.callWS({ type: "system_log/write", logger: "custom_components.hauswerk.panel", level: "error",
+        message: `Hauswerk ${VERSION} · Panel-Fehler in ${where}: ${msg}\n${stack}` }).catch(() => null);
+    }
+    return this._lastErr;
+  }
+
+  /** Text für „Diagnose kopieren“. */
+  _failText() {
+    const e = this._lastErr || {};
+    return [`Hauswerk ${VERSION} · Home Assistant ${this._hass?.config?.version || "?"}`, `Zeit: ${e.at || "–"}`, `Seite: ${e.tab || this._tab}${e.pop ? ` · Pop-up: ${e.pop}` : ""}`,
+      `Wo: ${e.where || "–"}`, `Fehler: ${e.msg || "–"}`, e.stack ? `\n${e.stack}` : "", `\nBrowser: ${navigator.userAgent}`].filter(Boolean).join("\n");
+  }
+
+  /** Karte statt leerer Seite: was kaputt ist, Diagnose kopieren, neu laden. */
+  _failCard(where, err, small = false) {
+    const e = this._fail(where, err);
+    if (small) return `<div class="hw-fail small"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><span><b>Kann nicht angezeigt werden</b><small>${esc(e.msg)}</small></span><button class="link tiny" data-action="err-copy">Diagnose</button></div>`;
+    return `<section class="card hw-fail"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>
+      <h2>Hier ist etwas schiefgelaufen</h2>
+      <p>${esc(where)} konnte nicht angezeigt werden. Der Rest von Hauswerk läuft weiter – die Regelung in Home Assistant ist davon nicht betroffen.</p>
+      <code>${esc(e.msg)}</code>
+      <div class="hw-fail-b"><button class="secondary" data-action="err-copy"><ha-icon icon="mdi:content-copy"></ha-icon>Diagnose kopieren</button>
+        <button class="secondary" data-action="err-reload"><ha-icon icon="mdi:reload"></ha-icon>Neu laden</button>
+        <button class="link" data-action="tab" data-tab="start">Zur Startseite</button></div>
+      <p class="muted small">Die Meldung steht auch im Protokoll von Home Assistant (Einstellungen › System › Protokolle). Den kopierten Text bei einem Fehlerbericht mitschicken – dann lässt sich der Fehler schnell finden.</p>
+    </section>`;
   }
 
   get _admin() {
@@ -630,8 +670,16 @@ class HauswerkPanel extends HTMLElement {
       this._listening = true;
       const root = this.shadowRoot;
       root.addEventListener("click", (e) => this._onClick(e));
-      root.addEventListener("input", (e) => this._onInput(e));
-      root.addEventListener("change", (e) => this._onInput(e, true));
+      const safeInput = (e, change) => {
+        try {
+          this._onInput(e, change);
+        } catch (err) {
+          this._fail("Eingabe", err);
+          this._toast(`Das hat nicht geklappt: ${err?.message || err}`);
+        }
+      };
+      root.addEventListener("input", (e) => safeInput(e));
+      root.addEventListener("change", (e) => safeInput(e, true));
 
     }
   }
@@ -858,7 +906,12 @@ class HauswerkPanel extends HTMLElement {
     const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom,
       shutters: this._viewShutters, shutset: () => this._settingsPage("rw"),
       kwflow: this._viewKwFlow, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw") }[this._tab] || this._viewStart;
-    main.innerHTML = view.call(this);
+    try {
+      main.innerHTML = view.call(this);
+    } catch (err) {
+      const name = SUB_VIEWS.find((v) => v.id === this._tab)?.name || { start: "Startseite", house: "Einstellungen", log: "Protokoll" }[this._tab] || this._tab;
+      main.innerHTML = this._failCard(`Die Seite „${name}“`, err);
+    }
   }
 
   // ------------------------------------------------------------ Bausteine
@@ -938,7 +991,7 @@ class HauswerkPanel extends HTMLElement {
     try {
       body = this[`_w_${w.type}`](w, z);
     } catch (err) {
-      body = `<p class="muted small">Widget kann nicht angezeigt werden.</p>`;
+      body = this._failCard(`Widget „${def.name}“`, err, true);
     }
     const tools = edit
       ? `<span class="wtools">
@@ -4075,7 +4128,13 @@ class HauswerkPanel extends HTMLElement {
       return;
     }
     const scroll = host.querySelector(".sheet-body")?.scrollTop || 0;
-    const def = this._popDef(this._pop.id);
+    let def;
+    try {
+      def = this._popDef(this._pop.id);
+    } catch (err) {
+      def = { icon: "mdi:alert-circle-outline", c: "#ef4444", title: "Fehler", sub: "Dieses Fenster kann nicht angezeigt werden",
+        body: this._failCard(`Das Fenster „${this._pop.id}“`, err), foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+    }
     const foot =
       def.foot ??
       `<button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
@@ -4105,6 +4164,9 @@ class HauswerkPanel extends HTMLElement {
     if (String(id).startsWith("rwc:")) return this._rwcPop(id.slice(4));
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (KW_POPS.includes(id)) return this._kwPop(id);
+    if (id === "errtext")
+      return { icon: "mdi:content-copy", c: "#64748b", title: "Diagnose", sub: "Text markieren und kopieren",
+        body: `<textarea class="hw-errtext" readonly rows="12">${esc(this._pop.draft.text || this._failText())}</textarea>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     if (String(id).startsWith("rwp:")) { const [, pid, sec] = String(id).split(":"); return this._rwpPop(pid, RW_SECTIONS.some(([x]) => x === sec) ? sec : "tag"); }
     const p = this._settings;
     const s = this._status || {};
@@ -4916,6 +4978,16 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _renderDialog() {
+    try {
+      this._renderDialogInner();
+    } catch (err) {
+      const host = this.shadowRoot.getElementById("dialog");
+      if (host) host.innerHTML = `<div class="backdrop" data-action="dialog-close"></div><div class="sheet pop"><div class="sheet-body">${this._failCard("Der Raum-Dialog", err)}</div>
+        <div class="sheet-foot"><button class="secondary" data-action="dialog-close">Schließen</button></div></div>`;
+    }
+  }
+
+  _renderDialogInner() {
     const host = this.shadowRoot.getElementById("dialog");
     if (!this._dialog) {
       host.innerHTML = "";
@@ -5352,6 +5424,8 @@ class HauswerkPanel extends HTMLElement {
 
   /** Auswahlfeld: gewählte Entitäten als Karten, darunter die Suche mit Vorschlägen, nach Raum und Filter. */
   _picker(field, selected) {
+    // einzelne Entität oder Liste – beides annehmen
+    selected = Array.isArray(selected) ? selected : selected ? [selected] : [];
     const cfg = PICKERS[field];
     const S = this._pkState(field);
     const open = this._admin && S.open;  // erst nach „Hinzufügen“ bzw. „Ändern“
@@ -5714,6 +5788,16 @@ class HauswerkPanel extends HTMLElement {
   }
 
   async _onClick(e) {
+    try {
+      await this._onClickInner(e);
+    } catch (err) {
+      const a = e.target.closest?.("[data-action]")?.dataset.action || "?";
+      this._fail(`Aktion „${a}“`, err);
+      if (!err?.hwShown) this._toast(`Das hat nicht geklappt: ${err?.message || err}`);
+    }
+  }
+
+  async _onClickInner(e) {
     const path = e.composedPath();
     if (!path.some((n) => n.classList?.contains("picker"))) {
       this.shadowRoot.querySelectorAll(".pick-list").forEach((l) => (l.hidden = true));
@@ -6386,6 +6470,20 @@ class HauswerkPanel extends HTMLElement {
         this._logMod = el.dataset.id || "";
         this._logLimit = 200;
         this._renderMain();
+        break;
+      case "err-copy": {
+        const text = this._failText();
+        try {
+          await navigator.clipboard.writeText(text);
+          this._toast("Diagnose kopiert");
+        } catch (err) {
+          // Zwischenablage gesperrt (z. B. in der App): Text zum Markieren zeigen
+          this._openPop("errtext", { text });
+        }
+        break;
+      }
+      case "err-reload":
+        location.reload();
         break;
       case "kw-log":
         this._logMod = "kraftwerk";
@@ -7627,6 +7725,16 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .mlogo svg { width:100%; height:100%; display:block; }
 /* Kraftwerk */
 .rwname { margin-bottom:10px; }
+.hw-fail { text-align:center; display:flex; flex-direction:column; align-items:center; gap:8px; padding:24px 18px; }
+.hw-fail > ha-icon { --mdc-icon-size:40px; color:#ef4444; }
+.hw-fail h2 { margin:0; }
+.hw-fail p { margin:0; max-width:520px; }
+.hw-fail code { display:block; max-width:100%; overflow-wrap:anywhere; padding:8px 12px; border-radius:10px; background:color-mix(in srgb, #ef4444 10%, var(--card2)); font-size:12.5px; }
+.hw-fail-b { display:flex; flex-wrap:wrap; gap:8px; justify-content:center; margin:6px 0; }
+.hw-fail.small { flex-direction:row; text-align:left; padding:6px 0; gap:10px; }
+.hw-fail.small > ha-icon { --mdc-icon-size:22px; }
+.hw-fail.small b { display:block; font-size:13px; } .hw-fail.small small { display:block; color:var(--muted); font-size:11.5px; overflow-wrap:anywhere; }
+.hw-errtext { width:100%; box-sizing:border-box; font:12px/1.4 ui-monospace, monospace; }
 .cwiz-name { margin:4px 0 10px 36px; }
 .mlogo.big { width:56px; height:56px; border-radius:16px; margin-bottom:6px; }
 .kwd { position:relative; width:100%; max-width:440px; margin:4px auto 8px; aspect-ratio:300 / 252; }

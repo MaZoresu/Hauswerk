@@ -214,13 +214,15 @@ custom_components/hauswerk/
   frontend/hauswerk-panel.js   Panel als Web-Komponente, ohne Build-Schritt
 tests/test_logic.py             Regel-Logik
 tests/test_smoke.py             Kern, Heizwerk und Protokoll mit nachgebautem Home Assistant
+tests/test_panel.py             Panel und Backend passen zusammen (Widget-Typen)
+tests/test_panel_ui.py          Klicktests im Browser (Playwright): alle Seiten, Fenster, Widgets; gesendete Befehle gegen api.py
 dev/vorschau.html               Panel mit simuliertem Home Assistant im Browser ansehen
 .github/workflows/ci.yml        Prüfen bei jedem Push: pytest, hassfest, HACS
 .github/workflows/release.yml   Release, sobald sich die Version in manifest.json ändert; Text aus CHANGELOG.md
 CHANGELOG.md                    Änderungen je Version – erscheinen als Update-Notizen in Home Assistant (HACS)
 ```
 
-Tests: `pip install pytest`, dann im Projektordner `python -m pytest tests` (Home Assistant wird nicht gebraucht).
+Tests: `pip install pytest`, dann im Projektordner `python -m pytest tests` (Home Assistant wird nicht gebraucht). Für die Klicktests zusätzlich `pip install playwright voluptuous` und `python -m playwright install chromium`.
 
 Vorschau: `dev/vorschau.html` direkt im Browser öffnen. Alle Daten sind erfunden, Speichern wirkt nur bis zum Neuladen.
 
