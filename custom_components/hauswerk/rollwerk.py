@@ -298,7 +298,7 @@ class Rollwerk:
     # ------------------------------------------------------------ Änderungen
     def profile(self, entity_id: str) -> dict[str, Any]:
         pid = (self.covers.get(entity_id) or {}).get("profile") or "standard"
-        prof = self.profiles.get(pid) or self.profiles.get("standard") or {}
+        prof = self.profiles.get(pid) or self.profiles.get("standard") or next(iter(self.profiles.values()), {})
         return {**PROFILE_DEFAULTS, **prof}
 
     async def async_save_settings(self, settings: dict[str, Any], by: str | None = None) -> None:
@@ -336,16 +336,23 @@ class Rollwerk:
         await self.async_evaluate()
         return pid
 
-    async def async_delete_profile(self, pid: str, by: str | None = None) -> None:
-        if pid == "standard" or pid not in self.profiles:
+    async def async_delete_profile(self, pid: str, replace_with: str | None = None, by: str | None = None) -> None:
+        """Profil löschen (auch „Standard“) – ein Profil bleibt immer. Rollläden bekommen das Ersatzprofil."""
+        if pid not in self.profiles or len(self.profiles) < 2:
             return
         name = self.profiles.pop(pid).get("name")
+        if replace_with not in self.profiles:
+            replace_with = "standard" if "standard" in self.profiles else next(iter(self.profiles))
+        moved = 0
         for cfg in self.covers.values():
-            if cfg.get("profile") == pid:
-                cfg["profile"] = "standard"
+            if (cfg.get("profile") or "standard") == pid:
+                cfg["profile"] = replace_with
+                moved += 1
         self._save()
         self._track()
-        self.log.add("settings", f"Rollwerk-Profil „{name}“ gelöscht", f"Rollläden nutzen jetzt „Standard“{f' · von {by}' if by else ''}")
+        new_name = self.profiles[replace_with].get("name")
+        self.log.add("settings", f"Rollwerk-Profil „{name}“ gelöscht",
+                     f"{moved} Rollläden nutzen jetzt „{new_name}“{f' · von {by}' if by else ''}" if moved else (f"von {by}" if by else None))
         await self.async_evaluate()
 
     async def async_command(self, entity_ids: list[str], action: str, position: int | None = None, by: str | None = None) -> None:

@@ -581,7 +581,11 @@ async def ws_rw_profile_save(hass: HomeAssistant, connection, msg) -> None:
 
 
 @websocket_api.websocket_command(
-    {vol.Required("type"): "hauswerk/rollwerk/profile/delete", vol.Required("profile_id"): vol.All(str, vol.Length(max=40))}
+    {
+        vol.Required("type"): "hauswerk/rollwerk/profile/delete",
+        vol.Required("profile_id"): vol.All(str, vol.Length(max=40)),
+        vol.Optional("replace_with"): vol.Any(None, vol.All(str, vol.Length(max=40))),
+    }
 )
 @require_editor
 @websocket_api.async_response
@@ -589,7 +593,7 @@ async def ws_rw_profile_delete(hass: HomeAssistant, connection, msg) -> None:
     rw = _rw(hass)
     if rw is None:
         return _not_ready(connection, msg)
-    await rw.async_delete_profile(msg["profile_id"], by=_who(connection))
+    await rw.async_delete_profile(msg["profile_id"], msg.get("replace_with"), by=_who(connection))
     connection.send_result(msg["id"], {"profiles": rw.profiles, "covers": rw.covers})
 
 

@@ -655,6 +655,13 @@ def test_rollwerk(hw):
         await rw.async_save_cover("cover.wz", {"profile": pid})
         await rw.async_delete_profile(pid)
         assert rw.covers["cover.wz"]["profile"] == "standard"
+        # auch „Standard“ ist löschbar, solange ein anderes Profil bleibt – Rollläden bekommen das Ersatzprofil
+        pid = await rw.async_save_profile(None, dict(prof, name="Süd"))
+        await rw.async_delete_profile("standard", pid)
+        assert "standard" not in rw.profiles and rw.covers["cover.wz"]["profile"] == pid
+        assert rw.profile("cover.wz")["name"] == "Süd"
+        await rw.async_delete_profile(pid)  # das letzte Profil bleibt
+        assert pid in rw.profiles
         return log
 
     log = asyncio.run(run())

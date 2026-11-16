@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.30.0";
+const VERSION = "0.30.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2335,10 +2335,11 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _rwProfName(pid) {
-    return this._data.rollwerk?.profiles?.[pid || "standard"]?.name || "Standard";
+    const all = this._data.rollwerk?.profiles || {};
+    return (all[pid || "standard"] || all.standard || Object.values(all)[0])?.name || "Standard";
   }
 
-  /** Wonach öffnet/schließt das Verhalten? time | sun | cal | free */
+  /** Wonach öffnet/schließt das Profil? time | sun | cal | free */
   _rwMode(p) {
     const f = p.features || [];
     if (!f.includes("time")) return "free";
@@ -2363,7 +2364,7 @@ class HauswerkPanel extends HTMLElement {
     return `<div class="rwday ${small ? "small" : ""}"><div class="rwday-bar">${segs.join("")}<b class="d-now" style="left:${pc(nowM)}"></b></div>${small ? "" : `<div class="rwday-lab">${lab}</div>`}</div>`;
   }
 
-  /** Kurztext eines Verhaltens für Listen. */
+  /** Kurztext eines Profils für Listen. */
   _rwProfSum(p) {
     const tl = this._rwStatus?.timelines?.[p.id];
     const mode = this._rwMode(p);
@@ -2385,22 +2386,22 @@ class HauswerkPanel extends HTMLElement {
     const s = this._rwStatus || {};
     const profiles = this._rwProfiles();
     const rows = [
-      { g: "Rollläden", id: "cwiz", icon: "mdi:auto-fix", c: "#0ea5e9", title: "Rollladen hinzufügen", sum: "Assistent: Richtung, Fensterkontakt, Raum und Verhalten in sechs Schritten", words: "assistent neu hinzufügen rollladen" },
+      { g: "Rollläden", id: "cwiz", icon: "mdi:auto-fix", c: "#0ea5e9", title: "Rollladen hinzufügen", sum: "Assistent: Richtung, Fensterkontakt, Raum und Profil in sechs Schritten", words: "assistent neu hinzufügen rollladen" },
       { g: "Rollläden", id: "rwcovers", icon: "mdi:window-shutter-settings", c: "#0ea5e9", title: "Welche Rollläden?",
         sum: covers.length ? `${covers.length} gewählt` : "Noch keine gewählt", warn: !covers.length, words: "rollladen rollo jalousie auswahl geräte" },
       ...covers.map((c) => ({
         g: "Rollläden", id: `rwc:${c.id}`, icon: "mdi:window-shutter", c: c.cfg.auto === false ? "#94a3b8" : "#38bdf8",
         title: this._entityName(c.id), off: c.cfg.auto === false,
         sum: (() => { const room = this._rwRoomFor(c.id); const own = c.cfg.contact_open || c.cfg.contact_tilted; const inh = this._rwRoomContacts(room);
-          return [`Verhalten „${this._rwProfName(c.cfg.profile)}“`, room ? `Raum ${room.name}` : "", own ? "eigene Kontakte" : c.cfg.contacts !== "none" && room && (inh.open.length || inh.tilted.length) ? "Fenster aus Heizwerk" : "", c.cfg.storm === false ? "ohne Sturmschutz" : ""].filter(Boolean).join(" · "); })(),
+          return [`Profil „${this._rwProfName(c.cfg.profile)}“`, room ? `Raum ${room.name}` : "", own ? "eigene Kontakte" : c.cfg.contacts !== "none" && room && (inh.open.length || inh.tilted.length) ? "Fenster aus Heizwerk" : "", c.cfg.storm === false ? "ohne Sturmschutz" : ""].filter(Boolean).join(" · "); })(),
         words: `${c.id} verhalten profil fenster tür kontakt`,
       })),
       ...profiles.map((x) => {
         const n = covers.filter((c) => (c.cfg.profile || "standard") === x.id).length;
-        return { g: "Verhalten", id: `rwp:${x.id}:tag`, icon: "mdi:tune-variant", c: "#f59e0b", title: `${x.name} · ${n} ${n === 1 ? "Rollladen" : "Rollläden"}`,
+        return { g: "Profile", id: `rwp:${x.id}:tag`, icon: "mdi:tune-variant", c: "#f59e0b", title: `${x.name} · ${n} ${n === 1 ? "Rollladen" : "Rollläden"}`,
           sum: this._rwProfSum(x), words: `verhalten profil ${x.name} zeiten sonnenschutz lüften ausnahmen` };
       }),
-      { g: "Verhalten", id: "rwp::tag", icon: "mdi:plus", c: "#0ea5e9", title: "Neues Verhalten", sum: "z. B. für eine Fassade oder das Schlafzimmer – startet als Kopie von „Standard“", words: "profil verhalten neu anlegen kopie" },
+      { g: "Profile", id: "rwp::tag", icon: "mdi:plus", c: "#0ea5e9", title: "Neues Profil", sum: "z. B. für eine Fassade oder das Schlafzimmer – startet als Kopie von „Standard“", words: "profil verhalten neu anlegen kopie" },
       { g: "Allgemein", id: "rwstorm", icon: "mdi:weather-windy-variant", c: "#ef4444", title: "Sturmschutz",
         sum: p.rw_storm !== false ? `hoch ab ${fmt(p.storm_kmh ?? 70, 0)} km/h Böen${s.gust != null ? ` · jetzt ${fmt(s.gust, 0)} km/h` : ""}` : "Aus", words: "sturm wind böen schutz" },
       { g: "Allgemein", id: "rwrecovery", icon: "mdi:restart", c: "#64748b", title: "Nach Neustart",
@@ -2419,7 +2420,7 @@ class HauswerkPanel extends HTMLElement {
     switch (id) {
       case "rwcovers":
         return { icon: "mdi:window-shutter-settings", c: "#0ea5e9", title: "Welche Rollläden?", sub: "Rollwerk",
-          body: `<p class="muted">Gewählte Rollläden fährt Rollwerk nach ihrem Verhalten. Verhalten und Fensterkontakte stellst du danach je Rollladen ein. Gruppen wie „Alle Rollläden“ besser weglassen.</p>
+          body: `<p class="muted">Gewählte Rollläden fährt Rollwerk nach ihrem Profil. Profil und Fensterkontakte stellst du danach je Rollladen ein. Gruppen wie „Alle Rollläden“ besser weglassen.</p>
             <div class="field"><span><ha-icon icon="mdi:window-shutter"></ha-icon> Rollläden</span>${this._picker("rw_covers", p.rw_covers || [])}</div>` };
       case "rwstorm":
         return { icon: "mdi:weather-windy-variant", c: "#ef4444", title: "Sturmschutz", sub: "Rollwerk · alle Rollläden",
@@ -2454,13 +2455,13 @@ class HauswerkPanel extends HTMLElement {
       <p class="muted small">${p.window_dir != null ? `Fenster zeigt nach <b>${this._rwDirName(p.window_dir)}</b> – Sonne zählt von ${fmt(s0, 0)}° bis ${fmt(s1, 0)}°.` : "Tippe an, wohin das Fenster zeigt."}${sun.azimuth != null && sun.elevation > 0 ? " ● Sonne jetzt." : ""}</p></div>`;
   }
 
-  /** Verhalten bearbeiten: fünf Abschnitte, einfach oder mit „Experte“ alle Einstellungen der Cover Control Automation. */
+  /** Profil bearbeiten: fünf Abschnitte, einfach oder mit „Experte“ alle Einstellungen der Cover Control Automation. */
   _rwpPop(pid, sec) {
     const d = this._pop.draft;
     const profiles = this._data.rollwerk?.profiles || {};
     if (!d.prof) {
       d.pid = pid || null;
-      d.prof = clone(profiles[pid] || { ...(profiles.standard || {}), name: "Neues Verhalten" });
+      d.prof = clone(profiles[pid] || { ...(profiles.standard || Object.values(profiles)[0] || {}), name: "Neues Profil" });
     }
     const p = d.prof;
     const ex = this._expertOn();
@@ -2569,7 +2570,7 @@ class HauswerkPanel extends HTMLElement {
           ${note("So sperrt dich die Terrassentür nicht aus. Hochfahren geht immer.", "mdi:door-open")}
           <div class="wxrows">${row("vf", "Fenster gekippt: lüften", "Rollladen auf Lüftungsstellung", feat("ventilate"))}${has("ventilate") ? row("pv", "Lüftungsstellung", "", num("pos_ventilate", 30, 0, 100, 5, "%")) : ""}</div>
           ${lbl("Kontakte")}${mine.length ? `<div class="evlist">${mine.map(([id, c]) => `<div class="ev"><ha-icon icon="mdi:window-shutter"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${(() => { const own = c.contact_open || c.contact_tilted; const k = own ? { open: [c.contact_open].filter(Boolean), tilted: [c.contact_tilted].filter(Boolean) } : c.contacts === "none" ? { open: [], tilted: [] } : this._rwRoomContacts(this._rwRoomFor(id));
-              return [k.open.length ? `offen: ${k.open.map((e) => esc(this._entityName(e))).join(", ")}` : "", k.tilted.length ? `gekippt: ${k.tilted.map((e) => esc(this._entityName(e))).join(", ")}` : ""].filter(Boolean).join(" · ") + (!own && (k.open.length || k.tilted.length) ? " · aus Heizwerk" : "") || "kein Kontakt"; })()}</small></span><button class="link" data-action="pop-open" data-pop="rwc:${esc(id)}">ändern</button></div>`).join("")}</div>` : note("Noch kein Rollladen nutzt dieses Verhalten.")}
+              return [k.open.length ? `offen: ${k.open.map((e) => esc(this._entityName(e))).join(", ")}` : "", k.tilted.length ? `gekippt: ${k.tilted.map((e) => esc(this._entityName(e))).join(", ")}` : ""].filter(Boolean).join(" · ") + (!own && (k.open.length || k.tilted.length) ? " · aus Heizwerk" : "") || "kein Kontakt"; })()}</small></span><button class="link" data-action="pop-open" data-pop="rwc:${esc(id)}">ändern</button></div>`).join("")}</div>` : note("Noch kein Rollladen nutzt dieses Profil.")}
           ${exBox(`${lbl("Lüften")}${checks("vent_options", RW_VENT)}${lbl("Aussperrschutz auch bei gekipptem Fenster")}${checks("lockout_tilted", RW_LOCK_TILTED)}`)}`;
         break;
       }
@@ -2594,19 +2595,26 @@ class HauswerkPanel extends HTMLElement {
           <div class="wxrows">${row("po", "Offen", "100 % = ganz offen", num("pos_open", 100, 0, 100, 1, "%"))}${row("pc", "Geschlossen", "z. B. 10 % für Lüftungsschlitze", num("pos_close", 0, 0, 100, 1, "%"))}${p.close_stage1 ? row("p1", "Abends Stufe 1", "", num("pos_stage1", 50, 0, 100, 1, "%")) : ""}${has("ventilate") ? row("pv2", "Lüften", "", num("pos_ventilate", 30, 0, 100, 1, "%")) : ""}${has("shading") ? row("ps2", "Beschattung", "", num("pos_shading", 25, 0, 100, 1, "%")) : ""}</div>
           ${exBox(`<div class="wxrows">${row("pt", "Toleranz", "", num("tolerance", 0, 0, 20, 1, "%"))}${row("pd", "Fahrzeit", "einmal ganz auf oder zu", num("drive_time", 90, 5, 300, 5, "s"))}
             ${row("df", "Verzögerung fest", "", num("delay_fix", 0, 0, 600, 1, "s"))}${row("dr", "Verzögerung zufällig bis", "", num("delay_random", 5, 0, 600, 1, "s"), "Verteilt die Fahrten, damit nicht alle Rollläden gleichzeitig funken.")}</div>
-            ${lbl("Verhalten im Detail")}${checks("behavior", RW_BEHAVIOR)}`)}
-          ${d.pid ? note(users.length ? `Genutzt von: ${users.map(esc).join(", ")}` : "Noch kein Rollladen nutzt dieses Verhalten – zuordnen im Rollladen.", "mdi:window-shutter") : ""}
-          ${this._admin && d.pid && d.pid !== "standard" ? `<button class="secondary danger small" data-action="rwp-del"><ha-icon icon="mdi:delete-outline"></ha-icon>${d.confirm ? "Wirklich löschen? Rollläden nutzen dann „Standard“" : "Verhalten löschen"}</button>` : ""}`;
+            ${lbl("Regeln im Detail")}${checks("behavior", RW_BEHAVIOR)}`)}
+          ${d.pid ? note(users.length ? `Genutzt von: ${users.map(esc).join(", ")}` : "Noch kein Rollladen nutzt dieses Profil – zuordnen im Rollladen.", "mdi:window-shutter") : ""}`;
         break;
     }
     const tl = d.pid ? st.timelines?.[d.pid] : null;
     const isNew = !d.pid;
     return {
-      icon: meta[2], c: meta[3], title: isNew ? "Neues Verhalten" : esc(p.name || ""), sub: `Verhalten · ${meta[1]}`,
-      body: `<div class="rwtop">${tl ? `<div class="grow">${this._rwDayBar(tl)}</div>` : `<span class="grow muted small">${isNew ? "Tagesleiste nach dem Anlegen" : ""}</span>`}
+      icon: meta[2], c: meta[3], title: isNew ? "Neues Profil" : esc(p.name || ""), sub: `Profil · ${meta[1]}`,
+      body: `${d.confirm ? (() => {
+          const others = this._rwProfiles().filter((x) => x.id !== d.pid);
+          const n = Object.values(this._data.rollwerk?.covers || {}).filter((c) => (c.profile || "standard") === d.pid).length;
+          if (!d.replace) d.replace = others.find((x) => x.id === "standard")?.id || others[0]?.id;
+          return `<div class="rwdel"><b><ha-icon icon="mdi:delete-alert-outline"></ha-icon>Profil „${esc(p.name || "")}“ löschen?</b>
+            ${n ? `<label class="field"><span>${n} ${n === 1 ? "Rollladen nutzt" : "Rollläden nutzen"} dieses Profil und ${n === 1 ? "bekommt" : "bekommen"} dann:</span><select data-rwdel>${others.map((x) => `<option value="${esc(x.id)}" ${x.id === d.replace ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>` : `<p class="muted small">Kein Rollladen nutzt dieses Profil.</p>`}
+            <div class="rwdel-b"><button class="secondary" data-action="rwp-del-no">Behalten</button><button class="primary danger-bg" data-action="rwp-del"><ha-icon icon="mdi:delete-outline"></ha-icon>Löschen</button></div></div>`;
+        })() : ""}<div class="rwtop">${tl ? `<div class="grow">${this._rwDayBar(tl)}</div>` : `<span class="grow muted small">${isNew ? "Tagesleiste nach dem Anlegen" : ""}</span>`}
           <button class="rwexp ${ex ? "on" : ""}" data-action="rw-expert" title="Alle Einstellungen wie bei der Cover Control Automation"><ha-icon icon="mdi:school-outline"></ha-icon>Experte</button></div>
         <div class="rwsecs">${RW_SECTIONS.map(([x, t, i, c, f]) => `<button class="rwsec ${x === sec ? "on" : ""} ${f && !(p.features || []).includes(f) ? "off" : ""}" data-action="rwp-sec" data-sec="${x}" style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${t}</button>`).join("")}</div>${body}`,
-      foot: `<button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
+      foot: `${this._admin && d.pid && this._rwProfiles().length > 1 ? `<button class="icon boxed danger" data-action="rwp-del" title="Profil löschen" aria-label="Profil löschen"><ha-icon icon="mdi:delete-outline"></ha-icon></button>` : ""}
+        <button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
         ${this._admin ? `<button class="primary" data-action="rwp-save"><ha-icon icon="mdi:content-save-outline"></ha-icon>${isNew ? "Anlegen" : "Speichern"}</button>` : ""}`,
     };
   }
@@ -2632,7 +2640,7 @@ class HauswerkPanel extends HTMLElement {
     return { all: contacts, open: open || null, tilted: tilted || null };
   }
 
-  /** Passt ein vorhandenes Verhalten? Gleiche Richtung, gleiche Art (Schlafzimmer), gleicher Sonnenschutz. */
+  /** Passt ein vorhandenes Profil? Gleiche Richtung, gleiche Art (Schlafzimmer), gleicher Sonnenschutz. */
   _cwizMatch(d) {
     const sleep = d.use === "schlafen";
     return this._rwProfiles().find((p) => Number(p.window_dir) === Number(d.prof.window_dir) && !!p.resident_sensor === false
@@ -2642,7 +2650,7 @@ class HauswerkPanel extends HTMLElement {
   _cwizPop() {
     const d = this._pop.draft;
     const S = this._hass.states;
-    const steps = ["Rollladen", "Richtung", "Fenster", "Raum", "Verhalten", "Fertig"];
+    const steps = ["Rollladen", "Richtung", "Fenster", "Raum", "Profil", "Fertig"];
     const name = (id) => esc(this._entityName(id));
     const bar = `<div class="wiz-bar">${steps.map((s, i) => `<button class="wiz-dot ${i === d.step ? "on" : i < d.step ? "done" : ""}" data-action="cwiz-go" data-i="${i}" ${i > d.step && !this._cwizOk(i - 1) ? "disabled" : ""}><i>${i < d.step ? "✓" : i + 1}</i><span>${s}</span></button>`).join("")}</div>`;
     const tick = (on, radio = false) => `<ha-icon icon="${radio ? (on ? "mdi:radiobox-marked" : "mdi:radiobox-blank") : on ? "mdi:checkbox-marked" : "mdi:checkbox-blank-outline"}"></ha-icon>`;
@@ -2657,7 +2665,7 @@ class HauswerkPanel extends HTMLElement {
           if (!groups.has(a)) groups.set(a, []);
           groups.get(a).push(id);
         }
-        body = `<p class="muted">Welche Rollläden sollen dazukommen? Mehrere gleichzeitig gehen auch – z. B. alle Fenster einer Seite, sie bekommen dann dasselbe Verhalten.</p>
+        body = `<p class="muted">Welche Rollläden sollen dazukommen? Mehrere gleichzeitig gehen auch – z. B. alle Fenster einer Seite, sie bekommen dann dasselbe Profil.</p>
           ${all.length ? [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de")).map(([a, ids]) => `<div class="lbl">${esc(a)}</div>${ids.map((id) => `<button class="wiz-dev ${d.covers.includes(id) ? "on" : ""}" data-action="cwiz-cover" data-id="${esc(id)}">${tick(d.covers.includes(id))}<span class="grow"><b>${name(id)}</b><small>${esc(this._fmtState(S[id]))}${S[id].attributes?.current_position != null ? ` · ${S[id].attributes.current_position} %` : ""}</small></span></button>`).join("")}`).join("")
             : `<p class="note"><ha-icon icon="mdi:check-all"></ha-icon>Alle Rollläden sind schon in Rollwerk.</p>`}`;
         break;
@@ -2701,8 +2709,8 @@ class HauswerkPanel extends HTMLElement {
         const match = this._cwizMatch(d);
         if (d.pick == null) d.pick = match ? match.id : "new";
         const opt = (v, t, s) => `<button class="wiz-dev ${d.pick === v ? "on" : ""}" data-action="cwiz-pick" data-v="${esc(v)}">${tick(d.pick === v, true)}<span class="grow"><b>${t}</b><small>${s}</small></span></button>`;
-        body = `<p class="muted">Rollläden mit gleichem Verhalten lassen sich später gemeinsam ändern.</p>
-          ${opt("new", `Neues Verhalten „${esc(this._cwizName(d))}“`, "aus deinen Antworten")}
+        body = `<p class="muted">Rollläden mit gleichem Profil lassen sich später gemeinsam ändern.</p>
+          ${opt("new", `Neues Profil „${esc(this._cwizName(d))}“`, "aus deinen Antworten")}
           ${this._rwProfiles().map((p) => opt(p.id, `„${esc(p.name)}“${match?.id === p.id ? " – passt" : ""}`, esc(this._rwProfSum(p)))).join("")}`;
         break;
       }
@@ -2715,7 +2723,7 @@ class HauswerkPanel extends HTMLElement {
             ${line("mdi:compass-outline", "Fenster zeigt nach", d.prof.window_dir == null ? "–" : this._rwDirName(d.prof.window_dir))}
             ${line("mdi:home-thermometer-outline", "Raum aus Heizwerk", rooms.length ? rooms.map(esc).join(", ") : "–")}
             ${line("mdi:door-open", "Mit Kontakt", `${cs} von ${d.covers.length}`)}
-            ${line("mdi:tune-variant", "Verhalten", d.pick === "new" ? `neu: „${esc(this._cwizName(d))}“` : `„${esc(this._rwProfName(d.pick))}“`)}
+            ${line("mdi:tune-variant", "Profil", d.pick === "new" ? `neu: „${esc(this._cwizName(d))}“` : `„${esc(this._rwProfName(d.pick))}“`)}
             ${d.pick === "new" ? line("mdi:sun-thermometer-outline", "Sonnenschutz", d.shade && d.prof.window_dir != null ? `ab ${fmt(d.temp, 0)} °C außen` : "aus") : ""}
           </div>${note2("Rollwerk fährt erst beim nächsten Wechsel (z. B. abends schließen) – nicht sofort nach dem Anlegen.")}`;
         break;
@@ -2743,7 +2751,7 @@ class HauswerkPanel extends HTMLElement {
     return [use, dir].filter(Boolean).join(" ") || "Wohnraum";
   }
 
-  /** Neues Verhalten aus den Antworten: Kopie von „Standard“, angepasst an Raum, Richtung und Sonnenschutz. */
+  /** Neues Profil aus den Antworten: Kopie von „Standard“, angepasst an Raum, Richtung und Sonnenschutz. */
   _cwizProfile(d) {
     const base = clone(this._data.rollwerk?.profiles?.standard || {});
     const f = new Set(["up", "down", "time"]);
@@ -2834,11 +2842,11 @@ class HauswerkPanel extends HTMLElement {
     return {
       icon: "mdi:window-shutter", c: "#0ea5e9", title: "Rollladen", sub: `${esc(this._entityName(entityId))}${rs.area ? ` · ${esc(rs.area)}` : ""}`,
       body: `
-        <div class="wxrows">${tog("auto", true, "Automatik", "nach dem Verhalten fahren")}${tog("storm", true, "Sturmschutz", "bei Sturm hochfahren")}</div>
-        <div class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Verhalten</span>
+        <div class="wxrows">${tog("auto", true, "Automatik", "nach dem Profil fahren")}${tog("storm", true, "Sturmschutz", "bei Sturm hochfahren")}</div>
+        <div class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Profil</span>
           <div class="segs small">${profiles.map((x) => `<button class="seg ${x.id === pid ? "on" : ""}" data-action="rwc-set" data-k="profile" data-v="${esc(x.id)}" ${dis}>${esc(x.name)}</button>`).join("")}</div></div>
         ${this._rwDayBar(this._rwStatus?.timelines?.[pid])}
-        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${esc(this._rwProfSum({ id: pid, ...(this._data.rollwerk?.profiles?.[pid] || {}) }))} · <button class="link inline" data-action="pop-open" data-pop="rwp:${esc(pid)}:tag">Verhalten bearbeiten</button></p>
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${esc(this._rwProfSum({ id: pid, ...(this._data.rollwerk?.profiles?.[pid] || {}) }))} · <button class="link inline" data-action="pop-open" data-pop="rwp:${esc(pid)}:tag">Profil bearbeiten</button></p>
         <label class="field"><span><ha-icon icon="mdi:home-thermometer-outline"></ha-icon> Raum aus Heizwerk</span>
           <select data-rwc="room" ${dis}><option value="">${autoRoom ? `automatisch: ${esc(autoRoom.name)}` : "automatisch (keiner gefunden)"}</option>${Object.values(this._data.rooms || {}).sort((a, b) => a.name.localeCompare(b.name, "de")).map((r) => `<option value="${esc(r.id)}" ${c.room === r.id ? "selected" : ""}>${esc(r.name)}</option>`).join("")}<option value="none" ${c.room === "none" ? "selected" : ""}>keiner</option></select></label>
         <div class="lbl">Fenster- und Türkontakte</div>
@@ -3003,7 +3011,7 @@ class HauswerkPanel extends HTMLElement {
         { g: "Darstellung", start: true, icon: "mdi:view-dashboard-edit-outline", c: "#2dd4bf", title: "Widgets der Startseite",
           sum: `${n} Widget${n === 1 ? "" : "s"} · für alle Benutzer gleich`, words: "start dashboard widget übersicht anpassen" },
         ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => v === "settings" || v === "shutset") || m.views[0], icon: `logo:${m.logo}`, c: m.id === "rollwerk" ? "#0ea5e9" : "#fb923c", title: m.name,
-          sum: m.id === "rollwerk" ? `${(p.rw_covers || []).length} Rollläden · ${Object.keys(this._data.rollwerk?.profiles || {}).length} Verhalten` : `${rooms.length} ${rooms.length === 1 ? "Raum" : "Räume"} · Heizpläne, Vorheizen, Saison und mehr`,
+          sum: m.id === "rollwerk" ? `${(p.rw_covers || []).length} Rollläden · ${Object.keys(this._data.rollwerk?.profiles || {}).length} Profile` : `${rooms.length} ${rooms.length === 1 ? "Raum" : "Räume"} · Heizpläne, Vorheizen, Saison und mehr`,
           words: m.id === "rollwerk" ? "rollwerk rollladen rollo module" : "heizen heizung räume module" })),
         ...COMING.map((m) => ({ g: "Module", soon: true, icon: m.icon, c: "#94a3b8", title: m.name, sum: "Kommt später", words: `${m.name.toLowerCase()} module` })),
         { g: "System", go: "log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll",
@@ -4812,6 +4820,10 @@ class HauswerkPanel extends HTMLElement {
       this._renderPop();
       return;
     }
+    if (t.hasAttribute?.("data-rwdel") && this._pop?.draft) {
+      this._pop.draft.replace = t.value;
+      return;
+    }
     if (t.dataset.rwp && this._pop?.draft?.prof) {
       const k = t.dataset.rwp, kind = t.dataset.kind;
       this._pop.draft.prof[k] = kind === "bool" ? t.checked : kind === "num" ? (t.value === "" ? null : Number(t.value)) : t.value || null;
@@ -5688,6 +5700,10 @@ class HauswerkPanel extends HTMLElement {
         }
         this._renderPop();
         break;
+      case "rwp-del-no":
+        this._pop.draft.confirm = false;
+        this._renderPop();
+        break;
       case "rwp-sec": {
         const [, pid] = this._pop.id.split(":");
         this._pop.id = `rwp:${pid}:${el.dataset.sec}`;
@@ -5702,18 +5718,18 @@ class HauswerkPanel extends HTMLElement {
         this._data.rollwerk.profiles = res.profiles;
         this._closePop();
         this._renderMain();
-        this._toast(d.pid ? "Gespeichert" : "Verhalten angelegt");
+        this._toast(d.pid ? "Gespeichert" : "Profil angelegt");
         break;
       }
       case "rwp-del": {
         const d = this._pop.draft;
-        if (!d.confirm) { d.confirm = true; this._renderPop(); return; }
-        const res = await this._ws({ type: "hauswerk/rollwerk/profile/delete", profile_id: d.pid });
+        if (!d.confirm) { d.confirm = true; this._pop.keep = false; this._renderPop(); return; }
+        const res = await this._ws({ type: "hauswerk/rollwerk/profile/delete", profile_id: d.pid, replace_with: d.replace || null });
         this._data.rollwerk.profiles = res.profiles;
         this._data.rollwerk.covers = res.covers;
         this._closePop();
         this._renderMain();
-        this._toast("Verhalten gelöscht");
+        this._toast("Profil gelöscht");
         break;
       }
       case "rwc-cmode": {
@@ -6689,6 +6705,12 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .rw-range { flex:1; min-width:60px; accent-color:var(--accent); height:28px; }
 .segs.small.rw-fac { display:grid; grid-template-columns:repeat(9, minmax(0, 1fr)); gap:4px; }
 .segs.small.rw-fac .seg { padding:8px 0; font-size:12.5px; justify-content:center; }
+.rwdel { padding:12px 14px; margin-bottom:12px; border-radius:14px; border:1px solid color-mix(in srgb, #ef4444 45%, transparent); background:color-mix(in srgb, #ef4444 8%, var(--card)); }
+.rwdel > b { display:flex; align-items:center; gap:8px; color:#dc2626; margin-bottom:8px; }
+.rwdel select { width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--line2); background:var(--card); color:var(--text); font:inherit; }
+.rwdel-b { display:flex; gap:8px; justify-content:flex-end; margin-top:10px; }
+.danger-bg { background:#dc2626 !important; border-color:#dc2626 !important; color:#fff !important; }
+button.icon.danger ha-icon { color:#dc2626; }
 .rwchecks { display:flex; flex-direction:column; gap:4px; margin:6px 0 10px; }
 .rwck { display:flex; align-items:flex-start; gap:10px; text-align:left; padding:9px 10px; border-radius:12px; border:1px solid var(--line2); background:var(--card); color:var(--text); font:inherit; cursor:pointer; }
 .rwck ha-icon { --mdc-icon-size:20px; color:var(--muted); flex:none; }

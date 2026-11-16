@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.30.1 – 2026-11-16
+
+### Geändert
+- **„Verhalten“ heißt wieder „Profil“** – in Einstellungen, Rollladen-Dialog, Assistent und Tagesleiste. Die Auswahl der CCA-Regeln unter Feinheiten heißt jetzt „Regeln im Detail“.
+- **Profile löschen:** Jedes Profil lässt sich löschen – auch „Standard“, solange ein anderes bleibt. Der Papierkorb steht unten im Profil-Dialog; vor dem Löschen wählst du, welches Profil die betroffenen Rollläden bekommen.
+
 ## 0.30.0 – 2026-11-16
 
 ### Neu
