@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.31.1 – 2026-11-16
+
+### Behoben
+- **Rollläden fuhren nach einem Neustart von Home Assistant hoch.** Zwei Ursachen:
+  - War ein Rollladen beim Start noch nicht erreichbar (die Integration lädt später), fuhr Rollwerk ihn beim ersten Wert sofort.
+  - Wartezeiten wie „Sonne mindestens 30 s unter …“ begannen nach dem Neustart neu – in der Zwischenzeit galt abends „noch Tag“, also offen.
+  
+  Jetzt übernimmt Rollwerk nach dem Start bei jedem Rollladen zuerst nur den Stand, sobald er erreichbar ist. In den ersten 3 Minuten gelten Wartezeiten sofort. Der Tagesstand (heute schon geöffnet/geschlossen, Stufe 1, Beschattung) übersteht den Neustart. Gefahren wird erst beim nächsten echten Wechsel – oder wie unter „Nach Neustart“ eingestellt.
+
 ## 0.31.0 – 2026-11-16
 
 ### Neu

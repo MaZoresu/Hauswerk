@@ -30,6 +30,8 @@ from .logic import FACADES, parse_hm, shade_conditions, shade_wanted
 _LOGGER = logging.getLogger(__name__)
 
 BAD = {"unavailable", "unknown", None}
+STARTUP_GRACE = 180  # Sekunden nach dem Start: Wartezeiten gelten noch nicht, es wird nur der Stand übernommen
+DAY_KEYS = ("opened_on", "closed_on", "stage1_on", "shaded_on", "shade_ended_on", "auto_opened_on", "auto_closed_on", "shading", "day")
 STORM_RELEASE = 15 * 60  # Sekunden unter 80 % der Sturmgrenze, bis der Sturmschutz endet
 
 # Einstellungen für alle Rollläden (rw_…)
@@ -213,6 +215,7 @@ class Rollwerk:
         self._cal_at = 0.0
         self._started_at = 0.0
         self._track_cache: tuple | None = None
+        self._seed: set[str] = set()
         self._tl_cache: dict = {}
         self._unsubs: list[Callable[[], None]] = []
         self._state_unsub: Callable[[], None] | None = None
@@ -227,6 +230,10 @@ class Rollwerk:
         self.covers = stored.get("covers") or {}
         self.profiles = stored.get("profiles") or {}
         self._persist = stored.get("persist") or {}
+        # Tagesstand (heute schon geöffnet/geschlossen, Stufe 1 …) über einen Neustart retten
+        if self._persist.get("day_date") == dt_util.now().date().isoformat():
+            for entity_id, flags in (self._persist.get("day") or {}).items():
+                self._rt.setdefault(entity_id, {}).update(flags)
         if not self.profiles:
             self._migrate(old)
         # Böen-Sensor gehört jetzt zu Hauswerk › Wetter (gilt für alle Module)
@@ -288,6 +295,7 @@ class Rollwerk:
 
     async def async_start(self) -> None:
         self._started_at = dt_util.utcnow().timestamp()
+        self._seed = set(self.settings.get("rw_covers") or [])  # beim Start vorhandene Rollläden: erst Stand übernehmen
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
         self._unsubs.append(self.haus.subscribe(self._on_house))
         self._track()
@@ -654,13 +662,18 @@ class Rollwerk:
                                     "end": end.hour * 60 + end.minute if end.date() == begin.date() else 1439})
                 self._cal[cal] = out
 
-    @staticmethod
-    def _hold(rt: dict, key: str, cond: bool, seconds: float, now: float) -> bool:
-        """Bedingung erst nach seconds Sekunden am Stück als erfüllt werten."""
+    def _hold(self, rt: dict, key: str, cond: bool, seconds: float, now: float) -> bool:
+        """Bedingung erst nach seconds Sekunden am Stück als erfüllt werten.
+
+        In den ersten Minuten nach dem Start zählt der Zustand sofort – sonst hielte Rollwerk z. B. abends
+        „noch nicht dunkel genug“ für wahr und wollte die Rollläden nach einem Neustart öffnen.
+        """
         if not cond:
             rt.pop(key, None)
             return False
         since = rt.setdefault(key, now)
+        if now - self._started_at < STARTUP_GRACE:
+            return True
         return now - since >= seconds
 
     # ------------------------------------------------------------ Steuerung
@@ -961,7 +974,10 @@ class Rollwerk:
             self._manual_reset(entity_id, prof, rt, now, local, pos)
             target, reason, cat = self._decide(entity_id, cfg, prof, rt, now, now_min, azimuth, elevation, pos)
             rt.update(target=target, reason=reason, cat=cat)
-            if initial and "sent" not in rt:
+            if "sent" not in rt and (initial or entity_id in self._seed):
+                self._seed.discard(entity_id)
+                # erster Blick auf diesen Rollladen seit dem Start (auch wenn er beim Start noch nicht erreichbar war):
+                # Stand übernehmen, nichts fahren – außer „Nach Neustart“ verlangt es
                 stored = (self._persist.get("sent") or {}).get(entity_id)
                 missed = recovery == "always" or (recovery == "outage" and stored is not None and stored != target and now - last_run > 120)
                 if not missed:
@@ -997,6 +1013,10 @@ class Rollwerk:
                 delay = 0
             await self._schedule_move(entity_id, target, reason, delay)
         self._persist["last_run"] = now
+        today = local.date().isoformat()
+        self._persist["day"] = {e: {k: v for k, v in (self._rt.get(e) or {}).items() if k in DAY_KEYS}
+                                for e in self.settings.get("rw_covers") or [] if (self._rt.get(e) or {}).get("opened_on") in (today, None)}
+        self._persist["day_date"] = today
         self._save(30)
         status = self.status()
         for cb in list(self._subscribers):

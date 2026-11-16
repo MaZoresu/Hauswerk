@@ -826,3 +826,41 @@ def test_rollwerk_protokoll(hw):
     assert "Schließen frühestens 16:00 → 21:00" in prof["why"] and "von Jens" in prof["why"]
     move = next(e for e in rw_entries if e["title"] == "Wohnzimmer zu")
     assert move["cat"] == "shutter" and "vorher 100 %" in move["why"]
+
+
+def test_rollwerk_neustart(hw):
+    """Neustart abends: Rollladen beim Start noch nicht erreichbar, Sonne schon unten – nichts fährt hoch."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 16, 19, 42, tzinfo=timezone.utc)  # 20:42 lokal
+        hass = Hass()
+        hass.set("cover.wz", "closed", {"current_position": 0, "supported_features": 15}, "Wohnzimmer")
+        hass.set("sun.sun", "below_horizon", {"azimuth": 290, "elevation": -25}, "Sonne")
+        log, haus, ctl = await _setup(hw, hass)
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        await rw.async_start()
+        await rw.async_save_profile("standard", dict(rw.profiles["standard"], features=["up", "down", "time", "sun"], delay_random=0))
+        await rw.async_save_settings({"rw_covers": ["cover.wz"]})
+        await rw.async_stop()
+        calls_before = len([c for c in hass.calls if c[0] == "cover"])
+        # Neustart: neue Instanz, Rollladen anfangs nicht erreichbar
+        hass2 = Hass()
+        hass2.set("cover.wz", "unavailable", {}, "Wohnzimmer")
+        hass2.set("sun.sun", "below_horizon", {"azimuth": 290, "elevation": -25}, "Sonne")
+        log2, haus2, ctl2 = await _setup(hw, hass2)
+        rw2 = hw.Rollwerk(hass2, log2, haus2)
+        await rw2.async_load()
+        restored = dict(rw2._rt.get("cover.wz") or {})
+        await rw2.async_start()
+        hass2.set("cover.wz", "closed", {"current_position": 0, "supported_features": 15}, "Wohnzimmer")
+        await rw2.async_evaluate()
+        NOW[0] = datetime(2026, 11, 16, 19, 50, tzinfo=timezone.utc)
+        await rw2.async_evaluate()
+        return calls_before, hass2, rw2, restored
+
+    calls_before, hass2, rw2, restored = asyncio.run(run())
+    assert restored.get("closed_on") == "2026-11-16"
+    assert not [c for c in hass2.calls if c[0] == "cover"]
+    assert rw2.status()["covers"]["cover.wz"]["target"] == 0
