@@ -62,7 +62,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
         for ids in getattr(heating, "_valve_src", {}).values():
             found.update(ids)
     if shutters is not None:
-        out["rollwerk"] = {"settings": shutters.settings, "covers": shutters.covers, "status": shutters.status()}
+        out["rollwerk"] = {"settings": shutters.settings, "covers": shutters.covers, "profiles": shutters.profiles, "status": shutters.status()}
         _entities(shutters.covers, found)
         _entities(shutters.settings, found)
 

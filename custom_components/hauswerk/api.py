@@ -195,23 +195,9 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_cold"): NOTIFY_MODE,
         # Rollwerk
         vol.Optional("rw_covers"): vol.All([vol.All(str, vol.Match(r"^cover\.[a-z0-9_]+$"))], vol.Length(max=60)),
-        vol.Optional("rw_open_mode"): vol.In(["sun", "time", "off"]),
-        vol.Optional("rw_open_offset"): vol.All(vol.Coerce(int), vol.Range(min=-120, max=240)),
-        vol.Optional("rw_open_not_before"): _hm,
-        vol.Optional("rw_open_not_before_we"): _hm,
-        vol.Optional("rw_open_time"): _hm,
-        vol.Optional("rw_open_time_we"): _hm,
-        vol.Optional("rw_close_mode"): vol.In(["sun", "time", "off"]),
-        vol.Optional("rw_close_offset"): vol.All(vol.Coerce(int), vol.Range(min=-120, max=240)),
-        vol.Optional("rw_close_not_after"): _hm,
-        vol.Optional("rw_close_time"): _hm,
-        vol.Optional("rw_shade"): bool,
-        vol.Optional("rw_shade_temp"): vol.All(vol.Coerce(float), vol.Range(min=10, max=40)),
-        vol.Optional("rw_shade_pos"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
-        vol.Optional("rw_shade_elev"): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
         vol.Optional("rw_storm"): bool,
         vol.Optional("rw_wind_entity"): _opt(ENTITY),
-        vol.Optional("rw_vacation_random"): bool,
+        vol.Optional("rw_recovery"): vol.In(["never", "outage", "always"]),
         vol.Optional("demand_entity"): _opt(vol.All(str, vol.Match(r"^climate\.[a-z0-9_]+$"))),
         vol.Optional("demand_action"): vol.In(["lower", "off"]),
         vol.Optional("demand_low"): vol.All(vol.Coerce(float), vol.Range(min=5, max=25)),
@@ -322,7 +308,7 @@ def ws_get(hass: HomeAssistant, connection, msg) -> None:
                 for room_id in ctl.rooms
             },
             "status": ctl.status(),
-            "rollwerk": {"covers": _rw(hass).covers, "status": _rw(hass).status()} if _rw(hass) else None,
+            "rollwerk": {"covers": _rw(hass).covers, "profiles": _rw(hass).profiles, "status": _rw(hass).status()} if _rw(hass) else None,
             "defaults": TYPE_DEFAULTS,
             "modes": MODES,
             "is_admin": _may_edit(hass, connection),
@@ -540,18 +526,68 @@ async def ws_notify_test(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"])
 
 
+_CONTACT = _opt(vol.All(str, vol.Match(r"^(binary_sensor|input_boolean|sensor)\.[a-z0-9_]+$")))
 COVER_SCHEMA = vol.Schema(
     {
-        vol.Optional("facade"): _opt(vol.In(["N", "NO", "O", "SO", "S", "SW", "W", "NW"])),
-        vol.Optional("shade"): bool,
-        vol.Optional("shade_pos"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=100))),
+        vol.Optional("profile"): vol.All(str, vol.Length(min=1, max=40)),
+        vol.Optional("contact_open"): _CONTACT,
+        vol.Optional("contact_tilted"): _CONTACT,
         vol.Optional("storm"): bool,
-        vol.Optional("door"): _opt(vol.All(str, vol.Match(r"^(binary_sensor|input_boolean)\.[a-z0-9_]+$"))),
         vol.Optional("auto"): bool,
-        vol.Optional("night_pos"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=100))),
     },
     extra=vol.REMOVE_EXTRA,
 )
+
+
+def _profile_schema() -> vol.Schema:
+    """Profil-Felder aus PROFILE_SPEC: Art bestimmt die Prüfung."""
+    from .rollwerk import PROFILE_SPEC
+
+    kinds = {
+        "bool": bool,
+        "num": _opt(vol.All(vol.Coerce(float), vol.Range(min=-100000, max=200000))),
+        "time": _hm,
+        "text": vol.All(str, vol.Length(max=60)),
+        "entity": _opt(ENTITY),
+        "list": vol.All([vol.All(str, vol.Length(max=40))], vol.Length(max=20)),
+        "choice": vol.All(str, vol.Length(max=20)),
+    }
+    return vol.Schema({vol.Optional(k): kinds[kind] for k, (_d, kind) in PROFILE_SPEC.items()}, extra=vol.REMOVE_EXTRA)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "hauswerk/rollwerk/profile/save",
+        vol.Optional("profile_id"): vol.Any(None, vol.All(str, vol.Length(max=40))),
+        vol.Required("profile"): dict,
+    }
+)
+@require_editor
+@websocket_api.async_response
+async def ws_rw_profile_save(hass: HomeAssistant, connection, msg) -> None:
+    rw = _rw(hass)
+    if rw is None:
+        return _not_ready(connection, msg)
+    try:
+        prof = _profile_schema()(msg["profile"])
+    except vol.Invalid as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    pid = await rw.async_save_profile(msg.get("profile_id"), prof, by=_who(connection))
+    connection.send_result(msg["id"], {"profile_id": pid, "profiles": rw.profiles})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "hauswerk/rollwerk/profile/delete", vol.Required("profile_id"): vol.All(str, vol.Length(max=40))}
+)
+@require_editor
+@websocket_api.async_response
+async def ws_rw_profile_delete(hass: HomeAssistant, connection, msg) -> None:
+    rw = _rw(hass)
+    if rw is None:
+        return _not_ready(connection, msg)
+    await rw.async_delete_profile(msg["profile_id"], by=_who(connection))
+    connection.send_result(msg["id"], {"profiles": rw.profiles, "covers": rw.covers})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/rollwerk/subscribe"})
@@ -585,14 +621,14 @@ async def ws_rw_cover_save(hass: HomeAssistant, connection, msg) -> None:
         connection.send_error(msg["id"], "invalid_format", str(err))
         return
     await rw.async_save_cover(msg["entity_id"], cfg, by=_who(connection))
-    connection.send_result(msg["id"], {"covers": rw.covers})
+    connection.send_result(msg["id"], {"covers": rw.covers, "profiles": rw.profiles})
 
 
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "hauswerk/rollwerk/command",
         vol.Required("entity_ids"): vol.All([vol.All(str, vol.Match(r"^cover\.[a-z0-9_]+$"))], vol.Length(min=1, max=60)),
-        vol.Required("action"): vol.In(["open", "close", "stop", "position"]),
+        vol.Required("action"): vol.In(["open", "close", "stop", "position", "resume"]),
         vol.Optional("position"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
     }
 )
@@ -648,6 +684,8 @@ COMMANDS = (
     ws_rw_subscribe,
     ws_rw_cover_save,
     ws_rw_command,
+    ws_rw_profile_save,
+    ws_rw_profile_delete,
     ws_log_get,
     ws_log_subscribe,
 )

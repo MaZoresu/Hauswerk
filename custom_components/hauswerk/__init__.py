@@ -4,7 +4,7 @@ Module:
 - Heizwerk (intern „heizen“): raumweise Heizungsregelung mit Fensterpause, Heizplänen und Anwesenheit
 - Kern (core.py): Anwesenheit, Urlaub, Wetter, Darstellung – gilt für alle Module
 - Protokoll: was wann warum entschieden wurde (für alle Module)
-- Rollwerk (intern „rollwerk“): Rollläden nach Sonne, Uhrzeit, Hitze und Sturm
+- Rollwerk (intern „rollwerk“): Rollläden mit Profilen nach dem Vorbild der Cover Control Automation
 - Licht, Garten: geplant
 """
 from __future__ import annotations

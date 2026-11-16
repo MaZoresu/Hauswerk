@@ -389,3 +389,18 @@ def test_rollwerk_logic():
     assert L.cover_target(23 * 60, 420, 1260, {}, {}, sun_on_facade=False, outside=10, storm=False)[:2] == (0, "Nacht")
     assert L.cover_target(23 * 60, 420, 1260, {}, {"storm": True}, sun_on_facade=False, outside=10, storm=True)[0] == 100
     assert L.cover_target(12 * 60, 420, 1260, {}, {"auto": False}, sun_on_facade=False, outside=10, storm=True)[0] is None
+
+
+def test_shade_conditions():
+    prof = {"azimuth_start": 300, "azimuth_end": 60, "elevation_min": 10, "elevation_max": 90, "temp2_min": 24,
+            "temp2_hyst": 0.5, "shade_start_and": ["azimuth", "elevation", "temp2"], "shade_end_or": ["azimuth", "temp2"]}
+    start, end = L.shade_conditions({"azimuth": 20, "elevation": 30, "temp2": 25}, prof)
+    assert start == {"azimuth": True, "elevation": True, "temp2": True}
+    assert L.shade_wanted(prof, start, end, active=False)
+    # 23.7 °C: unter Grenze, aber innerhalb der Hysterese -> bleibt
+    start, end = L.shade_conditions({"azimuth": 20, "elevation": 30, "temp2": 23.7}, prof)
+    assert not L.shade_wanted(prof, start, end, active=False) and not L.shade_wanted(prof, start, end, active=True)
+    start, end = L.shade_conditions({"azimuth": 120, "elevation": 30, "temp2": 26}, prof)
+    assert L.shade_wanted(prof, start, end, active=True)
+    # nichts messbar -> keine Beschattung
+    assert not L.shade_wanted(prof, {}, {}, active=False)

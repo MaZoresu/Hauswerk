@@ -822,3 +822,68 @@ def cover_target(now_min: int, open_at: int, close_at: int, settings: dict, cove
     if open_mode == "off":
         return None, "Tag (morgens nicht automatisch öffnen)", False
     return 100, "Tag", False
+
+
+# ---------------------------------------------------------------- Rollwerk-Beschattung (wie CCA)
+SHADE_CONDS = ("azimuth", "elevation", "brightness", "temp1", "temp2", "forecast_temp", "forecast_weather", "custom")
+
+
+def _in_azimuth(az: float, start: float, end: float) -> bool:
+    start, end = start % 360, end % 360
+    return start <= az <= end if start <= end else az >= start or az <= end
+
+
+def shade_conditions(values: dict, prof: dict, active: bool = False) -> tuple[dict, dict]:
+    """Je Bedingung: erfüllt fürs Starten bzw. Beenden (None = nicht messbar/nicht eingerichtet)."""
+    start: dict[str, bool | None] = {}
+    end: dict[str, bool | None] = {}
+
+    def num(key, default=0.0):
+        try:
+            return float(prof.get(key) if prof.get(key) is not None else default)
+        except (TypeError, ValueError):
+            return float(default)
+
+    az, el = values.get("azimuth"), values.get("elevation")
+    if az is not None:
+        inside = _in_azimuth(float(az), num("azimuth_start", 95), num("azimuth_end", 265))
+        start["azimuth"], end["azimuth"] = inside, not inside
+    if el is not None:
+        inside = num("elevation_min", 25) <= float(el) <= num("elevation_max", 90)
+        start["elevation"], end["elevation"] = inside, not inside
+    b = values.get("brightness")
+    if b is not None:
+        start["brightness"] = float(b) >= num("shade_bright_start", 35000)
+        end["brightness"] = float(b) <= num("shade_bright_end", 25000)
+    for key in ("temp1", "temp2"):
+        t = values.get(key)
+        if t is not None:
+            start[key] = float(t) >= num(f"{key}_min", 18)
+            end[key] = float(t) < num(f"{key}_min", 18) - num(f"{key}_hyst", 0.2)
+    fc = values.get("forecast_temp")
+    if fc is not None and prof.get("forecast_temp") is not None:
+        start["forecast_temp"] = float(fc) >= num("forecast_temp")
+        end["forecast_temp"] = float(fc) < num("forecast_temp") - num("temp2_hyst", 0.2)
+    cond = values.get("forecast_weather")
+    if cond and prof.get("weather_conditions"):
+        hit = cond in (prof.get("weather_conditions") or [])
+        start["forecast_weather"], end["forecast_weather"] = hit, not hit
+    if values.get("custom") is not None:
+        start["custom"], end["custom"] = bool(values["custom"]), not values["custom"]
+    return start, end
+
+
+def _combine(cond: dict, and_list: list, or_list: list) -> bool:
+    """UND-Liste: alle messbaren erfüllt; ODER-Liste: mindestens eine. Beide gewählt → beide nötig."""
+    and_vals = [cond[k] for k in and_list or [] if cond.get(k) is not None]
+    or_vals = [cond[k] for k in or_list or [] if cond.get(k) is not None]
+    if not and_vals and not or_vals:
+        return False
+    return (all(and_vals) if and_vals else True) and (any(or_vals) if or_vals else True)
+
+
+def shade_wanted(prof: dict, start: dict, end: dict, active: bool) -> bool:
+    """Nicht aktiv: soll die Beschattung starten? Aktiv: soll sie enden?"""
+    if active:
+        return _combine(end, prof.get("shade_end_and") or [], prof.get("shade_end_or") or [])
+    return _combine(start, prof.get("shade_start_and") or [], prof.get("shade_start_or") or [])

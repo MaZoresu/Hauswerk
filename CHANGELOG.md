@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.25.0 – 2026-11-16
+
+### Neu
+- **Rollwerk-Profile nach dem Vorbild der Cover Control Automation (CCA):** Einstellungen stehen jetzt in Profilen, die du Rollläden zuordnest. Abschnitte: Funktionen, Positionen, Zeiten (früh/spät, Werktag/frei, Arbeitstag morgen, Kalender), Helligkeit, Sonnenhöhe, Lüften, Beschattung (Bedingungen mit und/oder aus Richtung, Höhe, Helligkeit, Temperatur innen/außen, Vorhersage, Wetterlage, eigenem Schalter; Wartezeiten), Bewohner, Von Hand (Übersteuerung halten und zurücksetzen), Verzögerung, Erzwingen und Verhalten.
+- **Je Rollladen zwei Kontakte:** „ganz offen“ (Aussperrschutz) und „gekippt“ (Lüftungsstellung).
+- **„Automatik übernimmt“** auf der Rollläden-Seite beendet eine Übersteuerung von Hand.
+- **Nach Neustart:** wahlweise verpasste Wechsel nachholen.
+
+### Geändert
+- Die bisherigen Einstellungen (Öffnen, Schließen, Sonnenschutz, Fassade, Tür) werden beim ersten Start in Profile übernommen – je Fassade eins mit passender Himmelsrichtung.
+- Der Urlaubs-Zufall entfällt; dafür gibt es je Profil eine zufällige Verzögerung.
+
 ## 0.24.1 – 2026-11-16
 
 ### Neu

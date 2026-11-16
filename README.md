@@ -10,7 +10,7 @@ Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite 
 | Modul | Stand |
 |---|---|
 | <img src="docs/icons/heizwerk.svg" height="20"> **Heizwerk** | fertig – raumweise Heizungsregelung (früher eine eigene Integration) |
-| <img src="docs/icons/rollwerk.svg" height="20"> **Rollwerk** | neu – Rollläden nach Sonne, Uhrzeit, Hitze und Sturm, mit Aussperrschutz |
+| <img src="docs/icons/rollwerk.svg" height="20"> **Rollwerk** | Rollläden mit Profilen wie die Cover Control Automation: Zeiten, Sonne, Helligkeit, Beschattung, Lüften, Bewohner, Sturm |
 | Licht | geplant |
 | Garten | geplant |
 
@@ -158,18 +158,24 @@ Danach kann **Warm genug** einen Raum noch abschalten (außer beim Boost).
 
 # Modul Rollwerk
 
-Rollläden nach Sonne, Uhrzeit, Hitze und Sturm (Rollwerk › Rollläden und Rollwerk › Einstellungen).
+Rollläden mit **Profilen** nach dem Vorbild der [Cover Control Automation (CCA)](https://github.com/hvorragend/ha-blueprints) – ohne Blueprint und YAML, alles im Panel (Rollwerk › Rollläden und Rollwerk › Einstellungen).
 
-- **Rollläden-Seite:** nach Räumen aus Home Assistant, je Rollladen Stellung, was die Automatik gerade will und warum, ↑ ■ ↓ und Schieberegler; oben Öffnen/Schließen heute, Sonnenstand, Böen und „Alle hoch/runter“.
-- **Morgens öffnen:** Sonnenaufgang ± Versatz, aber nicht vor „frühestens“ (Werktag/Wochenende getrennt, Feiertage über „Arbeitstag“) – oder feste Uhrzeit, oder gar nicht.
-- **Abends schließen:** Sonnenuntergang + Versatz, spätestens um X – oder feste Uhrzeit, oder gar nicht. Je Rollladen eine Nachtstellung (z. B. 10 % für Lüftungsschlitze).
-- **Sonnenschutz:** Fassade je Rollladen (N … NW); scheint die Sonne darauf (±60°, mindestens X° hoch) und ist es draußen ab X °C warm, fährt er auf die Sonnenschutz-Stellung.
+- **Rollläden-Seite:** nach Räumen aus Home Assistant, je Rollladen Stellung, was die Automatik gerade will und warum, ↑ ■ ↓ und Schieberegler; Hinweise für Beschattung, gekippt/offen, Bewohner schläft, von Hand – mit „Automatik übernimmt“.
+- **Profile:** jeder Rollladen nutzt ein Profil (z. B. „Standard“, „Süd mit Hitze“, „Schlafzimmer“). Ein Profil hat die Abschnitte:
+  - **Funktionen:** morgens öffnen, abends schließen, Zeitsteuerung, Helligkeit, Sonnenhöhe, Lüften, Beschattung; Helligkeit und Sonnenhöhe mit „oder“/„und“.
+  - **Positionen:** offen, geschlossen, Lüften, Aussperrschutz, Beschattung (und eine zweite Beschattungs-Stellung per Schalter), Toleranz, Fahrzeit.
+  - **Zeiten:** früheste/späteste Zeit zum Öffnen und Schließen, Werktag und frei getrennt, „Arbeitstag morgen“ fürs Schließen – oder Zeiten aus einem Kalender.
+  - **Helligkeit / Sonnenhöhe:** Schwellen zum Öffnen und Schließen, Spielraum, Mindestdauer.
+  - **Lüften:** gekippt = Lüftungsstellung, ganz offen = Aussperrschutz; Optionen wie bei CCA (ohne Verzögerung, Beschattung vor Lüften …).
+  - **Beschattung:** Beginn- und Ende-Bedingungen als „alle“/„eins davon“ aus Richtung (Azimut), Sonnenhöhe, Helligkeit, Temperatur innen/außen mit Spielraum, Vorhersage-Höchstwert, Wetterlage, eigener Schalter; Wartezeiten.
+  - **Bewohner:** Sensor „schläft“ – nicht öffnen, auf Wunsch schließen/öffnen beim Schlafen/Aufwachen.
+  - **Von Hand:** welche Fahrten die Hand-Stellung nicht überschreiben dürfen; zurücksetzen zur Uhrzeit, nach Zeit oder in einer Stellung.
+  - **Verzögerung, Erzwingen** (Pause, auf, zu, lüften, beschatten per Schalter) und **Verhalten** (z. B. nur einmal am Tag öffnen).
+- **Je Rollladen:** Profil, Kontakt „ganz offen“ und „gekippt“, Automatik und Sturmschutz an/aus.
 - **Sturmschutz:** ab der Sturmgrenze aus Hauswerk › Wetter hoch, Ende nach 15 Min. unter 80 %; Böen vom Wetterdienst oder eigenem Sensor.
-- **Aussperrschutz:** Tür- oder Fensterkontakt je Rollladen – offen = nicht herunterfahren.
-- **Von Hand:** Rollwerk fährt nur bei einem Wechsel; wer einen Rollladen verstellt, behält die Stellung bis zum nächsten Wechsel. Je Rollladen lässt sich die Automatik ausschalten.
-- **Urlaub:** Zeiten auf Wunsch täglich zufällig ±15 Min.
+- **Nach Neustart:** nichts, verpasste Wechsel nachholen oder immer auf Sollstellung.
 
-Alles steht im Protokoll (Befehle, Sturm, Aussperrschutz, Fahrten von Hand).
+Einstellungen aus Version 0.24 werden beim ersten Start übernommen (je Fassade ein Profil). Alles steht im Protokoll.
 
 # Aufbau des Projekts
 

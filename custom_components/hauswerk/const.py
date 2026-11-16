@@ -51,13 +51,7 @@ SETTING_LABELS = {
     "workday_as": "Feiertage wie", "vent_rh": "Lüften-Hinweis", "sun_entity": "Sonne",
     "notify_ha": "Mitteilung in Home Assistant", "notify_cold": "Benachrichtigungen",
     "demand_entity": "Wärmeanforderung", "demand_action": "Wärmeanforderung", "demand_low": "Wärmeanforderung",
-    "demand_valve": "Wärmeanforderung", "rw_covers": "Rollwerk: Rollläden", "rw_open_mode": "Rollwerk: Öffnen",
-    "rw_open_offset": "Rollwerk: Öffnen", "rw_open_not_before": "Rollwerk: Öffnen", "rw_open_not_before_we": "Rollwerk: Öffnen",
-    "rw_open_time": "Rollwerk: Öffnen", "rw_open_time_we": "Rollwerk: Öffnen", "rw_close_mode": "Rollwerk: Schließen",
-    "rw_close_offset": "Rollwerk: Schließen", "rw_close_not_after": "Rollwerk: Schließen", "rw_close_time": "Rollwerk: Schließen",
-    "rw_shade": "Rollwerk: Sonnenschutz", "rw_shade_temp": "Rollwerk: Sonnenschutz", "rw_shade_pos": "Rollwerk: Sonnenschutz",
-    "rw_shade_elev": "Rollwerk: Sonnenschutz", "rw_storm": "Rollwerk: Sturmschutz", "rw_wind_entity": "Rollwerk: Sturmschutz",
-    "rw_vacation_random": "Rollwerk: Urlaub", "demand_hold": "Wärmeanforderung", "demand_preheat": "Wärmeanforderung",
+    "demand_valve": "Wärmeanforderung", "rw_covers": "Rollwerk: Rollläden", "rw_storm": "Rollwerk: Sturmschutz", "rw_wind_entity": "Rollwerk: Sturmschutz", "rw_recovery": "Rollwerk: Nach Neustart", "demand_hold": "Wärmeanforderung", "demand_preheat": "Wärmeanforderung",
     "radio_entities": "Funk-Auslastung", "radio_limit": "Funk-Grenze", "pair_mode": "Kopplung",
 }
 

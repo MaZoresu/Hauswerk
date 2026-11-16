@@ -594,7 +594,7 @@ def test_ventil_kalt_und_waermeanforderung(hw):
 
 
 def test_rollwerk(hw):
-    """Abends zu, morgens auf, Sonnenschutz, Aussperrschutz, Sturm, Handbetrieb bleibt bis zum nächsten Wechsel."""
+    """Profil wie CCA: Beschattung, abends zu, Aussperrschutz, Handbetrieb gesperrt, Sturm."""
     async def run():
         STORES.clear()
         REG.clear()
@@ -609,30 +609,40 @@ def test_rollwerk(hw):
         log, haus, ctl = await _setup(hw, hass)
         rw = hw.Rollwerk(hass, log, haus)
         await rw.async_load()
+        assert "standard" in rw.profiles
         await rw.async_start()  # Start: nichts fahren
         assert not [c for c in hass.calls if c[0] == "cover"]
-        await rw.async_save_settings({"rw_covers": ["cover.wz", "cover.tuer"], "rw_open_mode": "time", "rw_close_mode": "time",
-                                      "rw_close_time": "21:00", "rw_shade": True, "rw_shade_temp": 25})
-        await rw.async_save_cover("cover.wz", {"facade": "S", "shade": True})
-        await rw.async_save_cover("cover.tuer", {"door": "binary_sensor.tuer"})
+        prof = dict(rw.profiles["standard"], features=["up", "down", "time", "shading", "ventilate"],
+                    down_early="21:00", down_late="21:00", shade_start_and=["azimuth", "elevation", "temp2"],
+                    shade_end_or=["azimuth", "elevation", "temp2"], temp2_min=25, shade_wait_start=0, delay_random=0,
+                    pos_shading=30, manual_block=["opening", "closing", "shading"])
+        await rw.async_save_profile("standard", prof)
+        await rw.async_save_cover("cover.tuer", {"profile": "standard", "contact_open": "binary_sensor.tuer"})
+        await rw.async_save_settings({"rw_covers": ["cover.wz", "cover.tuer"]})
         # 20:00, Sonne auf der Südseite, 29 °C: Wohnzimmer beschattet, Tür bleibt offen
         assert ("cover", "set_cover_position", {"entity_id": "cover.wz", "position": 30}) in hass.calls
-        assert rw.status()["covers"]["cover.wz"]["reason"] == "Sonnenschutz"
-        # 21:00 Nacht: Wohnzimmer zu; Tür offen -> Rollladen bleibt oben
-        NOW[0] = datetime(2026, 7, 16, 20, 1, tzinfo=timezone.utc)  # 21:01 lokal
+        st = rw.status()["covers"]
+        assert st["cover.wz"]["reason"] == "Beschattung" and st["cover.wz"]["shading"]
+        assert ("cover", "set_cover_position", {"entity_id": "cover.tuer", "position": 30}) not in hass.calls
+        # 21:01 Abend: Wohnzimmer zu; Tür offen -> Rollladen bleibt oben
+        NOW[0] = datetime(2026, 7, 16, 20, 1, tzinfo=timezone.utc)
         hass.set("cover.wz", "open", {"current_position": 30, **feat}, "Wohnzimmer")
         await rw.async_evaluate()
         assert hass.calls[-1] == ("cover", "set_cover_position", {"entity_id": "cover.wz", "position": 0})
-        assert rw.status()["covers"]["cover.tuer"]["blocked"] == "Tür offen"
+        assert "offen – nicht herunterfahren" in rw.status()["covers"]["cover.tuer"]["reason"]
         # Tür zu: jetzt fährt er
         hass.set("binary_sensor.tuer", "off", {}, "Terrassentür Kontakt")
         await rw.async_evaluate()
         assert hass.calls[-1] == ("cover", "set_cover_position", {"entity_id": "cover.tuer", "position": 0})
-        # von Hand hochgefahren: bleibt so (kein neuer Befehl), Status zeigt Handbetrieb
+        # von Hand hochgefahren: bleibt so, Status zeigt Übersteuerung
         hass.set("cover.wz", "open", {"current_position": 100, **feat}, "Wohnzimmer")
         n = len(hass.calls)
         await rw.async_evaluate()
         assert len(hass.calls) == n and rw.status()["covers"]["cover.wz"]["manual"]
+        # Automatik übernimmt wieder (Panel) -> mit manual_recover zurück auf zu
+        await rw.async_save_profile("standard", dict(prof, manual_recover=True))
+        await rw.async_command(["cover.wz"], "resume")
+        assert hass.calls[-1] == ("cover", "set_cover_position", {"entity_id": "cover.wz", "position": 0})
         # Sturm: alle hoch
         hass.set("cover.tuer", "closed", {"current_position": 0, **feat}, "Terrassentür")
         hass.set("weather.home", "sunny", {"temperature": 20, "wind_gust_speed": 90, "wind_speed_unit": "km/h"}, "Wetter")
@@ -640,8 +650,34 @@ def test_rollwerk(hw):
         st = rw.status()
         assert st["storm"] and st["covers"]["cover.wz"]["target"] == 100
         assert hass.calls[-1] == ("cover", "set_cover_position", {"entity_id": "cover.tuer", "position": 100})
+        # Profil löschen -> Rollläden fallen auf Standard zurück
+        pid = await rw.async_save_profile(None, dict(prof, name="Süd"))
+        await rw.async_save_cover("cover.wz", {"profile": pid})
+        await rw.async_delete_profile(pid)
+        assert rw.covers["cover.wz"]["profile"] == "standard"
         return log
 
     log = asyncio.run(run())
     titles = [e["title"] for e in log.entries]
-    assert "Sturmschutz: Rollläden hoch" in titles and "Terrassentür bleibt oben – Tür offen" in titles
+    assert "Sturmschutz: Rollläden hoch" in titles
+
+
+def test_rollwerk_migration(hw):
+    """Einstellungen aus 0.24 werden zu Profilen (je Fassade eins)."""
+    async def run():
+        STORES.clear()
+        STORES["hauswerk.rollwerk"] = {"settings": {"rw_covers": ["cover.wz"], "rw_open_mode": "time", "rw_open_time": "06:45",
+                                                    "rw_close_mode": "sun", "rw_shade": True, "rw_shade_temp": 26},
+                                       "covers": {"cover.wz": {"facade": "S", "door": "binary_sensor.tuer", "storm": False}}}
+        hass = Hass()
+        log, haus, ctl = await _setup(hw, hass)
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        return rw
+
+    rw = asyncio.run(run())
+    assert rw.covers["cover.wz"] == {"profile": "fassade_s", "contact_open": "binary_sensor.tuer", "contact_tilted": None,
+                                     "auto": True, "storm": False}
+    p = rw.profiles["fassade_s"]
+    assert p["azimuth_start"] == 120 and p["azimuth_end"] == 240 and p["temp2_min"] == 26
+    assert "shading" in p["features"] and "sun" in p["features"] and p["up_early"] == "06:45"
