@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.34.1";
+const VERSION = "0.34.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -645,7 +645,9 @@ class HauswerkPanel extends HTMLElement {
       const slug = `heizen/${parts[2] || "raeume"}`;
       return Object.keys(SLUGS).find((k) => SLUGS[k] === slug) || "overview";
     }
-    if (parts[1] === "rollwerk") return parts[2] === "einstellungen" ? "shutset" : "shutters";
+    // Module mit Unterseiten: /hauswerk/<modul>/<unterseite>, ohne Unterseite die erste
+    const mod = MODULES.find((m) => m.id !== "heizen" && m.id === parts[1]);
+    if (mod) return Object.keys(SLUGS).find((k) => SLUGS[k] === `${mod.id}/${parts[2] || ""}`) || mod.views[0];
     // /hauswerk/einstellungen = zentrale Hauswerk-Einstellungen
     if (parts[1] === "einstellungen") return "house";
     if (parts[1] === "protokoll") return "log";

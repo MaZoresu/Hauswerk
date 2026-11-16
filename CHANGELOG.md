@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.34.2 – 2026-11-16
+
+### Behoben
+- **Kraftwerk ließ sich nicht öffnen:** Ein Tipp auf Kraftwerk (Reiter, untere Leiste oder Widget) sprang sofort zur Startseite zurück, weil die Adresse `/hauswerk/kraftwerk/…` nicht erkannt wurde. Jetzt werden die Unterseiten aller Module über ihre Adresse gefunden.
+
 ## 0.34.1 – 2026-11-16
 
 ### Behoben
