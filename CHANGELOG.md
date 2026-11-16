@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.23.2 – 2026-11-16
+
+### Geändert
+- **Geräte mit Art als Überschrift:** Gewählte Geräte, die Rollen der Thermostate und die Geräteliste der Raumseite zeigen jetzt oben die Art des Geräts (z. B. Wandthermostat, Heizkörper-Thermostat, Fußbodenheizung, Fensterkontakt, Temperatursensor, Ventilöffnung) und darunter den Namen der Entität mit Zustand. Die Art erkennt Hauswerk am Gerätemodell, an der Geräteklasse oder am Namen.
+
 ## 0.23.1 – 2026-11-16
 
 ### Geändert

@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.23.1";
+const VERSION = "0.23.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1565,7 +1565,7 @@ class HauswerkPanel extends HTMLElement {
       return `${isNaN(parseFloat(st.state)) ? st.state : fmt(parseFloat(st.state))}${u ? ` ${u}` : ""}`;
     };
     const dev = (icon, label, id, value, ok = true) => `
-      <div class="wrow"><ha-icon icon="${icon}"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${label} · ${esc(id)}</small></span><em class="${ok ? "" : "bad"}">${value}</em></div>`;
+      <div class="wrow"><ha-icon icon="${icon}"></ha-icon><span class="grow"><b>${esc(this._devType(id))}</b><small>${esc(this._entityName(id))}${label ? ` · ${label}` : ""}</small></span><em class="${ok ? "" : "bad"}">${value}</em></div>`;
     const devices = [
       ...(room.climates || []).map((id) => {
         const st = S[id];
@@ -1574,12 +1574,12 @@ class HauswerkPanel extends HTMLElement {
         const follows = (s.followers || []).includes(id);
         const assist = (s.assist?.entities || []).includes(id);
         return dev(follows || assist ? "mdi:radiator" : "mdi:thermostat",
-          assist ? `Heizkörper · Zusatzheizung, gerade ${s.assist.on ? "an" : "zu"}` : follows ? "Heizkörper · folgt dem Wandthermostat" : "Thermostat · stellt ein", id, bad ? "nicht erreichbar" : `${val(id, "current_temperature")} → ${val(id, "temperature")}${st.attributes.hvac_action === "heating" ? " · heizt" : ""}${v != null ? ` · Ventil ${fmt(v, 0)} %` : ""}`, !bad);
+          assist ? `Zusatzheizung, gerade ${s.assist.on ? "an" : "zu"}` : follows ? "folgt dem Wandthermostat" : "stellt ein", id, bad ? "nicht erreichbar" : `${val(id, "current_temperature")} → ${val(id, "temperature")}${st.attributes.hvac_action === "heating" ? " · heizt" : ""}${v != null ? ` · Ventil ${fmt(v, 0)} %` : ""}`, !bad);
       }),
       ...(room.windows || []).map((id) => {
         const st = S[id];
         const open = st && ["on", "open", "opening", "true"].includes(String(st.state).toLowerCase());
-        return dev(open ? "mdi:window-open-variant" : "mdi:window-closed-variant", "Fenster", id, !st ? "fehlt" : open ? "offen" : "zu", !!st);
+        return dev(open ? "mdi:window-open-variant" : "mdi:window-closed-variant", "", id, !st ? "fehlt" : open ? "offen" : "zu", !!st);
       }),
       ...(room.show_entities || []).map((id) => {
         const st = S[id];
@@ -1587,13 +1587,13 @@ class HauswerkPanel extends HTMLElement {
         const v = this._valveOf(id);
         const dom = id.split(".")[0];
         const sw = this._switchOf(id);
-        if (sw != null) return dev("mdi:heating-coil", `${this._floorLabel(room)} · nur Anzeige`, id, bad ? "nicht erreichbar" : sw ? "an – heizt" : "aus", !bad);
-        const label = v != null ? "Ventil" : dom === "climate" ? "Thermostat · nur Anzeige" : `${DOMAIN_LABEL[dom] || dom} · nur Anzeige`;
+        if (sw != null) return dev("mdi:heating-coil", "nur Anzeige", id, bad ? "nicht erreichbar" : sw ? "an – heizt" : "aus", !bad);
+        const label = "nur Anzeige";
         return dev(v != null ? "mdi:valve" : dom === "climate" ? "mdi:thermostat-box" : "mdi:eye-outline", label, id, bad ? "nicht erreichbar" : v != null ? `${fmt(v, 0)} % offen${dom === "climate" ? ` · ${esc(this._fmtState(st))}` : ""}` : esc(this._fmtState(st)), !bad);
       }),
-      room.temp_sensor ? dev("mdi:thermometer", "Raumsensor", room.temp_sensor, val(room.temp_sensor), !!S[room.temp_sensor]) : "",
-      room.humidity_sensor ? dev("mdi:water-percent", "Luftfeuchte", room.humidity_sensor, val(room.humidity_sensor), !!S[room.humidity_sensor]) : "",
-      room.presence_sensor ? dev("mdi:motion-sensor", "Präsenz", room.presence_sensor, S[room.presence_sensor]?.state === "on" ? "jemand da" : "leer", !!S[room.presence_sensor]) : "",
+      room.temp_sensor ? dev("mdi:thermometer", "Raumtemperatur", room.temp_sensor, val(room.temp_sensor), !!S[room.temp_sensor]) : "",
+      room.humidity_sensor ? dev("mdi:water-percent", "", room.humidity_sensor, val(room.humidity_sensor), !!S[room.humidity_sensor]) : "",
+      room.presence_sensor ? dev("mdi:motion-sensor", "", room.presence_sensor, S[room.presence_sensor]?.state === "on" ? "jemand da" : "leer", !!S[room.presence_sensor]) : "",
     ].join("");
     const preMode = room.preheat_mode || set.preheat_mode || "fixed";
     const kv = (k, v) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`;
@@ -3436,6 +3436,35 @@ class HauswerkPanel extends HTMLElement {
     };
   }
 
+  /** Art des Geräts als Überschrift, z. B. „Wandthermostat“, „Fensterkontakt“, „Fußbodenheizung“. */
+  _devType(id) {
+    const st = this._hass?.states?.[id];
+    const dom = String(id).split(".")[0];
+    const a = st?.attributes || {};
+    const dc = a.device_class;
+    const txt = `${id} ${a.friendly_name || ""}`.toLowerCase();
+    if (dom === "climate") {
+      const k = this._thermoKind(id);
+      return k === "wall" ? "Wandthermostat" : k === "trv" ? "Heizkörper-Thermostat" : "Thermostat";
+    }
+    if ((dom === "switch" || dom === "input_boolean") && /fu(ss|ß)boden|fbh|fl(ä|ae)chen|heizkreis|stellantrieb/.test(txt)) return "Fußbodenheizung";
+    if (dom === "binary_sensor") {
+      return { window: "Fensterkontakt", door: "Türkontakt", opening: "Öffnungskontakt", garage_door: "Garagentor", motion: "Bewegungsmelder",
+        occupancy: "Präsenzmelder", presence: "Präsenzmelder", battery: "Batterie", moisture: "Wassermelder", smoke: "Rauchmelder" }[dc]
+        || (/fenster|window/.test(txt) ? "Fensterkontakt" : /präsenz|presence|bewegung|motion/.test(txt) ? "Präsenzmelder" : "Melder");
+    }
+    if (dom === "sensor") {
+      if (a.unit_of_measurement === "%" && /ventil|valve|heating_demand/.test(txt)) return "Ventilöffnung";
+      if (/duty_cycle/.test(txt)) return "Funk-Auslastung";
+      return { temperature: "Temperatursensor", humidity: "Feuchtesensor", battery: "Batterie", distance: "Entfernung", power: "Leistung",
+        energy: "Energie", illuminance: "Helligkeit", pressure: "Luftdruck", carbon_dioxide: "CO₂-Sensor" }[dc] || "Sensor";
+    }
+    return { switch: "Schalter", input_boolean: "Schalter-Helfer", input_number: "Zahl-Helfer", number: "Einstellwert", valve: "Ventil",
+      cover: "Rollladen", light: "Licht", scene: "Szene", script: "Skript", weather: "Wetterdienst", person: "Person",
+      device_tracker: "Handy / Tracker", calendar: "Kalender", schedule: "Zeitplan", zone: "Zone", sun: "Sonne", notify: "Benachrichtigung",
+      fan: "Lüfter", humidifier: "Luftentfeuchter", media_player: "Medienspieler" }[dom] || DOMAIN_LABEL[dom] || "Gerät";
+  }
+
   /** Wandthermostat („wall“), Heizkörper-Thermostat („trv“) oder unbekannt – nach Modell, sonst Name. */
   _thermoKind(id) {
     const st = this._hass?.states?.[id];
@@ -3464,10 +3493,10 @@ class HauswerkPanel extends HTMLElement {
       let state = "";
       if (ro === "follow") state = (rs.pair_broken || []).includes(id) ? "folgt nicht – Hauswerk stellt selbst" : (rs.followers || []).includes(id) ? "folgt ✓" : "";
       if (ro === "assist" && rs.assist) state = rs.assist.on ? "heizt mit" : "zu – Boden reicht";
-      const sub = [kind === "wall" ? "Wandthermostat" : kind === "trv" ? "Heizkörper" : "Thermostat", state, v != null ? `Ventil ${fmt(v, 0)} %` : ""].filter(Boolean).join(" · ");
+      const sub = [this._entityName(id), state, v != null ? `Ventil ${fmt(v, 0)} %` : ""].filter(Boolean).join(" · ");
       const opts = [...(hasWall ? [["follow", "Folgt Wand", "mdi:link-variant"]] : []), ["own", "Selbst", "mdi:tune-variant"], ["assist", "Zusatz", "mdi:radiator"]];
       return `<div class="role">
-        <div class="role-h"><ha-icon icon="${kind === "wall" ? "mdi:thermostat-box" : "mdi:radiator"}"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${esc(sub)}</small></span>
+        <div class="role-h"><ha-icon icon="${kind === "wall" ? "mdi:thermostat-box" : "mdi:radiator"}"></ha-icon><span class="grow"><b>${esc(this._devType(id))}</b><small>${esc(sub)}</small></span>
           ${ro === "main" ? `<em class="role-main">stellt ein</em>` : ""}</div>
         ${ro === "main" ? "" : `<div class="segs small ${hasWall ? "n3" : "n2"}">${opts.map(([k, l, i]) => `<button class="seg ${ro === k ? "on" : ""}" data-action="role-set" data-id="${esc(id)}" data-v="${k}"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div>`}
       </div>`;
@@ -3564,7 +3593,7 @@ class HauswerkPanel extends HTMLElement {
         return `
         <div class="pk-sel ${st ? "" : "missing"}">
           <button class="pk-sel-b" ${this._admin && !cfg.multi ? `data-action="pk-open" data-field="${field}" title="Ändern"` : "disabled"}>
-            <b>${esc(this._entityName(id))}</b><small>${esc(id)} · ${esc(this._fmtState(st))}${area ? ` · ${esc(area)}` : ""}</small>
+            <b>${esc(this._devType(id))}</b><small>${esc(this._entityName(id))} · ${esc(this._fmtState(st))}${area ? ` · ${esc(area)}` : ""}</small>
           </button>
           ${this._admin ? `<button class="pk-x" data-action="pick-remove" data-field="${field}" data-id="${esc(id)}" title="Entfernen" aria-label="Entfernen"><ha-icon icon="mdi:close"></ha-icon></button>` : ""}
         </div>`;
