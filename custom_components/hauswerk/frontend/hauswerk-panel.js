@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.32.0";
+const VERSION = "0.32.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -647,8 +647,7 @@ class HauswerkPanel extends HTMLElement {
     if (chips)
       chips.innerHTML =
         this._data && !this._error
-          ? (["start", "overview", "room", "house", "log", "shutters", "shutset"].includes(this._tab) ? "" : this._chipsHtml())
-            + (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "") + (MODULES[1].views.includes(this._tab) ? this._rwNavHtml() : "")
+          ? (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "") + (MODULES[1].views.includes(this._tab) ? this._rwNavHtml() : "")
           : "";
   }
 
@@ -784,27 +783,6 @@ class HauswerkPanel extends HTMLElement {
     return `<nav class="heatnav">${HEAT_VIEWS.filter((v) => !v.hidden).map(
       (v) => `<button class="hnav ${this._tab === v.id || (v.id === "settings" && this._tab === "plans") || (v.id === "overview" && this._tab === "room") ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span>${badge(v.id)}</button>`
     ).join("")}</nav>`;
-  }
-
-  _chipsHtml() {
-    const f = this._facts();
-    if (!f.rooms.length) return "";
-    const s = this._status || {};
-    const set = this._data.settings;
-    const c = (icon, val, cap, k = "", action = "") =>
-      `<${action ? `button data-action="${action}"` : "span"} class="schip" ${k ? `style="--c:${k}"` : ""}><ha-icon icon="${icon}"></ha-icon><span><b>${esc(val)}</b><small>${esc(cap)}</small></span></${action ? "button" : "span"}>`;
-    const presence = s.vacation ? ["mdi:palm-tree", "Urlaub", "#34d399"] : s.away ? ["mdi:home-export-outline", "abwesend", "#94a3b8"] : set.party ? ["mdi:party-popper", "Party", "#e879f9"] : set.guest ? ["mdi:account-group-outline", "Gäste", "#e879f9"] : ["mdi:home-heart", "zu Hause", "#34d399"];
-    return `<div class="schips">${[
-      c(f.heating ? "mdi:fire" : "mdi:fire-off", `${f.heating} von ${f.rooms.length}`, "heizen", f.heating ? "#fb923c" : ""),
-      c(f.open ? "mdi:window-open-variant" : "mdi:window-closed-variant", f.open ? `${f.open} offen` : "alle zu", "Fenster", f.open ? "#22d3ee" : "#34d399"),
-      c(presence[0], presence[1], "Anwesenheit", presence[2]),
-      s.outside_temp != null ? c(s.outside_temp <= 0 ? "mdi:snowflake-thermometer" : "mdi:thermometer", `${fmt(s.outside_temp)} °C`, "Außen") : "",
-      s.summer ? c("mdi:weather-sunny", "Sommerpause", "Saison", "#facc15") : "",
-      set.eco_force ? c("mdi:leaf", "erzwungen", "Eco", "#22c55e") : "",
-      s.long_away ? c("mdi:snowflake-thermometer", "Frostschutz", "lange weg", "#38bdf8") : "",
-      s.liming ? c("mdi:water-sync", "läuft", "Entkalken", "#38bdf8") : "",
-      c(f.hints ? "mdi:alert-circle-outline" : "mdi:check-circle-outline", f.hints ? `${f.hints} Hinweis${f.hints > 1 ? "e" : ""}` : "alles gut", "Hinweise", f.hints ? "#f59e0b" : "#34d399", "hints-open"),
-    ].join("")}</div>`;
   }
 
   _toast(text) {
