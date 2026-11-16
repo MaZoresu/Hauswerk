@@ -2,6 +2,23 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.32.0 – 2026-11-16
+
+### Neu
+- **Bericht: Heizleistung je Raum.** Für jeden Raum gibt es ein Urteil – **Passt**, **Reserve**, **Knapp**, **Reicht nicht**, **Messung prüfen** oder **Zu wenig Daten**.
+  - **Kennzahlen:** Komfort erreicht (Anteil der Komfortzeit höchstens 0,5 °C unter Soll), Ø Abweichung vom Soll, Ø Ventilöffnung und Anteil „ganz auf“, gelernte Aufheizgeschwindigkeit, überheizt sowie kalte gegen milde Tage.
+  - **Hinweise mit Ursachen und Tipps:**
+    - Heizkörper zu klein / Vorlauf zu niedrig / Luft / hydraulischer Abgleich
+    - Thermostat misst zu warm (Raumsensor, Kalibrierung)
+    - Heizkurve bei Frost zu flach
+    - Reserve für niedrigere Vorlauftemperatur
+    - oft überheizt, heizt langsam auf, viel gelüftet
+  - Räume mit Handlungsbedarf stehen oben, mit Sprung zu „Raum einstellen“.
+- Für die Analyse sammelt Heizwerk ab jetzt zusätzlich je Minute: Komfort erreicht, Abweichung vom Soll, überheizt, Ventil ganz offen und Außentemperatur. Die Einschätzung wird nach einigen Tagen aussagekräftig.
+
+### Behoben
+- Lange Raumnamen in der Ventil-Wärmekarte wurden abgeschnitten.
+
 ## 0.31.1 – 2026-11-16
 
 ### Behoben

@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.31.1";
+const VERSION = "0.32.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -546,7 +546,12 @@ class HauswerkPanel extends HTMLElement {
       this._reports["loading" + days] = true;
       this._hass
         .callWS({ type: "hauswerk/heizen/report", days })
-        .then((r) => (this._reports[days] = r))
+        .then((r) => {
+          this._analysis = this._analysis || {};
+          this._analysis[days] = r._analysis || {};
+          delete r._analysis;
+          this._reports[days] = r;
+        })
         .catch(() => (this._reports[days] = {}))
         .finally(() => {
           delete this._reports["loading" + days];
@@ -2937,6 +2942,7 @@ class HauswerkPanel extends HTMLElement {
         ${this._sectionHead("mdi:window-open-variant", `Fensterpause pro Tag · ${days} Tage`)}
         ${this._stackChart(rep, days, "pause_min")}
       </section>
+      ${this._powerReport(rooms, days)}
       ${this._valveHeat(rooms, rep, days)}
       <section class="card">
         ${this._sectionHead("mdi:table", "Räume im Vergleich")}
@@ -2946,6 +2952,46 @@ class HauswerkPanel extends HTMLElement {
         </table></div>
         <p class="muted small">Geheizt: Minuten, in denen ein Thermostat „heizt“ meldet (ohne diese Angabe: Raum unter Soll).</p>
       </section>`;
+  }
+
+  /** Heizleistung je Raum: Urteil, Kennzahlen und Hinweise (Analyse aus dem Backend). */
+  _powerReport(rooms, days) {
+    const an = this._analysis?.[days] || {};
+    const V = { good: ["Passt", "#22c55e", "mdi:check-circle-outline"], reserve: ["Reserve", "#0ea5e9", "mdi:arrow-down-bold-circle-outline"],
+      tight: ["Knapp", "#f59e0b", "mdi:alert-circle-outline"], weak: ["Reicht nicht", "#ef4444", "mdi:fire-alert"],
+      sensor: ["Messung prüfen", "#f97316", "mdi:thermometer-alert"], nodata: ["Zu wenig Daten", "#94a3b8", "mdi:timer-sand"] };
+    const LV = { ok: ["mdi:check", "#22c55e"], info: ["mdi:information-outline", "#0ea5e9"], warn: ["mdi:alert-outline", "#ef4444"] };
+    const list = rooms.map((r) => ({ r, a: an[r.id] })).filter((x) => x.a);
+    if (!list.length) return "";
+    const order = ["weak", "sensor", "tight", "good", "reserve", "nodata"];
+    list.sort((x, y) => order.indexOf(x.a.verdict) - order.indexOf(y.a.verdict));
+    const count = (v) => list.filter((x) => x.a.verdict === v).length;
+    const bad = count("weak") + count("sensor");
+    const head = bad ? `${bad} ${bad === 1 ? "Raum braucht" : "Räume brauchen"} Aufmerksamkeit` : count("tight") ? `${count("tight")} ${count("tight") === 1 ? "Raum ist" : "Räume sind"} knapp, sonst alles gut` : count("nodata") === list.length ? "Noch zu wenig Daten" : "Alle Räume werden gut warm";
+    const fact = (label, val, hint = "") => (val == null ? "" : `<span class="pw-f"><small>${label}</small><b>${val}</b>${hint ? `<i>${hint}</i>` : ""}</span>`);
+    const card = ({ r, a }) => {
+      const [vl, vc, vi] = V[a.verdict] || V.nodata;
+      const f = a.facts || {};
+      return `<div class="pw-room" style="--c:${vc}">
+        <div class="pw-h"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><b>${esc(r.name)}</b><small>${r.type === "flaeche" ? "Fußbodenheizung" : "Heizkörper"}</small><span class="grow"></span><em class="pw-v"><ha-icon icon="${vi}"></ha-icon>${vl}</em></div>
+        ${f.ok_pct != null ? `<div class="pw-bar" title="Komfort erreicht"><i style="width:${f.ok_pct}%"></i></div>` : ""}
+        <div class="pw-fs">
+          ${fact("Komfort erreicht", f.ok_pct != null ? `${f.ok_pct} %` : null)}
+          ${fact("Ø zum Soll", f.dev != null ? `${f.dev > 0 ? "+" : ""}${fmt(f.dev)} °C` : null)}
+          ${fact("Ø Ventil", f.valve != null ? `${f.valve} %` : null, f.full_pct ? `${f.full_pct} % ganz auf` : "")}
+          ${fact("Aufheizen", f.rate != null ? `${fmt(f.rate, 1)} °C/h` : null)}
+          ${fact("Überheizt", f.over_pct ? `${f.over_pct} %` : null)}
+          ${fact("Frost / mild", f.ok_cold != null && f.ok_mild != null ? `${f.ok_cold} / ${f.ok_mild} %` : null)}
+        </div>
+        <div class="pw-list">${(a.findings || []).map((x) => { const [i, c] = LV[x.level] || LV.info; return `<div class="pw-i"><ha-icon icon="${i}" style="color:${c}"></ha-icon><span><b>${esc(x.title)}</b><small>${esc(x.text)}</small></span></div>`; }).join("")}</div>
+        ${this._admin && ["weak", "sensor", "tight"].includes(a.verdict) ? `<button class="link" data-action="room-edit" data-id="${r.id}"><ha-icon icon="mdi:cog-outline"></ha-icon>Raum einstellen</button>` : ""}
+      </div>`;
+    };
+    return `<section class="card">
+      ${this._sectionHead("mdi:radiator", `Heizleistung je Raum · ${days} Tage`)}
+      <p class="pw-sum"><b>${head}</b><small>Komfort erreicht = Anteil der Komfortzeit, in der der Raum höchstens 0,5 °C unter Soll lag. Zusammen mit der Ventilöffnung zeigt das, ob die Heizung reicht, knapp ist oder Reserve hat.</small></p>
+      <div class="pw-grid">${list.map(card).join("")}</div>
+    </section>`;
   }
 
   /** Ventilöffnung je Raum und Stunde (Ø über die gewählten Tage) als Wärmekarte. */
@@ -6403,6 +6449,27 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .cwiz-c > b { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
 .cwiz-c > b ha-icon { color:#0ea5e9; }
 .cwiz-c select { width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--line2); background:var(--card); color:var(--text); font:inherit; }
+/* Bericht: Heizleistung */
+.pw-sum { display:flex; flex-direction:column; gap:3px; margin:0 0 12px; }
+.pw-sum small { color:var(--muted); font-size:12px; }
+.pw-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:10px; }
+.pw-room { padding:12px 14px; border-radius:16px; border:1px solid var(--line2); border-left:4px solid var(--c); background:var(--card); display:flex; flex-direction:column; gap:8px; }
+.pw-h { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.pw-h small { color:var(--muted); font-size:12px; }
+.pw-v { font-style:normal; display:inline-flex; align-items:center; gap:4px; padding:3px 10px; border-radius:99px; font-size:12px; font-weight:700; color:var(--c); background:color-mix(in srgb, var(--c) 13%, transparent); }
+.pw-v ha-icon { --mdc-icon-size:16px; }
+.pw-bar { height:6px; border-radius:99px; background:var(--card2); overflow:hidden; }
+.pw-bar i { display:block; height:100%; background:var(--c); border-radius:99px; }
+.pw-fs { display:flex; flex-wrap:wrap; gap:6px; }
+.pw-f { display:flex; flex-direction:column; padding:6px 10px; border-radius:12px; background:var(--card2); min-width:84px; }
+.pw-f small { font-size:11px; color:var(--muted); }
+.pw-f b { font-size:15px; }
+.pw-f i { font-style:normal; font-size:11px; color:#ef4444; }
+.pw-list { display:flex; flex-direction:column; gap:6px; }
+.pw-i { display:flex; gap:8px; align-items:flex-start; }
+.pw-i ha-icon { --mdc-icon-size:18px; flex:none; margin-top:1px; }
+.pw-i span { display:flex; flex-direction:column; gap:2px; }
+.pw-i small { color:var(--muted); font-size:12.5px; line-height:1.45; }
 /* Raum-Assistent */
 .wiz-bar { display:flex; gap:4px; margin:-2px 0 16px; overflow-x:auto; scrollbar-width:none; }
 .wiz-dot { flex:1; min-width:52px; display:flex; flex-direction:column; align-items:center; gap:4px; border:0; background:none; color:var(--muted); font:inherit; font-size:11px; cursor:pointer; padding:0; }
@@ -6828,7 +6895,7 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .sr-ic.logo .mlogo { width:100%; height:100%; border-radius:12px; }
 .vh { display:flex; flex-direction:column; gap:6px; margin-top:4px; }
 .vh-row { display:grid; grid-template-columns:110px minmax(0, 1fr); gap:10px; align-items:center; }
-.vh-name { font-size:13px; font-weight:600; display:flex; flex-direction:column; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vh-name { font-size:13px; font-weight:600; display:flex; flex-direction:column; min-width:0; overflow-wrap:break-word; line-height:1.2; }
 .vh-name .rdot { display:none; }
 .vh-name small { color:var(--muted); font-weight:500; font-size:11.5px; }
 .vh-cells { display:grid; grid-template-columns:repeat(24, minmax(0, 1fr)); gap:2px; }

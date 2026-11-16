@@ -59,6 +59,7 @@ from .logic import (
     keyword_match,
     keywords,
     learn_rate,
+    room_analysis,
     liming_active,
     minutes_until,
     next_comfort,
@@ -1749,6 +1750,23 @@ class Heizen:
             if result.get("room_temp") is not None:
                 bucket["tsum"] += result["room_temp"]
                 bucket["tn"] += 1
+            temp, target, mode = result.get("room_temp"), result.get("target"), result.get("mode")
+            # Für die Analyse der Heizleistung: Komfort erreicht? Überheizt? Ventil ganz offen? Außentemperatur?
+            if temp is not None and target is not None and mode in COMFORT_MODES:
+                bucket["cn"] = bucket.get("cn", 0) + 1
+                bucket["cdev"] = round(bucket.get("cdev", 0.0) + (temp - target), 2)
+                if temp < target - 0.5:
+                    bucket["under"] = bucket.get("under", 0) + 1
+            if temp is not None and target is not None and mode not in ("fenster", "aus", "sommer", "entkalken"):
+                bucket["mn"] = bucket.get("mn", 0) + 1
+                if temp > target + 1.0:
+                    bucket["over"] = bucket.get("over", 0) + 1
+            if (result.get("valve_all") or 0) >= 90:
+                bucket["full"] = bucket.get("full", 0) + 1
+            outside = self.haus.outside_temp()
+            if outside is not None:
+                bucket["osum"] = round(bucket.get("osum", 0.0) + outside, 1)
+                bucket["on"] = bucket.get("on", 0) + 1
             valve = result.get("valve_all")
             if valve is not None:
                 hour = dt_util.now().hour
@@ -1778,7 +1796,16 @@ class Heizen:
                         # Ø Ventilöffnung je Stunde (None = keine Werte) und über den Tag
                         "valve_hours": [round(s / n) if n else None for s, n in zip(b.get("vh") or [0] * 24, b.get("vn") or [0] * 24)],
                         "valve_avg": round(sum(b["vh"]) / sum(b["vn"])) if sum(b.get("vn") or []) else None,
+                        # Analyse: Minuten in Komfort mit Messwert, davon zu kalt; Ø Abweichung; überheizt; Ventil ≥ 90 %
+                        "comfort_n": b.get("cn", 0), "under_min": b.get("under", 0),
+                        "comfort_dev": round(b["cdev"] / b["cn"], 2) if b.get("cn") else None,
+                        "measured_min": b.get("mn", 0), "over_min": b.get("over", 0), "full_min": b.get("full", 0),
+                        "outside_avg": round(b["osum"] / b["on"], 1) if b.get("on") else None,
                     }
                 )
             out[room_id] = rows
+        out["_analysis"] = {
+            room_id: room_analysis(out[room_id], self.heat_rates.get(room_id), room.get("type") or "heizkoerper")
+            for room_id, room in self.rooms.items()
+        }
         return out

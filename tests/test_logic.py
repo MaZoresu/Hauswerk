@@ -404,3 +404,19 @@ def test_shade_conditions():
     assert L.shade_wanted(prof, start, end, active=True)
     # nichts messbar -> keine Beschattung
     assert not L.shade_wanted(prof, {}, {}, active=False)
+
+
+def _day(cn=600, under=0, dev=0.0, valve=40, full=0, heat=300, over=0, mn=1400, out=8.0):
+    return {"comfort_n": cn, "under_min": under, "comfort_dev": dev, "valve_avg": valve, "full_min": full, "heat_min": heat,
+            "over_min": over, "measured_min": mn, "outside_avg": out, "pause_min": 0, "openings": 0}
+
+
+def test_room_analysis():
+    assert L.room_analysis([_day(cn=60)], None)["verdict"] == "nodata"
+    assert L.room_analysis([_day()] * 7, 1.2)["verdict"] == "good"
+    weak = L.room_analysis([_day(under=300, dev=-1.2, valve=85, full=200)] * 7, 0.3)
+    assert weak["verdict"] == "weak" and any(f["title"] == "Heizt langsam auf" for f in weak["findings"])
+    assert L.room_analysis([_day(under=300, dev=-1.0, valve=20)] * 7, None)["verdict"] == "sensor"
+    assert L.room_analysis([_day(valve=15)] * 7, None)["verdict"] == "reserve"
+    frost = L.room_analysis([_day(out=0.0, under=200)] * 3 + [_day(out=8.0)] * 4, None)
+    assert any(f["title"] == "Reicht bei Frost nicht" for f in frost["findings"])
