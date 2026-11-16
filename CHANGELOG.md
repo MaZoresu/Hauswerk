@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.25.1 – 2026-11-16
+
+### Geändert
+- **Geräte wählen:** Nach einem Tipp auf „Passt“ bzw. „Wählen“ schließt sich die Auswahl sofort – auch dort, wo mehrere Geräte möglich sind. Mit „Weitere hinzufügen“ öffnet sie sich wieder.
+
 ## 0.25.0 – 2026-11-16
 
 ### Neu

@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.25.0";
+const VERSION = "0.25.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4788,10 +4788,10 @@ class HauswerkPanel extends HTMLElement {
         break;
       case "pick-add": {
         const field = el.dataset.field;
-        // Nach der Wahl: Einzelfeld zuklappen, Suche zurücksetzen
+        // Nach der Wahl: Auswahl zuklappen (auch bei mehreren – „Weitere hinzufügen“ öffnet sie wieder), Suche zurücksetzen
         const S = this._pkState(field);
         S.q = "";
-        if (!PICKERS[field].multi) S.open = false;
+        S.open = false;
         const values = PICKERS[field].multi ? [...this._pickerValue(field), el.dataset.id] : [el.dataset.id];
         this._setPickerValue(field, values);
         break;
