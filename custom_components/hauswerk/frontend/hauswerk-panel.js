@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.21.0";
+const VERSION = "0.21.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -3388,6 +3388,33 @@ class HauswerkPanel extends HTMLElement {
     };
   }
 
+  /** %-Sensoren für die Ventilöffnung am selben Gerät wie das Thermostat (Sensoren vor Zahlen-Entitäten). */
+  _valveSiblings(id) {
+    const reg = this._hass?.entities;
+    if (!reg) return [];
+    if (this._valveMapFor !== reg) {
+      this._valveMapFor = reg;
+      this._valveMap = {};
+    }
+    if (this._valveMap[id]) return this._valveMap[id];
+    const dev = reg[id]?.device_id;
+    let found = [];
+    if (dev) {
+      const words = /ventil|valve|stellung|heating_demand|heizbedarf|pi_heating/i;
+      const cands = Object.entries(reg)
+        .map(([eid, e]) => ({ ...e, entity_id: eid }))
+        .filter((e) => e.device_id === dev && e.entity_id !== id && !e.hidden && words.test(`${e.entity_id} ${e.name || ""} ${e.translation_key || ""}`));
+      const ok = (e) => {
+        const st = this._hass.states?.[e.entity_id];
+        return st && st.attributes?.unit_of_measurement === "%" && !/max|min|limit|grenze|offset/i.test(e.entity_id);
+      };
+      found = cands.filter((e) => e.entity_id.startsWith("sensor.") && ok(e)).map((e) => e.entity_id);
+      if (!found.length) found = cands.filter((e) => e.entity_id.startsWith("number.") && ok(e)).map((e) => e.entity_id);
+    }
+    this._valveMap[id] = found;
+    return found;
+  }
+
   /** Ventilöffnung in % einer Entität (Thermostat-Attribut, Ventil/Stellantrieb oder %-Sensor), sonst null. */
   _valveOf(id) {
     const st = this._hass?.states?.[id];
@@ -3399,7 +3426,9 @@ class HauswerkPanel extends HTMLElement {
       for (const k of ["valve_position", "valve_opening", "pi_heating_demand", "heating_demand", "position", "valve"]) {
         if (num(a[k]) != null) return num(a[k]);
       }
-      return null;
+      // Viele Thermostate (z. B. Homematic IP, Zigbee) melden die Ventilöffnung als eigenen Sensor am selben Gerät.
+      const vals = this._valveSiblings(id).map((sid) => this._valveOf(sid)).filter((v) => v != null);
+      return vals.length ? Math.max(...vals) : null;
     }
     if (d === "valve" || d === "cover") return num(a.current_position);
     if ((d === "sensor" || d === "number") && a.unit_of_measurement === "%" && a.device_class !== "battery" && a.device_class !== "humidity") return num(st.state);

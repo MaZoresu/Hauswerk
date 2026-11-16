@@ -29,7 +29,9 @@ const states = {
   "sensor.garten_temp": st("6.4", { friendly_name: "Wetterstation Garten Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   "zone.home": st("0", { latitude: 51.34, longitude: 12.37 }),
   "binary_sensor.arbeitstag": st("on", { friendly_name: "Arbeitstag" }),
-  "climate.bad_heizkoerper": st("heat", { friendly_name: "Heizkörper Bad", current_temperature: 23.5, temperature: 24, valve_position: 35 }),
+  "climate.bad_heizkoerper": st("heat", { friendly_name: "Heizkörper Bad", current_temperature: 23.5, temperature: 24 }),
+  "sensor.bad_heizkoerper_ventil_offnungsgrad": st("35", { friendly_name: "Heizkörper Bad Ventilöffnungsgrad", unit_of_measurement: "%" }),
+  "sensor.wohnzimmer_ventil_offnungsgrad": st("100", { friendly_name: "Wohnzimmer Ventilöffnungsgrad", unit_of_measurement: "%" }),
   "switch.fussbodenheizung_bad": st("on", { friendly_name: "Fußbodenheizung Bad" }),
   "switch.fussbodenheizung_flur": st("off", { friendly_name: "Fußbodenheizung Flur" }),
   "sensor.fbh_bad_stellantrieb": st("60", { friendly_name: "Fußbodenheizung Bad Stellantrieb", unit_of_measurement: "%" }),
@@ -73,7 +75,7 @@ const areas = { wz: { area_id: "wz", name: "Wohnzimmer" }, bad: { area_id: "bad"
 const devices = { d1: { id: "d1", area_id: "wz" }, d2: { id: "d2", area_id: "bad" } };
 const entities = {
   "climate.wohnzimmer": { entity_id: "climate.wohnzimmer", device_id: "d1" }, "sensor.wohnzimmer_temperatur": { device_id: "d1" },
-  "binary_sensor.wohnzimmer_fenster": { area_id: "wz" }, "climate.bad": { device_id: "d2" }, "sensor.bad_temperatur": { device_id: "d2" },
+  "binary_sensor.wohnzimmer_fenster": { area_id: "wz" }, "climate.bad": { device_id: "d2" }, "climate.bad_heizkoerper": { device_id: "d3" }, "sensor.bad_heizkoerper_ventil_offnungsgrad": { device_id: "d3" }, "sensor.wohnzimmer_ventil_offnungsgrad": { device_id: "d1" }, "sensor.bad_temperatur": { device_id: "d2" },
   "binary_sensor.fenster_bad": { area_id: "bad" }, "sensor.kueche_temperatur": { area_id: "kueche" }, "sensor.garten_temp": { area_id: "garten" },
 };
 const hass = {

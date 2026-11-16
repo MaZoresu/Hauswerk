@@ -121,7 +121,7 @@ Alle Werte lassen sich je Raum ändern; seltene Feinheiten (Absenkgrenze, Fenste
 | Lüften & Schimmelschutz | Heizwerk › Einstellungen › Lüften | Hinweis „Jetzt lüften“, wenn drinnen ab X % Luftfeuchte und die Luft draußen trockener ist (absolute Feuchte, Taupunkt) |
 | Nach dem Duschen nachheizen | Raum › Geräte (mit Feuchtesensor) | Steigt die Luftfeuchte in 15 Min. um X Prozentpunkte, heizt der Raum für X Min. auf Komfort (höchstens einmal pro Stunde) |
 | Fenster ohne Kontakt erkennen | Raum › Vorheizen & Fenster | Fällt die Raumtemperatur in 5 Min. um X °C (Standard 1 °C), Fensterpause für X Min. (Standard 15) |
-| Weitere Geräte nur anzeigen | Raum › Geräte | Z. B. Heizkörper-Thermostat, Stellantrieb oder Schalter der Fußbodenheizung neben dem Wandthermostat, das Heizwerk einstellt: Symbole an Raumkarte und kompakter Kachel – Ventil mit Öffnung in % (höchster Wert), Fußbodenheizung an/aus – und alle Werte auf der Raumseite |
+| Weitere Geräte nur anzeigen | Raum › Geräte | Z. B. Heizkörper-Thermostat, Stellantrieb oder Schalter der Fußbodenheizung neben dem Wandthermostat, das Heizwerk einstellt: Symbole an Raumkarte und kompakter Kachel – Ventil mit Öffnung in % (höchster Wert; gelesen aus dem Thermostat oder automatisch aus einem %-Sensor wie „Ventilöffnungsgrad“ am selben Gerät), Fußbodenheizung an/aus – und alle Werte auf der Raumseite |
 | Batterie-Warnung | Hauswerk › Einstellungen › Benachrichtigungen | Batterie-Sensoren an den Geräten von Thermostaten, Fensterkontakten und Raumsensoren; unter X % Hinweis unter der Glocke und auf Wunsch Nachricht |
 
 ## Vorrang der Betriebsarten
