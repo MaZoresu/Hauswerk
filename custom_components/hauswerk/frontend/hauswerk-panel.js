@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.20.3";
+const VERSION = "0.21.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1468,7 +1468,6 @@ class HauswerkPanel extends HTMLElement {
   _roomCard(room) {
     if (!(room.climates || []).length) return this._roomSetup(room);
     const s = this._status?.rooms?.[room.id] || {};
-    const type = TYPES[room.type] || TYPES.heizkoerper;
     const mode = s.mode || "aus";
     const until = s.override_until ? new Date(s.override_until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : null;
     const canStep = !["aus", "fenster", "sommer", "entkalken", "boost"].includes(mode);
@@ -1482,8 +1481,8 @@ class HauswerkPanel extends HTMLElement {
     const dv = this._devIndicators(room);
     if (dv.valve != null)
       icons.push(si("mdi:valve", dv.valve > 0 ? "#fb923c" : "var(--muted)", `Ventil${dv.valves > 1 ? "e (höchster Wert)" : ""}: ${fmt(dv.valve, 0)} % offen`, `${fmt(dv.valve, 0)} %`));
-    if (dv.floor)
-      icons.push(si("mdi:heating-coil", dv.floor.on ? "#f97316" : "var(--muted)", `${dv.floor.label} ${dv.floor.on ? "an – heizt" : "aus"}: ${dv.floor.names}`, dv.floor.on ? "an" : "aus"));
+    // Fußbodenheizung: nur das Symbol, solange sie heizt (Details als Quickinfo)
+    if (dv.floor?.on) icons.push(si("mdi:heating-coil", "#f97316", `${dv.floor.label} heizt – ${dv.floor.names}`));
     const hum = humidityInfo(s.humidity);
     if (hum) icons.push(si(hum.i, hum.t ? hum.c : "var(--muted)", `Luftfeuchte ${fmt(s.humidity, 0)} %${hum.t ? " – " + hum.t : ""}`, `${fmt(s.humidity, 0)} %`));
     const tr = !["aus", "fenster", "sommer", "entkalken", "warm", "boost"].includes(mode) ? trend(s.room_temp, s.target) : null;
@@ -1513,13 +1512,13 @@ class HauswerkPanel extends HTMLElement {
         </details>`
       : "";
     return `
-      <article class="room ${mode === "aus" ? "off" : ""}" id="room-${room.id}" style="--rc:${this._roomColor(room.id)}">
+      <article class="room tap ${mode === "aus" ? "off" : ""}" id="room-${room.id}" style="--rc:${this._roomColor(room.id)}" data-action="room-quick" data-id="${room.id}" title="Tippen für manuelle Änderungen">
         <div class="room-head">
           <div class="room-ic">
             <ha-icon icon="${esc(roomIcon(room))}"></ha-icon>
             ${s.heating ? `<span class="flame" title="Heizt"><ha-icon icon="mdi:fire"></ha-icon></span>` : ""}
           </div>
-          <div class="room-t"><h4><button class="rlink" data-action="room-page" data-id="${room.id}" title="Raum öffnen">${esc(room.name)}</button></h4><small><ha-icon icon="${type.icon}"></ha-icon>${type.label}${icons.length ? `<span class="sis">${icons.join("")}</span>` : ""}</small></div>
+          <div class="room-t"><h4><button class="rlink" data-action="room-page" data-id="${room.id}" title="Raum öffnen">${esc(room.name)}</button></h4>${icons.length ? `<small><span class="sis">${icons.join("")}</span></small>` : ""}</div>
           ${this._chip(mode, s.mode_label || "Automatik aus")}
           ${canBoost ? `<button class="icon ${mode === "boost" ? "hot" : ""}" title="${mode === "boost" ? "Boost beenden" : `Boost: ${this._data.settings.boost_minutes || 30} Min. volle Leistung`}" data-action="${mode === "boost" ? "ovr-reset" : "boost"}" data-id="${room.id}"><ha-icon icon="mdi:rocket-launch-outline"></ha-icon></button>` : ""}
           ${menu}
@@ -1800,7 +1799,7 @@ class HauswerkPanel extends HTMLElement {
     const info = room.enabled === false ? null : this._schedInfo(room, s);
     const day = (new Date().getDay() + 6) % 7;
     return `
-      <article class="rmini ${mode === "aus" ? "off" : ""}" id="room-${room.id}" style="--rc:${this._roomColor(room.id)}; --c:${m.c}">
+      <article class="rmini tap ${mode === "aus" ? "off" : ""}" id="room-${room.id}" style="--rc:${this._roomColor(room.id)}; --c:${m.c}" data-action="room-quick" data-id="${room.id}" title="Tippen für manuelle Änderungen">
         <div class="rm-head">
           <span class="rm-ic"><ha-icon icon="${esc(roomIcon(room))}"></ha-icon></span>
           <button class="rm-name rlink" data-action="room-page" data-id="${room.id}" title="Raum öffnen">${esc(room.name)}</button>
@@ -1809,7 +1808,7 @@ class HauswerkPanel extends HTMLElement {
           ${(() => {
             const dv = this._devIndicators(room);
             return (dv.valve != null ? `<span class="rm-dev ${dv.valve > 0 ? "on" : ""}" title="Ventil ${fmt(dv.valve, 0)} % offen"><ha-icon icon="mdi:valve"></ha-icon>${fmt(dv.valve, 0)}%</span>` : "")
-              + (dv.floor ? `<span class="rm-dev ${dv.floor.on ? "on" : ""}" title="${esc(dv.floor.label)} ${dv.floor.on ? "an" : "aus"}"><ha-icon icon="mdi:heating-coil"></ha-icon></span>` : "");
+              + (dv.floor?.on ? `<span class="rm-dev on" title="${esc(dv.floor.label)} heizt – ${esc(dv.floor.names)}"><ha-icon icon="mdi:heating-coil"></ha-icon></span>` : "");
           })()}
           ${this._admin ? `<button class="icon tiny" data-action="room-edit" data-id="${room.id}" title="Bearbeiten"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
         </div>
@@ -2534,7 +2533,7 @@ class HauswerkPanel extends HTMLElement {
           <div class="grow"><h2>${def.title}</h2>${def.sub ? `<div class="muted">${def.sub}</div>` : ""}</div>
           <button class="icon boxed" data-action="pop-close" title="Schließen"><ha-icon icon="mdi:close"></ha-icon></button>
         </div>
-        <div class="sheet-body">${this._admin ? "" : `<p class="note warn"><ha-icon icon="mdi:lock-outline"></ha-icon>Nur ansehen: Ändern dürfen Administratoren – oder alle, wenn ein Admin es unter „Berechtigungen“ freigibt.</p>`}${def.body}</div>
+        <div class="sheet-body">${this._admin || def.open ? "" : `<p class="note warn"><ha-icon icon="mdi:lock-outline"></ha-icon>Nur ansehen: Ändern dürfen Administratoren – oder alle, wenn ein Admin es unter „Berechtigungen“ freigibt.</p>`}${def.body}</div>
         <div class="sheet-foot">${foot}</div>
       </div>`;
     const body = host.querySelector(".sheet-body");
@@ -2717,6 +2716,54 @@ class HauswerkPanel extends HTMLElement {
               return this._data.settings.preheat_weather && f ? `<p class="muted small"><ha-icon icon="mdi:thermometer"></ha-icon>Gerade ${fmt(f, 2)}-facher Vorlauf${out != null ? ` bei ${fmt(out)} °C außen` : ""}${mode === "fixed" ? ` – Heizkörper ${Math.round(this._leadFor("heizkoerper") * f)} Min., Fläche ${Math.round(this._leadFor("flaeche") * f)} Min` : ""}.</p>` : "";
             })()}` : ""}
             ${own.length ? `<p class="muted small"><ha-icon icon="mdi:home-edit-outline"></ha-icon>Eigene Einstellung: ${own.map((r) => `${esc(r.name)} (${label[r.preheat_mode]})`).join(", ")} – änderbar am Raum unter „Vorheizen & Fenster“.</p>` : ""}`,
+        };
+      }
+
+      case "rq": {
+        const d = this._pop.draft;
+        const room = this._data.rooms[d.id] || {};
+        const rs = st[d.id] || {};
+        const mode = rs.mode || "aus";
+        const m = MODE[mode] || MODE.aus;
+        const dv = this._devIndicators(room);
+        const until = rs.override_until ? new Date(rs.override_until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : null;
+        const blocked = { aus: "Die Automatik ist aus – Heizwerk stellt nichts ein.", fenster: "Fenster offen – die Fensterpause geht vor, die Änderung gilt danach.", sommer: "Sommerpause – die Änderung gilt erst in der Heizperiode.", entkalken: "Gerade läuft der Entkalkungsschutz." }[mode];
+        const next = rs.next_change != null ? new Date(Date.now() + rs.next_change * 60000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : null;
+        const durs = [["", next ? `bis ${next}` : "bis Planwechsel"], ["1", "1 h"], ["2", "2 h"], ["4", "4 h"], ["8", "8 h"]];
+        const facts = [
+          [m.i, rs.mode_label || "Automatik aus", m.c],
+          ["mdi:thermometer", `Jetzt ${fmt(rs.room_temp)} °C`, "var(--muted)"],
+          ["mdi:target", `Soll ${fmt(rs.target)} °C`, tint(tempColor(rs.target))],
+          ...(rs.humidity != null ? [["mdi:water-percent", `${fmt(rs.humidity, 0)} %`, "var(--muted)"]] : []),
+          ...(dv.valve != null ? [["mdi:valve", `Ventil ${fmt(dv.valve, 0)} %`, dv.valve > 0 ? "#fb923c" : "var(--muted)"]] : []),
+          ...(dv.floor?.on ? [["mdi:heating-coil", `${dv.floor.label} heizt`, "#f97316"]] : []),
+          ...(rs.windows_open ? [["mdi:window-open-variant", "Fenster offen", "#22d3ee"]] : []),
+        ];
+        const auto = room.enabled !== false;
+        return {
+          icon: roomIcon(room), c: this._roomColor(room.id), title: esc(room.name || "Raum"), sub: "Manuell ändern", open: true,
+          body: `
+            <div class="rq-facts">${facts.map(([i, txt, c]) => `<span style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${esc(txt)}</span>`).join("")}</div>
+            ${blocked ? `<p class="note"><ha-icon icon="mdi:information-outline"></ha-icon>${blocked}</p>` : ""}
+            ${(mode === "manuell" || mode === "boost") && until ? `<div class="room-note ${mode === "boost" ? "boost" : ""}"><ha-icon icon="${mode === "boost" ? "mdi:rocket-launch-outline" : "mdi:hand-back-right-outline"}"></ha-icon>${mode === "boost" ? "Boost" : "Manuell"} bis ${until}<span class="grow"></span><button class="link" data-action="ovr-reset" data-id="${room.id}">Zurück zum Plan</button></div>` : ""}
+            <div class="rq-temp">
+              <small>Gewünschte Temperatur</small>
+              ${this._stepper("rq", room.id, d.temp)}
+              <div class="rq-quick">
+                <button class="pill ${d.temp === room.comfort ? "on" : ""}" data-action="rq-temp" data-t="${room.comfort ?? 21}"><ha-icon icon="mdi:sofa-outline"></ha-icon>Komfort ${fmt(room.comfort ?? 21)} °C</button>
+                <button class="pill ${d.temp === room.eco ? "on" : ""}" data-action="rq-temp" data-t="${room.eco ?? 18}"><ha-icon icon="mdi:leaf"></ha-icon>Eco ${fmt(room.eco ?? 18)} °C</button>
+              </div>
+            </div>
+            <div class="lbl">Wie lange?</div>
+            <div class="segs small rq-dur">${durs.map(([h, l]) => `<button class="seg ${String(d.hours ?? "") === h ? "on" : ""}" data-action="rq-dur" data-h="${h}">${l}</button>`).join("")}</div>
+            <div class="rq-more">
+              ${(room.climates || []).length && !["aus", "fenster", "entkalken"].includes(mode) ? `<button class="qbtn hot" data-action="rq-boost" data-id="${room.id}"><ha-icon icon="mdi:rocket-launch-outline"></ha-icon>Boost ${this._data.settings.boost_minutes || 30} Min.</button>` : ""}
+              <button class="qbtn" data-action="room-page" data-id="${room.id}" data-hint="1"><ha-icon icon="mdi:chart-line"></ha-icon>Raumseite</button>
+              ${this._admin ? `<button class="qbtn" data-action="plan-open" data-id="${room.id}" data-hint="1"><ha-icon icon="mdi:calendar-clock"></ha-icon>Heizplan</button>
+              <button class="qbtn" data-action="room-auto" data-id="${room.id}" data-hint="1"><ha-icon icon="${auto ? "mdi:robot-off-outline" : "mdi:robot-outline"}"></ha-icon>Automatik ${auto ? "aus" : "an"}</button>` : ""}
+            </div>`,
+          foot: `<button class="secondary" data-action="pop-close">Abbrechen</button>
+                 <button class="primary" data-action="rq-apply"><ha-icon icon="mdi:check"></ha-icon>Übernehmen</button>`,
         };
       }
 
@@ -3695,6 +3742,7 @@ class HauswerkPanel extends HTMLElement {
     const el = e.target.closest?.("[data-action]");
     if (!el) return;
     const a = el.dataset.action;
+    if (a === "room-quick" && path.some((n) => n.tagName === "DETAILS" || n.tagName === "SUMMARY" || n.tagName === "INPUT")) return;
     if (["room-toggle", "plan-preset", "adv", "hmode", "room-plan", "set-search", "log-search"].includes(a)) {
       if (a === "adv" && this._dialog) setTimeout(() => (this._dialog.advanced = el.open), 0);
       return;
@@ -4036,6 +4084,35 @@ class HauswerkPanel extends HTMLElement {
       }
       case "ovr-reset":
         await this._ws({ type: "hauswerk/heizen/override", room_id: el.dataset.id, temp: null });
+        if (this._pop?.id === "rq") this._closePop();
+        break;
+      case "room-quick": {
+        const s = this._status?.rooms?.[el.dataset.id] || {};
+        const room = this._data.rooms[el.dataset.id];
+        if (!room) break;
+        this._openPop("rq", { id: room.id, temp: s.target ?? room.comfort ?? 21, hours: null });
+        break;
+      }
+      case "rq-dur":
+        this._pop.draft.hours = el.dataset.h === "" ? null : Number(el.dataset.h);
+        this._renderPop();
+        break;
+      case "rq-temp":
+        this._pop.draft.temp = Number(el.dataset.t);
+        this._renderPop();
+        break;
+      case "rq-apply": {
+        const d = this._pop.draft;
+        const name = this._data.rooms[d.id]?.name || "";
+        await this._ws({ type: "hauswerk/heizen/override", room_id: d.id, temp: d.temp, hours: d.hours });
+        this._closePop();
+        this._toast(`${name}: ${fmt(d.temp)} °C ${d.hours ? `für ${d.hours} h` : "bis zum nächsten Planwechsel"}`);
+        break;
+      }
+      case "rq-boost":
+        await this._ws({ type: "hauswerk/heizen/override", room_id: el.dataset.id, boost: true });
+        this._closePop();
+        this._toast(`Boost für ${this._data.settings.boost_minutes || 30} Minuten`);
         break;
       case "boost":
         await this._ws({ type: "hauswerk/heizen/override", room_id: el.dataset.id, boost: true });
@@ -4235,6 +4312,9 @@ class HauswerkPanel extends HTMLElement {
     } else if (kind === "set") {
       this._settings[key] = clampT((this._settings[key] ?? 17) + delta);
       this._refreshSettings();
+    } else if (kind === "rq") {
+      this._pop.draft.temp = clampT((this._pop.draft.temp ?? 20) + delta);
+      this._renderPop();
     } else if (kind === "ovr") {
       const s = this._status?.rooms?.[key] || {};
       const base = s.target ?? this._data.rooms[key].comfort;
@@ -5006,6 +5086,21 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .rsched .dbar.mini { height:8px; }
 /* Kompakte Raumkacheln */
 .rooms.compact { grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:10px; }
+.room.tap, .rmini.tap { cursor:pointer; }
+.room.tap:active, .rmini.tap:active { transform:scale(.99); }
+.rq-facts { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+.rq-facts span { display:inline-flex; align-items:center; gap:5px; padding:6px 10px; border-radius:99px; background:var(--card2); font-size:13px; font-weight:600; }
+.rq-facts ha-icon { --mdc-icon-size:17px; color:var(--c); }
+.rq-temp { display:grid; justify-items:center; gap:10px; padding:16px; border-radius:18px; background:var(--card2); margin-bottom:14px; }
+.rq-temp > small { color:var(--muted); font-weight:600; }
+.rq-temp .stepper { transform:scale(1.25); margin:8px 0; }
+.rq-quick { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; }
+.segs.small.rq-dur { display:grid; grid-template-columns:repeat(5, minmax(0, 1fr)); gap:6px; }
+.segs.small.rq-dur .seg { padding:10px 2px; font-size:12.5px; white-space:nowrap; }
+.rq-more { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
+.rq-more .qbtn { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; padding:10px 14px; border-radius:12px; background:var(--card2); font-size:13.5px; font-weight:600; color:var(--text); }
+.rq-more .qbtn ha-icon { --mdc-icon-size:18px; color:var(--accent); }
+.rq-more .qbtn.hot ha-icon { color:#fb923c; }
 .rm-dev { display:inline-flex; align-items:center; gap:2px; font-size:11px; font-weight:700; color:var(--muted); }
 .rm-dev ha-icon { --mdc-icon-size:16px; }
 .rm-dev.on { color:#f97316; }
