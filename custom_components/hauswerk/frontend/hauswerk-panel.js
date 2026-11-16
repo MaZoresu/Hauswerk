@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.22.0";
+const VERSION = "0.22.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -5582,7 +5582,8 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
   .hero-big { font-size:52px; }
 }
 @media (max-width:600px) {
-  .app { padding:10px 12px 32px; }
+  /* unten Platz für die Navigationsleiste lassen, sonst verdeckt sie das Ende der letzten Kachel */
+  .app { padding:10px 12px calc(96px + env(safe-area-inset-bottom)); }
   .hmodes { grid-template-columns:1fr; }
   .top { padding:6px 10px 0; }
   .bar { gap:8px; }

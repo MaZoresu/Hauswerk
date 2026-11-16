@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.22.1 – 2026-11-16
+
+### Behoben
+- **Kacheln unten abgeschnitten (Handy):** Die untere Navigationsleiste verdeckte das Ende der letzten Kachel bzw. des letzten Widgets – auch ganz nach unten gescrollt. Die Seite lässt unten jetzt genug Platz.
+
 ## 0.22.0 – 2026-11-16
 
 ### Neu
