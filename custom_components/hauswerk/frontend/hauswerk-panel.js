@@ -1,6 +1,6 @@
-/* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
+/* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.33.0";
+const VERSION = "0.34.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -102,6 +102,7 @@ const WIDGETS = {
   hints: { name: "Hinweise", icon: "mdi:bell-outline", c: "#f59e0b", text: "Was zu beheben ist – Thermostate, Batterien, Fenster, Kalender – mit Sprung zur Stelle" },
   power: { name: "Heizleistung", icon: "mdi:radiator", c: "#ef4444", text: "Räume, in denen die Heizung nicht reicht, knapp ist oder die Messung nicht stimmt (aus dem Bericht)", go: "report" },
   shutters: { name: "Rollläden", icon: "mdi:window-shutter", c: "#0ea5e9", text: "Wie viele offen, zu oder beschattet sind, Alle hoch/runter und von Hand verstellte Rollläden", go: "shutters" },
+  energy: { name: "Energie", icon: "mdi:solar-power-variant", c: "#f59e0b", text: "Solar, Netz, Hausverbrauch und Batterie jetzt; groß mit Energiefluss und Tageswerten", go: "kwflow" },
   rwnext: { name: "Nächste Fahrten", icon: "mdi:clock-outline", c: "#38bdf8", text: "Die nächsten Fahrten heute mit Uhrzeit und die Tagesleiste", go: "shutters" },
   forecast: { name: "Wetterprognose", icon: "mdi:weather-cloudy-clock", c: "#60a5fa", text: "Die nächsten Stunden oder Tage mit Tiefst- und Höchstwerten, Regen und Frost-Hinweis", size: "l", forecast: true },
 };
@@ -122,6 +123,13 @@ const PICKERS = {
   demand_entity: { scope: "settings", multi: false, domains: ["climate"] },
   rw_covers: { scope: "settings", multi: true, domains: ["cover"] },
   rw_wind_entity: { scope: "settings", multi: false, domains: ["sensor"] },
+  kw_solar: { scope: "settings", multi: true, domains: ["sensor"], deviceClass: "power" },
+  kw_grid: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "power" },
+  kw_grid_export: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "power" },
+  kw_battery: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "power" },
+  kw_battery_soc: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "battery" },
+  kw_home: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "power" },
+  kw_consumers: { scope: "settings", multi: true, domains: ["sensor"], deviceClass: "power" },
   outside_sensor: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "temperature" },
   season_entity: { scope: "settings", multi: false, domains: ["input_boolean", "switch", "binary_sensor", "schedule"] },
   schedule_entity: { scope: "room", multi: false, domains: ["schedule", "calendar", "input_boolean", "binary_sensor"] },
@@ -144,6 +152,12 @@ const PICKERS = {
 };
 // Entitätssuche: Wörter im Namen, die zum Feld passen, und passende Geräteklassen
 const PICK_HINTS = {
+  kw_solar: ["pv", "solar", "photovoltaik", "wechselrichter", "inverter"],
+  kw_grid: ["netz", "grid", "bezug", "einspeis", "zähler", "meter"],
+  kw_grid_export: ["einspeis", "export", "feed"],
+  kw_battery: ["batterie", "battery", "akku", "speicher"],
+  kw_battery_soc: ["batterie", "battery", "akku", "speicher", "soc", "ladestand"],
+  kw_home: ["haus", "home", "verbrauch", "load", "last"],
   climates: ["thermostat", "heizung", "heizkörper", "heizkoerper", "trv", "climate"],
   windows: ["fenster", "tür", "tuer", "window", "door", "kontakt"],
   temp_sensor: ["temperatur", "temp"],
@@ -230,17 +244,25 @@ const SHUT_VIEWS = [
   { id: "shutters", slug: "rolllaeden", name: "Rollläden", icon: "mdi:window-shutter" },
   { id: "shutset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
 ];
+const KW_VIEWS = [
+  { id: "kwflow", slug: "energiefluss", name: "Energiefluss", icon: "mdi:transmission-tower" },
+  { id: "kwrep", slug: "verlauf", name: "Verlauf", icon: "mdi:chart-bar" },
+  { id: "kwset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
+];
 const MODULES = [
   { id: "heizen", no: 1, name: "Heizwerk", icon: "mdi:radiator", logo: "heizen", views: HEAT_VIEWS.map((v) => v.id) },
   { id: "rollwerk", no: 2, name: "Rollwerk", icon: "mdi:window-shutter", logo: "rollwerk", views: SHUT_VIEWS.map((v) => v.id) },
+  { id: "kraftwerk", no: 3, name: "Kraftwerk", icon: "mdi:solar-power-variant", logo: "kraftwerk", views: KW_VIEWS.map((v) => v.id) },
 ];
+const SUB_VIEWS = [...HEAT_VIEWS, ...SHUT_VIEWS, ...KW_VIEWS];
+const KW_POPS = ["kwdetect", "kwsolar", "kwgrid", "kwbatt", "kwhome", "kwcons"];
 // Geplante Module: nur ausgegraut angezeigt, noch ohne Funktion.
 const COMING = [
   { name: "Licht", icon: "mdi:lightbulb-outline" },
   { name: "Garten", icon: "mdi:flower-outline" },
 ];
 const SLUGS = { start: "start", house: "einstellungen", log: "protokoll", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])),
-  ...Object.fromEntries(SHUT_VIEWS.map((v) => [v.id, `rollwerk/${v.slug}`])) };
+  ...Object.fromEntries(SHUT_VIEWS.map((v) => [v.id, `rollwerk/${v.slug}`])), ...Object.fromEntries(KW_VIEWS.map((v) => [v.id, `kraftwerk/${v.slug}`])) };
 // Pop-ups von Rollwerk (Einstellungen unter Rollwerk › Einstellungen)
 const WIZ_USES = [
   { id: "wohnen", label: "Wohnzimmer", icon: "mdi:sofa-outline", comfort: 21, eco: 18, plan: "berufstaetig", match: /wohn|living|stube/ },
@@ -363,9 +385,14 @@ class HauswerkPanel extends HTMLElement {
     // Design, Akzentfarbe, Hintergrund und Größe (Hauswerk › Einstellungen › Darstellung)
     this._applyLook(this._pop?.id === "look" ? this._settings : null);
     if (first) this._init();
+    // Kraftwerk: Energiefluss live (Zahlen und Linien austauschen, höchstens jede Sekunde)
+    else if (this._tab === "kwflow" && this._data && Date.now() - (this._kwAt || 0) > 1000) {
+      this._kwAt = Date.now();
+      this._kwLive();
+    }
     // Startseite mit Shortcuts, Werten, Wetter oder Fenstern: Änderungen in HA zeigen (höchstens alle 3 s)
     else if (this._tab === "start" && this._data && !this._busy && Date.now() - (this._hassAt || 0) > 3000 &&
-      this._widgets().some((w) => ["shortcuts", "values", "weather", "windows"].includes(w.type))) {
+      this._widgets().some((w) => ["shortcuts", "values", "weather", "windows", "energy"].includes(w.type))) {
       this._hassAt = Date.now();
       this._renderMain();
     }
@@ -651,7 +678,7 @@ class HauswerkPanel extends HTMLElement {
     if (chips)
       chips.innerHTML =
         this._data && !this._error
-          ? (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "") + (MODULES[1].views.includes(this._tab) ? this._rwNavHtml() : "")
+          ? (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "") + (MODULES[1].views.includes(this._tab) ? this._rwNavHtml() : "") + (MODULES[2].views.includes(this._tab) ? this._kwNavHtml() : "")
           : "";
   }
 
@@ -730,13 +757,17 @@ class HauswerkPanel extends HTMLElement {
     if (s.vacation_calendar_error) add("warn", "mdi:calendar-alert", "Urlaubskalender nicht lesbar", s.vacation_calendar_error, "settings-go", { sub: "vacation" });
     for (const [pid, err] of Object.entries(s.plan_errors || {})) add("warn", "mdi:calendar-alert", `Kalender von Plan „${this._data.plans?.[pid]?.name || pid}“ nicht lesbar`, err, "plan-sel", { kind: "plan", id: pid });
     for (const x of this._wxAlerts()) add("info", x.icon, x.text, x.sub, "settings-go", { sub: "weather" });
+    {
+      const kwIds = [...(set.kw_solar || []), set.kw_grid, set.kw_grid_export, set.kw_battery, set.kw_battery_soc, set.kw_home].filter(Boolean);
+      for (const id of kwIds) if (bad(id)) add("info", "mdi:flash-off-outline", "Kraftwerk: Sensor nicht erreichbar", this._entityName(id), "tab", { tab: "kwset" });
+    }
     if (!(set.persons || []).length) add("info", "mdi:account-question-outline", "Keine Personen gewählt", "Ohne Personen gibt es kein automatisches „Abwesend“", "settings-go", { sub: "presence" });
     return out.sort((a, b) => (a.lvl === b.lvl ? 0 : a.lvl === "warn" ? -1 : 1));
   }
 
   _headHtml() {
     const mod = MODULES.find((m) => m.views.includes(this._tab));
-    const sub = [...HEAT_VIEWS, ...SHUT_VIEWS].find((v) => v.id === this._tab);
+    const sub = SUB_VIEWS.find((v) => v.id === this._tab);
     const roomName = this._tab === "room" ? this._data?.rooms?.[this._roomId]?.name : null;
     const title = mod ? `${mod.name}${roomName ? ` · ${roomName}` : sub ? ` · ${sub.name}` : ""}` : this._tab === "house" ? "Einstellungen" : this._tab === "log" ? "Protokoll" : "Start";
     const f = this._data ? this._facts() : null;
@@ -811,7 +842,8 @@ class HauswerkPanel extends HTMLElement {
     this.setAttribute("view", MODULES[0].views.includes(this._tab) ? "heat" : "start");
     if (!this._data) return;
     const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom,
-      shutters: this._viewShutters, shutset: () => this._settingsPage("rw") }[this._tab] || this._viewStart;
+      shutters: this._viewShutters, shutset: () => this._settingsPage("rw"),
+      kwflow: this._viewKwFlow, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw") }[this._tab] || this._viewStart;
     main.innerHTML = view.call(this);
   }
 
@@ -2358,6 +2390,507 @@ class HauswerkPanel extends HTMLElement {
   }
 
 
+  // ------------------------------------------------------------ Kraftwerk
+  /** Leistung eines Sensors in Watt (W, kW, MW), sonst null. */
+  _kwW(id) {
+    const s = id && this._hass.states[id];
+    if (!s || ["unavailable", "unknown", ""].includes(s.state)) return null;
+    const v = parseFloat(s.state);
+    if (!Number.isFinite(v)) return null;
+    const u = String(s.attributes?.unit_of_measurement || "W");
+    return u === "kW" ? v * 1000 : u === "MW" ? v * 1e6 : v;
+  }
+
+  _kwFmt(w, sign = false) {
+    if (w == null) return "–";
+    const a = Math.abs(w);
+    const t = a >= 1000 ? `${fmt(a / 1000, a >= 10000 ? 1 : 2)} kW` : `${fmt(a, 0)} W`;
+    return sign && w < 0 ? `−${t}` : sign && w > 0 ? `+${t}` : t;
+  }
+
+  _kwConfigured(p = this._data?.settings || {}) {
+    return !!((p.kw_solar || []).length || p.kw_grid || p.kw_battery || p.kw_home);
+  }
+
+  /** Energiefluss jetzt: Quellen, Verbrauch und wer wohin liefert (Watt). */
+  _kwFlow(p = this._data?.settings || {}) {
+    const W = (id) => this._kwW(id);
+    const solarIds = p.kw_solar || [];
+    const sv = solarIds.map(W).filter((x) => x != null);
+    const solar = solarIds.length ? (sv.length ? Math.max(0, sv.reduce((a, b) => a + b, 0)) : null) : null;
+    let grid = null;
+    if (p.kw_grid) {
+      const g = W(p.kw_grid);
+      if (g != null) {
+        if (p.kw_grid_export) grid = Math.max(0, g) - Math.max(0, W(p.kw_grid_export) ?? 0);
+        else grid = p.kw_grid_invert ? -g : g;
+      }
+    }
+    let batt = null;
+    if (p.kw_battery) {
+      const b = W(p.kw_battery);
+      if (b != null) batt = p.kw_battery_invert ? -b : b;
+    }
+    const socS = p.kw_battery_soc && this._hass.states[p.kw_battery_soc];
+    const soc = socS && Number.isFinite(parseFloat(socS.state)) ? parseFloat(socS.state) : null;
+    const measured = p.kw_home ? W(p.kw_home) : null;
+    const calc = (solar ?? 0) + (grid ?? 0) + (batt ?? 0);
+    const home = measured != null ? Math.max(0, measured) : solar != null || grid != null || batt != null ? Math.max(0, calc) : null;
+    // Wer liefert wohin: Solar zuerst ins Haus, dann in die Batterie, der Rest ins Netz
+    const s = solar ?? 0, h = home ?? 0, charge = Math.max(0, -(batt ?? 0)), dis = Math.max(0, batt ?? 0);
+    const sh = Math.min(s, h);
+    const sb = Math.min(s - sh, charge);
+    const sg = Math.max(0, Math.min(s - sh - sb, Math.max(0, -(grid ?? 0))));
+    const gb = Math.max(0, charge - sb);
+    const bh = Math.min(dis, h - sh);
+    const gh = Math.max(0, h - sh - bh);
+    const bg = Math.max(0, dis - bh);
+    const cons = (p.kw_consumers || []).map((id) => ({ id, name: this._entityName(id), w: W(id) })).sort((a, b) => (b.w ?? -1) - (a.w ?? -1));
+    return { solar, grid, batt, soc, home, measured: measured != null, f: { sh, sb, sg, gh, gb, bh, bg }, cons,
+      has: { solar: solarIds.length > 0, grid: !!p.kw_grid, batt: !!p.kw_battery } };
+  }
+
+  /** Texte und Linien des Fluss-Bilds – für das erste Zeichnen und die Live-Aktualisierung. */
+  _kwView(fl) {
+    const g = fl.grid;
+    const own = fl.home ? Math.round(((fl.f.sh + fl.f.bh) / fl.home) * 100) : null;
+    const b = fl.batt;
+    return {
+      text: {
+        solar: this._kwFmt(fl.solar),
+        "solar-s": fl.solar == null ? "kein Wert" : fl.solar < 5 ? "keine Sonne" : "Erzeugung",
+        grid: this._kwFmt(g == null ? null : Math.abs(g)),
+        "grid-s": g == null ? "kein Wert" : g > 5 ? "Bezug" : g < -5 ? "Einspeisung" : "ausgeglichen",
+        home: this._kwFmt(fl.home),
+        "home-s": own != null && fl.home > 5 ? `${own} % selbst` : fl.measured ? "gemessen" : "errechnet",
+        batt: this._kwFmt(b == null ? null : Math.abs(b)),
+        "batt-s": `${fl.soc != null ? `${fmt(fl.soc, 0)} % · ` : ""}${b == null ? "kein Wert" : b > 5 ? "entlädt" : b < -5 ? "lädt" : "Ruhe"}`,
+      },
+      cls: { grid: g == null ? "" : g > 5 ? "imp" : g < -5 ? "exp" : "" },
+      lines: { sh: fl.f.sh, sb: fl.f.sb, sg: fl.f.sg, gh: fl.f.gh, gb: fl.f.gb, bh: fl.f.bh, bg: fl.f.bg },
+    };
+  }
+
+  /** Fluss-Bild: Solar oben, Netz links, Haus rechts, Batterie unten. */
+  _kwDiagram(fl, small = false) {
+    const v = this._kwView(fl);
+    // Knoten in Prozent der Fläche (Seitenverhältnis 1:0.84)
+    const N = { solar: [50, 13], grid: [13, 50], home: [87, 50], batt: [50, 87] };
+    const X = (k) => N[k][0] * 3, Y = (k) => N[k][1] * 2.52; // viewBox 300 × 252
+    const L = {
+      sh: `M${X("solar") + 18},${Y("solar") + 14} Q${X("home") - 20},${Y("solar") + 14} ${X("home") - 14},${Y("home") - 24}`,
+      sg: `M${X("solar") - 18},${Y("solar") + 14} Q${X("grid") + 20},${Y("solar") + 14} ${X("grid") + 14},${Y("grid") - 24}`,
+      sb: `M${X("solar")},${Y("solar") + 30} L${X("batt")},${Y("batt") - 30}`,
+      gh: `M${X("grid") + 30},${Y("grid")} L${X("home") - 30},${Y("home")}`,
+      gb: `M${X("grid") + 14},${Y("grid") + 24} Q${X("grid") + 20},${Y("batt") - 14} ${X("batt") - 18},${Y("batt") - 14}`,
+      bg: `M${X("batt") - 18},${Y("batt") - 14} Q${X("grid") + 20},${Y("batt") - 14} ${X("grid") + 14},${Y("grid") + 24}`,
+      bh: `M${X("batt") + 18},${Y("batt") - 14} Q${X("home") - 20},${Y("batt") - 14} ${X("home") - 14},${Y("home") + 24}`,
+    };
+    const need = { sh: fl.has.solar, sg: fl.has.solar && fl.has.grid, sb: fl.has.solar && fl.has.batt, gh: fl.has.grid, gb: fl.has.grid && fl.has.batt, bg: fl.has.grid && fl.has.batt, bh: fl.has.batt };
+    const COL = { sh: "#f59e0b", sg: "#f59e0b", sb: "#f59e0b", gh: "#8b5cf6", gb: "#8b5cf6", bg: "#ec4899", bh: "#ec4899" };
+    const paths = Object.entries(L).filter(([k]) => need[k]).map(([k, d]) =>
+      `<path d="${d}" class="kl-base"/><path d="${d}" class="kl ${v.lines[k] > 10 ? "on" : ""}" data-kwl="${k}" style="--c:${COL[k]};${this._kwAnim(v.lines[k])}"/>`).join("");
+    const node = (k, icon, c, show = true) => show ? `
+      <div class="kn kn-${k} ${v.cls[k] || ""}" style="left:${N[k][0]}%;top:${N[k][1]}%;--c:${c}">
+        <span class="kn-c"><ha-icon icon="${icon}"></ha-icon><b data-kwv="${k}">${esc(v.text[k])}</b></span>
+        <small data-kwv="${k}-s">${esc(v.text[`${k}-s`])}</small>
+      </div>` : "";
+    return `<div class="kwd ${small ? "small" : ""}">
+      <svg viewBox="0 0 300 252" preserveAspectRatio="none" aria-hidden="true">${paths}</svg>
+      ${node("solar", "mdi:solar-power-variant", "#f59e0b", fl.has.solar)}
+      ${node("grid", "mdi:transmission-tower", "#8b5cf6", fl.has.grid)}
+      ${node("home", "mdi:home-lightning-bolt-outline", "#0ea5e9")}
+      ${node("batt", fl.soc != null && fl.soc < 20 ? "mdi:battery-low" : "mdi:home-battery-outline", "#ec4899", fl.has.batt)}
+    </div>`;
+  }
+
+  /** Dauer und Phase der Animation: die Phase hängt an der Uhr, damit neu Zeichnen nicht ruckelt. */
+  _kwAnim(w) {
+    const d = Number(this._kwDur(w));
+    return `--d:${d}s;animation-delay:-${((Date.now() / 1000) % d).toFixed(2)}s`;
+  }
+
+  /** Je mehr Leistung, desto schneller laufen die Punkte (Sekunden pro Durchlauf). */
+  _kwDur(w) {
+    if (!w || w <= 10) return 4;
+    return Math.max(0.5, 4 - Math.log10(w) * 0.9).toFixed(2);
+  }
+
+  /** Live: nur Zahlen und Linien austauschen, damit die Animation nicht neu startet. */
+  _kwLive() {
+    const root = this.shadowRoot;
+    if (!root.querySelector(".kwd")) return;
+    const fl = this._kwFlow();
+    const v = this._kwView(fl);
+    root.querySelectorAll("[data-kwv]").forEach((el) => { const t = v.text[el.dataset.kwv]; if (t != null && el.textContent !== t) el.textContent = t; });
+    root.querySelectorAll("[data-kwl]").forEach((el) => {
+      const w = v.lines[el.dataset.kwl];
+      el.classList.toggle("on", w > 10);
+      const d = `${this._kwDur(w)}s`;
+      if (el.style.getPropertyValue("--d") !== d) el.setAttribute("style", `--c:${el.style.getPropertyValue("--c")};${this._kwAnim(w)}`);
+    });
+    root.querySelectorAll(".kn-grid").forEach((el) => { el.classList.toggle("imp", v.cls.grid === "imp"); el.classList.toggle("exp", v.cls.grid === "exp"); });
+    const cons = root.getElementById("kw-cons");
+    if (cons) cons.innerHTML = this._kwConsHtml(fl);
+  }
+
+  _kwConsHtml(fl) {
+    if (!fl.cons.length) return "";
+    const home = fl.home || 0;
+    const known = fl.cons.reduce((a, c) => a + Math.max(0, c.w ?? 0), 0);
+    const rows = [...fl.cons, ...(home > known + 5 ? [{ id: "", name: "Sonstiges", w: home - known, rest: true }] : [])];
+    const max = Math.max(1, home, ...rows.map((c) => c.w ?? 0));
+    return rows.map((c) => `<div class="kc-row ${c.rest ? "rest" : ""}"><span class="grow"><b>${esc(c.name)}</b>
+      <span class="kc-bar"><i style="width:${Math.max(0, Math.min(100, ((c.w ?? 0) / max) * 100)).toFixed(1)}%"></i></span></span>
+      <em>${this._kwFmt(c.w)}${home > 5 && c.w != null ? `<small>${fmt((Math.max(0, c.w) / home) * 100, 0)} %</small>` : ""}</em></div>`).join("");
+  }
+
+  // ---- Tageswerte aus dem Energie-Dashboard von Home Assistant
+  /** Energie-Dashboard lesen (einmal je Sitzung bzw. nach „Neu laden“). */
+  _kwPrefs() {
+    if (this._kwP !== undefined) return this._kwP;
+    this._kwP = null;
+    this._hass.callWS({ type: "energy/get_prefs" })
+      .then((r) => (this._kwP = this._kwParse(r)))
+      .catch(() => (this._kwP = this._kwParse({})))
+      .finally(() => this._renderMain());
+    return null;
+  }
+
+  _kwParse(r) {
+    const out = { solar: [], imp: [], exp: [], bin: [], bout: [], cost: [], comp: [], priceImp: null, priceExp: null, rates: { solar: [], grid: [], batt: [] }, devices: [] };
+    const rate = (o, list) => { for (const [k, v] of Object.entries(o || {})) if (/rate|power/.test(k) && typeof v === "string" && v.startsWith("sensor.")) list.push(v); };
+    for (const src of r?.energy_sources || []) {
+      if (src.type === "solar") { if (src.stat_energy_from) out.solar.push(src.stat_energy_from); rate(src, out.rates.solar); }
+      if (src.type === "battery") { if (src.stat_energy_from) out.bout.push(src.stat_energy_from); if (src.stat_energy_to) out.bin.push(src.stat_energy_to); rate(src, out.rates.batt); }
+      if (src.type === "grid") {
+        rate(src, out.rates.grid);
+        const from = src.flow_from || (src.stat_energy_from ? [src] : []);
+        const to = src.flow_to || (src.stat_energy_to ? [src] : []);
+        for (const f of from) {
+          if (f.stat_energy_from) out.imp.push(f.stat_energy_from);
+          if (f.stat_cost) out.cost.push(f.stat_cost);
+          if (out.priceImp == null) out.priceImp = f.number_energy_price ?? f.entity_energy_price ?? null;
+          rate(f, out.rates.grid);
+        }
+        for (const f of to) {
+          if (f.stat_energy_to) out.exp.push(f.stat_energy_to);
+          if (f.stat_compensation) out.comp.push(f.stat_compensation);
+          if (out.priceExp == null) out.priceExp = f.number_energy_price ?? f.entity_energy_price ?? null;
+        }
+      }
+    }
+    for (const d of r?.device_consumption || []) if (d.stat_consumption) out.devices.push({ stat: d.stat_consumption, name: d.name || null, rate: d.stat_rate || null });
+    out.ok = !!(out.solar.length || out.imp.length || out.exp.length);
+    return out;
+  }
+
+  /** Preis je kWh: Zahl oder aktueller Wert einer Entität (dann „ca.“). */
+  _kwPrice(x) {
+    if (x == null) return null;
+    if (typeof x === "number") return { v: x, approx: false };
+    const n = parseFloat(this._hass.states[x]?.state);
+    return Number.isFinite(n) ? { v: n, approx: true } : null;
+  }
+
+  /**
+   * Summen je Zeitraum aus der Statistik (kWh): Tag „today“ (stündlich), 7/30 Tage (täglich), 12 Monate (monatlich).
+   * Ergebnis: { buckets: [{start, solar, imp, exp, bin, bout, cost, comp}], total }
+   */
+  _kwStats(range) {
+    const P = this._kwPrefs();
+    if (!P) return null;
+    this._kwS = this._kwS || {};
+    const c = this._kwS[range];
+    if (c && Date.now() - c.at < 5 * 60000) return c.data;
+    if (!this._kwS[`loading${range}`]) {
+      this._kwS[`loading${range}`] = true;
+      const now = new Date();
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      let period = "hour";
+      if (range === "7" || range === "30") { start.setDate(start.getDate() - (Number(range) - 1)); period = "day"; }
+      if (range === "365") { start.setMonth(start.getMonth() - 11, 1); period = "month"; }
+      const groups = { solar: P.solar, imp: P.imp, exp: P.exp, bin: P.bin, bout: P.bout, cost: P.cost, comp: P.comp };
+      const ids = [...new Set(Object.values(groups).flat())];
+      const done = (data) => { this._kwS[range] = { at: Date.now(), data }; delete this._kwS[`loading${range}`]; this._renderMain(); };
+      if (!ids.length) { done({ buckets: [], total: null }); return null; }
+      this._hass.callWS({ type: "recorder/statistics_during_period", start_time: start.toISOString(), end_time: now.toISOString(),
+        statistic_ids: ids, period, types: ["change"], units: { energy: "kWh" } })
+        .then((res) => {
+          const map = new Map();
+          for (const [g, list] of Object.entries(groups))
+            for (const id of list)
+              for (const x of res?.[id] || []) {
+                const t = typeof x.start === "number" ? x.start : Date.parse(x.start);
+                if (!map.has(t)) map.set(t, { start: t, solar: 0, imp: 0, exp: 0, bin: 0, bout: 0, cost: 0, comp: 0, costN: 0, compN: 0 });
+                const b = map.get(t);
+                b[g] += Math.max(0, x.change || 0);
+                if (g === "cost") b.costN++;
+                if (g === "comp") b.compN++;
+              }
+          const buckets = [...map.values()].sort((a, b) => a.start - b.start).map((b) => this._kwDerive(b, P));
+          const total = this._kwDerive(buckets.reduce((a, b) => { for (const k of ["solar", "imp", "exp", "bin", "bout", "cost", "comp", "costN", "compN"]) a[k] += b[k]; return a; },
+            { start: start.getTime(), solar: 0, imp: 0, exp: 0, bin: 0, bout: 0, cost: 0, comp: 0, costN: 0, compN: 0 }), P);
+          done({ buckets, total });
+        })
+        .catch(() => done({ buckets: [], total: null, error: true }));
+    }
+    return c ? c.data : null;
+  }
+
+  /** Abgeleitete Werte: Verbrauch, Eigenverbrauch, Autarkie, Kosten. */
+  _kwDerive(b, P) {
+    const use = Math.max(0, b.solar + b.imp + b.bout - b.exp - b.bin);
+    const selfUse = Math.max(0, b.solar - b.exp);
+    const pi = this._kwPrice(P.priceImp), pe = this._kwPrice(P.priceExp);
+    const cost = P.cost.length ? b.cost : pi ? b.imp * pi.v : null;
+    const comp = P.comp.length ? b.comp : pe ? b.exp * pe.v : null;
+    return { ...b, use, selfUse, own: b.solar > 0.01 ? Math.min(100, (selfUse / b.solar) * 100) : null,
+      autark: use > 0.01 ? Math.max(0, Math.min(100, ((use - b.imp) / use) * 100)) : null,
+      costV: cost, compV: comp, approx: (!P.cost.length && pi?.approx) || (!P.comp.length && pe?.approx) };
+  }
+
+  _kwKwh(x) {
+    return x == null ? "–" : `${fmt(x, x >= 100 ? 0 : 1)} kWh`;
+  }
+
+  _kwEur(x) {
+    return x == null ? "–" : `${x.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+  }
+
+  /** Kennzahlen eines Zeitraums als Kacheln. */
+  _kwKpis(t, P) {
+    const k = (icon, c, val, cap, sub = "") => `<div class="kk" style="--c:${c}"><ha-icon icon="${icon}"></ha-icon><b>${val}</b><small>${cap}</small>${sub ? `<em>${sub}</em>` : ""}</div>`;
+    const net = t.costV != null || t.compV != null ? (t.costV ?? 0) - (t.compV ?? 0) : null;
+    return `<div class="kks">
+      ${P.solar.length ? k("mdi:solar-power-variant", "#f59e0b", this._kwKwh(t.solar), "erzeugt", t.own != null ? `${fmt(t.own, 0)} % selbst genutzt` : "") : ""}
+      ${k("mdi:home-lightning-bolt-outline", "#0ea5e9", this._kwKwh(t.use), "verbraucht", t.autark != null ? `${fmt(t.autark, 0)} % autark` : "")}
+      ${P.imp.length ? k("mdi:transmission-tower-import", "#8b5cf6", this._kwKwh(t.imp), "Netzbezug", t.costV != null ? `${t.approx ? "ca. " : ""}${this._kwEur(t.costV)}` : "") : ""}
+      ${P.exp.length ? k("mdi:transmission-tower-export", "#10b981", this._kwKwh(t.exp), "eingespeist", t.compV != null ? `${t.approx ? "ca. " : ""}+${this._kwEur(t.compV)}` : "") : ""}
+      ${P.bin.length || P.bout.length ? k("mdi:home-battery-outline", "#ec4899", this._kwKwh(t.bout), "aus Batterie", `${this._kwKwh(t.bin)} geladen`) : ""}
+      ${net != null ? k("mdi:cash", net > 0 ? "#ef4444" : "#22c55e", this._kwEur(Math.abs(net)), net > 0 ? "Kosten netto" : "Ertrag netto", "Bezug − Einspeisung") : ""}
+    </div>`;
+  }
+
+  _kwEnergyHint() {
+    return `<section class="card kw-hint"><ha-icon icon="mdi:chart-box-outline"></ha-icon><div class="grow">
+      <b>Tageswerte aus dem Energie-Dashboard</b>
+      <small>Erzeugung, Bezug, Einspeisung, Autarkie und Kosten liest Kraftwerk aus dem Energie-Dashboard von Home Assistant – nichts doppelt eintragen. Dort sind noch keine Zähler für Netz oder Solar eingetragen.</small>
+      ${this._admin ? `<button class="link" data-action="kw-energy"><ha-icon icon="mdi:open-in-new"></ha-icon>Energie-Dashboard einrichten</button>` : ""}</div></section>`;
+  }
+
+  _viewKwFlow() {
+    const p = this._data.settings;
+    if (!this._kwConfigured(p))
+      return `<section class="card empty"><span class="mlogo big">${MODULE_LOGOS.kraftwerk}</span><h2>Kraftwerk einrichten</h2>
+        <p>Kraftwerk zeigt live, woher dein Strom kommt und wohin er fließt – Solar, Netz, Batterie und Verbraucher. Dafür braucht es Leistungs-Sensoren (W oder kW), z. B. vom Wechselrichter oder Stromzähler.</p>
+        ${this._admin ? `<button class="primary" data-action="pop-open" data-pop="kwdetect"><ha-icon icon="mdi:auto-fix"></ha-icon>Sensoren automatisch erkennen</button>
+        <button class="link" data-action="tab" data-tab="kwset">Selbst wählen</button>` : ""}</section>`;
+    const fl = this._kwFlow(p);
+    const P = this._kwPrefs();
+    const st = P?.ok ? this._kwStats("today") : null;
+    const today = !P ? `<div class="chart-empty"><div class="spinner"></div></div>`
+      : !P.ok ? "" : st?.total ? this._kwKpis(st.total, P) : `<div class="chart-empty"><div class="spinner"></div></div>`;
+    return `
+      <section class="card kw-flow">
+        ${this._sectionHead("mdi:flash-outline", "Jetzt", `<span class="kw-live"><i></i>live</span>`)}
+        ${this._kwDiagram(fl)}
+      </section>
+      ${fl.cons.length ? `<section class="card">${this._sectionHead("mdi:power-plug-outline", "Verbraucher jetzt")}<div id="kw-cons" class="kc">${this._kwConsHtml(fl)}</div></section>` : ""}
+      ${P && !P.ok ? this._kwEnergyHint() : `<section class="card">${this._sectionHead("mdi:calendar-today", "Heute", `<button class="link tiny" data-action="tab" data-tab="kwrep"><span>Verlauf</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`)}${today}</section>`}`;
+  }
+
+  _viewKwRep() {
+    const P = this._kwPrefs();
+    if (!P) return `<section class="card"><div class="chart-empty"><div class="spinner"></div></div></section>`;
+    if (!P.ok) return this._kwEnergyHint();
+    const range = this._kwRange || "today";
+    const st = this._kwStats(range);
+    const tabs = `<div class="segs small kw-range">${[["today", "Heute"], ["7", "7 Tage"], ["30", "30 Tage"], ["365", "12 Monate"]]
+      .map(([v, l]) => `<button class="seg ${range === v ? "on" : ""}" data-action="kw-range" data-v="${v}">${l}</button>`).join("")}</div>`;
+    if (!st) return `${tabs}<section class="card"><div class="chart-empty"><div class="spinner"></div></div></section>`;
+    if (!st.buckets.length) return `${tabs}<section class="card empty small"><p>${st.error ? "Die Statistik von Home Assistant ist gerade nicht lesbar." : "Für diesen Zeitraum gibt es noch keine Werte."}</p></section>`;
+    const lab = (t) => {
+      const d = new Date(t);
+      return range === "today" ? `${d.getHours()}` : range === "365" ? d.toLocaleDateString("de-DE", { month: "short" }) : range === "7" ? d.toLocaleDateString("de-DE", { weekday: "short" }) : `${d.getDate()}.`;
+    };
+    // Balken: oben Verbrauch (aus Solar, aus Batterie, aus dem Netz), unten Einspeisung
+    const up = st.buckets.map((b) => b.use), down = st.buckets.map((b) => b.exp);
+    const max = Math.max(0.01, ...up, ...down);
+    const hasDown = down.some((x) => x > 0.005);
+    const bars = st.buckets.map((b) => {
+      const fromSolar = Math.max(0, Math.min(b.use, b.solar - b.exp - b.bin));
+      const fromBatt = Math.min(Math.max(0, b.use - fromSolar), b.bout);
+      const fromGrid = Math.max(0, b.use - fromSolar - fromBatt);
+      const h = (x) => `${((x / max) * 100).toFixed(2)}%`;
+      const tip = `${lab(b.start)}: ${fmt(b.use, 2)} kWh verbraucht · Solar ${fmt(b.solar, 2)} · Netz ${fmt(b.imp, 2)} · eingespeist ${fmt(b.exp, 2)} kWh${b.autark != null ? ` · ${fmt(b.autark, 0)} % autark` : ""}`;
+      return `<div class="kb" title="${esc(tip)}"><div class="kb-up">${fromGrid > 0 ? `<i class="g" style="height:${h(fromGrid)}"></i>` : ""}${fromBatt > 0 ? `<i class="b" style="height:${h(fromBatt)}"></i>` : ""}${fromSolar > 0 ? `<i class="s" style="height:${h(fromSolar)}"></i>` : ""}</div>
+        ${hasDown ? `<div class="kb-down">${b.exp > 0 ? `<i class="e" style="height:${h(b.exp)}"></i>` : ""}</div>` : ""}<small>${lab(b.start)}</small></div>`;
+    }).join("");
+    const every = st.buckets.length > 14 ? Math.ceil(st.buckets.length / 10) : 1;
+    const legend = [["s", "Solar direkt"], ...(P.bout.length ? [["b", "aus Batterie"]] : []), ["g", "aus dem Netz"], ...(hasDown ? [["e", "eingespeist"]] : [])]
+      .map(([c, l]) => `<span><i class="${c}"></i>${l}</span>`).join("");
+    const title = { today: "Heute", 7: "Letzte 7 Tage", 30: "Letzte 30 Tage", 365: "Letzte 12 Monate" }[range];
+    return `${tabs}
+      <section class="card">${this._sectionHead("mdi:sigma", title)}${this._kwKpis(st.total, P)}</section>
+      <section class="card">${this._sectionHead("mdi:chart-bar", range === "today" ? "Je Stunde" : range === "365" ? "Je Monat" : "Je Tag")}
+        <div class="kbars ${every > 1 ? "thin" : ""}" style="--every:${every}">${bars}</div>
+        <div class="klegend">${legend}</div>
+        <p class="muted small">Quelle: Energie-Dashboard von Home Assistant${P.cost.length || P.priceImp != null ? " · Kosten mit den dort hinterlegten Preisen" : ""}.</p>
+      </section>`;
+  }
+
+  // ---- Einstellungen
+  _kwRows(p) {
+    const P = this._kwPrefs();
+    const fl = this._kwFlow(p);
+    const names = (ids) => ids.map((id) => this._entityName(id)).join(", ");
+    const sug = this._kwSuggest();
+    const found = ["kw_solar", "kw_grid", "kw_battery", "kw_battery_soc", "kw_home"].filter((k) => (Array.isArray(sug[k]) ? sug[k].length : sug[k]) && !(Array.isArray(p[k]) ? p[k].length : p[k])).length;
+    return [
+      { g: "Einrichten", id: "kwdetect", icon: "mdi:auto-fix", c: "#f59e0b", title: "Automatisch erkennen",
+        sum: found ? `${found} passende Sensoren gefunden – übernehmen?` : "Sucht Leistungs-Sensoren für Solar, Netz, Batterie und Haus", warn: !!found && !this._kwConfigured(p), words: "erkennen automatisch vorschlag assistent" },
+      { g: "Leistung jetzt", id: "kwsolar", icon: "mdi:solar-power-variant", c: "#f59e0b", title: "Solar",
+        sum: (p.kw_solar || []).length ? `${names(p.kw_solar)} · jetzt ${this._kwFmt(fl.solar)}` : "Kein Sensor – ohne PV-Anlage leer lassen", words: "solar pv photovoltaik wechselrichter erzeugung" },
+      { g: "Leistung jetzt", id: "kwgrid", icon: "mdi:transmission-tower", c: "#8b5cf6", title: "Netz",
+        sum: p.kw_grid ? `${names([p.kw_grid, p.kw_grid_export].filter(Boolean))} · jetzt ${fl.grid == null ? "–" : `${this._kwFmt(Math.abs(fl.grid))} ${fl.grid > 5 ? "Bezug" : fl.grid < -5 ? "Einspeisung" : ""}`}` : "Kein Sensor", words: "netz zähler bezug einspeisung smartmeter" },
+      { g: "Leistung jetzt", id: "kwbatt", icon: "mdi:home-battery-outline", c: "#ec4899", title: "Batterie",
+        sum: p.kw_battery ? `${names([p.kw_battery])} · ${fl.soc != null ? `${fmt(fl.soc, 0)} % · ` : ""}${fl.batt == null ? "–" : fl.batt > 5 ? `entlädt ${this._kwFmt(fl.batt)}` : fl.batt < -5 ? `lädt ${this._kwFmt(-fl.batt)}` : "Ruhe"}` : "Kein Speicher – leer lassen", words: "batterie speicher akku ladestand soc" },
+      { g: "Leistung jetzt", id: "kwhome", icon: "mdi:home-lightning-bolt-outline", c: "#0ea5e9", title: "Hausverbrauch",
+        sum: p.kw_home ? `${names([p.kw_home])} · jetzt ${this._kwFmt(fl.home)}` : `errechnet aus Solar, Netz und Batterie${fl.home != null ? ` · jetzt ${this._kwFmt(fl.home)}` : ""}`, words: "haus verbrauch last" },
+      { g: "Leistung jetzt", id: "kwcons", icon: "mdi:power-plug-outline", c: "#64748b", title: "Verbraucher",
+        sum: (p.kw_consumers || []).length ? names(p.kw_consumers) : "z. B. Wärmepumpe, Wallbox, Waschmaschine – optional", words: "verbraucher wärmepumpe wallbox steckdose geräte" },
+      { g: "Tageswerte", act: "kw-energy", icon: "mdi:chart-box-outline", c: "#10b981", title: "Energie-Dashboard von Home Assistant",
+        sum: !P ? "wird gelesen …" : P.ok ? [P.solar.length ? "Solar ✓" : "", P.imp.length ? "Netzbezug ✓" : "", P.exp.length ? "Einspeisung ✓" : "", P.bin.length || P.bout.length ? "Batterie ✓" : "", P.cost.length || P.priceImp != null ? "Preise ✓" : "ohne Preise"].filter(Boolean).join(" · ") : "Noch nicht eingerichtet – dort Netz und Solar eintragen",
+        warn: !!P && !P.ok, words: "energie dashboard kwh zähler preis kosten statistik" },
+      { g: "Allgemein", act: "kw-log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll", sum: "Änderungen an den Einstellungen von Kraftwerk", words: "protokoll log änderungen" },
+    ];
+  }
+
+  /** Vorschläge: aus dem Energie-Dashboard (Leistungs-Sensoren oder Sensoren am selben Gerät), sonst nach Namen. */
+  _kwSuggest() {
+    const S = this._hass.states;
+    const ents = this._hass.entities || {};
+    const P = this._kwP || null;
+    const isPower = (id) => { const a = S[id]?.attributes || {}; return id.startsWith("sensor.") && (a.device_class === "power" || ["W", "kW", "MW"].includes(a.unit_of_measurement)); };
+    const power = Object.keys(S).filter(isPower);
+    const nm = (id) => `${S[id]?.attributes?.friendly_name || ""} ${id}`.toLowerCase();
+    const sameDevice = (statId, re) => {
+      const dev = ents[statId]?.device_id;
+      if (!dev) return null;
+      const list = power.filter((id) => ents[id]?.device_id === dev);
+      return list.find((id) => re && re.test(nm(id))) || (list.length === 1 ? list[0] : null);
+    };
+    const byName = (re, not) => power.filter((id) => re.test(nm(id)) && !(not && not.test(nm(id))));
+    const out = { kw_solar: [], kw_grid: null, kw_battery: null, kw_battery_soc: null, kw_home: null, why: {} };
+    // Solar
+    if (P?.rates.solar.length) { out.kw_solar = P.rates.solar; out.why.kw_solar = "aus dem Energie-Dashboard"; }
+    else if (P?.solar.length) { out.kw_solar = P.solar.map((id) => sameDevice(id, /pv|solar|dc|ac|leistung|power/)).filter(Boolean); if (out.kw_solar.length) out.why.kw_solar = "am selben Gerät wie der Solar-Zähler"; }
+    if (!out.kw_solar.length) { const l = byName(/(\bpv\b|pv_|solar|photovolt|wechselrichter|inverter)/, /(prognose|forecast|batter|akku|speicher|grid|netz|einspeis|bezug|energy|ertrag|yield|today|heute)/); if (l.length) { out.kw_solar = l.slice(0, 2); out.why.kw_solar = "nach Namen"; } }
+    // Netz
+    if (P?.rates.grid.length) { out.kw_grid = P.rates.grid[0]; out.why.kw_grid = "aus dem Energie-Dashboard"; }
+    else if (P?.imp.length) { out.kw_grid = sameDevice(P.imp[0], /(netz|grid|bezug|import|wirk|active|power|leistung)/); if (out.kw_grid) out.why.kw_grid = "am selben Gerät wie der Netzzähler"; }
+    if (!out.kw_grid) { const l = byName(/(grid|netz|bezug|einspeis|smart.?meter|stromz(ä|ae)hler|hausanschluss|zaehler|zähler|\bmeter\b)/, /(batter|akku|speicher|\bpv\b|solar)/); if (l.length) { out.kw_grid = l[0]; out.why.kw_grid = "nach Namen"; } }
+    // Batterie
+    if (P?.rates.batt.length) { out.kw_battery = P.rates.batt[0]; out.why.kw_battery = "aus dem Energie-Dashboard"; }
+    else if (P?.bout.length) { out.kw_battery = sameDevice(P.bout[0], /(batter|akku|speicher|power|leistung)/); if (out.kw_battery) out.why.kw_battery = "am selben Gerät wie der Batterie-Zähler"; }
+    if (!out.kw_battery) { const l = byName(/(batter|akku|speicher|storage)/, /(soc|ladestand|level|state of charge|spannung|volt|temp)/); if (l.length) { out.kw_battery = l[0]; out.why.kw_battery = "nach Namen"; } }
+    const soc = Object.keys(S).filter((id) => id.startsWith("sensor.") && S[id].attributes?.unit_of_measurement === "%" && /(batter|akku|speicher|storage)/.test(nm(id)) && /(soc|lade|charge|level|stand)/.test(nm(id)) && !/(phone|handy|iphone|pixel|tablet|watch|uhr|thermostat|kontakt|fenster|bewegung|motion)/.test(String(S[id].attributes?.friendly_name || id.slice(7)).toLowerCase()));
+    const dev = out.kw_battery && ents[out.kw_battery]?.device_id;
+    out.kw_battery_soc = (dev && soc.find((id) => ents[id]?.device_id === dev)) || (out.kw_battery ? soc[0] : null) || null;
+    // Haus
+    const home = byName(/((haus|home|house).*(verbrauch|consum|load|last))|((verbrauch|consum|load).*(haus|home|house))/);
+    if (home.length) { out.kw_home = home[0]; out.why.kw_home = "nach Namen"; }
+    return out;
+  }
+
+  _kwPop(id) {
+    const p = this._settings;
+    const { sw } = this._setHelpers(p);
+    const row = (k, title, sub, value, text, ctl) => this._setRow(k, title, sub, value, text, ctl);
+    const fl = this._kwFlow(p);
+    const live = (txt, c = "#94a3b8") => `<div class="rq-facts"><span style="--c:${c}"><ha-icon icon="mdi:flash-outline"></ha-icon>${txt}</span></div>`;
+    switch (id) {
+      case "kwdetect": {
+        const sug = this._kwSuggest();
+        const roles = [["kw_solar", "Solar", "mdi:solar-power-variant", "#f59e0b"], ["kw_grid", "Netz", "mdi:transmission-tower", "#8b5cf6"], ["kw_battery", "Batterie", "mdi:home-battery-outline", "#ec4899"],
+          ["kw_battery_soc", "Ladestand", "mdi:battery-50", "#ec4899"], ["kw_home", "Hausverbrauch", "mdi:home-lightning-bolt-outline", "#0ea5e9"]];
+        const val = (id2) => { const w = this._kwW(id2); const s = this._hass.states[id2]; return s?.attributes?.unit_of_measurement === "%" ? `${s.state} %` : this._kwFmt(w, true); };
+        const list = roles.map(([k, l, icon, c]) => {
+          const v = sug[k];
+          const ids = Array.isArray(v) ? v : v ? [v] : [];
+          const cur = Array.isArray(p[k]) ? p[k] : p[k] ? [p[k]] : [];
+          const same = ids.length && JSON.stringify(ids) === JSON.stringify(cur);
+          return `<div class="kwsug ${ids.length ? "" : "none"}" style="--c:${c}"><span class="sr-ic"><ha-icon icon="${icon}"></ha-icon></span>
+            <span class="grow"><b>${l}</b><small>${ids.length ? `${esc(ids.map((x) => `${this._entityName(x)} (${val(x)})`).join(", "))} · ${sug.why[k] || ""}` : "nichts gefunden"}${cur.length && !same ? ` · jetzt: ${esc(cur.map((x) => this._entityName(x)).join(", "))}` : ""}</small></span>
+            ${ids.length ? same ? `<em class="badge ok">GEWÄHLT</em>` : `<button class="secondary small" data-action="kw-take" data-k="${k}" ${this._admin ? "" : "disabled"}>Übernehmen</button>` : ""}</div>`;
+        }).join("");
+        return { icon: "mdi:auto-fix", c: "#f59e0b", title: "Automatisch erkennen", sub: "Kraftwerk",
+          body: `<p class="muted">Kraftwerk sucht Leistungs-Sensoren (W/kW): zuerst im Energie-Dashboard von Home Assistant und an denselben Geräten wie die dort eingetragenen Zähler, sonst nach Namen. Prüfe die Werte – sie sollten zu dem passen, was gerade passiert.</p>
+            <div class="kwsugs">${list}</div>
+            ${this._admin ? `<button class="link" data-action="kw-take" data-k="all"><ha-icon icon="mdi:check-all"></ha-icon>Alle übernehmen</button>` : ""}
+            <p class="muted small">Danach unter Netz und Batterie die Richtung prüfen: Bezug soll als „Bezug“ erscheinen, Laden als „lädt“.</p>` };
+      }
+      case "kwsolar":
+        return { icon: "mdi:solar-power-variant", c: "#f59e0b", title: "Solar", sub: "Kraftwerk · Leistung jetzt",
+          body: `<p class="muted">Aktuelle Leistung der PV-Anlage in W oder kW – bei mehreren Wechselrichtern alle wählen, sie werden addiert.</p>
+            <div class="field"><span><ha-icon icon="mdi:solar-power-variant"></ha-icon> PV-Leistung</span>${this._picker("kw_solar", p.kw_solar || [])}</div>
+            ${(p.kw_solar || []).length ? live(`jetzt ${this._kwFmt(fl.solar)}`, "#f59e0b") : ""}` };
+      case "kwgrid":
+        return { icon: "mdi:transmission-tower", c: "#8b5cf6", title: "Netz", sub: "Kraftwerk · Leistung jetzt",
+          body: `<p class="muted">Ein Sensor mit Vorzeichen (meist + = Bezug, − = Einspeisung), z. B. vom Smart Meter oder Zählerlesekopf. Liefert dein Zähler Bezug und Einspeisung getrennt, wähle unten zusätzlich die Einspeisung.</p>
+            <div class="field"><span><ha-icon icon="mdi:transmission-tower-import"></ha-icon> Netz-Leistung${p.kw_grid_export ? " (Bezug)" : ""}</span>${this._picker("kw_grid", p.kw_grid)}</div>
+            <div class="wxrows">${p.kw_grid_export ? "" : row("kwg1", "Vorzeichen umdrehen", "an, wenn Einspeisung positiv angezeigt wird", sw("kw_grid_invert"), "Manche Zähler zeigen die Einspeisung positiv. Schalte das an, wenn unten bei Sonne „Bezug“ steht, obwohl du einspeist.")}</div>
+            <div class="field"><span><ha-icon icon="mdi:transmission-tower-export"></ha-icon> Einspeisung getrennt (optional)</span>${this._picker("kw_grid_export", p.kw_grid_export)}</div>
+            ${p.kw_grid ? live(fl.grid == null ? "kein Wert" : `jetzt ${this._kwFmt(Math.abs(fl.grid))} ${fl.grid > 5 ? "Bezug" : fl.grid < -5 ? "Einspeisung" : "ausgeglichen"}`, fl.grid > 5 ? "#8b5cf6" : "#10b981") : ""}` };
+      case "kwbatt":
+        return { icon: "mdi:home-battery-outline", c: "#ec4899", title: "Batterie", sub: "Kraftwerk · Leistung jetzt",
+          body: `<p class="muted">Lade-/Entladeleistung des Speichers mit Vorzeichen (meist + = Entladen, − = Laden) und der Ladestand in %.</p>
+            <div class="field"><span><ha-icon icon="mdi:home-battery-outline"></ha-icon> Batterie-Leistung</span>${this._picker("kw_battery", p.kw_battery)}</div>
+            <div class="wxrows">${row("kwb1", "Vorzeichen umdrehen", "an, wenn Laden positiv angezeigt wird", sw("kw_battery_invert"), "Schalte das an, wenn unten „entlädt“ steht, während der Speicher bei Sonne lädt.")}</div>
+            <div class="field"><span><ha-icon icon="mdi:battery-50"></ha-icon> Ladestand (%)</span>${this._picker("kw_battery_soc", p.kw_battery_soc)}</div>
+            ${p.kw_battery ? live(`${fl.soc != null ? `${fmt(fl.soc, 0)} % · ` : ""}${fl.batt == null ? "kein Wert" : fl.batt > 5 ? `entlädt ${this._kwFmt(fl.batt)}` : fl.batt < -5 ? `lädt ${this._kwFmt(-fl.batt)}` : "Ruhe"}`, "#ec4899") : ""}` };
+      case "kwhome":
+        return { icon: "mdi:home-lightning-bolt-outline", c: "#0ea5e9", title: "Hausverbrauch", sub: "Kraftwerk · Leistung jetzt",
+          body: `<p class="muted">Leer lassen: Kraftwerk rechnet den Verbrauch aus Solar + Netz + Batterie. Nur wählen, wenn dein Wechselrichter oder Energiemanager ihn selbst misst.</p>
+            <div class="field"><span><ha-icon icon="mdi:home-lightning-bolt-outline"></ha-icon> Hausverbrauch</span>${this._picker("kw_home", p.kw_home)}</div>
+            ${live(`jetzt ${this._kwFmt(fl.home)} · ${fl.measured ? "gemessen" : "errechnet"}`, "#0ea5e9")}` };
+      case "kwcons":
+        return { icon: "mdi:power-plug-outline", c: "#64748b", title: "Verbraucher", sub: "Kraftwerk · optional",
+          body: `<p class="muted">Einzelne Geräte mit Leistungsmessung, z. B. Wärmepumpe, Wallbox, Waschmaschine oder Mess-Steckdosen. Sie erscheinen unter dem Energiefluss mit ihrem Anteil am Hausverbrauch.</p>
+            <div class="field"><span><ha-icon icon="mdi:power-plug-outline"></ha-icon> Verbraucher</span>${this._picker("kw_consumers", p.kw_consumers || [])}</div>` };
+    }
+    return { icon: "mdi:help", c: "#94a3b8", title: id, body: "" };
+  }
+
+  // ---- Widget
+  _w_energy(w, z) {
+    const p = this._data.settings;
+    if (!this._kwConfigured(p))
+      return `<div class="wok" style="--c:#94a3b8"><ha-icon icon="mdi:solar-power-variant"></ha-icon>Kraftwerk noch nicht eingerichtet</div>
+        ${this._admin ? `<button class="link tiny wmore" data-action="tab" data-tab="kwflow">Einrichten<ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}`;
+    const fl = this._kwFlow(p);
+    const v = this._kwView(fl);
+    const P = this._kwPrefs();
+    const t = P?.ok ? this._kwStats("today")?.total : null;
+    if (z === "s") {
+      const main = fl.has.solar ? [fl.solar, "Solar"] : [fl.home, "Haus"];
+      return `<div class="wbig"><span>${esc(this._kwFmt(main[0]).replace(/ (k?W)$/, ""))}<small>${/kW$/.test(this._kwFmt(main[0])) ? "kW" : "W"} ${main[1]}</small></span></div>
+        <div class="wline" style="--c:${fl.grid > 5 ? "#8b5cf6" : "#10b981"}"><ha-icon icon="${fl.grid > 5 ? "mdi:transmission-tower-import" : "mdi:transmission-tower-export"}"></ha-icon>${fl.grid == null ? "–" : `${v.text["grid-s"]} ${v.text.grid}`}</div>`;
+    }
+    if (z === "m") {
+      const mini = (icon, val, cap, c) => `<div class="wmini" style="--c:${c}"><ha-icon icon="${icon}" style="color:${c}"></ha-icon><b>${esc(val)}</b><small>${esc(cap)}</small></div>`;
+      return `<div class="wminis four">
+        ${fl.has.solar ? mini("mdi:solar-power-variant", v.text.solar, "Solar", "#f59e0b") : ""}
+        ${fl.has.grid ? mini(fl.grid > 5 ? "mdi:transmission-tower-import" : "mdi:transmission-tower-export", v.text.grid, v.text["grid-s"], fl.grid > 5 ? "#8b5cf6" : "#10b981") : ""}
+        ${mini("mdi:home-lightning-bolt-outline", v.text.home, "Haus", "#0ea5e9")}
+        ${fl.has.batt ? mini("mdi:home-battery-outline", fl.soc != null ? `${fmt(fl.soc, 0)} %` : v.text.batt, fl.batt > 5 ? "entlädt" : fl.batt < -5 ? "lädt" : "Batterie", "#ec4899") : ""}
+      </div>${t ? `<div class="wline" style="--c:#10b981"><ha-icon icon="mdi:calendar-today"></ha-icon>Heute ${t.solar ? `${this._kwKwh(t.solar)} erzeugt · ` : ""}${t.autark != null ? `${fmt(t.autark, 0)} % autark` : `${this._kwKwh(t.use)} verbraucht`}</div>` : ""}`;
+    }
+    return `<div class="wsplit"><div>${this._kwDiagram(fl, true)}</div><div>${t ? this._kwKpis(t, P) : `<p class="muted small">Tageswerte kommen aus dem Energie-Dashboard von Home Assistant.</p>`}</div></div>`;
+  }
+
   // ------------------------------------------------------------ Rollwerk
   _rwCovers() {
     return (this._data?.settings?.rw_covers || []).map((id) => ({ id, st: this._hass.states[id], cfg: this._data.rollwerk?.covers?.[id] || {}, rs: this._rwStatus?.covers?.[id] || {} }));
@@ -2367,6 +2900,10 @@ class HauswerkPanel extends HTMLElement {
     if (!st) return null;
     const p = Number(st.attributes?.current_position);
     return Number.isFinite(p) ? p : st.state === "open" ? 100 : st.state === "closed" ? 0 : null;
+  }
+
+  _kwNavHtml() {
+    return `<nav class="heatnav">${KW_VIEWS.map((v) => `<button class="hnav ${this._tab === v.id ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span></button>`).join("")}</nav>`;
   }
 
   _rwNavHtml() {
@@ -3168,6 +3705,7 @@ class HauswerkPanel extends HTMLElement {
     const persons = (p.persons || []).length;
     const d = (iso) => new Date(iso).toLocaleDateString("de-DE", { day: "numeric", month: "short" });
     if (scope === "rw") return this._rwRows(p);
+    if (scope === "kw") return this._kwRows(p);
     if (scope === "house") {
       const vac = {
         off: "Nur von Hand",
@@ -3193,9 +3731,12 @@ class HauswerkPanel extends HTMLElement {
           words: "design farbe akzent hell dunkel hintergrund tageszeit himmel uhr uhrzeit wetter kopfzeile größe tablet" },
         { g: "Darstellung", start: true, icon: "mdi:view-dashboard-edit-outline", c: "#2dd4bf", title: "Widgets der Startseite",
           sum: `${n} Widget${n === 1 ? "" : "s"} · für alle Benutzer gleich`, words: "start dashboard widget übersicht anpassen" },
-        ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => v === "settings" || v === "shutset") || m.views[0], icon: `logo:${m.logo}`, c: m.id === "rollwerk" ? "#0ea5e9" : "#fb923c", title: m.name,
-          sum: m.id === "rollwerk" ? `${(p.rw_covers || []).length} Rollläden · ${Object.keys(this._data.rollwerk?.profiles || {}).length} Profile` : `${rooms.length} ${rooms.length === 1 ? "Raum" : "Räume"} · Heizpläne, Vorheizen, Saison und mehr`,
-          words: m.id === "rollwerk" ? "rollwerk rollladen rollo module" : "heizen heizung räume module" })),
+        ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => ["settings", "shutset", "kwset"].includes(v)) || m.views[0], icon: `logo:${m.logo}`,
+          c: { rollwerk: "#0ea5e9", kraftwerk: "#f59e0b" }[m.id] || "#fb923c", title: m.name,
+          sum: m.id === "rollwerk" ? `${(p.rw_covers || []).length} Rollläden · ${Object.keys(this._data.rollwerk?.profiles || {}).length} Profile`
+            : m.id === "kraftwerk" ? (this._kwConfigured(p) ? [(p.kw_solar || []).length ? "Solar" : "", p.kw_grid ? "Netz" : "", p.kw_battery ? "Batterie" : "", (p.kw_consumers || []).length ? `${p.kw_consumers.length} Verbraucher` : ""].filter(Boolean).join(" · ") : "Noch nicht eingerichtet")
+            : `${rooms.length} ${rooms.length === 1 ? "Raum" : "Räume"} · Heizpläne, Vorheizen, Saison und mehr`,
+          words: { rollwerk: "rollwerk rollladen rollo module", kraftwerk: "kraftwerk energie strom solar pv netz batterie module" }[m.id] || "heizen heizung räume module" })),
         ...COMING.map((m) => ({ g: "Module", soon: true, icon: m.icon, c: "#94a3b8", title: m.name, sum: "Kommt später", words: `${m.name.toLowerCase()} module` })),
         { g: "System", go: "log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll",
           sum: "Was wann warum entschieden wurde · 14 Tage", words: "protokoll log verlauf ereignisse warum debug" },
@@ -3324,7 +3865,7 @@ class HauswerkPanel extends HTMLElement {
           <div class="grow"><h2>Protokoll</h2><small>Was wann warum entschieden wurde · ${L.days || 14} Tage</small></div>
           <span class="lg-live ${L.live ? "on" : ""}" id="lg-live">${this._logLiveHtml()}</span>
         </div>
-        <div class="lg-chips">${[["", "Alles", "mdi:home-outline", "#94a3b8"], ["heizwerk", "Heizwerk & Haus", "logo:heizen", "#fb923c"], ["rollwerk", "Rollwerk", "logo:rollwerk", "#0ea5e9"]]
+        <div class="lg-chips">${[["", "Alles", "mdi:home-outline", "#94a3b8"], ["heizwerk", "Heizwerk & Haus", "logo:heizen", "#fb923c"], ["rollwerk", "Rollwerk", "logo:rollwerk", "#0ea5e9"], ["kraftwerk", "Kraftwerk", "logo:kraftwerk", "#f59e0b"]]
           .map(([id, name, icon, c]) => `<button class="lg-cat lg-mod ${(this._logMod || "") === id ? "on" : ""}" style="--c:${c}" data-action="log-mod" data-id="${id}">${String(icon).startsWith("logo:") ? `<span class="lg-logo">${modIcon(icon)}</span>` : `<ha-icon icon="${icon}"></ha-icon>`}${name}</button>`)
           .join("")}</div>
         <div class="lg-chips">${[["", "Alle Räume", "#94a3b8"], ...rooms.map((r) => [r.id, r.name, this._roomColor(r.id)])]
@@ -3369,8 +3910,8 @@ class HauswerkPanel extends HTMLElement {
       const e = L.entries[i];
       if (!cats.has(e.cat) && LOG_CATS[e.cat]) continue;
       if (room && e.room !== room) continue;
-      if (this._logMod === "rollwerk" && e.mod !== "rollwerk") continue;
-      if (this._logMod === "heizwerk" && e.mod === "rollwerk") continue;
+      if (["rollwerk", "kraftwerk"].includes(this._logMod) && e.mod !== this._logMod) continue;
+      if (this._logMod === "heizwerk" && ["rollwerk", "kraftwerk"].includes(e.mod)) continue;
       if (q && !`${e.title} ${e.why || ""} ${roomName(e)} ${LOG_CATS[e.cat]?.name || ""}`.toLowerCase().includes(q)) continue;
       hits.push(e);
     }
@@ -3426,7 +3967,7 @@ class HauswerkPanel extends HTMLElement {
       <div id="set-list">${this._settingsList(scope)}</div>`;
   }
 
-  _settingsList(scope = this._tab === "house" ? "house" : this._tab === "shutset" ? "rw" : "heat") {
+  _settingsList(scope = this._tab === "house" ? "house" : this._tab === "shutset" ? "rw" : this._tab === "kwset" ? "kw" : "heat") {
     const q = (this._setQuery || "").toLowerCase().trim();
     const rows = this._settingRows(scope).filter((r) => !q || `${r.g} ${r.title} ${r.sum} ${r.words}`.toLowerCase().includes(q));
     if (!rows.length) return `<section class="card empty small"><p>Nichts gefunden für „${esc(q)}“.</p></section>`;
@@ -3520,6 +4061,7 @@ class HauswerkPanel extends HTMLElement {
     }
     if (String(id).startsWith("rwc:")) return this._rwcPop(id.slice(4));
     if (RW_POPS.includes(id)) return this._rwPop(id);
+    if (KW_POPS.includes(id)) return this._kwPop(id);
     if (String(id).startsWith("rwp:")) { const [, pid, sec] = String(id).split(":"); return this._rwpPop(pid, RW_SECTIONS.some(([x]) => x === sec) ? sec : "tag"); }
     const p = this._settings;
     const s = this._status || {};
@@ -4819,7 +5361,8 @@ class HauswerkPanel extends HTMLElement {
       const dc = a.device_class;
       const unit = a.unit_of_measurement;
       if (cfg.deviceClass) {
-        const ok = dc === cfg.deviceClass || (cfg.deviceClass === "temperature" && ["°C", "°F"].includes(unit)) || (cfg.deviceClass === "humidity" && unit === "%");
+        const ok = dc === cfg.deviceClass || (cfg.deviceClass === "temperature" && ["°C", "°F"].includes(unit)) || (["humidity", "battery"].includes(cfg.deviceClass) && unit === "%")
+          || (cfg.deviceClass === "power" && ["W", "kW", "MW"].includes(unit));
         if (!ok) continue;
       }
       const name = a.friendly_name || id;
@@ -5787,6 +6330,29 @@ class HauswerkPanel extends HTMLElement {
         this._logLimit = 200;
         this._renderMain();
         break;
+      case "kw-log":
+        this._logMod = "kraftwerk";
+        this._logRoom = "";
+        this._setView("log");
+        break;
+      case "kw-range":
+        this._kwRange = el.dataset.v;
+        this._renderMain();
+        break;
+      case "kw-energy":
+        history.pushState(null, "", "/config/energy");
+        window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+        break;
+      case "kw-take": {
+        const sug = this._kwSuggest();
+        const keys = el.dataset.k === "all" ? ["kw_solar", "kw_grid", "kw_battery", "kw_battery_soc", "kw_home"] : [el.dataset.k];
+        for (const k of keys) {
+          const v = sug[k];
+          if (Array.isArray(v) ? v.length : v) this._settings[k] = Array.isArray(v) ? [...v] : v;
+        }
+        this._renderPop();
+        break;
+      }
       case "rw-log":
         this._logMod = "rollwerk";
         this._logRoom = "";
@@ -6062,6 +6628,13 @@ const MODULE_LOGOS = {
   <rect x="18.6" y="30.6" width="10.8" height="3" rx="1.5" fill="#fdba74"/>
 </svg>`,
 };
+MODULE_LOGOS.kraftwerk = `<svg viewBox="0 0 48 48" aria-hidden="true">
+  <defs><linearGradient id="kwlg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fde047"/><stop offset="1" stop-color="#d97706"/></linearGradient></defs>
+  <rect width="48" height="48" rx="13" fill="url(#kwlg)"/>
+  <path d="M10.5 23.5 24 11.5l13.5 12" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M14.8 21.8V34.2a2.8 2.8 0 0 0 2.8 2.8h12.8a2.8 2.8 0 0 0 2.8-2.8V21.8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M25.6 20.5 19.8 29h4.4l-1.8 6.6 6-8.8h-4.5z" fill="#fff" stroke="#fff" stroke-width="1" stroke-linejoin="round"/>
+</svg>`;
 /** ha-icon oder – bei „logo:<modul>“ – das eigene Symbol des Moduls. */
 // Jede Kopie bekommt eigene IDs für den Farbverlauf: sonst bleibt sie leer, wenn die erste Kopie verborgen ist.
 let logoNo = 0;
@@ -6993,6 +7566,71 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 @media (max-width:600px) { .rw-grid { grid-template-columns:1fr; } .segs.small.rw-fac { grid-template-columns:repeat(5, minmax(0, 1fr)); } }
 .mlogo { display:inline-flex; width:24px; height:24px; flex:none; border-radius:7px; filter:drop-shadow(0 1px 2px rgba(0,0,0,.18)); }
 .mlogo svg { width:100%; height:100%; display:block; }
+/* Kraftwerk */
+.mlogo.big { width:56px; height:56px; border-radius:16px; margin-bottom:6px; }
+.kwd { position:relative; width:100%; max-width:440px; margin:4px auto 8px; aspect-ratio:300 / 252; }
+.kwd svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+.kwd .kl-base { fill:none; stroke:var(--line2); stroke-width:2; }
+.kwd .kl { fill:none; stroke:var(--c); stroke-width:3.2; stroke-linecap:round; stroke-dasharray:0.1 14; opacity:0; }
+.kwd .kl.on { opacity:1; animation:kwrun var(--d, 3s) linear infinite; }
+@keyframes kwrun { from { stroke-dashoffset:28.2; } to { stroke-dashoffset:0; } }
+@media (prefers-reduced-motion: reduce) { .kwd .kl.on { animation:none; stroke-dasharray:none; opacity:.7; } }
+.kn { position:absolute; transform:translate(-50%, -50%); display:flex; flex-direction:column; align-items:center; gap:3px; text-align:center; }
+.kn-c { width:86px; height:86px; border-radius:50%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; background:var(--card);
+  border:3px solid color-mix(in srgb, var(--c) 70%, transparent); box-shadow:0 0 0 6px color-mix(in srgb, var(--c) 10%, transparent); }
+.kn-c ha-icon { --mdc-icon-size:24px; color:var(--c); }
+.kn-c b { font-size:14px; font-weight:800; letter-spacing:-.01em; white-space:nowrap; }
+.kn small { font-size:11.5px; color:var(--muted); white-space:nowrap; font-weight:600; }
+.kn-grid.exp { --c:#10b981 !important; }
+.kn-home .kn-c { width:96px; height:96px; }
+.kwd.small .kn-c { width:62px; height:62px; border-width:2px; box-shadow:none; }
+.kwd.small .kn-home .kn-c { width:68px; height:68px; }
+.kwd.small .kn-c ha-icon { --mdc-icon-size:18px; }
+.kwd.small .kn-c b { font-size:11.5px; }
+.kwd.small .kn small { font-size:10px; }
+.kw-live { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:#10b981; }
+.kw-live i { width:7px; height:7px; border-radius:50%; background:#10b981; animation:kwpulse 1.6s ease-in-out infinite; }
+@keyframes kwpulse { 50% { opacity:.3; } }
+.kc { display:grid; gap:10px; }
+.kc-row { display:flex; align-items:center; gap:12px; }
+.kc-row b { display:block; font-size:13.5px; }
+.kc-bar { display:block; height:7px; border-radius:99px; background:var(--card2); margin-top:4px; overflow:hidden; }
+.kc-bar i { display:block; height:100%; border-radius:99px; background:#0ea5e9; }
+.kc-row.rest .kc-bar i { background:var(--muted); opacity:.5; }
+.kc-row em { font-style:normal; font-weight:800; font-size:14px; white-space:nowrap; text-align:right; }
+.kc-row em small { display:block; font-weight:600; font-size:11px; color:var(--muted); }
+.kks { display:grid; grid-template-columns:repeat(auto-fill, minmax(132px, 1fr)); gap:8px; }
+.kk { display:flex; flex-direction:column; gap:1px; padding:10px 12px; border-radius:14px; background:color-mix(in srgb, var(--c) 9%, var(--card2)); }
+.kk ha-icon { --mdc-icon-size:20px; color:var(--c); margin-bottom:2px; }
+.kk b { font-size:17px; font-weight:800; letter-spacing:-.01em; }
+.kk small { font-size:11.5px; color:var(--muted); }
+.kk em { font-style:normal; font-size:11.5px; font-weight:700; color:var(--ct); margin-top:3px; }
+.kw-range { margin:0 0 12px; display:flex; flex-wrap:nowrap; }
+.kw-range .seg { flex:1; padding-left:4px; padding-right:4px; white-space:nowrap; }
+.kbars { display:flex; align-items:stretch; gap:3px; height:190px; padding-top:6px; }
+.kb { flex:1; min-width:0; display:flex; flex-direction:column; align-items:stretch; }
+.kb-up { flex:3; display:flex; flex-direction:column-reverse; justify-content:flex-start; border-bottom:1px solid var(--line2); }
+.kb-down { flex:1; display:flex; flex-direction:column; }
+.kb i { display:block; border-radius:3px; min-height:1px; }
+.kb-up i + i { margin-bottom:1px; }
+.kb small { font-size:9.5px; color:var(--muted); text-align:center; margin-top:3px; white-space:nowrap; overflow:hidden; }
+.kbars.thin .kb:not(:nth-child(5n+1)) small { visibility:hidden; }
+.kb i.s, .klegend i.s { background:#f59e0b; }
+.kb i.b, .klegend i.b { background:#ec4899; }
+.kb i.g, .klegend i.g { background:#8b5cf6; }
+.kb i.e, .klegend i.e { background:#10b981; }
+.klegend { display:flex; flex-wrap:wrap; gap:12px; margin:10px 0 4px; font-size:12px; color:var(--muted); }
+.klegend span { display:inline-flex; align-items:center; gap:5px; }
+.klegend i { width:10px; height:10px; border-radius:3px; }
+.kw-hint { display:flex; gap:12px; align-items:flex-start; }
+.kw-hint > ha-icon { --mdc-icon-size:26px; color:#10b981; flex:none; }
+.kw-hint b { display:block; } .kw-hint small { display:block; color:var(--muted); margin:3px 0 6px; }
+.kwsugs { display:grid; gap:8px; margin:12px 0; }
+.kwsug { display:flex; align-items:center; gap:10px; padding:10px; border-radius:14px; border:1px solid var(--line); }
+.kwsug .sr-ic { --c:inherit; }
+.kwsug b { display:block; } .kwsug small { display:block; color:var(--muted); font-size:12px; overflow-wrap:anywhere; }
+.kwsug.none { opacity:.6; }
+.wminis.four { grid-template-columns:repeat(auto-fit, minmax(70px, 1fr)); }
 .mtab .mlogo { width:22px; height:22px; }
 .mtab.active .mlogo { filter:drop-shadow(0 1px 3px rgba(0,0,0,.28)); }
 .sr-ic.logo { background:none !important; box-shadow:none; }

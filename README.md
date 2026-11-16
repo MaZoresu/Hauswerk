@@ -11,6 +11,7 @@ Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite 
 |---|---|
 | <img src="docs/icons/heizwerk.svg" height="20"> **Heizwerk** | fertig – raumweise Heizungsregelung (früher eine eigene Integration) |
 | <img src="docs/icons/rollwerk.svg" height="20"> **Rollwerk** | Rollläden mit Profilen wie die Cover Control Automation: Zeiten, Sonne, Helligkeit, Beschattung, Lüften, Bewohner, Sturm |
+| <img src="docs/icons/kraftwerk.svg" height="20"> **Kraftwerk** | Energiefluss live – Solar, Netz, Batterie, Hausverbrauch und Verbraucher; Tageswerte, Autarkie und Kosten aus dem Energie-Dashboard |
 | Licht | geplant |
 | Garten | geplant |
 
@@ -55,6 +56,10 @@ Heizwerk                    Modul Heizen
 Rollwerk                    Modul Rollläden
   ├─ Rollläden              /hauswerk/rollwerk/rolllaeden
   └─ Einstellungen          /hauswerk/rollwerk/einstellungen
+Kraftwerk                   Modul Energie
+  ├─ Energiefluss           /hauswerk/kraftwerk/energiefluss
+  ├─ Verlauf                /hauswerk/kraftwerk/verlauf
+  └─ Einstellungen          /hauswerk/kraftwerk/einstellungen
 Licht · Garten              geplant, ausgegraut
 ⚙ Einstellungen            /hauswerk/einstellungen  (zentral, für alle Module)
   └─ Protokoll              /hauswerk/protokoll  (was wann warum entschieden wurde)
@@ -70,7 +75,7 @@ Licht · Garten              geplant, ausgegraut
 - **Heizwerk › Einstellungen:** nur was das Heizen betrifft – **Abwesenheit & Urlaub** (welche Temperatur, wenn niemand da ist oder Urlaub ist; Frostschutz nach langer Abwesenheit), **Saison**, **Heizpläne**, **Vorheizen** (auch nach Wetter), **Lüften & Schimmelschutz**, **Frostschutz**, **Boost**, **Entkalkungsschutz**, **Kalibrierung** und die **Räume**. Ganz oben führt ein Eintrag zu den zentralen Einstellungen.
 - Beide Einstellungsseiten sind Listen mit Suche; ein Tipp öffnet die Einzelheiten als Pop-up.
 - **Entitätssuche** (überall, wo Geräte gewählt werden): gewählte Entitäten als Karten mit aktuellem Wert und Raum; darunter **Vorschläge** mit Trefferquote und Begründung (Geräteklasse, Name, Raum aus Home Assistant, erreichbar), **Nach Raum** gruppiert und **Filter** nach Art und Erreichbarkeit. Temperaturunterschiede zeigt Hauswerk überall in °C.
-- **Kopfzeile:** schrumpft beim Scrollen auf eine Zeile mit Logo, Reitern, Glocke und Zahnrad. Auf dem Handy gibt es stattdessen unten eine Leiste **Start · Heizwerk · Rollwerk · Einstellungen**; im Modul Heizwerk bleibt dessen Unterleiste **Räume · Bericht · Einstellungen** sichtbar.
+- **Kopfzeile:** schrumpft beim Scrollen auf eine Zeile mit Logo, Reitern, Glocke und Zahnrad. Auf dem Handy gibt es stattdessen unten eine Leiste **Start · Heizwerk · Rollwerk · Kraftwerk · Einstellungen**; im Modul Heizwerk bleibt dessen Unterleiste **Räume · Bericht · Einstellungen** sichtbar.
 - **Raumseite:** Ein Tipp auf den Raumnamen öffnet eine eigene Seite mit Raumkarte, Verlauf der letzten 24 Stunden (Raumtemperatur, Soll, Heizzeiten, offene Fenster), Geräten mit Live-Werten, Einstellungen im Überblick und den letzten 7 Tagen.
 - **Hinweise:** Glocke oben rechts mit Zahl. Ein Tipp listet alles, was zu beheben ist (z. B. Thermostat nicht erreichbar, **zweite Regelung** am selben Thermostat, **Funk ausgelastet**, **Batterie schwach** an Thermostat, Fensterkontakt oder Sensor, Raum ohne Thermostat, Kalender nicht lesbar) und was gut zu wissen ist (z. B. Fenster lange offen, **Jetzt lüften**, Fenster vermutlich offen) – jeweils mit Sprung an die richtige Stelle.
 - **Räume:** schmales Banner mit Ø-Temperatur, Kurzurteil (z. B. „2 Räume unter Soll“), Wetter und Kennzahlen (heizende Räume, Fenster, Außen, Luftfeuchte, heute geheizt). Raumkacheln **detailliert** (Boost und „⋯“-Menü für Heizplan, Bearbeiten und Automatik; heutiger Zeitplan; nur der wichtigste Hinweis) oder **kompakt** (Übersicht vieler Räume); die Wahl merkt sich jedes Gerät. Symbole an der Kachel: Fenster offen, Präsenz, Ventilöffnung in %, Fußbodenheizung (nur solange sie heizt) und Luftfeuchte – Details als Quickinfo. **Ein Tipp auf die Kachel** öffnet das Schnellmenü für manuelle Änderungen: Wunschtemperatur (± oder Komfort/Eco), Dauer (bis Planwechsel, 1/2/4/8 h), Boost, zurück zum Plan, Raumseite, Heizplan und Automatik.
@@ -179,17 +184,29 @@ Rollläden mit **Profilen** nach dem Vorbild der [Cover Control Automation (CCA)
 
 Einstellungen aus Version 0.24 werden beim ersten Start übernommen (je Fassade ein Profil). Anwesenheit, Urlaub, Feiertage, Sonnenstand, Wetter und Sturmgrenze stellt man nur einmal unter Hauswerk ein. Alles steht im Protokoll.
 
+# Modul Kraftwerk
+
+Zeigt, woher der Strom kommt und wohin er fließt (Kraftwerk › Energiefluss):
+
+- **Energiefluss live:** Solar, Netz (Bezug oder Einspeisung), Batterie (lädt/entlädt, Ladestand) und Haus als Kreise; animierte Linien zeigen, wer wen versorgt – Solar zuerst ins Haus, dann in die Batterie, der Rest ins Netz. Am Haus steht, wie viel Prozent gerade selbst gedeckt sind.
+- **Verbraucher jetzt:** einzelne Geräte mit Leistungsmessung (Wärmepumpe, Wallbox …) mit Anteil am Hausverbrauch; der Rest erscheint als „Sonstiges“.
+- **Heute und Verlauf** (Heute, 7 Tage, 30 Tage, 12 Monate): erzeugt, verbraucht, Netzbezug, eingespeist, Batterie, **Eigenverbrauch** und **Autarkie** in %, Kosten bzw. Ertrag. Balken je Stunde, Tag oder Monat: Verbrauch aus Solar, Batterie und Netz, darunter die Einspeisung.
+- **Einstellungen:** nur die Leistungs-Sensoren (W/kW) für Solar, Netz (mit Vorzeichen oder Bezug/Einspeisung getrennt, Vorzeichen umkehrbar), Batterie (+ Ladestand), Hausverbrauch (sonst errechnet) und Verbraucher. **Automatisch erkennen** schlägt sie vor – aus dem Energie-Dashboard, von denselben Geräten wie die dort eingetragenen Zähler oder nach Namen.
+- **Nichts doppelt:** Zähler (kWh) und Preise kommen aus dem **Energie-Dashboard von Home Assistant** und dessen Statistik.
+- **Widget „Energie“** für die Startseite: klein Solar und Netz, mittel vier Werte und Autarkie heute, groß mit Energiefluss und Tageswerten.
+
 # Aufbau des Projekts
 
 ```
 custom_components/hauswerk/
-  __init__.py       Einstieg, Panel, Module (hass.data["hauswerk"]: "log", "haus", "heizen", "rollwerk")
+  __init__.py       Einstieg, Panel, Module (hass.data["hauswerk"]: "log", "haus", "heizen", "rollwerk", "kraftwerk")
   core.py           Hauswerk-Kern für alle Module: Anwesenheit, Urlaub (auch Kalender), Wetter (Frost-Vorhersage),
                     Benachrichtigungen mit Ruhezeit, Darstellung, Widgets, Berechtigungen (config/.storage/hauswerk.haus)
   logic.py          Modul Heizwerk: Regel-Logik ohne Home-Assistant-Abhängigkeit (getestet)
   controller.py     Modul Heizwerk: Speicher, Zustandsüberwachung, Ansteuerung der Thermostate, Statistik
   log.py            Protokoll für alle Module (config/.storage/hauswerk.protokoll, 14 Tage)
   rollwerk.py       Modul Rollwerk: Rollläden (config/.storage/hauswerk.rollwerk)
+  kraftwerk.py      Modul Kraftwerk: Sensoren für den Energiefluss (config/.storage/hauswerk.kraftwerk)
   diagnostics.py    Diagnose-Download (Geräte & Dienste › Hauswerk › Diagnose herunterladen)
   api.py            WebSocket-Befehle fürs Panel (hauswerk/heizen/get, /subscribe, /room/save …, hauswerk/log/get, /subscribe, hauswerk/notify/test)
   sensor.py, switch.py, entity.py

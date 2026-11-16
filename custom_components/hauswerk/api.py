@@ -10,7 +10,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_HEATING, MODULE_HOUSE, MODULE_LOG, MODULE_SHUTTER
+from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_HEATING, MODULE_HOUSE, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
 from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, parse_hm
 
 
@@ -30,6 +30,7 @@ def _opt(validator):
 TEMP = vol.All(vol.Coerce(float), vol.Range(min=5, max=30))
 ENTITY = vol.All(str, vol.Match(r"^[a-z0-9_]+\.[a-z0-9_]+$"))
 ENTITY_LIST = vol.All([ENTITY], vol.Length(max=20))
+SENSOR = vol.All(str, vol.Match(r"^sensor\.[a-z0-9_]+$"))
 MINUTES = vol.All(vol.Coerce(int), vol.Range(min=0, max=240))
 NOTIFY_MODE = vol.Any(bool, vol.In(["off", "log", "normal", "important"]))
 
@@ -199,6 +200,16 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("rw_storm"): bool,
         vol.Optional("rw_wind_entity"): _opt(ENTITY),
         vol.Optional("rw_recovery"): vol.In(["never", "outage", "always"]),
+        # Kraftwerk
+        vol.Optional("kw_solar"): vol.All([SENSOR], vol.Length(max=10)),
+        vol.Optional("kw_grid"): _opt(SENSOR),
+        vol.Optional("kw_grid_export"): _opt(SENSOR),
+        vol.Optional("kw_grid_invert"): bool,
+        vol.Optional("kw_battery"): _opt(SENSOR),
+        vol.Optional("kw_battery_invert"): bool,
+        vol.Optional("kw_battery_soc"): _opt(SENSOR),
+        vol.Optional("kw_home"): _opt(SENSOR),
+        vol.Optional("kw_consumers"): vol.All([SENSOR], vol.Length(max=20)),
         vol.Optional("demand_entity"): _opt(vol.All(str, vol.Match(r"^climate\.[a-z0-9_]+$"))),
         vol.Optional("demand_action"): vol.In(["lower", "off"]),
         vol.Optional("demand_low"): vol.All(vol.Coerce(float), vol.Range(min=5, max=25)),
@@ -247,10 +258,14 @@ def _rw(hass: HomeAssistant):
     return (hass.data.get(DOMAIN) or {}).get(MODULE_SHUTTER)
 
 
+def _kw(hass: HomeAssistant):
+    return (hass.data.get(DOMAIN) or {}).get(MODULE_POWER)
+
+
 def _settings(hass: HomeAssistant) -> dict:
-    """Alle Einstellungen, wie das Panel sie sieht: zentral (Kern), Heizwerk und Rollwerk (rw_…)."""
-    haus, ctl, rw = _haus(hass), _ctl(hass), _rw(hass)
-    return {**(haus.settings if haus else {}), **(ctl.settings if ctl else {}), **(rw.settings if rw else {})}
+    """Alle Einstellungen, wie das Panel sie sieht: zentral (Kern), Heizwerk, Rollwerk (rw_…) und Kraftwerk (kw_…)."""
+    haus, ctl, rw, kw = _haus(hass), _ctl(hass), _rw(hass), _kw(hass)
+    return {**(haus.settings if haus else {}), **(ctl.settings if ctl else {}), **(rw.settings if rw else {}), **(kw.settings if kw else {})}
 
 
 def _log(hass: HomeAssistant):
@@ -391,9 +406,12 @@ async def ws_settings_save(hass: HomeAssistant, connection, msg) -> None:
     # Zentrale Einstellungen an den Kern, der Rest an Heizwerk
     house = {k: v for k, v in settings.items() if k in HOUSE_KEYS}
     shutter = {k: v for k, v in settings.items() if k.startswith("rw_")}
-    heat = {k: v for k, v in settings.items() if k not in HOUSE_KEYS and not k.startswith("rw_")}
+    power = {k: v for k, v in settings.items() if k.startswith("kw_")}
+    heat = {k: v for k, v in settings.items() if k not in HOUSE_KEYS and not k.startswith(("rw_", "kw_"))}
     if shutter and _rw(hass):
         await _rw(hass).async_save_settings(shutter, by=_who(connection))
+    if power and _kw(hass):
+        await _kw(hass).async_save_settings(power, by=_who(connection))
     if house:
         await _haus(hass).async_save_settings(house, by=_who(connection))
     if heat:

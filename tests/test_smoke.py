@@ -94,7 +94,7 @@ def hw(tmp_path_factory):
     root = tmp_path_factory.mktemp("pkg")
     pkg = root / "hw"
     pkg.mkdir()
-    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py"):
+    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py"):
         shutil.copy(SRC / name, pkg / name)
     (pkg / "__init__.py").write_text("")
     sys.path.insert(0, str(root))
@@ -103,6 +103,7 @@ def hw(tmp_path_factory):
         Haus=importlib.import_module("hw.core").Haus,
         Protokoll=importlib.import_module("hw.log").Protokoll,
         Rollwerk=importlib.import_module("hw.rollwerk").Rollwerk,
+        Kraftwerk=importlib.import_module("hw.kraftwerk").Kraftwerk,
         const=importlib.import_module("hw.const"),
     )
 
@@ -864,3 +865,27 @@ def test_rollwerk_neustart(hw):
     assert restored.get("closed_on") == "2026-11-16"
     assert not [c for c in hass2.calls if c[0] == "cover"]
     assert rw2.status()["covers"]["cover.wz"]["target"] == 0
+
+
+def test_kraftwerk(hw):
+    """Kraftwerk: nur kw_-Einstellungen, Protokoll mit Modul, bleibt nach Neustart erhalten."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        hass = Hass()
+        log, haus, ctl = await _setup(hw, hass)
+        kw = hw.Kraftwerk(hass, log, haus)
+        await kw.async_load()
+        assert kw.settings["kw_solar"] == [] and kw.settings["kw_grid"] is None
+        await kw.async_save_settings({"kw_solar": ["sensor.pv"], "kw_grid": "sensor.netz", "rw_covers": ["cover.x"]}, by="Jens")
+        assert "rw_covers" not in kw.settings
+        e = log.entries[-1]
+        assert e["mod"] == "kraftwerk" and "Kraftwerk: Solar" in e["why"] and "Jens" in e["why"]
+        n = len(log.entries)
+        await kw.async_save_settings({"kw_grid": "sensor.netz"})  # unverändert: kein Eintrag
+        assert len(log.entries) == n
+        assert sorted(kw.entities()) == ["sensor.netz", "sensor.pv"]
+        kw2 = hw.Kraftwerk(hass, log, haus)
+        await kw2.async_load()
+        assert kw2.settings["kw_solar"] == ["sensor.pv"]
+    asyncio.run(run())

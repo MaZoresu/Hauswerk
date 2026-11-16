@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.34.0 – 2026-11-16
+
+### Neu
+- **Modul Kraftwerk** – Energie im Haus, neben Heizwerk und Rollwerk (eigener Reiter, eigenes Symbol):
+  - **Energiefluss live:** Solar, Netz, Batterie und Haus mit animierten Linien – wer wen gerade versorgt, Bezug oder Einspeisung, Laden oder Entladen mit Ladestand, Anteil selbst gedeckt.
+  - **Verbraucher jetzt:** z. B. Wärmepumpe, Wallbox, Waschmaschine mit Anteil am Hausverbrauch, Rest als „Sonstiges“.
+  - **Heute und Verlauf** (Heute, 7 Tage, 30 Tage, 12 Monate): erzeugt, verbraucht, Netzbezug, eingespeist, Batterie, Eigenverbrauch, Autarkie und Kosten; Balken je Stunde/Tag/Monat.
+  - **Nichts doppelt:** Zähler (kWh) und Preise kommen aus dem Energie-Dashboard von Home Assistant. In Kraftwerk werden nur die Leistungs-Sensoren (W/kW) gewählt – **„Automatisch erkennen“** schlägt sie vor.
+  - Vorzeichen von Netz und Batterie umkehrbar; Einspeisung auch als eigener Sensor.
+- **Widget „Energie“** für die Startseite (klein, mittel, groß mit Energiefluss).
+- Kraftwerk im Protokoll (Filter „Kraftwerk“), unter Einstellungen › Module, in der unteren Leiste am Handy und als Hinweis, wenn ein Sensor nicht erreichbar ist.
+
 ## 0.33.0 – 2026-11-16
 
 ### Neu

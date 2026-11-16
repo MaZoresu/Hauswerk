@@ -5,6 +5,7 @@ Module:
 - Kern (core.py): Anwesenheit, Urlaub, Wetter, Darstellung – gilt für alle Module
 - Protokoll: was wann warum entschieden wurde (für alle Module)
 - Rollwerk (intern „rollwerk“): Rollläden mit Profilen nach dem Vorbild der Cover Control Automation
+- Kraftwerk (intern „kraftwerk“): Energiefluss – Solar, Netz, Batterie, Verbrauch
 - Licht, Garten: geplant
 """
 from __future__ import annotations
@@ -23,6 +24,7 @@ from .const import (
     MODULE_HEATING,
     MODULE_HOUSE,
     MODULE_LOG,
+    MODULE_POWER,
     MODULE_SHUTTER,
     NAME,
     PANEL_COMPONENT,
@@ -33,6 +35,7 @@ from .const import (
 )
 from .controller import Heizen
 from .core import Haus
+from .kraftwerk import Kraftwerk
 from .log import Protokoll
 from .rollwerk import Rollwerk
 
@@ -77,7 +80,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     heating.drop_house_settings()
     shutters = Rollwerk(hass, log, haus)
     await shutters.async_load()
-    hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HOUSE: haus, MODULE_HEATING: heating, MODULE_SHUTTER: shutters}
+    power = Kraftwerk(hass, log, haus)
+    await power.async_load()
+    hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HOUSE: haus, MODULE_HEATING: heating, MODULE_SHUTTER: shutters, MODULE_POWER: power}
 
     api.async_register(hass)
     await _async_register_panel(hass)
@@ -85,6 +90,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await haus.async_start()
     await heating.async_start()
     await shutters.async_start()
+    await power.async_start()
     return True
 
 
