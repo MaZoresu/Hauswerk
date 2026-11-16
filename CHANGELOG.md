@@ -2,6 +2,13 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.35.0 – 2026-11-16
+
+### Neu
+- **Profilname im Assistenten:** Bei „Rollladen hinzufügen“ › Profil › „Neues Profil“ lässt sich der Name direkt eingeben (vorgeschlagen aus Raum und Richtung, z. B. „Schlafzimmer Süd“).
+- **Profile umbenennen:** Jedes Profil – auch „Standard“ – hat oben im Profil-Dialog das Feld **Name des Profils**, in jedem Abschnitt sichtbar. Die Umbenennung steht im Protokoll (Name alt → neu); die Rollläden behalten ihr Profil.
+- Zwei Profile mit gleichem Namen werden verhindert.
+
 ## 0.34.2 – 2026-11-16
 
 ### Behoben

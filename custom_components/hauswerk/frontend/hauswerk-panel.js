@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.34.2";
+const VERSION = "0.35.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -3163,8 +3163,7 @@ class HauswerkPanel extends HTMLElement {
       case "tag": {
         const mode = this._rwMode(p);
         const win = (a, b) => (mode === "time" ? row(a, "Uhrzeit", "", time(a)) : `${row(a, "Frühestens", "", time(a))}${row(b, "Spätestens", "", time(b))}`);
-        body = `${!d.pid ? `<label class="field"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name</span>${text("name")}</label>` : ""}
-          ${lbl("Wonach?")}${choice("_mode", [["time", "Uhrzeit", "mdi:clock-outline"], ["sun", "Mit der Sonne", "mdi:weather-sunset"], ...(ex || mode === "cal" ? [["cal", "Kalender", "mdi:calendar"]] : []), ...(ex || mode === "free" ? [["free", "Nur Sonne", "mdi:white-balance-sunny"]] : [])], "rwp-mode")}
+        body = `${lbl("Wonach?")}${choice("_mode", [["time", "Uhrzeit", "mdi:clock-outline"], ["sun", "Mit der Sonne", "mdi:weather-sunset"], ...(ex || mode === "cal" ? [["cal", "Kalender", "mdi:calendar"]] : []), ...(ex || mode === "free" ? [["free", "Nur Sonne", "mdi:white-balance-sunny"]] : [])], "rwp-mode")}
           ${mode === "sun" ? note("Öffnet frühestens zur ersten Zeit, sobald die Sonne hoch genug steht – spätestens zur zweiten. Abends genauso andersherum.", "mdi:weather-sunset") : ""}
           <div class="rwstage"><div class="rwstage-h"><ha-icon icon="mdi:weather-sunset-up"></ha-icon><b>Morgens öffnen</b>${feat("up")}</div>
             ${has("up") ? `<p class="rwline">auf ${tok("pos_open", 100, 5, 0, 100, " %")}</p>
@@ -3270,8 +3269,7 @@ class HauswerkPanel extends HTMLElement {
         break;
       }
       case "fine":
-        body = `<label class="field"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name</span>${text("name")}</label>
-          <div class="wxrows">${row("po", "Offen", "100 % = ganz offen", num("pos_open", 100, 0, 100, 1, "%"))}${row("pc", "Geschlossen", "z. B. 10 % für Lüftungsschlitze", num("pos_close", 0, 0, 100, 1, "%"))}${p.close_stage1 ? row("p1", "Abends Stufe 1", "", num("pos_stage1", 50, 0, 100, 1, "%")) : ""}${has("ventilate") ? row("pv2", "Lüften", "", num("pos_ventilate", 30, 0, 100, 1, "%")) : ""}${has("shading") ? row("ps2", "Beschattung", "", num("pos_shading", 25, 0, 100, 1, "%")) : ""}</div>
+        body = `<div class="wxrows">${row("po", "Offen", "100 % = ganz offen", num("pos_open", 100, 0, 100, 1, "%"))}${row("pc", "Geschlossen", "z. B. 10 % für Lüftungsschlitze", num("pos_close", 0, 0, 100, 1, "%"))}${p.close_stage1 ? row("p1", "Abends Stufe 1", "", num("pos_stage1", 50, 0, 100, 1, "%")) : ""}${has("ventilate") ? row("pv2", "Lüften", "", num("pos_ventilate", 30, 0, 100, 1, "%")) : ""}${has("shading") ? row("ps2", "Beschattung", "", num("pos_shading", 25, 0, 100, 1, "%")) : ""}</div>
           ${exBox(`<div class="wxrows">${row("pt", "Toleranz", "", num("tolerance", 0, 0, 20, 1, "%"))}${row("pd", "Fahrzeit", "einmal ganz auf oder zu", num("drive_time", 90, 5, 300, 5, "s"))}
             ${row("df", "Verzögerung fest", "", num("delay_fix", 0, 0, 600, 1, "s"))}${row("dr", "Verzögerung zufällig bis", "", num("delay_random", 5, 0, 600, 1, "s"), "Verteilt die Fahrten, damit nicht alle Rollläden gleichzeitig funken.")}</div>
             ${lbl("Regeln im Detail")}${checks("behavior", RW_BEHAVIOR)}`)}
@@ -3289,7 +3287,7 @@ class HauswerkPanel extends HTMLElement {
           return `<div class="rwdel"><b><ha-icon icon="mdi:delete-alert-outline"></ha-icon>Profil „${esc(p.name || "")}“ löschen?</b>
             ${n ? `<label class="field"><span>${n} ${n === 1 ? "Rollladen nutzt" : "Rollläden nutzen"} dieses Profil und ${n === 1 ? "bekommt" : "bekommen"} dann:</span><select data-rwdel>${others.map((x) => `<option value="${esc(x.id)}" ${x.id === d.replace ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>` : `<p class="muted small">Kein Rollladen nutzt dieses Profil.</p>`}
             <div class="rwdel-b"><button class="secondary" data-action="rwp-del-no">Behalten</button><button class="primary danger-bg" data-action="rwp-del"><ha-icon icon="mdi:delete-outline"></ha-icon>Löschen</button></div></div>`;
-        })() : ""}<div class="rwtop">${tl ? `<div class="grow">${this._rwDayBar(tl)}</div>` : `<span class="grow muted small">${isNew ? "Tagesleiste nach dem Anlegen" : ""}</span>`}
+        })() : ""}<label class="field rwname"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name des Profils</span>${text("name").replace("<input ", `<input placeholder="z. B. Süd mit Hitze" `)}</label><div class="rwtop">${tl ? `<div class="grow">${this._rwDayBar(tl)}</div>` : `<span class="grow muted small">${isNew ? "Tagesleiste nach dem Anlegen" : ""}</span>`}
           <button class="rwexp ${ex ? "on" : ""}" data-action="rw-expert" title="Alle Einstellungen wie bei der Cover Control Automation"><ha-icon icon="mdi:school-outline"></ha-icon>Experte</button></div>
         <div class="rwsecs">${RW_SECTIONS.map(([x, t, i, c, f]) => `<button class="rwsec ${x === sec ? "on" : ""} ${f && !(p.features || []).includes(f) ? "off" : ""}" data-action="rwp-sec" data-sec="${x}" style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${t}</button>`).join("")}</div>${body}`,
       foot: `${this._admin && d.pid && this._rwProfiles().length > 1 ? `<button class="icon boxed danger" data-action="rwp-del" title="Profil löschen" aria-label="Profil löschen"><ha-icon icon="mdi:delete-outline"></ha-icon></button>` : ""}
@@ -3389,7 +3387,8 @@ class HauswerkPanel extends HTMLElement {
         if (d.pick == null) d.pick = match ? match.id : "new";
         const opt = (v, t, s) => `<button class="wiz-dev ${d.pick === v ? "on" : ""}" data-action="cwiz-pick" data-v="${esc(v)}">${tick(d.pick === v, true)}<span class="grow"><b>${t}</b><small>${s}</small></span></button>`;
         body = `<p class="muted">Rollläden mit gleichem Profil lassen sich später gemeinsam ändern.</p>
-          ${opt("new", `Neues Profil „${esc(this._cwizName(d))}“`, "aus deinen Antworten")}
+          ${opt("new", "Neues Profil", "aus deinen Antworten")}
+          ${d.pick === "new" ? `<label class="field cwiz-name"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name des neuen Profils</span><input type="text" maxlength="60" data-cwizname value="${esc(d.name ?? this._cwizName(d, true))}" placeholder="${esc(this._cwizName(d, true))}"></label>` : ""}
           ${this._rwProfiles().map((p) => opt(p.id, `„${esc(p.name)}“${match?.id === p.id ? " – passt" : ""}`, esc(this._rwProfSum(p)))).join("")}`;
         break;
       }
@@ -3424,7 +3423,9 @@ class HauswerkPanel extends HTMLElement {
     return step === 0 ? d.covers?.length > 0 : true;
   }
 
-  _cwizName(d) {
+  /** Name des neuen Profils: eingegeben, sonst aus Raum und Richtung vorgeschlagen. */
+  _cwizName(d, suggest = false) {
+    if (!suggest && String(d.name ?? "").trim()) return String(d.name).trim();
     const dir = d.prof.window_dir != null ? this._rwDirName(d.prof.window_dir) : "";
     const use = { schlafen: "Schlafzimmer", kind: "Kinderzimmer", neben: "Nebenraum" }[d.use] || "";
     return [use, dir].filter(Boolean).join(" ") || "Wohnraum";
@@ -3453,6 +3454,13 @@ class HauswerkPanel extends HTMLElement {
     const d = this._pop.draft;
     let pid = d.pick;
     if (pid === "new") {
+      const name = this._cwizName(d);
+      if (this._rwProfiles().some((x) => x.name.toLowerCase() === name.toLowerCase())) {
+        this._toast(`Ein Profil „${name}“ gibt es schon – bitte anders benennen oder das vorhandene wählen.`);
+        d.step = 4;
+        this._renderPop();
+        return;
+      }
       const res = await this._ws({ type: "hauswerk/rollwerk/profile/save", profile_id: null, profile: this._cwizProfile(d) });
       this._data.rollwerk.profiles = res.profiles;
       pid = res.profile_id;
@@ -5543,6 +5551,10 @@ class HauswerkPanel extends HTMLElement {
       t.style.setProperty("--v", `${t.value}%`);
       return;
     }
+    if (t.dataset.cwizname !== undefined && this._pop?.id === "cwiz") {
+      this._pop.draft.name = t.value;
+      return;
+    }
     if (t.dataset.cwiz && this._pop?.id === "cwiz") {
       const c = (this._pop.draft.contacts[t.dataset.cwiz] ||= {});
       c[t.dataset.k] = t.value || null;
@@ -6501,7 +6513,9 @@ class HauswerkPanel extends HTMLElement {
       }
       case "rwp-save": {
         const d = this._pop.draft;
-        if (!String(d.prof.name || "").trim()) { this._toast("Bitte einen Namen eingeben."); return; }
+        d.prof.name = String(d.prof.name || "").trim();
+        if (!d.prof.name) { this._toast("Bitte einen Namen eingeben."); return; }
+        if (this._rwProfiles().some((x) => x.id !== d.pid && x.name.toLowerCase() === d.prof.name.toLowerCase())) { this._toast(`Ein Profil „${d.prof.name}“ gibt es schon.`); return; }
         const res = await this._ws({ type: "hauswerk/rollwerk/profile/save", profile_id: d.pid, profile: d.prof });
         this._data.rollwerk.profiles = res.profiles;
         this._closePop();
@@ -7569,6 +7583,8 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .mlogo { display:inline-flex; width:24px; height:24px; flex:none; border-radius:7px; filter:drop-shadow(0 1px 2px rgba(0,0,0,.18)); }
 .mlogo svg { width:100%; height:100%; display:block; }
 /* Kraftwerk */
+.rwname { margin-bottom:10px; }
+.cwiz-name { margin:4px 0 10px 36px; }
 .mlogo.big { width:56px; height:56px; border-radius:16px; margin-bottom:6px; }
 .kwd { position:relative; width:100%; max-width:440px; margin:4px auto 8px; aspect-ratio:300 / 252; }
 .kwd svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
