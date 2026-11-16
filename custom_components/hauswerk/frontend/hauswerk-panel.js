@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.20.2";
+const VERSION = "0.20.3";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1964,6 +1964,7 @@ class HauswerkPanel extends HTMLElement {
         ${saveBar}`;
     }
 
+    this._planRefDay = [ref, day];
     return `
       ${pills}
       <section class="card">
@@ -1973,15 +1974,7 @@ class HauswerkPanel extends HTMLElement {
         <div class="daypills">
           ${DAYS.map((d, i) => `<button class="dp ${i === day ? "on" : ""}" data-action="plan-preview" data-day="${i}">${d}</button>`).join("")}
         </div>
-        ${this._dayBar(plan.blocks, ref, day)}
-        <div class="muted small legend-line">${["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"][day]}
-          <span><i style="background:color-mix(in srgb, #60a5fa 38%, var(--card2))"></i>Eco</span>
-          <span><i style="background:${tempColor(ref.comfort)}"></i>Komfort</span>
-          <span><i style="background:linear-gradient(90deg,#fde047,#fb923c)"></i>eigene Temperatur</span>
-        </div>
-        <div class="week-mini">
-          ${DAYS.map((d, i) => `<div class="wm-row"><span>${d}</span>${this._dayBar(plan.blocks, ref, i, true)}</div>`).join("")}
-        </div>
+        <div id="plan-preview">${this._planPreview(plan, ref, day)}</div>
       </section>
 
       <div class="blocks">
@@ -1996,11 +1989,42 @@ class HauswerkPanel extends HTMLElement {
         </label>
         <button class="ghost" data-action="import-open"><ha-icon icon="mdi:calendar-import"></ha-icon>Aus Kalender importieren</button>
       </div>
-      ${plan.dirty ? `
-      <div class="savebar">
+      <div class="savebar" id="plan-savebar" ${plan.dirty ? "" : "hidden"}>
         <button class="secondary" data-action="plan-revert">Verwerfen</button>
         <button class="primary" data-action="plan-save">Speichern</button>
-      </div>` : ""}` : ""}`;
+      </div>` : ""}`;
+  }
+
+  /** Tagesbalken, Legende und Wochenübersicht des Plan-Editors. */
+  _planPreview(plan, ref, day) {
+    return `
+        ${this._dayBar(plan.blocks, ref, day)}
+        <div class="muted small legend-line">${["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"][day]}
+          <span><i style="background:color-mix(in srgb, #60a5fa 38%, var(--card2))"></i>Eco</span>
+          <span><i style="background:${tempColor(ref.comfort)}"></i>Komfort</span>
+          <span><i style="background:linear-gradient(90deg,#fde047,#fb923c)"></i>eigene Temperatur</span>
+        </div>
+        <div class="week-mini">
+          ${DAYS.map((d, i) => `<div class="wm-row"><span>${d}</span>${this._dayBar(plan.blocks, ref, i, true)}</div>`).join("")}
+        </div>`;
+  }
+
+  /** Nach einer Uhrzeit-Änderung nur Vorschau, Dauer und Speicherleiste anpassen – ohne Neuzeichnen,
+   *  damit der Uhrzeit-Wähler am Handy offen bleibt und die Seite nicht springt. */
+  _planSoftUpdate(i) {
+    const root = this.shadowRoot;
+    this._plan.dirty = true;
+    const bar = root.getElementById("plan-savebar");
+    if (bar) bar.hidden = false;
+    const prev = root.getElementById("plan-preview");
+    if (prev && this._planRefDay) prev.innerHTML = this._planPreview(this._plan, ...this._planRefDay);
+    const b = this._plan.blocks[i];
+    const dur = root.querySelector(`.dur[data-i="${i}"]`);
+    if (b && dur) {
+      let d = hm(b.end) - hm(b.start);
+      if (d <= 0) d += 1440;
+      dur.textContent = `${Math.floor(d / 60)} h${d % 60 ? ` ${d % 60} min` : ""}${hm(b.end) <= hm(b.start) ? " · bis zum Folgetag" : ""}`;
+    }
   }
 
   /** Räume, die einen gemeinsamen Plan nutzen. */
@@ -2093,7 +2117,7 @@ class HauswerkPanel extends HTMLElement {
             <label class="timebox"><input type="time" value="${esc(b.start)}" data-plan="start" data-i="${i}" ${dis}><ha-icon icon="mdi:clock-outline"></ha-icon></label>
             <span class="muted">bis</span>
             <label class="timebox"><input type="time" value="${esc(b.end)}" data-plan="end" data-i="${i}" ${dis}><ha-icon icon="mdi:clock-outline"></ha-icon></label>
-            ${durTxt ? `<span class="dur">${durTxt}${hm(b.end) <= hm(b.start) ? " · bis zum Folgetag" : ""}</span>` : ""}
+<span class="dur" data-i="${i}">${durTxt}${durTxt && hm(b.end) <= hm(b.start) ? " · bis zum Folgetag" : ""}</span>
           </div>
           <div class="block-temp">
             ${this._admin ? this._stepper("blk", i, b.temp, { placeholder: room.comfort }) : `<b style="color:${tint(tempColor(b.temp ?? room.comfort))}">${fmt(b.temp ?? room.comfort)} °C</b>`}
@@ -3613,10 +3637,11 @@ class HauswerkPanel extends HTMLElement {
       return;
     }
     if (t.dataset.plan && this._plan) {
-      const b = this._plan.blocks[Number(t.dataset.i)];
+      const i = Number(t.dataset.i);
+      const b = this._plan.blocks[i];
       if (t.value) b[t.dataset.plan] = t.value;
-      this._plan.dirty = true;
-      if (isChange) this._renderMain();
+      // Uhrzeit: nicht neu zeichnen (sonst schließt der Wähler am Handy und die Seite springt)
+      if (t.value) this._planSoftUpdate(i);
       return;
     }
     if (t.dataset.lookColor !== undefined && this._settings) {
@@ -4755,6 +4780,7 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
   display:flex; flex-direction:column; background:var(--card); border:1px solid var(--line2); border-radius:24px; box-shadow:0 30px 80px rgba(0,0,0,.6); color:var(--text);
   font-family:Inter, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif; }
 .sheet { height:min(780px, calc(100vh - 40px)); }
+@supports (height:100dvh) { .sheet { max-height:calc(100dvh - 40px); height:min(780px, calc(100dvh - 40px)); } }
 .sheet-head { display:flex; align-items:center; gap:14px; padding:20px 24px 12px; }
 .sheet-head h2 { margin:0 0 2px; font-size:20px; }
 .rr-ic.big { width:46px; height:46px; border-radius:14px; }
@@ -5125,6 +5151,8 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
   .bn em { position:absolute; top:-3px; right:6px; min-width:16px; height:16px; padding:0 4px; box-sizing:border-box; border-radius:99px; font-style:normal; font-size:10px; font-weight:800; display:grid; place-items:center; background:#fb923c; color:#1f1300; }
   .bn em.warn { background:#22d3ee; color:#001b20; }
   .app { padding-bottom:calc(84px + env(safe-area-inset-bottom)); }
+  /* Speicherleisten über der unteren Navigationsleiste halten */
+  .savebar { bottom:calc(78px + env(safe-area-inset-bottom)); z-index:9; }
   .mtabs { display:none !important; }
   .heatnav { margin-bottom:12px; }
   .hnav { padding:9px 10px; font-size:13px; }
@@ -5401,6 +5429,9 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
   .plan-tools .addbtn { flex-basis:100%; }
   .plan-tools .ghost { padding:12px 18px; justify-content:center; flex:1; }
   .sheet { top:auto; bottom:0; left:0; transform:none; width:100vw; height:92vh; max-height:92vh; border-radius:24px 24px 0 0; }
+  /* sichtbare Höhe statt 100vh (in der App und im Browser liegen sonst Leisten über dem Fuß) */
+  @supports (height:100dvh) { .sheet { height:92dvh; max-height:92dvh; } .sheet.pop { height:auto; } }
+  .sheet-foot { padding-bottom:calc(16px + env(safe-area-inset-bottom)); }
   .dtabs { padding:0 10px; justify-content:space-between; }
   .dtab:not(.on) span { display:none; }
   .dtab { padding:11px 8px 12px; }
