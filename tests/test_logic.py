@@ -334,3 +334,17 @@ def test_radio_should_send():
     assert not L.radio_should_send(True, 20.0, 22.0, 300)  # zu bald
     assert L.radio_should_send(True, 20.0, 22.0, 1000)
     assert L.radio_should_send(True, 20.0, 20.5, 10, important=True)  # Wechsel der Betriebsart
+
+
+def test_assist_on():
+    # Grundlast Boden: erst ab 0,5 °C unter Soll hilft der Heizkörper
+    assert not L.assist_on("komfort", 20.7, 21.0, 0.5, False)
+    assert L.assist_on("komfort", 20.5, 21.0, 0.5, False)
+    # bleibt an bis kurz vor Soll
+    assert L.assist_on("komfort", 20.85, 21.0, 0.5, True)
+    assert not L.assist_on("komfort", 20.95, 21.0, 0.5, True)
+    # Vorheizen und Boost immer, Fenster nie
+    assert L.assist_on("vorheizen", 22.0, 21.0, 0.5, False)
+    assert L.assist_on("boost", 22.0, 30.0, 0.5, False)
+    assert not L.assist_on("fenster", 15.0, 7.0, 0.5, True)
+    assert L.assist_on("eco", None, 18.0, 0.5, False)

@@ -22,6 +22,7 @@ const states = {
   "sensor.kueche_temperatur": st("unavailable", { friendly_name: "Küche Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   "binary_sensor.wohnzimmer_fenster": st("off", { friendly_name: "Wohnzimmer Fenster links", device_class: "window" }),
   "binary_sensor.flur_bewegung": st("off", { friendly_name: "Flur Bewegung", device_class: "motion" }),
+  "climate.wohnzimmer_heizkoerper2": st("heat", { friendly_name: "Heizkörper Wohnzimmer Fenster", current_temperature: 22.4, temperature: 22.5, model: "HMIP-eTRV" }),
   "climate.wohnzimmer_heizkoerper": st("heat", { friendly_name: "Heizkörper Wohnzimmer", current_temperature: 21.2, temperature: 21, model: "HMIP-eTRV" }),
   "sensor.ccu3_duty_cycle_level": st("22", { friendly_name: "CCU3 Duty Cycle", unit_of_measurement: "%" }),
   "sensor.hmip_router_duty_cycle_level": st("9.5", { friendly_name: "Router Duty Cycle", unit_of_measurement: "%" }),
@@ -55,7 +56,7 @@ const settings = {
   preheat_weather: true, workday_entity: "binary_sensor.arbeitstag", workday_as: 6, vent_rh: 65,
 };
 const rooms = {
-  a1: { id: "a1", name: "Wohnzimmer", type: "heizkoerper", comfort: 21, eco: 18, climates: ["climate.wohnzimmer", "climate.wohnzimmer_heizkoerper"], windows: [], enabled: true,
+  a1: { id: "a1", name: "Wohnzimmer", type: "heizkoerper", comfort: 21, eco: 18, climates: ["climate.wohnzimmer", "climate.wohnzimmer_heizkoerper", "climate.wohnzimmer_heizkoerper2"], assist_entities: ["climate.wohnzimmer_heizkoerper2"], windows: [], enabled: true,
     schedule: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "06:00", end: "22:00" }] },
   b2: { id: "b2", name: "Bad", type: "flaeche", comfort: 22, eco: 19, climates: ["climate.bad"], windows: ["binary_sensor.fenster_bad"], enabled: true,
     humidity_sensor: "sensor.bad_feuchte", shower_boost: 30, show_entities: ["climate.bad_heizkoerper", "switch.fussbodenheizung_bad"],
@@ -65,7 +66,7 @@ const status = {
   rooms: {
     a1: { mode: "komfort", mode_label: "Komfort", target: 21, room_temp: 20.4, heating: true, humidity: 48, next_change: 120, preheat_factor: 1.06,
       battery_low: [{ id: "sensor.thermostat_wohnzimmer_batterie", name: "Thermostat Wohnzimmer Batterie", level: 14 }],
-      followers: ["climate.wohnzimmer_heizkoerper"], pair_broken: [], duty_blocked: [],
+      followers: ["climate.wohnzimmer_heizkoerper"], pair_broken: [], duty_blocked: [], assist: { entities: ["climate.wohnzimmer_heizkoerper2"], on: true, diff: 0.5, room_temp: 20.4 },
       conflicts: [{ id: "climate.wohnzimmer", name: "Thermostat Wohnzimmer", by: ["Raumklima Wohnzimmer (raumklima)"], writes: 0 }] },
     b2: { mode: "eco", mode_label: "Eco", target: 20, room_temp: 21.8, heating: false, humidity: 72, next_change: 300, preheat_factor: 1.06,
       vent: { rh: 72, inside_g: 13.9, outside_g: 5.9, dew_point: 16.5 } },

@@ -41,6 +41,7 @@ from .logic import (
     MODES,
     TYPE_RADIATOR,
     aggressive,
+    assist_on,
     calendar_state,
     calibration_offset,
     compensated,
@@ -351,7 +352,8 @@ class Heizen:
         """
         if room.get("pair_mode") == "off":
             return set()
-        climates = room.get("climates") or []
+        assist = set(room.get("assist_entities") or [])
+        climates = [c for c in room.get("climates") or [] if c not in assist]
         walls = [c for c in climates if self._kind(c) == "wall"]
         trvs = [c for c in climates if self._kind(c) == "trv"]
         if not walls or not trvs:
@@ -385,6 +387,36 @@ class Heizen:
                              room.get("id"), room.get("name"))
             rt["followers_logged"] = out
         return out
+
+    # ------------------------------------------------------------ Mischbetrieb
+    def _assist_ids(self, room: dict) -> list[str]:
+        """Heizkörper-Thermostate, die als Zusatzheizung eigenständig gestellt werden."""
+        climates = room.get("climates") or []
+        return [c for c in room.get("assist_entities") or [] if c in climates]
+
+    def _assist(self, room: dict, rt: dict, result: dict, room_temp: float | None) -> None:
+        if not self._assist_ids(room):
+            rt["assist_on"] = None
+            return
+        temp = room_temp  # ohne Zusatz-Heizkörper gemessen (siehe _room_values)
+        before = rt.get("assist_on")
+        on = assist_on(result["mode"], temp, result["target"], float(room.get("assist_diff") or 0.5), bool(before))
+        rt["assist_on"], rt["assist_temp"] = on, temp
+        if before is not None and before != on:
+            why = {"vorheizen": "Vorheizen", "boost": "Boost", "entkalken": "Entkalken"}.get(result["mode"])
+            if on and not why:
+                why = f"Raum {self._t(temp)} °C, Soll {self._t(result['target'])} °C"
+            elif not on:
+                why = f"Raum {self._t(temp)} °C – Fußbodenheizung reicht" if result["target"] is not None and result["mode"] not in ("fenster", "sommer", "aus", "warm") else MODES[result["mode"]]
+            self.log.add("target", "Heizkörper hilft nach" if on else "Heizkörper aus – Fußbodenheizung allein", why,
+                         room.get("id"), room.get("name"))
+
+    def _assist_status(self, room: dict, rt: dict) -> dict[str, Any] | None:
+        ids = self._assist_ids(room)
+        if not ids:
+            return None
+        return {"entities": ids, "on": bool(rt.get("assist_on")), "diff": float(room.get("assist_diff") or 0.5),
+                "room_temp": rt.get("assist_temp")}
 
     def _find_batteries(self) -> None:
         """Batterie-Sensoren an den Geräten jedes Raums suchen (Thermostate, Fenster, Sensoren)."""
@@ -840,7 +872,12 @@ class Heizen:
             temp = _float(state.state) if state else None
         if temp is None:
             values = []
-            for entity_id in room.get("climates") or []:
+            assist = set(room.get("assist_entities") or [])
+            # Zusatz-Heizkörper messen am Heizkörper zu warm – nur, wenn es sonst nichts gibt
+            climates = [c for c in room.get("climates") or [] if c not in assist] or room.get("climates") or []
+            # Wandthermostate messen die Raumluft, Heizkörper-Thermostate am Heizkörper: Wand zählt vor
+            climates = [c for c in climates if self._kind(c) == "wall"] or climates
+            for entity_id in climates:
                 state = self.hass.states.get(entity_id)
                 if state is not None:
                     value = _float(state.attributes.get("current_temperature"))
@@ -1137,6 +1174,7 @@ class Heizen:
                 schedule_next_on=schedule_next_on,
             )
             rt["warm"] = result["mode"] == "warm"
+            self._assist(room, rt, result, room_temp)
             self._learn(room_id, rt, result, room_temp, now)
             result.update(
                 preheat_mode=self._preheat_mode(room),
@@ -1170,6 +1208,7 @@ class Heizen:
                 pair_broken=sorted(rt.get("pair_broken") or {}),
                 conflicts=self._conflicts(room, now),
                 duty_blocked=[c for c in room.get("climates") or [] if self._duty_blocked(c)],
+                assist=self._assist_status(room, rt),
             )
             for c in result["conflicts"]:
                 if f"conflict:{c['id']}" not in self._flags:
@@ -1322,9 +1361,29 @@ class Heizen:
             elif state.state == "off":
                 continue  # vom Nutzer ausgeschaltet: respektieren
 
+            if entity_id in self._assist_ids(room):
+                await self._set_assist(room, rt, result, now, entity_id)
+                continue
             await self._calibrate(room, rt, room_temp, now, entity_id)
             await self._set_temperature(room, rt, result, room_temp, now, entity_id)
             await self._set_valve(room, rt, result, room_temp, now, entity_id)
+
+    async def _set_assist(self, room: dict, rt: dict, result: dict, now: float, entity_id: str) -> None:
+        """Heizkörper im Mischbetrieb: mitheizen (Raum-Soll, auf den Raumsensor ausgeglichen) oder zu (Frostschutz)."""
+        if rt.get("assist_on"):
+            temp = rt.get("assist_temp")
+            state = self.hass.states.get(entity_id)
+            target = result["target"]
+            if result["mode"] not in ("boost", "entkalken") and state is not None and temp is not None:
+                # Das Thermostat misst am Heizkörper wärmer als der Raum: um den Unterschied höher stellen
+                target = compensated(target, _float(state.attributes.get("current_temperature")), temp)
+            res = dict(result, target=round(min(MAX_TEMP, max(target, result["target"])), 1))
+            label = "Zusatzheizung an"
+        else:
+            res = dict(result, target=float(self.settings.get("frost_temp") or 7))
+            label = "Zusatzheizung aus – Fußbodenheizung allein"
+        await self._set_temperature(room, rt, res, None, now, entity_id, tuned=False, label=label,
+                                    send_key=f"assist:{bool(rt.get('assist_on'))}")
 
     async def _calibrate(self, room: dict, rt: dict, room_temp: float | None, now: float, entity_id: str) -> None:
         """Offset des Thermostats so setzen, dass es die Temperatur des Raumsensors misst."""
@@ -1401,14 +1460,15 @@ class Heizen:
         self.log.add("command", f"{self._name(entity_id)} → wieder {previous}", "vorheriger Modus nach der Pause", room.get("id"), room.get("name"))
 
     async def _set_temperature(
-        self, room: dict, rt: dict, result: dict, room_temp: float | None, now: float, entity_id: str
+        self, room: dict, rt: dict, result: dict, room_temp: float | None, now: float, entity_id: str,
+        tuned: bool = True, label: str | None = None, send_key: str | None = None,
     ) -> None:
         state = self.hass.states.get(entity_id)
         if state is None:
             return
         attrs = state.attributes
         target = result["target"]
-        tunable = result["mode"] not in NO_TUNING_MODES and target > MIN_TEMP
+        tunable = tuned and result["mode"] not in NO_TUNING_MODES and target > MIN_TEMP
         if tunable and result["mode"] != "boost":
             target = aggressive(
                 target,
@@ -1440,17 +1500,18 @@ class Heizen:
         # Funk ausgelastet: nur Wechsel der Betriebsart oder größere Änderungen, höchstens alle 15 Minuten
         last = rt["last_sent"].get(entity_id)
         last_mode = rt.setdefault("sent_mode", {}).get(entity_id)
+        mode_key = send_key or result["mode"]
         if not radio_should_send(self.haus.radio_busy, current, value, now - last[1] if last else None,
-                                 important=last_mode != result["mode"]):
+                                 important=last_mode != mode_key):
             return
-        rt["sent_mode"][entity_id] = result["mode"]
+        rt["sent_mode"][entity_id] = mode_key
         rt["last_sent"][entity_id] = (value, now)
         await self._call(
             "climate", "set_temperature", {"entity_id": entity_id, "temperature": value}
         )
         extra = f" · gesendet {self._t(value)} °C (Ausgleich)" if abs(value - result["target"]) >= 0.05 else ""
         self.log.add("command", f"{self._name(entity_id)} → {self._t(value)} °C",
-                     f"Ziel {self._t(result['target'])} °C · {MODES[result['mode']]}{extra}", room.get("id"), room.get("name"))
+                     label or f"Ziel {self._t(result['target'])} °C · {MODES[result['mode']]}{extra}", room.get("id"), room.get("name"))
 
     # ------------------------------------------------------------ Statistik
     def _stat(self, room_id: str) -> dict[str, float]:

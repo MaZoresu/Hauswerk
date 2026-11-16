@@ -470,3 +470,47 @@ def test_zweite_regelung_kopplung_und_funk(hw):
     assert any(t.startswith("Zweite Regelung") for t in titles)
     assert "Wandthermostat stellt die Heizkörper" in titles
     assert "Heizkörper Wohnzimmer folgt dem Wandthermostat nicht" in titles
+
+
+def test_mischbetrieb(hw):
+    """Fußbodenheizung über das Wandthermostat, ein Heizkörper in der Gruppe, einer als Zusatzheizung."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        DEVS.clear()
+        NOW[0] = datetime(2026, 11, 16, 9, 0, tzinfo=timezone.utc)  # 10:00 lokal, Komfort
+        hass = Hass()
+        hass.set("climate.wth", "heat", {"current_temperature": 20.8, "temperature": 21.0, "model": "HmIP-WTH-2"}, "WTH Bad")
+        hass.set("climate.trv_gruppe", "heat", {"current_temperature": 23.0, "temperature": 21.0, "model": "HMIP-eTRV"}, "Heizkörper Gruppe")
+        hass.set("climate.trv_zusatz", "heat", {"current_temperature": 22.5, "temperature": 21.0, "model": "HMIP-eTRV"}, "Heizkörper Zusatz")
+        log, haus, ctl = await _setup(hw, hass)
+        await ctl.async_save_room({"id": "bad", "name": "Bad", "comfort": 21, "eco": 18, "enabled": True, "type": "flaeche",
+                                   "climates": ["climate.wth", "climate.trv_gruppe", "climate.trv_zusatz"],
+                                   "assist_entities": ["climate.trv_zusatz"], "assist_diff": 0.5,
+                                   "schedule": [{"days": [0, 1, 2, 3, 4, 5, 6], "start": "06:00", "end": "22:00"}]})
+        res = ctl.status()["rooms"]["bad"]
+        # Raumtemperatur ohne die Heizkörper (nur Wandthermostat)
+        assert res["room_temp"] == 20.8
+        # Heizkörper in der Gruppe folgt, Zusatz-Heizkörper ist zu (nur 0,2 °C unter Soll)
+        assert res["followers"] == ["climate.trv_gruppe"]
+        assert res["assist"]["on"] is False
+        sent = {d["entity_id"]: d["temperature"] for dom, s, d in hass.calls if s == "set_temperature"}
+        assert sent == {"climate.trv_zusatz": 7.0}
+        # Raum kühlt aus: Zusatz-Heizkörper hilft, um seinen Messfehler höher gestellt
+        hass.set("climate.wth", "heat", {"current_temperature": 20.4, "temperature": 21.0, "model": "HmIP-WTH-2"}, "WTH Bad")
+        hass.set("climate.trv_zusatz", "heat", {"current_temperature": 21.4, "temperature": 7.0, "model": "HMIP-eTRV"}, "Heizkörper Zusatz")
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["bad"]
+        assert res["assist"]["on"] is True
+        assert hass.calls[-1][2] == {"entity_id": "climate.trv_zusatz", "temperature": 22.0}
+        # bis kurz vor Soll an, dann wieder zu
+        hass.set("climate.wth", "heat", {"current_temperature": 20.95, "temperature": 21.0, "model": "HmIP-WTH-2"}, "WTH Bad")
+        hass.set("climate.trv_zusatz", "heat", {"current_temperature": 22.0, "temperature": 22.0, "model": "HMIP-eTRV"}, "Heizkörper Zusatz")
+        await ctl.async_evaluate()
+        assert ctl.status()["rooms"]["bad"]["assist"]["on"] is False
+        assert hass.calls[-1][2] == {"entity_id": "climate.trv_zusatz", "temperature": 7.0}
+        return log
+
+    log = asyncio.run(run())
+    titles = [e["title"] for e in log.entries]
+    assert "Heizkörper hilft nach" in titles and "Heizkörper aus – Fußbodenheizung allein" in titles

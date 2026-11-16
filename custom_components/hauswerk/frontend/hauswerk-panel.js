@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.22.1";
+const VERSION = "0.23.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1492,6 +1492,7 @@ class HauswerkPanel extends HTMLElement {
       icons.push(si("mdi:valve", dv.valve > 0 ? "#fb923c" : "var(--muted)", `Ventil${dv.valves > 1 ? "e (höchster Wert)" : ""}: ${fmt(dv.valve, 0)} % offen`, `${fmt(dv.valve, 0)} %`));
     // Fußbodenheizung: nur das Symbol, solange sie heizt (Details als Quickinfo)
     if (dv.floor?.on) icons.push(si("mdi:heating-coil", "#f97316", `${dv.floor.label} heizt – ${dv.floor.names}`));
+    if (s.assist?.on) icons.push(si("mdi:radiator", "#f97316", "Heizkörper hilft nach (Mischbetrieb)"));
     const hum = humidityInfo(s.humidity);
     if (hum) icons.push(si(hum.i, hum.t ? hum.c : "var(--muted)", `Luftfeuchte ${fmt(s.humidity, 0)} %${hum.t ? " – " + hum.t : ""}`, `${fmt(s.humidity, 0)} %`));
     const tr = !["aus", "fenster", "sommer", "entkalken", "warm", "boost"].includes(mode) ? trend(s.room_temp, s.target) : null;
@@ -1571,7 +1572,9 @@ class HauswerkPanel extends HTMLElement {
         const bad = !st || ["unavailable", "unknown"].includes(st.state);
         const v = this._valveOf(id);
         const follows = (s.followers || []).includes(id);
-        return dev(follows ? "mdi:radiator" : "mdi:thermostat", follows ? "Heizkörper · folgt dem Wandthermostat" : "Thermostat · stellt ein", id, bad ? "nicht erreichbar" : `${val(id, "current_temperature")} → ${val(id, "temperature")}${st.attributes.hvac_action === "heating" ? " · heizt" : ""}${v != null ? ` · Ventil ${fmt(v, 0)} %` : ""}`, !bad);
+        const assist = (s.assist?.entities || []).includes(id);
+        return dev(follows || assist ? "mdi:radiator" : "mdi:thermostat",
+          assist ? `Heizkörper · Zusatzheizung, gerade ${s.assist.on ? "an" : "zu"}` : follows ? "Heizkörper · folgt dem Wandthermostat" : "Thermostat · stellt ein", id, bad ? "nicht erreichbar" : `${val(id, "current_temperature")} → ${val(id, "temperature")}${st.attributes.hvac_action === "heating" ? " · heizt" : ""}${v != null ? ` · Ventil ${fmt(v, 0)} %` : ""}`, !bad);
       }),
       ...(room.windows || []).map((id) => {
         const st = S[id];
@@ -1818,7 +1821,8 @@ class HauswerkPanel extends HTMLElement {
           ${(() => {
             const dv = this._devIndicators(room);
             return (dv.valve != null ? `<span class="rm-dev ${dv.valve > 0 ? "on" : ""}" title="Ventil ${fmt(dv.valve, 0)} % offen"><ha-icon icon="mdi:valve"></ha-icon>${fmt(dv.valve, 0)}%</span>` : "")
-              + (dv.floor?.on ? `<span class="rm-dev on" title="${esc(dv.floor.label)} heizt – ${esc(dv.floor.names)}"><ha-icon icon="mdi:heating-coil"></ha-icon></span>` : "");
+              + (dv.floor?.on ? `<span class="rm-dev on" title="${esc(dv.floor.label)} heizt – ${esc(dv.floor.names)}"><ha-icon icon="mdi:heating-coil"></ha-icon></span>` : "")
+              + (s.assist?.on ? `<span class="rm-dev on" title="Heizkörper hilft nach (Mischbetrieb)"><ha-icon icon="mdi:radiator"></ha-icon></span>` : "");
           })()}
           ${this._admin ? `<button class="icon tiny" data-action="room-edit" data-id="${room.id}" title="Bearbeiten"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
         </div>
@@ -2754,6 +2758,7 @@ class HauswerkPanel extends HTMLElement {
           ...(rs.humidity != null ? [["mdi:water-percent", `${fmt(rs.humidity, 0)} %`, "var(--muted)"]] : []),
           ...(dv.valve != null ? [["mdi:valve", `Ventil ${fmt(dv.valve, 0)} %`, dv.valve > 0 ? "#fb923c" : "var(--muted)"]] : []),
           ...(dv.floor?.on ? [["mdi:heating-coil", `${dv.floor.label} heizt`, "#f97316"]] : []),
+          ...(rs.assist ? [["mdi:radiator", rs.assist.on ? "Heizkörper hilft nach" : "Heizkörper zu", rs.assist.on ? "#f97316" : "#64748b"]] : []),
           ...(rs.windows_open ? [["mdi:window-open-variant", "Fenster offen", "#22d3ee"]] : []),
         ];
         const auto = room.enabled !== false;
@@ -3223,7 +3228,15 @@ class HauswerkPanel extends HTMLElement {
             : "Kein Paar aus Wandthermostat und Heizkörper-Thermostat erkannt.";
           return `<div class="field"><span><ha-icon icon="mdi:link-variant"></ha-icon> Wandthermostat und Heizkörper gekoppelt</span>
             ${segs("pair-mode", r.pair_mode || "auto", [["auto", "Automatisch erkennen", "mdi:link-variant"], ["off", "Alle selbst stellen", "mdi:link-variant-off"]])}</div>
-            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${state} Bei Homematic IP steuert das Wandthermostat die Heizkörper-Thermostate im selben CCU-Raum selbst. Hauswerk erkennt das am Gerätemodell (z. B. HmIP-WTH und HmIP-eTRV) und prüft laufend: weicht ein Heizkörper länger als 15 Minuten ab, stellt Hauswerk ihn wieder selbst. Das spart Funkbefehle.</p>`;
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${state} Bei Homematic IP steuert das Wandthermostat die Heizkörper-Thermostate seiner Heizgruppe selbst. Hauswerk erkennt das am Gerätemodell (z. B. HmIP-WTH und HmIP-eTRV) und prüft laufend: weicht ein Heizkörper länger als 15 Minuten ab, stellt Hauswerk ihn wieder selbst. Das spart Funkbefehle.</p>`;
+        })() : ""}
+        ${(r.climates || []).length > 1 ? (() => {
+          const sel = r.assist_entities || [];
+          const as = this._status?.rooms?.[r.id]?.assist;
+          return `<div class="field"><span><ha-icon icon="mdi:radiator"></ha-icon> Mischbetrieb – Heizkörper als Zusatzheizung</span>
+            <div class="pills">${(r.climates || []).map((id) => `<button class="pill ${sel.includes(id) ? "on" : ""}" data-action="assist-toggle" data-id="${esc(id)}"><ha-icon class="pi" icon="${sel.includes(id) ? "mdi:check" : "mdi:radiator"}"></ha-icon>${esc(this._entityName(id))}</button>`).join("")}</div></div>
+            ${sel.length ? `<label class="field narrow"><span><ha-icon icon="mdi:thermometer-chevron-down"></ha-icon> Heizkörper hilft nach ab</span><div class="unit"><input type="number" step="0.1" min="0.2" max="3" data-room="assist_diff" value="${r.assist_diff ?? ""}" placeholder="0,5"><i>°C unter Soll</i></div></label>` : ""}
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${sel.length && as ? `Gerade: Heizkörper ${as.on ? "<b>heizt mit</b>" : "<b>zu</b> – Fußbodenheizung allein"}. ` : ""}Für Räume mit Fußbodenheizung und Heizkörper: Die Fußbodenheizung (über das Wandthermostat) trägt die Grundlast. Gewählte Heizkörper stellt Hauswerk selbst – auf Frostschutz (zu), solange der Boden reicht, und auf das Raum-Soll, wenn der Raum zu weit darunter liegt, beim Vorheizen und beim Boost. Ihren Messfehler am Heizkörper gleicht Hauswerk mit der Temperatur des Wandthermostats aus. Diese Heizkörper müssen in der CCU <b>aus der Heizgruppe</b> genommen und auf <b>manuell</b> gestellt sein; alle anderen Heizkörper bleiben in der Gruppe und folgen weiter dem Wandthermostat.</p>`;
         })() : ""}
         <div class="field"><span><ha-icon icon="mdi:eye-outline"></ha-icon> Weitere Geräte – nur anzeigen</span>${this._picker("show_entities", r.show_entities || [])}</div>
         <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Z. B. Heizkörper-Thermostat oder Stellantrieb der Fußbodenheizung: Heizwerk zeigt Ventilöffnung und Werte an der Raumkarte und auf der Raumseite, stellt aber nichts daran ein.</p>
@@ -4112,6 +4125,14 @@ class HauswerkPanel extends HTMLElement {
         if (this._pop) this._renderPop();
         this._toast("Wird beim nächsten Aufheizen neu gelernt");
         break;
+      case "assist-toggle": {
+        const room = this._dialog.room;
+        const sel = new Set(room.assist_entities || []);
+        sel.has(el.dataset.id) ? sel.delete(el.dataset.id) : sel.add(el.dataset.id);
+        room.assist_entities = [...sel];
+        this._renderDialog();
+        break;
+      }
       case "pair-mode":
         this._dialog.room.pair_mode = el.dataset.v === "auto" ? null : el.dataset.v;
         this._renderDialog();

@@ -109,6 +109,9 @@ ROOM_SCHEMA = vol.Schema(
         vol.Optional("show_entities", default=[]): ENTITY_LIST,
         # Wandthermostat und Heizkörper-Thermostate gekoppelt (z. B. Homematic IP): nur das Wandthermostat stellen
         vol.Optional("pair_mode"): _opt(vol.In(["auto", "off"])),
+        # Mischbetrieb: diese Heizkörper-Thermostate helfen der Fußbodenheizung nur nach (ab assist_diff °C unter Soll)
+        vol.Optional("assist_entities", default=[]): ENTITY_LIST,
+        vol.Optional("assist_diff"): _opt(vol.All(vol.Coerce(float), vol.Range(min=0.2, max=3))),
     },
     extra=vol.REMOVE_EXTRA,
 )

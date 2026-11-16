@@ -662,3 +662,21 @@ def radio_should_send(
     if abs(value - current) < min_step:
         return False
     return since_last is None or since_last >= min_interval
+
+
+# ------------------------------------------------------------ Mischbetrieb (Fußbodenheizung + Heizkörper)
+def assist_on(mode: str, room_temp: float | None, target: float | None, diff: float, was_on: bool) -> bool:
+    """Soll der Heizkörper als Zusatzheizung mitheizen?
+
+    Die Fußbodenheizung trägt die Grundlast. Der Heizkörper hilft beim Vorheizen, beim Boost und
+    sobald der Raum diff °C unter Soll liegt – bis das Soll fast erreicht ist (0,1 °C darunter).
+    """
+    if mode in ("vorheizen", "boost", "entkalken"):
+        return True
+    if mode in ("fenster", "sommer", "aus", "warm") or target is None:
+        return False
+    if room_temp is None:
+        return True  # ohne Messwert lieber mitheizen
+    if was_on:
+        return room_temp < target - 0.1
+    return room_temp <= target - max(0.1, diff)

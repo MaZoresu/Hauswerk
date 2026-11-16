@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.23.0 – 2026-11-16
+
+### Neu
+- **Mischbetrieb – Heizkörper als Zusatzheizung:** Für Räume mit Fußbodenheizung und Heizkörper. Unter *Raum › Geräte* einzelne Heizkörper-Thermostate als Zusatzheizung wählen. Die Fußbodenheizung über das Wandthermostat trägt die Grundlast; die gewählten Heizkörper bleiben zu (Frostschutz) und heizen nur mit, wenn der Raum zu weit unter Soll liegt (Standard 0,5 °C), beim Vorheizen und beim Boost – bis das Soll fast erreicht ist. Ihr Messfehler am Heizkörper wird mit der Temperatur des Wandthermostats ausgeglichen. Heizkörper, die nicht gewählt sind, bleiben in der Heizgruppe und folgen weiter dem Wandthermostat. An Kachel, Schnellmenü und Raumseite zeigt ein Heizkörper-Symbol, wenn er nachhilft; Wechsel stehen im Protokoll.
+
+### Geändert
+- **Raumtemperatur ohne Raumsensor:** Sind im Raum Wandthermostat und Heizkörper-Thermostate eingetragen, zählt nur noch der Messwert des Wandthermostats (Heizkörper-Thermostate messen am Heizkörper zu warm).
+
 ## 0.22.1 – 2026-11-16
 
 ### Behoben
