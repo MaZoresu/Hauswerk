@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.34.1 – 2026-11-16
+
+### Behoben
+- **Widgets hinzufügen schlug fehl** („Ungültiger Wert bei start_widgets…type“): Die neuen Widgets Rollläden, Nächste Fahrten, Heizleistung, Hinweise und Energie wurden beim Speichern der Startseite abgelehnt. Ein Test prüft jetzt, dass jedes Widget des Panels gespeichert werden darf.
+
 ## 0.34.0 – 2026-11-16
 
 ### Neu

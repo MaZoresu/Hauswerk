@@ -119,7 +119,8 @@ ROOM_SCHEMA = vol.Schema(
     extra=vol.REMOVE_EXTRA,
 )
 
-WIDGET_TYPES = ["heat", "presence", "weather", "rooms", "shortcuts", "windows", "schedule", "report", "values", "forecast"]
+WIDGET_TYPES = ["heat", "presence", "weather", "rooms", "shortcuts", "windows", "schedule", "report", "values", "forecast",
+                "hints", "power", "shutters", "rwnext", "energy"]
 WIDGET_SCHEMA = vol.Schema(
     {
         vol.Required("id"): vol.All(str, vol.Length(min=1, max=20)),
