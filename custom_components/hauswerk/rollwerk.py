@@ -64,7 +64,15 @@ PROFILE_SPEC: dict[str, tuple[Any, str]] = {
     "up_late": ("08:00", "time"), "up_late_we": ("08:00", "time"),
     "down_early": ("16:00", "time"), "down_early_we": ("16:00", "time"),
     "down_late": ("22:00", "time"), "down_late_we": ("22:00", "time"),
-    "workday_tomorrow": (None, "entity"),                   # Arbeitstag morgen (nur fürs Schließen)
+    "workday_tomorrow": (None, "entity"),
+    # Abends in zwei Stufen: Stufe 1 (halb) bei Sonnenrichtung/-höhe/Uhrzeit, Stufe 2 (ganz zu) zur spätesten Zeit
+    "close_stage1": (False, "bool"),
+    "stage1_trigger": ("azimuth", "choice"),   # azimuth | elevation | time
+    "stage1_azimuth": (250, "num"),
+    "stage1_elevation": (10, "num"),
+    "stage1_time": ("18:00", "time"),
+    "pos_stage1": (50, "num"),
+    "close_stage2": (True, "bool"),                   # Arbeitstag morgen (nur fürs Schließen)
     "calendar": (None, "entity"),
     "cal_open": ("Rollladen auf", "text"),
     "cal_close": ("Rollladen zu", "text"),
@@ -615,6 +623,8 @@ class Rollwerk:
                 rt["day"] = True
             return rt.get("day"), "Sonne/Helligkeit"
         up, down = self._windows(prof)
+        if prof.get("close_stage1") and down:
+            down = (down[1], down[1]) if prof.get("close_stage2", True) else None
         if up and rt.get("opened_on") != today and now_min >= up[0] and (ok_up is not False or now_min >= up[1]):
             rt["opened_on"] = today
             rt["why_day"] = "späteste Zeit" if ok_up is False else "Sonne/Helligkeit" if ok_up else "Zeit"
@@ -626,6 +636,31 @@ class Rollwerk:
             day = rt.get("closed_on") != today and now_min < (down[0] if down else 1440) and rt.get("day") is not False
         rt["day"] = day
         return day, rt.get("why_day" if day else "why_night") or "Zeit"
+
+    def _stage1(self, prof: dict, rt: dict, now_min: int, azimuth: float | None, elevation: float | None, today: str) -> bool:
+        """Stufe 1 erreicht? Einmal erreicht, gilt sie bis zum nächsten Morgen."""
+        if rt.get("stage1_on") == today:
+            return True
+        trig = prof.get("stage1_trigger") or "azimuth"
+        hit = False
+        if trig == "time":
+            hit = now_min >= _hm(prof.get("stage1_time"), "18:00")
+        elif trig == "azimuth":
+            hit = azimuth is not None and now_min >= 720 and azimuth >= float(prof.get("stage1_azimuth") or 250)
+        elif trig == "elevation":
+            hit = elevation is not None and now_min >= 720 and elevation <= float(prof.get("stage1_elevation") or 10)
+        if hit:
+            rt["stage1_on"] = today
+        return hit
+
+    @staticmethod
+    def _stage1_why(prof: dict) -> str:
+        trig = prof.get("stage1_trigger") or "azimuth"
+        if trig == "time":
+            return f"ab {prof.get('stage1_time') or '18:00'}"
+        if trig == "elevation":
+            return f"Sonne unter {float(prof.get('stage1_elevation') or 10):g}°"
+        return f"Sonne ab {float(prof.get('stage1_azimuth') or 250):g}°"
 
     def _shading(self, prof: dict, rt: dict, now: float, azimuth: float | None, elevation: float | None,
                  room_temp: float | None = None) -> tuple[bool, dict]:
@@ -721,6 +756,16 @@ class Rollwerk:
             if (cat == "shading" or rt.get("shade_ended_on") == today) and "prevent_shading_end_if_closed" in behavior \
                     and pos is not None and pos <= p_close + 2 and cat != "shading":
                 target, reason, cat = None, "Beschattung endet – Rollladen bleibt zu", "none"
+        # Abends in zwei Stufen
+        if prof.get("close_stage1") and "down" in feats:
+            p_st1 = int(prof.get("pos_stage1") if prof.get("pos_stage1") is not None else 50)
+            if day and self._stage1(prof, rt, now_min, azimuth, elevation, today) and (target is None or target > p_st1 or cat == "open"):
+                if not (cat == "shading" and target is not None and target <= p_st1):
+                    target, reason, cat = p_st1, f"Abends Stufe 1 ({self._stage1_why(prof)})", "close"
+            elif day is False and not prof.get("close_stage2", True):
+                target, reason, cat = p_st1, "Nacht: bleibt auf Stufe 1", "close"
+            elif day is False and cat == "close":
+                reason = "Abends Stufe 2 (späteste Zeit)"
         # Bewohner (z. B. schläft): nicht öffnen; auf Wunsch schließen
         if resident and prof.get("resident_sensor"):
             if "closing" in rconf:
@@ -944,12 +989,29 @@ class Rollwerk:
                 open_at = hit if hit is not None else (up[1] if sun_on else up[0])
             elif sun_on:
                 open_at = first(0, 1439, lambda el: el >= float(prof.get("sun_up") or 0))
-        if "down" in feats:
-            if "time" in feats and down:
+        two = bool(prof.get("close_stage1")) and "down" in feats
+        if two and down:
+            down = (down[1], down[1]) if prof.get("close_stage2", True) else None
+        if "down" in feats and not (two and down is None):
+            if two and down:
+                close_at = down[1]
+            elif "time" in feats and down:
                 hit = first(down[0], down[1], lambda el: el <= float(prof.get("sun_down") or 0)) if sun_on else None
                 close_at = hit if hit is not None else (down[1] if sun_on else down[0])
             elif sun_on:
                 close_at = first(max(open_at or 0, 720), 1439, lambda el: el <= float(prof.get("sun_down") or 0))
+        stage1 = None
+        if two:
+            trig = prof.get("stage1_trigger") or "azimuth"
+            if trig == "time":
+                stage1 = _hm(prof.get("stage1_time"), "18:00")
+            elif track:
+                if trig == "azimuth":
+                    stage1 = next((m for m, az, _el in track if m >= 720 and az >= float(prof.get("stage1_azimuth") or 250)), None)
+                else:
+                    stage1 = next((m for m, _az, el in track if m >= 720 and el <= float(prof.get("stage1_elevation") or 10)), None)
+            if stage1 is not None and close_at is not None and stage1 >= close_at:
+                stage1 = None
         shade: list[list[int]] = []
         if "shading" in feats and track:
             lo, hi = open_at if open_at is not None else 0, close_at if close_at is not None else 1440
@@ -971,6 +1033,7 @@ class Rollwerk:
             return None if m is None else f"{min(m, 1439) // 60:02d}:{min(m, 1439) % 60:02d}"
 
         out = {"open": hm(open_at), "close": hm(close_at), "shade": [[hm(a), hm(b)] for a, b in shade], "approx": approx,
+               "stage1": hm(stage1), "stage1_min": stage1, "stage1_pos": prof.get("pos_stage1") if two else None,
                "open_min": open_at, "close_min": close_at, "shade_min": shade, "sun": track is not None}
         if len(self._tl_cache) > 50:
             self._tl_cache.clear()
@@ -984,6 +1047,8 @@ class Rollwerk:
             events.append((tl["open_min"], "öffnet"))
         for a, b in tl.get("shade_min") or []:
             events += [(a, "Beschattung möglich"), (b, "Beschattung endet")]
+        if tl.get("stage1_min") is not None:
+            events.append((tl["stage1_min"], f"Stufe 1 auf {int(tl.get('stage1_pos') or 50)} %"))
         if tl.get("close_min") is not None:
             events.append((tl["close_min"], "schließt"))
         for m, what in sorted(events):

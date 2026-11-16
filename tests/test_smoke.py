@@ -745,3 +745,46 @@ def test_rollwerk_raum_aus_heizwerk(hw):
     # Fenster (gekippt) offen beim Schließen -> Lüftungsstellung statt zu
     assert hass.calls[-1] == ("cover", "set_cover_position", {"entity_id": "cover.wz", "position": 30})
     assert "gekippt – lüften" in st["reason"]
+
+
+def test_rollwerk_zwei_stufen(hw):
+    """Abends: Stufe 1 (50 %) sobald die Sonne im Westen steht, Stufe 2 (zu) zur spätesten Zeit."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 7, 16, 17, 0, tzinfo=timezone.utc)  # 18:00 lokal
+        hass = Hass()
+        feat = {"supported_features": 15}
+        hass.set("cover.wz", "open", {"current_position": 100, **feat}, "Wohnzimmer")
+        hass.set("sun.sun", "above_horizon", {"azimuth": 240, "elevation": 25}, "Sonne")
+        log, haus, ctl = await _setup(hw, hass)
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        await rw.async_start()
+        await rw.async_save_profile("standard", dict(rw.profiles["standard"], features=["up", "down", "time"], delay_random=0,
+                                                     close_stage1=True, stage1_trigger="azimuth", stage1_azimuth=250, pos_stage1=50,
+                                                     down_early="16:00", down_late="22:00"))
+        await rw.async_save_settings({"rw_covers": ["cover.wz"]})
+        steps = [rw.status()["covers"]["cover.wz"]["target"]]
+        # Sonne im Westen: Stufe 1
+        hass.set("sun.sun", "above_horizon", {"azimuth": 262, "elevation": 15}, "Sonne")
+        NOW[0] = datetime(2026, 7, 16, 18, 0, tzinfo=timezone.utc)
+        await rw.async_evaluate()
+        steps.append(hass.calls[-1][2]["position"])
+        reason1 = rw.status()["covers"]["cover.wz"]["reason"]
+        hass.set("cover.wz", "open", {"current_position": 50, **feat}, "Wohnzimmer")
+        # 22:01: Stufe 2
+        NOW[0] = datetime(2026, 7, 16, 21, 1, tzinfo=timezone.utc)
+        await rw.async_evaluate()
+        steps.append(hass.calls[-1][2]["position"])
+        reason2 = rw.status()["covers"]["cover.wz"]["reason"]
+        # Stufe 2 aus: bleibt nachts auf Stufe 1
+        hass.set("cover.wz", "closed", {"current_position": 0, **feat}, "Wohnzimmer")
+        await rw.async_evaluate()
+        await rw.async_save_profile("standard", dict(rw.profiles["standard"], close_stage2=False))
+        steps.append(hass.calls[-1][2]["position"])
+        return steps, reason1, reason2, rw
+
+    steps, reason1, reason2, rw = asyncio.run(run())
+    assert steps == [100, 50, 0, 50]
+    assert reason1 == "Abends Stufe 1 (Sonne ab 250°)" and reason2 == "Abends Stufe 2 (späteste Zeit)"

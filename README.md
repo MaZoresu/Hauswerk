@@ -163,7 +163,7 @@ Rollläden mit **Verhalten** (früher „Profile“) nach dem Vorbild der [Cover
 
 - **Rollläden-Seite:** nach Räumen aus Home Assistant, je Rollladen Stellung, was die Automatik gerade will und warum, ↑ ■ ↓ und Schieberegler; Hinweise für Beschattung, gekippt/offen, Bewohner schläft, von Hand – mit „Automatik übernimmt“.
 - **Verhalten:** jeder Rollladen nutzt ein Verhalten (z. B. „Standard“, „Süd mit Hitze“, „Schlafzimmer“) mit fünf Abschnitten. Zuerst nur das Wichtige, mit **Experte** alle Einstellungen der Cover Control Automation:
-  - **Tagesablauf:** nach Uhrzeit oder mit der Sonne (früheste/späteste Zeit, Werktag und frei getrennt, Sonnenhöhe); Experte: Kalender, Helligkeit, „Arbeitstag morgen“.
+  - **Tagesablauf:** nach Uhrzeit oder mit der Sonne (früheste/späteste Zeit, Werktag und frei getrennt, Sonnenhöhe), Stellungen in % für öffnen und schließen; abends wahlweise **in zwei Stufen** (Stufe 1 auf X % ab Sonnenrichtung, -höhe oder Uhrzeit, Stufe 2 zur spätesten Zeit ganz zu – beide schaltbar); Experte: Kalender, Helligkeit, „Arbeitstag morgen“.
   - **Sonnenschutz:** Fensterrichtung per Kompass und ein Satz mit − / + für Sonnenhöhe, Außentemperatur und Stellung; Experte: Bedingungen mit und/oder, Sonnenhöhe, Innen-/Außentemperatur, Helligkeit, Vorhersage, Wetterlage, Wartezeiten.
   - **Fenster & Lüften:** Tür offen = nicht herunterfahren (oder höchstens bis X %), gekippt = Lüftungsstellung.
   - **Ausnahmen:** niemand zu Hause (wie immer, tagsüber zu, beschattet) und Urlaub mit zufälligen Zeiten – beides aus Hauswerk › Anwesenheit/Urlaub; von Hand verstellt; Schlafzimmer-Schalter; Experte: Erzwingen.

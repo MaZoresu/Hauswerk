@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.29.0";
+const VERSION = "0.30.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -247,6 +247,8 @@ const WIZ_USES = [
   { id: "buero", label: "Büro", icon: "mdi:desk", comfort: 21, eco: 17, plan: "homeoffice", match: /b(ü|ue)ro|arbeit|office/ },
   { id: "flur", label: "Flur / Sonstiges", icon: "mdi:door", comfort: 18, eco: 16, plan: "ganztags", match: /flur|diele|gang|treppe|keller|hall/ },
 ];
+const RW_TIME_DEFAULTS = { up_early: "06:00", up_late: "08:00", up_early_we: "07:00", up_late_we: "08:00", down_early: "16:00", down_late: "22:00",
+  down_early_we: "16:00", down_late_we: "22:00", stage1_time: "18:00", reset_time: "00:01" };
 const RW_POPS = ["rwcovers", "rwstorm", "rwrecovery"];
 const RW_FEATURES = [["up", "Morgens öffnen"], ["down", "Abends schließen"], ["time", "Zeitsteuerung"], ["brightness", "Helligkeit"], ["sun", "Sonnenhöhe"], ["ventilate", "Lüften"], ["shading", "Beschattung"]];
 const RW_SECTIONS = [
@@ -2353,9 +2355,11 @@ class HauswerkPanel extends HTMLElement {
     const from = o ?? 0, to = c ?? 1440;
     const now = new Date();
     const nowM = now.getHours() * 60 + now.getMinutes();
+    const s1 = m(tl.stage1);
     const segs = [`<i class="d-day" style="left:${pc(from)};width:${pc(Math.max(0, to - from))}"></i>`]
+      .concat(s1 != null ? [`<i class="d-half" style="left:${pc(s1)};width:${pc(Math.max(10, to - s1))}"></i>`] : [])
       .concat((tl.shade || []).map(([a, b]) => `<i class="d-shade" style="left:${pc(m(a))};width:${pc(Math.max(10, m(b) - m(a)))}"></i>`));
-    const lab = [tl.open ? `<span style="left:${pc(o)}">${tl.approx ? "~" : ""}${tl.open}</span>` : "", tl.close ? `<span style="left:${pc(c)}">${tl.approx ? "~" : ""}${tl.close}</span>` : ""].join("");
+    const lab = [tl.open ? `<span style="left:${pc(o)}">${tl.approx ? "~" : ""}${tl.open}</span>` : "", s1 != null ? `<span class="s1" style="left:${pc(s1)}">${tl.stage1} · ${fmt(tl.stage1_pos ?? 50, 0)} %</span>` : "", tl.close ? `<span style="left:${pc(c)}">${tl.approx ? "~" : ""}${tl.close}</span>` : ""].join("");
     return `<div class="rwday ${small ? "small" : ""}"><div class="rwday-bar">${segs.join("")}<b class="d-now" style="left:${pc(nowM)}"></b></div>${small ? "" : `<div class="rwday-lab">${lab}</div>`}</div>`;
   }
 
@@ -2366,6 +2370,7 @@ class HauswerkPanel extends HTMLElement {
     const parts = [];
     if (tl?.open || tl?.close) parts.push(`heute ${tl.open || "–"} auf · ${tl.close || "–"} zu`);
     else parts.push({ time: "nach Uhrzeit", sun: "mit der Sonne", cal: "nach Kalender", free: "nur Sonne/Helligkeit" }[mode]);
+    if (p.close_stage1 && (p.features || []).includes("down")) parts.push(`abends ${fmt(p.pos_stage1 ?? 50, 0)} %${p.close_stage2 !== false ? `, dann ${fmt(p.pos_close ?? 0, 0)} %` : ""}`);
     if ((p.features || []).includes("shading")) parts.push(`Sonnenschutz${p.window_dir != null ? ` (${this._rwDirName(p.window_dir)})` : ""}`);
     if (p.away_mode && p.away_mode !== "normal") parts.push("Abwesend: " + (p.away_mode === "closed" ? "zu" : "beschattet"));
     return parts.join(" · ");
@@ -2465,7 +2470,7 @@ class HauswerkPanel extends HTMLElement {
     const row = (k, title, sub, ctl, text) => text ? this._setRow(`rwp_${k}`, title, sub, ctl, text, true)
       : `<div class="wxr ctl"><div class="wxr-l"><b>${title}</b>${sub ? `<small>${sub}</small>` : ""}</div><div class="wxr-v">${ctl}</div></div>`;
     const num = (k, def, min, max, step, unit) => `<div class="unit"><input type="number" min="${min}" max="${max}" step="${step}" data-rwp="${k}" data-kind="num" value="${p[k] ?? ""}" placeholder="${def ?? "–"}" ${dis}><i>${unit}</i></div>`;
-    const time = (k) => `<input type="time" data-rwp="${k}" data-kind="time" value="${esc(p[k] || "")}" ${dis}>`;
+    const time = (k) => `<input type="time" data-rwp="${k}" data-kind="time" value="${esc(p[k] || RW_TIME_DEFAULTS[k] || "")}" ${dis}>`;
     const bool = (k) => `<label class="switch"><input type="checkbox" data-rwp="${k}" data-kind="bool" ${p[k] ? "checked" : ""} ${dis}><span></span></label>`;
     const feat = (f) => `<label class="switch"><input type="checkbox" data-action="rwp-feat" data-v="${f}" ${(p.features || []).includes(f) ? "checked" : ""} ${dis}><span></span></label>`;
     const text = (k) => `<input type="text" data-rwp="${k}" data-kind="text" value="${esc(p[k] || "")}" maxlength="60" ${dis}>`;
@@ -2482,6 +2487,7 @@ class HauswerkPanel extends HTMLElement {
     const note = (t, icon = "mdi:information-outline") => `<p class="muted small"><ha-icon icon="${icon}"></ha-icon>${t}</p>`;
     const exBox = (html) => (ex ? `<div class="rwex"><div class="rwex-h"><ha-icon icon="mdi:school-outline"></ha-icon>Experte</div>${html}</div>` : "");
     const has = (f) => (p.features || []).includes(f);
+    const tok = (k, def, step, min, max, unit) => `<span class="tok"><button class="tok-b" data-action="rwp-step" data-k="${k}" data-d="${-step}" data-def="${def}" data-min="${min}" data-max="${max}" ${dis} aria-label="weniger">−</button><b>${fmt(p[k] ?? def, step < 1 ? 1 : 0)}${unit}</b><button class="tok-b" data-action="rwp-step" data-k="${k}" data-d="${step}" data-def="${def}" data-min="${min}" data-max="${max}" ${dis} aria-label="mehr">+</button></span>`;
     const meta = RW_SECTIONS.find(([x]) => x === sec) || RW_SECTIONS[0];
     const users = Object.entries(this._data.rollwerk?.covers || {}).filter(([, c]) => (c.profile || "standard") === (d.pid || "")).map(([id]) => this._entityName(id));
     let body = "";
@@ -2492,13 +2498,27 @@ class HauswerkPanel extends HTMLElement {
         body = `${!d.pid ? `<label class="field"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name</span>${text("name")}</label>` : ""}
           ${lbl("Wonach?")}${choice("_mode", [["time", "Uhrzeit", "mdi:clock-outline"], ["sun", "Mit der Sonne", "mdi:weather-sunset"], ...(ex || mode === "cal" ? [["cal", "Kalender", "mdi:calendar"]] : []), ...(ex || mode === "free" ? [["free", "Nur Sonne", "mdi:white-balance-sunny"]] : [])], "rwp-mode")}
           ${mode === "sun" ? note("Öffnet frühestens zur ersten Zeit, sobald die Sonne hoch genug steht – spätestens zur zweiten. Abends genauso andersherum.", "mdi:weather-sunset") : ""}
-          <div class="wxrows">${row("up", "Morgens öffnen", "", feat("up"))}</div>
-          ${has("up") && mode !== "cal" && mode !== "free" ? `${lbl("Öffnen · Werktag")}<div class="wxrows">${win("up_early", "up_late")}</div>${lbl("Öffnen · Wochenende & Feiertag")}<div class="wxrows">${win("up_early_we", "up_late_we")}</div>` : ""}
-          <div class="wxrows">${row("down", "Abends schließen", "", feat("down"))}</div>
-          ${has("down") && mode !== "cal" && mode !== "free" ? `${lbl("Schließen · vor Werktag")}<div class="wxrows">${win("down_early", "down_late")}</div>${lbl("Schließen · vor freiem Tag")}<div class="wxrows">${win("down_early_we", "down_late_we")}</div>` : ""}
+          <div class="rwstage"><div class="rwstage-h"><ha-icon icon="mdi:weather-sunset-up"></ha-icon><b>Morgens öffnen</b>${feat("up")}</div>
+            ${has("up") ? `<p class="rwline">auf ${tok("pos_open", 100, 5, 0, 100, " %")}</p>
+              ${mode !== "cal" && mode !== "free" ? `${lbl("Werktag")}<div class="wxrows">${win("up_early", "up_late")}</div>${lbl("Wochenende & Feiertag")}<div class="wxrows">${win("up_early_we", "up_late_we")}</div>` : ""}` : ""}</div>
+          <div class="rwstage"><div class="rwstage-h"><ha-icon icon="mdi:weather-sunset-down"></ha-icon><b>Abends schließen</b>${feat("down")}</div>
+            ${has("down") ? `
+              <div class="wxrows">${row("two", "In zwei Stufen", "erst halb, später ganz zu", bool("close_stage1"))}</div>
+              ${p.close_stage1 ? `
+                <div class="rwsub"><div class="rwsub-h"><i>1</i><b>Stufe 1</b></div>
+                  ${choice("stage1_trigger", [["azimuth", "Sonnenrichtung", "mdi:compass-outline"], ["elevation", "Sonnenhöhe", "mdi:weather-sunset"], ["time", "Uhrzeit", "mdi:clock-outline"]])}
+                  <p class="rwline">${(p.stage1_trigger || "azimuth") === "azimuth" ? `sobald die Sonne ab ${tok("stage1_azimuth", 250, 5, 90, 360, "°")} steht <small class="muted">(${this._rwDirName(p.stage1_azimuth ?? 250)})</small>`
+                    : p.stage1_trigger === "elevation" ? `sobald die Sonne unter ${tok("stage1_elevation", 10, 1, -10, 60, "°")} sinkt` : `um ${time("stage1_time")}`}
+                    auf ${tok("pos_stage1", 50, 5, 0, 100, " %")}</p></div>
+                <div class="rwsub"><div class="rwsub-h"><i>2</i><b>Stufe 2 – ganz zu</b><label class="switch"><input type="checkbox" data-rwp="close_stage2" data-kind="bool" ${p.close_stage2 !== false ? "checked" : ""} ${dis}><span></span></label></div>
+                  ${p.close_stage2 !== false ? `<p class="rwline">zur spätesten Zeit auf ${tok("pos_close", 0, 5, 0, 100, " %")}</p>
+                    ${mode !== "cal" ? `<div class="wxrows">${row("down_late", "Spätestens · vor Werktag", "", time("down_late"))}${row("down_late_we", "Spätestens · vor freiem Tag", "", time("down_late_we"))}</div>` : ""}`
+                    : `<p class="muted small">Ohne Stufe 2 bleibt der Rollladen nachts auf Stufe 1 und öffnet morgens wieder.</p>`}</div>`
+              : `<p class="rwline">auf ${tok("pos_close", 0, 5, 0, 100, " %")}</p>
+                ${mode !== "cal" && mode !== "free" ? `${lbl("Vor Werktag")}<div class="wxrows">${win("down_early", "down_late")}</div>${lbl("Vor freiem Tag")}<div class="wxrows">${win("down_early_we", "down_late_we")}</div>` : ""}`}` : ""}</div>
           ${mode === "sun" || mode === "free" ? `${lbl("Sonnenhöhe")}<div class="wxrows">
             ${row("su", "Öffnen ab", "0° = Sonnenaufgang", num("sun_up", 0, -20, 60, 0.5, "°"), "Negativ = in der Dämmerung, z. B. −4°. Positiv = erst wenn die Sonne über Nachbarhäusern steht.")}
-            ${row("sd", "Schließen ab", "0° = Sonnenuntergang", num("sun_down", 0, -20, 60, 0.5, "°"))}</div>` : ""}
+            ${p.close_stage1 ? "" : row("sd", "Schließen ab", "0° = Sonnenuntergang", num("sun_down", 0, -20, 60, 0.5, "°"))}</div>` : ""}
           ${mode === "cal" ? `<label class="field"><span><ha-icon icon="mdi:calendar"></ha-icon> Kalender</span>${ent("calendar", (id) => id.startsWith("calendar."), "–")}</label>
             <div class="wxrows">${row("co", "Termin fürs Öffnen", "Titel enthält", text("cal_open"), "Beginn = früheste, Ende = späteste Zeit.")}${row("cc", "Termin fürs Schließen", "Titel enthält", text("cal_close"))}</div>` : ""}
           ${note("Feiertage und Sonnenstand kommen aus Hauswerk › Einstellungen (Anwesenheit bzw. Wetter).", "mdi:home-cog-outline")}
@@ -2571,7 +2591,7 @@ class HauswerkPanel extends HTMLElement {
       }
       case "fine":
         body = `<label class="field"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name</span>${text("name")}</label>
-          <div class="wxrows">${row("po", "Offen", "100 % = ganz offen", num("pos_open", 100, 0, 100, 1, "%"))}${row("pc", "Geschlossen", "z. B. 10 % für Lüftungsschlitze", num("pos_close", 0, 0, 100, 1, "%"))}</div>
+          <div class="wxrows">${row("po", "Offen", "100 % = ganz offen", num("pos_open", 100, 0, 100, 1, "%"))}${row("pc", "Geschlossen", "z. B. 10 % für Lüftungsschlitze", num("pos_close", 0, 0, 100, 1, "%"))}${p.close_stage1 ? row("p1", "Abends Stufe 1", "", num("pos_stage1", 50, 0, 100, 1, "%")) : ""}${has("ventilate") ? row("pv2", "Lüften", "", num("pos_ventilate", 30, 0, 100, 1, "%")) : ""}${has("shading") ? row("ps2", "Beschattung", "", num("pos_shading", 25, 0, 100, 1, "%")) : ""}</div>
           ${exBox(`<div class="wxrows">${row("pt", "Toleranz", "", num("tolerance", 0, 0, 20, 1, "%"))}${row("pd", "Fahrzeit", "einmal ganz auf oder zu", num("drive_time", 90, 5, 300, 5, "s"))}
             ${row("df", "Verzögerung fest", "", num("delay_fix", 0, 0, 600, 1, "s"))}${row("dr", "Verzögerung zufällig bis", "", num("delay_random", 5, 0, 600, 1, "s"), "Verteilt die Fahrten, damit nicht alle Rollläden gleichzeitig funken.")}</div>
             ${lbl("Verhalten im Detail")}${checks("behavior", RW_BEHAVIOR)}`)}
@@ -6237,6 +6257,18 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .rwday.small .rwday-bar { height:7px; }
 .rwday-bar i { position:absolute; top:0; bottom:0; }
 .rwday-bar .d-day { background:color-mix(in srgb, #38bdf8 55%, var(--card2)); }
+.rwday-bar .d-half { background:repeating-linear-gradient(135deg, #6366f1 0 4px, #818cf8 4px 8px); }
+.rwday-lab span.s1 { color:#6366f1; font-weight:700; top:14px; }
+.rwday-lab { height:30px !important; }
+.rwstage { padding:12px; border:1px solid var(--line2); border-radius:16px; margin:10px 0; }
+.rwstage-h { display:flex; align-items:center; gap:10px; }
+.rwstage-h > ha-icon { color:#f59e0b; }
+.rwstage-h b { flex:1; font-size:15px; }
+.rwline { margin:10px 0 6px; line-height:2.2; }
+.rwsub { margin-top:10px; padding:10px 12px; border-radius:14px; background:var(--card2); }
+.rwsub-h { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.rwsub-h i { font-style:normal; width:22px; height:22px; border-radius:50%; display:grid; place-items:center; background:#6366f1; color:#fff; font-size:12px; font-weight:700; }
+.rwsub-h b { flex:1; }
 .rwday-bar .d-shade { background:repeating-linear-gradient(135deg, #f97316 0 4px, #fb923c 4px 8px); }
 .rwday-bar .d-now { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--text); border-radius:2px; }
 .rwday-lab { position:relative; height:16px; font-size:11px; color:var(--muted); }

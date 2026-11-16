@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.30.0 – 2026-11-16
+
+### Neu
+- **Abends in zwei Stufen schließen** (Verhalten › Tagesablauf › Abends schließen › „In zwei Stufen“):
+  - **Stufe 1** fährt auf eine eigene Stellung (z. B. 50 %), sobald die Sonne eine Himmelsrichtung erreicht (z. B. ab 250° = West), unter eine Höhe sinkt oder zu einer Uhrzeit.
+  - **Stufe 2** fährt zur spätesten Zeit (Werktag / vor freiem Tag getrennt) ganz zu. Stufe 2 lässt sich abschalten – dann bleibt der Rollladen nachts auf Stufe 1.
+  - Die Tagesleiste zeigt Stufe 1 mit Uhrzeit und Prozent, „Als Nächstes“ nennt sie ebenfalls.
+- **Prozent direkt im Tagesablauf:** „Morgens öffnen auf … %“ und „Abends schließen auf … %“ lassen sich jetzt dort mit − / + einstellen (vorher nur unter Feinheiten). Unter Feinheiten stehen alle Stellungen (offen, zu, Stufe 1, Lüften, Beschattung) beisammen.
+
 ## 0.29.0 – 2026-11-16
 
 ### Neu
