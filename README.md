@@ -52,7 +52,10 @@ Heizwerk                    Modul Heizen
   ├─ Räume                  /hauswerk/heizen/raeume  (Raumseite: /hauswerk/heizen/raum/<id>)
   ├─ Bericht                /hauswerk/heizen/bericht
   └─ Einstellungen          /hauswerk/heizen/einstellungen  (nur Heizwerk, Heizpläne darunter)
-Rollladen · Licht · Garten  geplant, ausgegraut
+Rollwerk                    Modul Rollläden
+  ├─ Rollläden              /hauswerk/rollwerk/rolllaeden
+  └─ Einstellungen          /hauswerk/rollwerk/einstellungen
+Licht · Garten              geplant, ausgegraut
 ⚙ Einstellungen            /hauswerk/einstellungen  (zentral, für alle Module)
   └─ Protokoll              /hauswerk/protokoll  (was wann warum entschieden wurde)
 🔔 Hinweise                 Pop-up mit allem, was zu beheben oder gut zu wissen ist
@@ -67,7 +70,7 @@ Rollladen · Licht · Garten  geplant, ausgegraut
 - **Heizwerk › Einstellungen:** nur was das Heizen betrifft – **Abwesenheit & Urlaub** (welche Temperatur, wenn niemand da ist oder Urlaub ist; Frostschutz nach langer Abwesenheit), **Saison**, **Heizpläne**, **Vorheizen** (auch nach Wetter), **Lüften & Schimmelschutz**, **Frostschutz**, **Boost**, **Entkalkungsschutz**, **Kalibrierung** und die **Räume**. Ganz oben führt ein Eintrag zu den zentralen Einstellungen.
 - Beide Einstellungsseiten sind Listen mit Suche; ein Tipp öffnet die Einzelheiten als Pop-up.
 - **Entitätssuche** (überall, wo Geräte gewählt werden): gewählte Entitäten als Karten mit aktuellem Wert und Raum; darunter **Vorschläge** mit Trefferquote und Begründung (Geräteklasse, Name, Raum aus Home Assistant, erreichbar), **Nach Raum** gruppiert und **Filter** nach Art und Erreichbarkeit. Temperaturunterschiede zeigt Hauswerk überall in °C.
-- **Kopfzeile:** schrumpft beim Scrollen auf eine Zeile mit Logo, Reitern, Glocke und Zahnrad. Auf dem Handy gibt es stattdessen unten eine Leiste **Start · Heizwerk · Einstellungen**; im Modul Heizwerk bleibt dessen Unterleiste **Räume · Bericht · Einstellungen** sichtbar.
+- **Kopfzeile:** schrumpft beim Scrollen auf eine Zeile mit Logo, Reitern, Glocke und Zahnrad. Auf dem Handy gibt es stattdessen unten eine Leiste **Start · Heizwerk · Rollwerk · Einstellungen**; im Modul Heizwerk bleibt dessen Unterleiste **Räume · Bericht · Einstellungen** sichtbar.
 - **Raumseite:** Ein Tipp auf den Raumnamen öffnet eine eigene Seite mit Raumkarte, Verlauf der letzten 24 Stunden (Raumtemperatur, Soll, Heizzeiten, offene Fenster), Geräten mit Live-Werten, Einstellungen im Überblick und den letzten 7 Tagen.
 - **Hinweise:** Glocke oben rechts mit Zahl. Ein Tipp listet alles, was zu beheben ist (z. B. Thermostat nicht erreichbar, **zweite Regelung** am selben Thermostat, **Funk ausgelastet**, **Batterie schwach** an Thermostat, Fensterkontakt oder Sensor, Raum ohne Thermostat, Kalender nicht lesbar) und was gut zu wissen ist (z. B. Fenster lange offen, **Jetzt lüften**, Fenster vermutlich offen) – jeweils mit Sprung an die richtige Stelle.
 - **Räume:** schmales Banner mit Ø-Temperatur, Kurzurteil (z. B. „2 Räume unter Soll“), Wetter und Kennzahlen (heizende Räume, Fenster, Außen, Luftfeuchte, heute geheizt). Raumkacheln **detailliert** (Boost und „⋯“-Menü für Heizplan, Bearbeiten und Automatik; heutiger Zeitplan; nur der wichtigste Hinweis) oder **kompakt** (Übersicht vieler Räume); die Wahl merkt sich jedes Gerät. Symbole an der Kachel: Fenster offen, Präsenz, Ventilöffnung in %, Fußbodenheizung (nur solange sie heizt) und Luftfeuchte – Details als Quickinfo. **Ein Tipp auf die Kachel** öffnet das Schnellmenü für manuelle Änderungen: Wunschtemperatur (± oder Komfort/Eco), Dauer (bis Planwechsel, 1/2/4/8 h), Boost, zurück zum Plan, Raumseite, Heizplan und Automatik.
@@ -172,7 +175,7 @@ Alles steht im Protokoll (Befehle, Sturm, Aussperrschutz, Fahrten von Hand).
 
 ```
 custom_components/hauswerk/
-  __init__.py       Einstieg, Panel, Module (hass.data["hauswerk"]: "log", "haus", "heizen")
+  __init__.py       Einstieg, Panel, Module (hass.data["hauswerk"]: "log", "haus", "heizen", "rollwerk")
   core.py           Hauswerk-Kern für alle Module: Anwesenheit, Urlaub (auch Kalender), Wetter (Frost-Vorhersage),
                     Benachrichtigungen mit Ruhezeit, Darstellung, Widgets, Berechtigungen (config/.storage/hauswerk.haus)
   logic.py          Modul Heizwerk: Regel-Logik ohne Home-Assistant-Abhängigkeit (getestet)
