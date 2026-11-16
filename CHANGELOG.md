@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.33.0 – 2026-11-16
+
+### Neu
+Vier neue Widgets für die Startseite (Startseite › Anpassen › „+“), je in klein, mittel und groß:
+- **Rollläden:** wie viele offen, zu und beschattet; „Alle hoch“ / „Alle runter“; von Hand verstellte Rollläden mit „Automatik“ zum Zurückgeben. Groß: alle Rollläden mit Stellung und Grund.
+- **Nächste Fahrten:** die nächsten Fahrten heute mit Uhrzeit und betroffenen Rollläden, darüber die Tagesleiste. Groß: eine Tagesleiste je Profil.
+- **Heizleistung:** Räume mit „Reicht nicht“, „Messung prüfen“ oder „Knapp“ aus dem Bericht (14 Tage). Groß: alle Räume mit Urteil und wichtigstem Hinweis.
+- **Hinweise:** der Inhalt der Glocke, jeder Hinweis führt zur passenden Stelle. Steht das Widget auf der Startseite, entfällt der gelbe Hinweis-Streifen darüber.
+
 ## 0.32.1 – 2026-11-16
 
 - Heizwerk: Die Statusleiste (heizen, Fenster, Anwesenheit, Außen, Hinweise) über Bericht, Heizplänen und Einstellungen entfällt. Hinweise bleiben über die Glocke oben erreichbar.

@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.32.1";
+const VERSION = "0.33.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -99,6 +99,10 @@ const WIDGETS = {
   schedule: { name: "Komfortzeiten", icon: "mdi:calendar-clock", c: "#f59e0b", text: "Wann welcher Raum als Nächstes warm wird oder absenkt" },
   report: { name: "Heizdauer", icon: "mdi:chart-bar", c: "#a78bfa", text: "Geheizte Stunden der letzten 7 Tage als Balken", go: "report" },
   values: { name: "Werte", icon: "mdi:gauge", c: "#94a3b8", text: "Beliebige Sensoren, z. B. Gaszähler, Strompreis oder Vorlauftemperatur", config: true },
+  hints: { name: "Hinweise", icon: "mdi:bell-outline", c: "#f59e0b", text: "Was zu beheben ist – Thermostate, Batterien, Fenster, Kalender – mit Sprung zur Stelle" },
+  power: { name: "Heizleistung", icon: "mdi:radiator", c: "#ef4444", text: "Räume, in denen die Heizung nicht reicht, knapp ist oder die Messung nicht stimmt (aus dem Bericht)", go: "report" },
+  shutters: { name: "Rollläden", icon: "mdi:window-shutter", c: "#0ea5e9", text: "Wie viele offen, zu oder beschattet sind, Alle hoch/runter und von Hand verstellte Rollläden", go: "shutters" },
+  rwnext: { name: "Nächste Fahrten", icon: "mdi:clock-outline", c: "#38bdf8", text: "Die nächsten Fahrten heute mit Uhrzeit und die Tagesleiste", go: "shutters" },
   forecast: { name: "Wetterprognose", icon: "mdi:weather-cloudy-clock", c: "#60a5fa", text: "Die nächsten Stunden oder Tage mit Tiefst- und Höchstwerten, Regen und Frost-Hinweis", size: "l", forecast: true },
 };
 const DEFAULT_WIDGETS = [{ type: "heat", size: "m" }, { type: "weather", size: "s" }, { type: "windows", size: "s" }, { type: "presence", size: "l" }, { type: "rooms", size: "l" }];
@@ -839,7 +843,7 @@ class HauswerkPanel extends HTMLElement {
     const list = this._widgets();
     const edit = this._wEdit && this._admin;
     return `
-      ${warn.length ? `
+      ${warn.length && !list.some((w) => w.type === "hints") ? `
       <button class="hstrip" data-action="hints-open">
         <ha-icon icon="mdi:alert-circle-outline"></ha-icon>
         <span class="grow"><b>${warn.length} Hinweis${warn.length > 1 ? "e" : ""}</b> · ${esc(warn[0].text)}${warn[0].sub ? ` (${esc(warn[0].sub)})` : ""}${warn.length > 1 ? " …" : ""}</span>
@@ -1122,6 +1126,125 @@ class HauswerkPanel extends HTMLElement {
       .map(({ r, i }) => `<div class="wrow ${z === "l" ? "tall" : ""}"><ha-icon icon="${esc(roomIcon(r))}"></ha-icon>
         <span class="grow"><b>${esc(r.name)}</b><small>${esc(i.src)}</small>${z === "l" && i.blocks ? this._dayBar(i.blocks, r, day, true) : ""}</span><em class="${i.comfort ? "hot" : ""}">${esc(i.text)}</em></div>`)
       .join("")}</div>`;
+  }
+
+  /** Eine Zeile der Hinweise (Glocke und Widget). */
+  _hintRow(x) {
+    const data = Object.entries(x.data).map(([k, v]) => `data-${k}="${esc(v)}"`).join(" ");
+    const can = this._admin || !["room-edit", "plan-open", "plan-sel"].includes(x.action);
+    return `<button class="hint ${x.lvl}" ${can ? `data-action="${x.action}" data-hint="1" ${data}` : "disabled"}>
+      <span class="sr-ic"><ha-icon icon="${x.icon}"></ha-icon></span>
+      <span class="sr-t"><b>${esc(x.text)}</b>${x.sub ? `<small class="wrap">${esc(x.sub)}</small>` : ""}</span>
+      ${can ? `<ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon>` : ""}</button>`;
+  }
+
+  _w_hints(w, z) {
+    const h = this._hints();
+    const warn = h.filter((x) => x.lvl === "warn").length;
+    if (!h.length) return `<div class="wok"><ha-icon icon="mdi:check-circle-outline"></ha-icon>Keine Hinweise – alles läuft.</div>`;
+    if (z === "s")
+      return `<div class="wbig"><span style="color:${warn ? tint("#f59e0b") : "inherit"}">${h.length}<small>Hinweis${h.length > 1 ? "e" : ""}</small></span></div>
+        <button class="wline wlink" data-action="hints-open" style="--c:${warn ? "#f59e0b" : "#60a5fa"}"><ha-icon icon="${warn ? "mdi:alert-circle-outline" : "mdi:information-outline"}"></ha-icon>${warn ? `${warn} zu beheben` : "nur zur Info"}</button>`;
+    const max = z === "l" ? 8 : 2;
+    return `<div class="hints">${h.slice(0, max).map((x) => this._hintRow(x)).join("")}</div>
+      ${h.length > max ? `<button class="link tiny wmore" data-action="hints-open">Alle ${h.length} Hinweise<ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}`;
+  }
+
+  /** Heizleistung je Raum aus dem Bericht (14 Tage). */
+  _w_power(w, z) {
+    const rep = this._report(14);
+    if (!rep) return `<div class="chart-empty"><div class="spinner"></div></div>`;
+    const an = this._analysis?.[14] || {};
+    const V = { weak: ["Reicht nicht", "#ef4444", "mdi:fire-alert"], sensor: ["Messung prüfen", "#f97316", "mdi:thermometer-alert"], tight: ["Knapp", "#f59e0b", "mdi:alert-circle-outline"],
+      good: ["Passt", "#22c55e", "mdi:check-circle-outline"], reserve: ["Reserve", "#0ea5e9", "mdi:arrow-down-bold-circle-outline"], nodata: ["Zu wenig Daten", "#94a3b8", "mdi:timer-sand"] };
+    const order = ["weak", "sensor", "tight", "good", "reserve", "nodata"];
+    const list = this._rooms().map((r) => ({ r, a: an[r.id] })).filter((x) => x.a).sort((x, y) => order.indexOf(x.a.verdict) - order.indexOf(y.a.verdict));
+    if (!list.length || list.every((x) => x.a.verdict === "nodata"))
+      return `<div class="wok" style="--c:#94a3b8"><ha-icon icon="mdi:timer-sand"></ha-icon>Noch zu wenig Daten – die Einschätzung kommt nach einigen Tagen.</div>`;
+    const need = list.filter((x) => ["weak", "sensor", "tight"].includes(x.a.verdict));
+    const bad = need.filter((x) => x.a.verdict !== "tight").length;
+    if (z === "s") {
+      const k = bad ? "#ef4444" : need.length ? "#f59e0b" : "#22c55e";
+      return `<div class="wbig"><span style="color:${need.length ? tint(k) : "inherit"}">${need.length}<small>${need.length === 1 ? "Raum" : "Räume"}</small></span></div>
+        <div class="wline" style="--c:${k}"><ha-icon icon="${need.length ? V[need[0].a.verdict][2] : "mdi:check"}"></ha-icon>${need.length ? esc(need.map((x) => x.r.name).join(", ")) : "alle werden warm"}</div>`;
+    }
+    const rows = z === "l" ? list : need;
+    if (!rows.length) return `<div class="wok"><ha-icon icon="mdi:check-circle-outline"></ha-icon>Alle Räume werden gut warm.</div>`;
+    return `<div class="wlist">${rows
+      .map(({ r, a }) => {
+        const [vl, vc, vi] = V[a.verdict] || V.nodata;
+        const f = a.facts || {};
+        const top = (a.findings || []).find((x) => x.level === "warn") || (a.findings || [])[0];
+        return `<div class="wrow"><span class="rdot" style="background:${this._roomColor(r.id)}"></span>
+          <span class="grow"><b>${esc(r.name)}</b><small>${f.ok_pct != null ? `Komfort ${f.ok_pct} %` : ""}${f.valve != null ? ` · Ventil Ø ${f.valve} %` : ""}${z === "l" && top ? ` · ${esc(top.title)}` : ""}</small></span>
+          <em class="wverd" style="--c:${vc}"><ha-icon icon="${vi}"></ha-icon>${vl}</em></div>`;
+      })
+      .join("")}</div>`;
+  }
+
+  _w_shutters(w, z) {
+    if (!this._data.rollwerk) return `<p class="muted small">Rollwerk ist nicht geladen.</p>`;
+    const covers = this._rwCovers();
+    if (!covers.length)
+      return `<div class="wok" style="--c:#94a3b8"><ha-icon icon="mdi:window-shutter"></ha-icon>Noch keine Rollläden</div>
+        ${this._admin ? `<button class="link tiny wmore" data-action="cwiz-open"><ha-icon icon="mdi:plus"></ha-icon>Rollladen hinzufügen</button>` : ""}`;
+    const pos = covers.map((c) => this._rwPos(c.st));
+    const nOpen = pos.filter((x) => x != null && x >= 95).length;
+    const nClosed = pos.filter((x) => x != null && x <= 5).length;
+    const nShade = covers.filter((c) => c.rs.cat === "shading" || c.rs.shading).length;
+    const manual = covers.filter((c) => c.rs.manual);
+    const storm = this._rwStatus?.storm;
+    const line = storm
+      ? `<div class="wline" style="--c:#ef4444"><ha-icon icon="mdi:weather-windy-variant"></ha-icon>Sturm – alle hoch</div>`
+      : manual.length
+        ? `<div class="wline" style="--c:#8b5cf6"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>${manual.length} von Hand</div>`
+        : nShade
+          ? `<div class="wline" style="--c:#f97316"><ha-icon icon="mdi:sun-thermometer-outline"></ha-icon>${nShade} beschattet</div>`
+          : `<div class="wline"><ha-icon icon="mdi:window-shutter"></ha-icon>${nClosed} zu</div>`;
+    if (z === "s") return `<div class="wbig"><span>${nOpen}<small>von ${covers.length} offen</small></span></div>${line}`;
+    const all = covers.map((c) => c.id).join(",");
+    const mini = (icon, val, cap) => `<div class="wmini"><ha-icon icon="${icon}"></ha-icon><b>${val}</b><small>${cap}</small></div>`;
+    const minis = `<div class="wminis">${mini("mdi:window-shutter-open", nOpen, "offen")}${mini("mdi:window-shutter", nClosed, "zu")}${mini("mdi:sun-thermometer-outline", nShade, "beschattet")}</div>`;
+    const btns = `<div class="wbtns"><button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="open"><ha-icon icon="mdi:arrow-up"></ha-icon>Alle hoch</button><button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="close"><ha-icon icon="mdi:arrow-down"></ha-icon>Alle runter</button></div>`;
+    const rowOf = (c) => {
+      const p = this._rwPos(c.st);
+      const bad = !c.st || ["unavailable", "unknown"].includes(c.st.state);
+      const txt = bad ? "nicht erreichbar" : p == null ? c.st.state : p >= 95 ? "offen" : p <= 5 ? "zu" : `${fmt(p, 0)} %`;
+      return `<div class="wrow"><ha-icon icon="${c.rs.manual ? "mdi:hand-back-right-outline" : bad ? "mdi:window-shutter-alert" : p != null && p >= 95 ? "mdi:window-shutter-open" : "mdi:window-shutter"}" style="${c.rs.manual ? "color:#8b5cf6" : ""}"></ha-icon>
+        <span class="grow"><b>${esc(this._entityName(c.id))}</b><small>${esc(c.rs.manual ? (c.rs.blocked ? "von Hand – Automatik wartet" : "von Hand") : c.rs.reason || c.rs.area || "")}</small></span>
+        ${c.rs.manual ? `<button class="link tiny" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="resume" title="Automatik übernimmt"><ha-icon icon="mdi:robot-outline"></ha-icon>Automatik</button>` : ""}<em>${esc(txt)}</em></div>`;
+    };
+    const rows = z === "l" ? [...manual, ...covers.filter((c) => !c.rs.manual)] : manual;
+    return `${z === "l" ? `<div class="wsplit"><div>` : ""}${minis}${btns}${z === "l" ? `</div><div>` : ""}${rows.length ? `<div class="wlist" ${z === "l" ? "" : `style="margin-top:10px"`}>${rows.map(rowOf).join("")}</div>` : ""}${z === "l" ? `</div></div>` : ""}`;
+  }
+
+  _w_rwnext(w, z) {
+    if (!this._data.rollwerk) return `<p class="muted small">Rollwerk ist nicht geladen.</p>`;
+    const covers = this._rwCovers().filter((c) => c.cfg.auto !== false);
+    if (!covers.length) return `<div class="wok" style="--c:#94a3b8"><ha-icon icon="mdi:window-shutter"></ha-icon>Keine Rollläden mit Automatik</div>`;
+    // gleiche Fahrten zusammenfassen: „19:42 Stufe 1 auf 50 %“ → Wohnzimmer, Küche
+    const ev = new Map();
+    for (const c of covers) {
+      if (!c.rs.next) continue;
+      if (!ev.has(c.rs.next)) ev.set(c.rs.next, []);
+      ev.get(c.rs.next).push(this._entityName(c.id));
+    }
+    const key = (t) => (t.match(/(\d\d):(\d\d)/) || []).slice(1).join("");
+    const list = [...ev.entries()].sort((a, b) => key(a[0]).localeCompare(key(b[0])));
+    const split = (t) => { const m = t.match(/^(ca\. )?(\d\d:\d\d) (.*)$/); return m ? [(m[1] ? "~" : "") + m[2], m[3]] : ["", t]; };
+    const tls = this._rwStatus?.timelines || {};
+    const pids = [...new Set(covers.map((c) => c.cfg.profile || "standard"))].filter((p) => tls[p]);
+    if (z === "s") {
+      if (!list.length) return `<div class="wok" style="--c:#94a3b8"><ha-icon icon="mdi:weather-night"></ha-icon>Heute nichts mehr</div>`;
+      const [t, what] = split(list[0][0]);
+      return `<div class="wbig"><span>${esc(t)}</span></div><div class="wline" style="--c:#38bdf8"><ha-icon icon="mdi:clock-outline"></ha-icon>${esc(what)} · ${esc(list[0][1].length === 1 ? list[0][1][0] : `${list[0][1].length} Rollläden`)}</div>`;
+    }
+    const rows = list.slice(0, z === "l" ? 8 : 4).map(([text, names]) => {
+      const [t, what] = split(text);
+      return `<div class="wrow"><em class="wtime">${esc(t)}</em><span class="grow"><b>${esc(what)}</b><small>${esc(names.join(", "))}</small></span></div>`;
+    }).join("");
+    const bars = (z === "l" ? pids : pids.slice(0, 1)).map((p) => `<div class="wtl">${pids.length > 1 || z === "l" ? `<small>${esc(this._rwProfName(p))}</small>` : ""}${this._rwDayBar(tls[p], z !== "l")}</div>`).join("");
+    return `${bars}${list.length ? `<div class="wlist">${rows}</div>` : `<div class="wok" style="--c:#94a3b8"><ha-icon icon="mdi:weather-night"></ha-icon>Heute keine Fahrten mehr</div>`}`;
   }
 
   _w_report(w, z) {
@@ -3784,14 +3907,7 @@ class HauswerkPanel extends HTMLElement {
 
       case "hints": {
         const h = this._hints();
-        const row = (x) => {
-          const data = Object.entries(x.data).map(([k, v]) => `data-${k}="${esc(v)}"`).join(" ");
-          const can = this._admin || !["room-edit", "plan-open", "plan-sel"].includes(x.action);
-          return `<button class="hint ${x.lvl}" ${can ? `data-action="${x.action}" data-hint="1" ${data}` : "disabled"}>
-            <span class="sr-ic"><ha-icon icon="${x.icon}"></ha-icon></span>
-            <span class="sr-t"><b>${esc(x.text)}</b>${x.sub ? `<small class="wrap">${esc(x.sub)}</small>` : ""}</span>
-            ${can ? `<ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon>` : ""}</button>`;
-        };
+        const row = (x) => this._hintRow(x);
         const warn = h.filter((x) => x.lvl === "warn"), info = h.filter((x) => x.lvl === "info");
         return {
           icon: h.length ? "mdi:bell-badge-outline" : "mdi:bell-check-outline", c: warn.length ? "#f59e0b" : "#34d399", title: "Hinweise",
@@ -6695,6 +6811,15 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .danger-t { color:#f87171; }
 .wb { flex:1; min-width:0; }
 .wb .presence { margin:0; }
+.wlink { all:unset; cursor:pointer; display:flex; align-items:center; gap:6px; margin-top:6px; font-size:12.5px; font-weight:600; color:var(--ct); }
+.wmore { margin-top:8px; }
+.wbtns { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+.wbtns button { flex:1; justify-content:center; }
+.wverd { display:inline-flex; align-items:center; gap:4px; font-style:normal; font-size:12px; font-weight:700; color:var(--ct); white-space:nowrap; padding:3px 8px; border-radius:99px; background:color-mix(in srgb, var(--c) 14%, transparent); }
+.wverd ha-icon { --mdc-icon-size:14px; }
+.wtime { font-style:normal; font-weight:800; font-size:15px; min-width:48px; }
+.wtl { margin-bottom:8px; }
+.wtl small { display:block; color:var(--muted); font-size:11px; margin-bottom:2px; }
 .wbig { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
 .wbig > span:first-child { font-size:38px; font-weight:800; letter-spacing:-.03em; line-height:1; }
 .wbig small { font-size:15px; font-weight:500; color:var(--muted); margin-left:3px; }
@@ -6719,6 +6844,7 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .sc.missing { opacity:.5; }
 .wok { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:14px; }
 .wok ha-icon { color:#34d399; }
+.wok[style] ha-icon { color:var(--c); }
 .wlist { display:grid; }
 .wrow { display:flex; align-items:center; gap:10px; padding:7px 0; border-top:1px solid var(--line); min-width:0; }
 .wrow:first-child { border-top:none; padding-top:0; }
