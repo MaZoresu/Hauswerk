@@ -36,7 +36,7 @@ SETTING_LABELS = {
     "away_action": "Abwesend-Verhalten", "long_away_days": "Lange Abwesenheit",
     "summer_mode": "Sommerpause", "summer_temp": "Heizgrenze", "summer_action": "Sommerpause-Verhalten",
     "summer_fallback": "Ersatz bei Sensorausfall", "season_entity": "Heizperiode-Entität",
-    "outside_sensor": "Außentemperatur", "weather_entity": "Wetterquelle",
+    "outside_sensor": "Außentemperatur", "wind_sensor": "Böen-Sensor", "weather_entity": "Wetterquelle",
     "cold_snap_temp": "Kälteeinbruch", "storm_kmh": "Sturm",
     "frost_temp": "Frostschutz", "boost_minutes": "Boost-Dauer", "liming": "Entkalken", "liming_day": "Entkalken",
     "liming_time": "Entkalken", "liming_minutes": "Entkalken", "liming_winter": "Entkalken",
@@ -93,7 +93,8 @@ HOUSE_DEFAULTS = {
     "outside_sensor": None,       # eigene Außentemperatur statt Wetterdienst
     "cold_snap_temp": 0.0,        # Kälteeinbruch: Tiefstwert der nächsten 3 Tage darunter
     "storm_kmh": 70.0,            # Sturm: Böen der nächsten 24 Stunden ab dieser Stärke
-    "sun_entity": "sun.sun",      # Sonnenstand (Darstellung nach Tageszeit, später Rollläden)
+    "sun_entity": "sun.sun",      # Sonnenstand (Darstellung nach Tageszeit, Rollwerk)
+    "wind_sensor": None,          # eigener Böen-/Windsensor (leer = Wetterdienst), z. B. für den Sturmschutz von Rollwerk
     # Startseite, Darstellung, Berechtigungen
     "start_widgets": None,        # Widgets der Startseite (None = Grundauswahl im Panel)
     "look_theme": "auto",         # auto = wie Home Assistant | light | dark

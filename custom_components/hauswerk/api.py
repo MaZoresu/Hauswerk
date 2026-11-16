@@ -158,6 +158,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("eco_force"): bool,
         vol.Optional("calibration_interval"): vol.All(vol.Coerce(int), vol.Range(min=1, max=120)),
         vol.Optional("outside_sensor"): _opt(ENTITY),
+        vol.Optional("wind_sensor"): _opt(ENTITY),
         vol.Optional("summer_temp"): vol.All(vol.Coerce(float), vol.Range(min=5, max=30)),
         vol.Optional("summer_action"): vol.In(["off", "frost"]),
         vol.Optional("liming"): bool,

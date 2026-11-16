@@ -10,7 +10,7 @@ Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite 
 | Modul | Stand |
 |---|---|
 | <img src="docs/icons/heizwerk.svg" height="20"> **Heizwerk** | fertig – raumweise Heizungsregelung (früher eine eigene Integration) |
-| <img src="docs/icons/rollwerk.svg" height="20"> **Rollwerk** | Rollläden mit Profilen wie die Cover Control Automation: Zeiten, Sonne, Helligkeit, Beschattung, Lüften, Bewohner, Sturm |
+| <img src="docs/icons/rollwerk.svg" height="20"> **Rollwerk** | Rollläden mit Verhalten wie die Cover Control Automation: Zeiten, Sonne, Helligkeit, Beschattung, Lüften, Bewohner, Sturm |
 | Licht | geplant |
 | Garten | geplant |
 
@@ -162,21 +162,18 @@ Danach kann **Warm genug** einen Raum noch abschalten (außer beim Boost).
 Rollläden mit **Profilen** nach dem Vorbild der [Cover Control Automation (CCA)](https://github.com/hvorragend/ha-blueprints) – ohne Blueprint und YAML, alles im Panel (Rollwerk › Rollläden und Rollwerk › Einstellungen).
 
 - **Rollläden-Seite:** nach Räumen aus Home Assistant, je Rollladen Stellung, was die Automatik gerade will und warum, ↑ ■ ↓ und Schieberegler; Hinweise für Beschattung, gekippt/offen, Bewohner schläft, von Hand – mit „Automatik übernimmt“.
-- **Profile:** jeder Rollladen nutzt ein Profil (z. B. „Standard“, „Süd mit Hitze“, „Schlafzimmer“). Ein Profil hat die Abschnitte:
-  - **Funktionen:** morgens öffnen, abends schließen, Zeitsteuerung, Helligkeit, Sonnenhöhe, Lüften, Beschattung; Helligkeit und Sonnenhöhe mit „oder“/„und“.
-  - **Positionen:** offen, geschlossen, Lüften, Aussperrschutz, Beschattung (und eine zweite Beschattungs-Stellung per Schalter), Toleranz, Fahrzeit.
-  - **Zeiten:** früheste/späteste Zeit zum Öffnen und Schließen, Werktag und frei getrennt, „Arbeitstag morgen“ fürs Schließen – oder Zeiten aus einem Kalender.
-  - **Helligkeit / Sonnenhöhe:** Schwellen zum Öffnen und Schließen, Spielraum, Mindestdauer.
-  - **Lüften:** gekippt = Lüftungsstellung, ganz offen = Aussperrschutz; Optionen wie bei CCA (ohne Verzögerung, Beschattung vor Lüften …).
-  - **Beschattung:** Beginn- und Ende-Bedingungen als „alle“/„eins davon“ aus Richtung (Azimut), Sonnenhöhe, Helligkeit, Temperatur innen/außen mit Spielraum, Vorhersage-Höchstwert, Wetterlage, eigener Schalter; Wartezeiten.
-  - **Bewohner:** Sensor „schläft“ – nicht öffnen, auf Wunsch schließen/öffnen beim Schlafen/Aufwachen.
-  - **Von Hand:** welche Fahrten die Hand-Stellung nicht überschreiben dürfen; zurücksetzen zur Uhrzeit, nach Zeit oder in einer Stellung.
-  - **Verzögerung, Erzwingen** (Pause, auf, zu, lüften, beschatten per Schalter) und **Verhalten** (z. B. nur einmal am Tag öffnen).
-- **Je Rollladen:** Profil, Kontakt „ganz offen“ und „gekippt“, Automatik und Sturmschutz an/aus.
-- **Sturmschutz:** ab der Sturmgrenze aus Hauswerk › Wetter hoch, Ende nach 15 Min. unter 80 %; Böen vom Wetterdienst oder eigenem Sensor.
+- **Verhalten:** jeder Rollladen nutzt ein Verhalten (z. B. „Standard“, „Süd mit Hitze“, „Schlafzimmer“) mit fünf Abschnitten. Zuerst nur das Wichtige, mit **Experte** alle Einstellungen der Cover Control Automation:
+  - **Tagesablauf:** nach Uhrzeit oder mit der Sonne (früheste/späteste Zeit, Werktag und frei getrennt, Sonnenhöhe); Experte: Kalender, Helligkeit, „Arbeitstag morgen“.
+  - **Sonnenschutz:** Fensterrichtung per Kompass, „wärmer als X °C“ und Stellung; Experte: Bedingungen mit und/oder, Sonnenhöhe, Innen-/Außentemperatur, Helligkeit, Vorhersage, Wetterlage, Wartezeiten.
+  - **Fenster & Lüften:** Tür offen = nicht herunterfahren (oder höchstens bis X %), gekippt = Lüftungsstellung.
+  - **Ausnahmen:** niemand zu Hause (wie immer, tagsüber zu, beschattet) und Urlaub mit zufälligen Zeiten – beides aus Hauswerk › Anwesenheit/Urlaub; von Hand verstellt; Schlafzimmer-Schalter; Experte: Erzwingen.
+  - **Feinheiten:** Name, Stellungen offen/zu; Experte: Toleranz, Fahrzeit, Verzögerung, Verhalten im Detail.
+- **Tagesleiste:** je Verhalten und Rollladen – heute öffnen, Beschattung möglich, schließen – und „Als Nächstes“.
+- **Je Rollladen:** Verhalten, Kontakt „ganz offen“ und „gekippt“, Automatik und Sturmschutz an/aus.
+- **Sturmschutz:** ab der Sturmgrenze aus Hauswerk › Wetter hoch, Ende nach 15 Min. unter 80 %; Böen vom Wetterdienst oder dem Böen-Sensor unter Hauswerk › Wetter.
 - **Nach Neustart:** nichts, verpasste Wechsel nachholen oder immer auf Sollstellung.
 
-Einstellungen aus Version 0.24 werden beim ersten Start übernommen (je Fassade ein Profil). Alles steht im Protokoll.
+Einstellungen aus Version 0.24 werden beim ersten Start übernommen (je Fassade ein Verhalten). Anwesenheit, Urlaub, Feiertage, Sonnenstand, Wetter und Sturmgrenze stellt man nur einmal unter Hauswerk ein. Alles steht im Protokoll.
 
 # Aufbau des Projekts
 

@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.26.0";
+const VERSION = "0.27.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -132,6 +132,7 @@ const PICKERS = {
   valve_entities: { scope: "room", multi: true, domains: ["number"] },
   workday_entity: { scope: "settings", multi: false, domains: ["binary_sensor"] },
   sun_entity: { scope: "settings", multi: false, domains: ["sun"] },
+  wind_sensor: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "wind_speed" },
   // Personen hinzufügen: wählt aus Personen und Trackern, die gewählten stehen schon als Chips da
   person_add: { scope: "settings", multi: true, domains: ["person", "device_tracker"], noCards: true },
   // Weitere Geräte im Raum, nur zur Anzeige (z. B. Ventil eines Heizkörper-Thermostats, Stellantrieb der Fußbodenheizung)
@@ -150,6 +151,7 @@ const PICK_HINTS = {
   demand_entity: ["zone", "circuit", "vaillant", "kessel", "therme", "heizkreis", "wärmepumpe", "boiler"],
   rw_covers: ["rollladen", "rolladen", "rollo", "shutter", "jalousie", "raffstore", "blind", "markise", "ra_"],
   rw_wind_entity: ["böe", "boe", "gust", "wind"],
+  wind_sensor: ["böe", "boe", "gust", "wind"],
   calibration_entities: ["calibration", "offset", "kalibrier"],
   valve_entities: ["valve", "ventil", "position", "opening"],
   comfort_entity: ["komfort", "comfort"],
@@ -248,12 +250,9 @@ const WIZ_USES = [
 const RW_POPS = ["rwcovers", "rwstorm", "rwrecovery"];
 const RW_FEATURES = [["up", "Morgens öffnen"], ["down", "Abends schließen"], ["time", "Zeitsteuerung"], ["brightness", "Helligkeit"], ["sun", "Sonnenhöhe"], ["ventilate", "Lüften"], ["shading", "Beschattung"]];
 const RW_SECTIONS = [
-  ["fn", "Funktionen", "mdi:format-list-checks", "#0ea5e9"], ["pos", "Positionen", "mdi:arrow-expand-vertical", "#38bdf8"],
-  ["time", "Zeiten", "mdi:clock-outline", "#6366f1", "time"], ["bright", "Helligkeit", "mdi:brightness-5", "#eab308", "brightness"],
-  ["sun", "Sonnenhöhe", "mdi:weather-sunset", "#f59e0b", "sun"], ["vent", "Lüften", "mdi:window-open-variant", "#22c55e", "ventilate"],
-  ["shade", "Beschattung", "mdi:sun-thermometer-outline", "#f97316", "shading"], ["res", "Bewohner", "mdi:bed-outline", "#a78bfa"],
-  ["man", "Von Hand", "mdi:hand-back-right-outline", "#8b5cf6"], ["delay", "Verzögerung", "mdi:timer-sand", "#64748b"],
-  ["force", "Erzwingen", "mdi:gesture-tap-button", "#ef4444"], ["beh", "Verhalten", "mdi:tune-variant", "#14b8a6"],
+  ["tag", "Tagesablauf", "mdi:weather-sunset", "#f59e0b"], ["shade", "Sonnenschutz", "mdi:sun-thermometer-outline", "#f97316", "shading"],
+  ["vent", "Fenster & Lüften", "mdi:window-open-variant", "#22c55e"], ["exc", "Ausnahmen", "mdi:account-clock-outline", "#a78bfa"],
+  ["fine", "Feinheiten", "mdi:tune-variant", "#64748b"],
 ];
 const RW_WORDS = { fn: "funktionen automatik öffnen schließen", pos: "stellung position prozent fahrzeit toleranz", time: "uhrzeit früh spät werktag wochenende kalender",
   bright: "helligkeit lux sensor", sun: "sonnenhöhe elevation dämmerung", vent: "lüften fenster gekippt aussperrschutz",
@@ -1884,6 +1883,10 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Kompakte Raumkachel: Temperatur, Soll, Betriebsart und der heutige Plan. */
+  _wrapInd(html) {
+    return html.trim() ? `<div class="rm-ind">${html}</div>` : "";
+  }
+
   _roomMini(room) {
     if (!(room.climates || []).length) return this._roomSetup(room, true);
     const s = this._status?.rooms?.[room.id] || {};
@@ -1896,6 +1899,9 @@ class HauswerkPanel extends HTMLElement {
         <div class="rm-head">
           <span class="rm-ic"><ha-icon icon="${esc(roomIcon(room))}"></ha-icon></span>
           <button class="rm-name rlink" data-action="room-page" data-id="${room.id}" title="Raum öffnen">${esc(room.name)}</button>
+          ${this._admin ? `<button class="icon tiny" data-action="room-edit" data-id="${room.id}" title="Bearbeiten"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
+        </div>
+        ${this._wrapInd(`
           ${s.heating ? `<ha-icon class="rm-fire" icon="mdi:fire" title="Heizt"></ha-icon>` : ""}
           ${s.windows_open ? `<ha-icon class="rm-win" icon="mdi:window-open-variant" title="Fenster offen"></ha-icon>` : ""}
           ${(() => {
@@ -1904,8 +1910,7 @@ class HauswerkPanel extends HTMLElement {
               + (dv.floor?.on ? `<span class="rm-dev on" title="${esc(dv.floor.label)} heizt – ${esc(dv.floor.names)}"><ha-icon icon="mdi:heating-coil"></ha-icon></span>` : "")
               + (s.assist?.on ? `<span class="rm-dev on" title="Heizkörper hilft nach (Mischbetrieb)"><ha-icon icon="mdi:radiator"></ha-icon></span>` : "");
           })()}
-          ${this._admin ? `<button class="icon tiny" data-action="room-edit" data-id="${room.id}" title="Bearbeiten"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
-        </div>
+        `)}
         <div class="rm-body">
           <span class="rm-temp">${fmt(s.room_temp)}<small>°C</small></span>
           <span class="rm-tgt"><small>Soll</small><b style="color:${tint(tempColor(s.target))}">${fmt(s.target)} °C</b></span>
@@ -2254,7 +2259,7 @@ class HauswerkPanel extends HTMLElement {
     if (!this._data.rollwerk) return `<section class="card empty"><ha-icon icon="mdi:window-shutter-alert"></ha-icon><h2>Rollwerk nicht geladen</h2><p>Bitte Home Assistant neu starten.</p></section>`;
     if (!covers.length)
       return `<section class="card empty"><ha-icon icon="mdi:window-shutter"></ha-icon><h2>Noch keine Rollläden</h2>
-        <p>Wähle die Rollläden, die Rollwerk fahren soll – nach Profilen mit Zeiten, Sonne, Helligkeit, Beschattung, Lüften und Sturmschutz.</p>
+        <p>Wähle die Rollläden, die Rollwerk fahren soll – morgens auf, abends zu, Sonnenschutz, Lüften und Sturmschutz.</p>
         ${this._admin ? `<button class="primary" data-action="pop-open" data-pop="rwcovers"><ha-icon icon="mdi:plus"></ha-icon>Rollläden wählen</button>` : ""}</section>`;
     const pos = covers.map((c) => this._rwPos(c.st)).filter((x) => x != null);
     const nOpen = pos.filter((x) => x >= 95).length;
@@ -2295,6 +2300,7 @@ class HauswerkPanel extends HTMLElement {
       else if (c.rs.contact_open) flags.push(["mdi:door-open", "offen – Aussperrschutz", "#f59e0b"]);
       else if (c.rs.contact_tilted) flags.push(["mdi:window-open-variant", "gekippt – lüften", "#22c55e"]);
       else if (cat === "shading") flags.push(["mdi:sun-thermometer-outline", "Beschattung", "#f97316"]);
+      else if (cat === "away") flags.push(["mdi:home-export-outline", "niemand zu Hause", "#94a3b8"]);
       if (c.rs.resident) flags.push(["mdi:sleep", "Bewohner schläft", "#a78bfa"]);
       if (c.rs.manual) flags.push(["mdi:hand-back-right-outline", c.rs.blocked ? "von Hand – Automatik wartet" : "von Hand", "#8b5cf6"]);
       if (c.cfg.auto === false) flags.push(["mdi:robot-off-outline", "Automatik aus", "#94a3b8"]);
@@ -2307,6 +2313,7 @@ class HauswerkPanel extends HTMLElement {
             <span class="grow"><b>${esc(this._entityName(c.id))}</b><small>${esc(posTxt)}${why ? ` · ${esc(why)}` : ""}</small></span>
             ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="rwc:${esc(c.id)}" title="Einstellungen dieses Rollladens"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
           </div>
+          ${c.cfg.auto !== false && this._rwStatus?.timelines?.[c.cfg.profile || "standard"] ? `<div class="rw-next">${this._rwDayBar(this._rwStatus.timelines[c.cfg.profile || "standard"], true)}${c.rs.next ? `<small><ha-icon icon="mdi:clock-outline"></ha-icon>Als Nächstes: ${esc(c.rs.next)}</small>` : ""}</div>` : ""}
           ${flags.length ? `<div class="rw-flags">${flags.map(([i, l, k]) => `<span style="--c:${k}"><ha-icon icon="${i}"></ha-icon>${l}</span>`).join("")}${c.rs.manual ? `<button class="link" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="resume"><ha-icon icon="mdi:robot-outline"></ha-icon>Automatik übernimmt</button>` : ""}</div>` : ""}
           <div class="rw-ctl">
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="open" title="hoch" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-up"></ha-icon></button>
@@ -2329,28 +2336,43 @@ class HauswerkPanel extends HTMLElement {
     return this._data.rollwerk?.profiles?.[pid || "standard"]?.name || "Standard";
   }
 
-  /** Kurztexte der Profil-Abschnitte (Einstellungsliste und Profil-Übersicht). */
-  _rwSecSum(sec, p) {
-    const has = (f) => (p.features || []).includes(f);
-    const pc = (v) => (v == null || v === "" ? "–" : `${fmt(v, 0)} %`);
-    const ent = (id) => (id ? this._entityName(id) : "");
-    switch (sec) {
-      case "fn": return (p.features || []).map((f) => RW_FEATURES.find(([v]) => v === f)?.[1]).filter(Boolean).join(" · ") || "nichts gewählt";
-      case "pos": return `auf ${pc(p.pos_open ?? 100)} · zu ${pc(p.pos_close ?? 0)} · lüften ${pc(p.pos_ventilate ?? 30)} · Beschattung ${pc(p.pos_shading ?? 25)}`;
-      case "time":
-        if (p.time_mode === "calendar") return p.calendar ? `Kalender ${ent(p.calendar)} · „${p.cal_open}“ / „${p.cal_close}“` : "Kalender fehlt";
-        return `auf ${p.up_early}–${p.up_late} (frei ${p.up_early_we}–${p.up_late_we}) · zu ${p.down_early}–${p.down_late}`;
-      case "bright": return p.brightness_sensor ? `${ent(p.brightness_sensor)} · auf ab ${fmt(p.brightness_up, 0)} lx, zu bis ${fmt(p.brightness_down, 0)} lx` : "kein Helligkeitssensor";
-      case "sun": return `auf ab ${fmt(p.sun_up ?? 0, 1)}°, zu bis ${fmt(p.sun_down ?? 0, 1)}° Sonnenhöhe`;
-      case "vent": return `gekippt auf ${pc(p.pos_ventilate ?? 30)}${p.pos_lockout != null ? ` · offen auf ${pc(p.pos_lockout)}` : ""}${(p.vent_options || []).length ? ` · ${(p.vent_options || []).length} Optionen` : ""}`;
-      case "shade": return `Richtung ${fmt(p.azimuth_start, 0)}–${fmt(p.azimuth_end, 0)}°, Höhe ${fmt(p.elevation_min, 0)}–${fmt(p.elevation_max, 0)}° · ${(p.shade_start_and || []).concat(p.shade_start_or || []).length} Bedingungen · ${fmt((p.shade_wait_start ?? 300) / 60, 0)} Min. warten`;
-      case "res": return p.resident_sensor ? `${ent(p.resident_sensor)}${(p.resident_config || []).length ? ` · ${(p.resident_config || []).length} Optionen` : ""}` : "kein Bewohner-Sensor";
-      case "man": return (p.manual_block || []).length ? `hält bei ${(p.manual_block || []).map((v) => RW_MANUAL.find(([x]) => x === v)?.[1]).join(", ")}${(p.manual_reset || []).length ? ` · zurück: ${(p.manual_reset || []).map((v) => RW_RESET.find(([x]) => x === v)?.[1]).join(", ")}` : ""}` : "nächster automatischer Wechsel übernimmt";
-      case "delay": return `${fmt(p.delay_fix ?? 0, 0)} s fest + bis ${fmt(p.delay_random ?? 5, 0)} s zufällig`;
-      case "force": { const n = RW_FORCE.filter(([k]) => p[k]).length; return n ? `${n} Schalter` : "keine Schalter"; }
-      case "beh": return (p.behavior || []).length ? `${(p.behavior || []).length} von ${RW_BEHAVIOR.length} gewählt` : "Standard";
-    }
-    return "";
+  /** Wonach öffnet/schließt das Verhalten? time | sun | cal | free */
+  _rwMode(p) {
+    const f = p.features || [];
+    if (!f.includes("time")) return "free";
+    if (p.time_mode === "calendar") return "cal";
+    return f.includes("sun") || f.includes("brightness") ? "sun" : "time";
+  }
+
+  /** Tagesleiste: Nacht, offen, Beschattung möglich, jetzt-Strich und Zeiten darunter. */
+  _rwDayBar(tl, small = false) {
+    if (!tl) return "";
+    const m = (hm) => (hm ? Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5)) : null);
+    const pc = (x) => `${((x / 1440) * 100).toFixed(2)}%`;
+    const o = m(tl.open), c = m(tl.close);
+    const from = o ?? 0, to = c ?? 1440;
+    const now = new Date();
+    const nowM = now.getHours() * 60 + now.getMinutes();
+    const segs = [`<i class="d-day" style="left:${pc(from)};width:${pc(Math.max(0, to - from))}"></i>`]
+      .concat((tl.shade || []).map(([a, b]) => `<i class="d-shade" style="left:${pc(m(a))};width:${pc(Math.max(10, m(b) - m(a)))}"></i>`));
+    const lab = [tl.open ? `<span style="left:${pc(o)}">${tl.approx ? "~" : ""}${tl.open}</span>` : "", tl.close ? `<span style="left:${pc(c)}">${tl.approx ? "~" : ""}${tl.close}</span>` : ""].join("");
+    return `<div class="rwday ${small ? "small" : ""}"><div class="rwday-bar">${segs.join("")}<b class="d-now" style="left:${pc(nowM)}"></b></div>${small ? "" : `<div class="rwday-lab">${lab}</div>`}</div>`;
+  }
+
+  /** Kurztext eines Verhaltens für Listen. */
+  _rwProfSum(p) {
+    const tl = this._rwStatus?.timelines?.[p.id];
+    const mode = this._rwMode(p);
+    const parts = [];
+    if (tl?.open || tl?.close) parts.push(`heute ${tl.open || "–"} auf · ${tl.close || "–"} zu`);
+    else parts.push({ time: "nach Uhrzeit", sun: "mit der Sonne", cal: "nach Kalender", free: "nur Sonne/Helligkeit" }[mode]);
+    if ((p.features || []).includes("shading")) parts.push(`Sonnenschutz${p.window_dir != null ? ` (${this._rwDirName(p.window_dir)})` : ""}`);
+    if (p.away_mode && p.away_mode !== "normal") parts.push("Abwesend: " + (p.away_mode === "closed" ? "zu" : "beschattet"));
+    return parts.join(" · ");
+  }
+
+  _rwDirName(deg) {
+    return ["Nord", "Nordost", "Ost", "Südost", "Süd", "Südwest", "West", "Nordwest"][Math.round(((Number(deg) % 360) + 360) % 360 / 45) % 8];
   }
 
   _rwRows(p) {
@@ -2363,26 +2385,22 @@ class HauswerkPanel extends HTMLElement {
       ...covers.map((c) => ({
         g: "Rollläden", id: `rwc:${c.id}`, icon: "mdi:window-shutter", c: c.cfg.auto === false ? "#94a3b8" : "#38bdf8",
         title: this._entityName(c.id), off: c.cfg.auto === false,
-        sum: [`Profil „${this._rwProfName(c.cfg.profile)}“`, c.cfg.contact_open ? `offen: ${this._entityName(c.cfg.contact_open)}` : "", c.cfg.contact_tilted ? `gekippt: ${this._entityName(c.cfg.contact_tilted)}` : "", c.cfg.storm === false ? "ohne Sturmschutz" : ""].filter(Boolean).join(" · "),
-        words: `${c.id} profil fenster tür kontakt`,
+        sum: [`Verhalten „${this._rwProfName(c.cfg.profile)}“`, c.cfg.contact_open || c.cfg.contact_tilted ? "mit Fensterkontakt" : "", c.cfg.storm === false ? "ohne Sturmschutz" : ""].filter(Boolean).join(" · "),
+        words: `${c.id} verhalten profil fenster tür kontakt`,
       })),
-    ];
-    for (const prof of profiles) {
-      const n = covers.filter((c) => (c.cfg.profile || "standard") === prof.id).length;
-      const g = `Profil „${prof.name}“ · ${n} ${n === 1 ? "Rollladen" : "Rollläden"}`;
-      for (const [sec, title, icon, c, feat] of RW_SECTIONS) {
-        const off = feat && !(prof.features || []).includes(feat);
-        rows.push({ g, id: `rwp:${prof.id}:${sec}`, icon, c: off ? "#94a3b8" : c, title, sum: off ? "Funktion aus" : this._rwSecSum(sec, prof),
-          words: `profil ${prof.name} ${title} ${RW_WORDS[sec] || ""}`, dim: off });
-      }
-    }
-    rows.push(
-      { g: "Profile", id: "rwp::fn", icon: "mdi:plus", c: "#0ea5e9", title: "Neues Profil", sum: "Kopie von „Standard“ – z. B. für eine Fassade oder das Schlafzimmer", words: "profil neu anlegen kopie" },
+      ...profiles.map((x) => {
+        const n = covers.filter((c) => (c.cfg.profile || "standard") === x.id).length;
+        return { g: "Verhalten", id: `rwp:${x.id}:tag`, icon: "mdi:tune-variant", c: "#f59e0b", title: `${x.name} · ${n} ${n === 1 ? "Rollladen" : "Rollläden"}`,
+          sum: this._rwProfSum(x), words: `verhalten profil ${x.name} zeiten sonnenschutz lüften ausnahmen` };
+      }),
+      { g: "Verhalten", id: "rwp::tag", icon: "mdi:plus", c: "#0ea5e9", title: "Neues Verhalten", sum: "z. B. für eine Fassade oder das Schlafzimmer – startet als Kopie von „Standard“", words: "profil verhalten neu anlegen kopie" },
       { g: "Allgemein", id: "rwstorm", icon: "mdi:weather-windy-variant", c: "#ef4444", title: "Sturmschutz",
         sum: p.rw_storm !== false ? `hoch ab ${fmt(p.storm_kmh ?? 70, 0)} km/h Böen${s.gust != null ? ` · jetzt ${fmt(s.gust, 0)} km/h` : ""}` : "Aus", words: "sturm wind böen schutz" },
       { g: "Allgemein", id: "rwrecovery", icon: "mdi:restart", c: "#64748b", title: "Nach Neustart",
         sum: { never: "nichts nachholen", outage: "verpasste Wechsel nachholen", always: "immer auf Sollstellung fahren" }[p.rw_recovery || "never"], words: "neustart stromausfall nachholen recovery" },
-    );
+      { g: "Allgemein", go: "house", icon: "mdi:home-cog-outline", c: "#94a3b8", title: "Aus Hauswerk übernommen",
+        sum: "Anwesenheit, Urlaub, Feiertage, Sonnenstand, Wetter, Sturmgrenze und Böen-Sensor – gelten für alle Module", words: "anwesenheit urlaub sonne wetter feiertage hauswerk" },
+    ];
     return rows;
   }
 
@@ -2394,16 +2412,16 @@ class HauswerkPanel extends HTMLElement {
     switch (id) {
       case "rwcovers":
         return { icon: "mdi:window-shutter-settings", c: "#0ea5e9", title: "Welche Rollläden?", sub: "Rollwerk",
-          body: `<p class="muted">Gewählte Rollläden fährt Rollwerk nach ihrem Profil. Profil und Fensterkontakte stellst du danach je Rollladen ein. Gruppen wie „Alle Rollläden“ besser weglassen.</p>
+          body: `<p class="muted">Gewählte Rollläden fährt Rollwerk nach ihrem Verhalten. Verhalten und Fensterkontakte stellst du danach je Rollladen ein. Gruppen wie „Alle Rollläden“ besser weglassen.</p>
             <div class="field"><span><ha-icon icon="mdi:window-shutter"></ha-icon> Rollläden</span>${this._picker("rw_covers", p.rw_covers || [])}</div>` };
       case "rwstorm":
-        return { icon: "mdi:weather-windy-variant", c: "#ef4444", title: "Sturmschutz", sub: "Rollwerk · alle Profile",
-          body: `<div class="wxrows">${row("rt0", "Sturmschutz", `hoch ab ${fmt(p.storm_kmh ?? 70, 0)} km/h Böen`, sw("rw_storm"), "Bei Sturm fahren die Rollläden hoch, damit der Behang nicht beschädigt wird, und bleiben oben, bis die Böen 15 Minuten lang unter 80 % der Grenze liegen. Die Grenze stellst du unter Hauswerk › Wetter › Sturm ein. Je Rollladen abschaltbar.")}</div>
+        return { icon: "mdi:weather-windy-variant", c: "#ef4444", title: "Sturmschutz", sub: "Rollwerk · alle Rollläden",
+          body: `<div class="wxrows">${row("rt0", "Sturmschutz", `hoch ab ${fmt(p.storm_kmh ?? 70, 0)} km/h Böen`, sw("rw_storm"), "Bei Sturm fahren die Rollläden hoch, damit der Behang nicht beschädigt wird, und bleiben oben, bis die Böen 15 Minuten lang unter 80 % der Grenze liegen. Je Rollladen abschaltbar.")}</div>
             <div class="rq-facts"><span style="--c:${s.storm ? "#ef4444" : "#22c55e"}"><ha-icon icon="mdi:weather-windy"></ha-icon>${s.gust != null ? `Böen jetzt ${fmt(s.gust, 0)} km/h` : "keine Windwerte"}</span>${s.storm ? `<span style="--c:#ef4444"><ha-icon icon="mdi:alert"></ha-icon>Sturmschutz aktiv</span>` : ""}</div>
-            <div class="field"><span><ha-icon icon="mdi:weather-windy"></ha-icon> Böen-Sensor (leer = Wetterdienst)</span>${this._picker("rw_wind_entity", p.rw_wind_entity ? [p.rw_wind_entity] : [])}</div>` };
+            <p class="muted small"><ha-icon icon="mdi:home-cog-outline"></ha-icon>Sturmgrenze und Böen-Sensor stehen unter <button class="link inline" data-action="settings-go" data-sub="weather">Hauswerk › Wetter</button> – sie gelten für alle Module.</p>` };
       case "rwrecovery": {
         const { segs } = this._setHelpers(p);
-        return { icon: "mdi:restart", c: "#64748b", title: "Nach Neustart", sub: "Rollwerk · alle Profile",
+        return { icon: "mdi:restart", c: "#64748b", title: "Nach Neustart", sub: "Rollwerk · alle Rollläden",
           body: `${segs("rw_recovery", [["never", "Nichts"], ["outage", "Verpasstes"], ["always", "Immer"]], "never")}
             <p class="muted small">„Nichts“: nach einem Neustart fährt Rollwerk erst beim nächsten Wechsel. „Verpasstes“: war Home Assistant während eines Wechsels aus (z. B. Stromausfall morgens), fährt Rollwerk das nach. „Immer“: nach jedem Neustart auf die aktuelle Sollstellung.</p>` };
       }
@@ -2411,22 +2429,43 @@ class HauswerkPanel extends HTMLElement {
     return { icon: "mdi:help", c: "#94a3b8", title: id, body: "" };
   }
 
-  /** Profil-Abschnitt bearbeiten (wie eine Seite der Cover Control Automation). */
+  /** Kompass: Fensterrichtung antippen; Sonnenschutz-Bereich und Sonne jetzt. */
+  _rwCompass(p) {
+    const cx = 110, cy = 110, R = 82;
+    const pt = (deg, r) => [cx + r * Math.sin((deg * Math.PI) / 180), cy - r * Math.cos((deg * Math.PI) / 180)];
+    const s0 = Number(p.azimuth_start ?? 95), s1 = Number(p.azimuth_end ?? 265);
+    const span = (((s1 - s0) % 360) + 360) % 360;
+    const [ax, ay] = pt(s0, R), [bx, by] = pt(s1, R);
+    const sector = `<path d="M${cx},${cy} L${ax.toFixed(1)},${ay.toFixed(1)} A${R},${R} 0 ${span > 180 ? 1 : 0} 1 ${bx.toFixed(1)},${by.toFixed(1)} Z" class="cp-sec"/>`;
+    const sun = this._rwStatus?.sun || {};
+    const sunDot = sun.azimuth != null && sun.elevation > 0 ? (() => { const [x, y] = pt(sun.azimuth, R * (1 - Math.min(sun.elevation, 80) / 110)); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9" class="cp-sun"/>`; })() : "";
+    const dirs = [["N", 0], ["NO", 45], ["O", 90], ["SO", 135], ["S", 180], ["SW", 225], ["W", 270], ["NW", 315]];
+    const btns = dirs.map(([l, d]) => { const [x, y] = pt(d, R + 16); const on = Number(p.window_dir) === d; return `<g class="cp-b ${on ? "on" : ""}" data-action="rwp-dir" data-v="${d}"><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="15"/><text x="${x.toFixed(1)}" y="${(y + 4).toFixed(1)}">${l}</text></g>`; }).join("");
+    const win = p.window_dir != null ? (() => { const [x, y] = pt(Number(p.window_dir), R - 6); return `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" class="cp-win"/>`; })() : "";
+    return `<div class="compass"><svg viewBox="0 0 220 220" aria-label="Fensterrichtung">
+      <circle cx="${cx}" cy="${cy}" r="${R}" class="cp-ring"/>${sector}${win}<rect x="${cx - 14}" y="${cy - 9}" width="28" height="18" rx="4" class="cp-house"/>${sunDot}${btns}</svg>
+      <p class="muted small">${p.window_dir != null ? `Fenster zeigt nach <b>${this._rwDirName(p.window_dir)}</b> – Sonne zählt von ${fmt(s0, 0)}° bis ${fmt(s1, 0)}°.` : "Tippe an, wohin das Fenster zeigt."}${sun.azimuth != null && sun.elevation > 0 ? " ● Sonne jetzt." : ""}</p></div>`;
+  }
+
+  /** Verhalten bearbeiten: fünf Abschnitte, einfach oder mit „Experte“ alle Einstellungen der Cover Control Automation. */
   _rwpPop(pid, sec) {
     const d = this._pop.draft;
     const profiles = this._data.rollwerk?.profiles || {};
     if (!d.prof) {
       d.pid = pid || null;
-      d.prof = clone(profiles[pid] || { ...(profiles.standard || {}), name: "Neues Profil" });
+      d.prof = clone(profiles[pid] || { ...(profiles.standard || {}), name: "Neues Verhalten" });
     }
     const p = d.prof;
+    const ex = this._expertOn();
     const dis = this._admin ? "" : "disabled";
     const S = this._hass.states;
+    const st = this._rwStatus || {};
     const row = (k, title, sub, ctl, text) => text ? this._setRow(`rwp_${k}`, title, sub, ctl, text, true)
       : `<div class="wxr ctl"><div class="wxr-l"><b>${title}</b>${sub ? `<small>${sub}</small>` : ""}</div><div class="wxr-v">${ctl}</div></div>`;
     const num = (k, def, min, max, step, unit) => `<div class="unit"><input type="number" min="${min}" max="${max}" step="${step}" data-rwp="${k}" data-kind="num" value="${p[k] ?? ""}" placeholder="${def ?? "–"}" ${dis}><i>${unit}</i></div>`;
     const time = (k) => `<input type="time" data-rwp="${k}" data-kind="time" value="${esc(p[k] || "")}" ${dis}>`;
     const bool = (k) => `<label class="switch"><input type="checkbox" data-rwp="${k}" data-kind="bool" ${p[k] ? "checked" : ""} ${dis}><span></span></label>`;
+    const feat = (f) => `<label class="switch"><input type="checkbox" data-action="rwp-feat" data-v="${f}" ${(p.features || []).includes(f) ? "checked" : ""} ${dis}><span></span></label>`;
     const text = (k) => `<input type="text" data-rwp="${k}" data-kind="text" value="${esc(p[k] || "")}" maxlength="60" ${dis}>`;
     const ent = (k, test, none = "keiner") => {
       const ids = Object.keys(S).filter((id) => test(id, S[id].attributes || {}) || id === p[k]).sort((a, b) => this._entityName(a).localeCompare(this._entityName(b), "de"));
@@ -2435,145 +2474,111 @@ class HauswerkPanel extends HTMLElement {
     const dc = (cls, ...dom) => (id, a) => dom.some((x) => id.startsWith(`${x}.`)) && (!cls || a.device_class === cls || id.includes(cls));
     const bin = (id) => /^(binary_sensor|input_boolean|switch)\./.test(id);
     const chips = (k, opts) => `<div class="chips rwchips">${opts.map(([v, l, i]) => `<button class="chip ${(p[k] || []).includes(v) ? "on" : ""}" data-action="rwp-tog" data-k="${k}" data-v="${v}" ${dis}>${i ? `<ha-icon icon="${i}"></ha-icon>` : ""}${l}</button>`).join("")}</div>`;
-    const choice = (k, opts) => `<div class="segs small">${opts.map(([v, l, i]) => `<button class="seg ${String(p[k]) === String(v) ? "on" : ""}" data-action="rwp-set" data-k="${k}" data-v="${v}" ${dis}>${i ? `<ha-icon icon="${i}"></ha-icon>` : ""}${l}</button>`).join("")}</div>`;
+    const choice = (k, opts, action = "rwp-set") => `<div class="segs small">${opts.map(([v, l, i]) => `<button class="seg ${String(k === "_mode" ? this._rwMode(p) : p[k] ?? "") === String(v) ? "on" : ""}" data-action="${action}" data-k="${k}" data-v="${v}" ${dis}>${i ? `<ha-icon icon="${i}"></ha-icon>` : ""}${l}</button>`).join("")}</div>`;
     const checks = (k, opts) => `<div class="rwchecks">${opts.map(([v, l]) => { const on = (p[k] || []).includes(v); return `<button class="rwck ${on ? "on" : ""}" data-action="rwp-tog" data-k="${k}" data-v="${v}" ${dis}><ha-icon icon="${on ? "mdi:checkbox-marked" : "mdi:checkbox-blank-outline"}"></ha-icon><span>${l}</span></button>`; }).join("")}</div>`;
     const lbl = (t) => `<div class="lbl">${t}</div>`;
     const note = (t, icon = "mdi:information-outline") => `<p class="muted small"><ha-icon icon="${icon}"></ha-icon>${t}</p>`;
+    const exBox = (html) => (ex ? `<div class="rwex"><div class="rwex-h"><ha-icon icon="mdi:school-outline"></ha-icon>Experte</div>${html}</div>` : "");
+    const has = (f) => (p.features || []).includes(f);
     const meta = RW_SECTIONS.find(([x]) => x === sec) || RW_SECTIONS[0];
-    const featOff = meta[4] && !(p.features || []).includes(meta[4])
-      ? `<p class="note warn"><ha-icon icon="mdi:toggle-switch-off-outline"></ha-icon>„${RW_FEATURES.find(([v]) => v === meta[4])[1]}“ ist in diesem Profil aus. <button class="link inline" data-action="rwp-feat" data-v="${meta[4]}">Einschalten</button></p>` : "";
-    const users = Object.entries(this._data.rollwerk?.covers || {}).filter(([id, c]) => (c.profile || "standard") === (d.pid || "")).map(([id]) => this._entityName(id));
+    const users = Object.entries(this._data.rollwerk?.covers || {}).filter(([, c]) => (c.profile || "standard") === (d.pid || "")).map(([id]) => this._entityName(id));
     let body = "";
     switch (sec) {
-      case "fn":
-        body = `<label class="field"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name</span>${text("name")}</label>
-          ${lbl("Was soll Rollwerk mit diesem Profil tun?")}${checks("features", RW_FEATURES)}
-          ${note("Ohne Helligkeit und Sonnenhöhe öffnet und schließt Rollwerk zur frühesten Zeit. Mit Sensoren gilt: frühestens ab der frühen Zeit, sobald es hell/dunkel genug ist – spätestens zur späten Zeit.")}
-          ${lbl("Helligkeit und Sonnenhöhe verknüpfen")}${choice("bs_operator", [["or", "Eins reicht (oder)"], ["and", "Beide nötig (und)"]])}
-          ${lbl("Zeiten aus")}${choice("time_mode", [["times", "Uhrzeiten", "mdi:clock-outline"], ["calendar", "Kalender", "mdi:calendar"]])}
-          ${d.pid ? note(users.length ? `Genutzt von: ${users.map(esc).join(", ")}` : "Noch kein Rollladen nutzt dieses Profil – zuordnen im Rollladen.", "mdi:window-shutter") : ""}
-          ${this._admin && d.pid && d.pid !== "standard" ? `<button class="secondary danger small" data-action="rwp-del"><ha-icon icon="mdi:delete-outline"></ha-icon>${d.confirm ? "Wirklich löschen? Rollläden nutzen dann „Standard“" : "Profil löschen"}</button>` : ""}`;
-        break;
-      case "pos":
-        body = `<div class="wxrows">
-          ${row("po", "Offen", "0 % = zu, 100 % = ganz offen", num("pos_open", 100, 0, 100, 1, "%"))}
-          ${row("pc", "Geschlossen", "z. B. 10 % für Lüftungsschlitze", num("pos_close", 0, 0, 100, 1, "%"))}
-          ${row("pv", "Lüften", "Fenster gekippt", num("pos_ventilate", 30, 0, 100, 1, "%"))}
-          ${row("pl", "Aussperrschutz", "Fenster/Tür ganz offen", num("pos_lockout", "", 0, 100, 1, "%"), "Leer = der Rollladen fährt bei offener Tür gar nicht herunter. Mit Wert fährt er höchstens bis zu dieser Stellung (braucht die Funktion „Lüften“).")}
-          ${row("ps", "Beschattung", "", num("pos_shading", 25, 0, 100, 1, "%"))}
-          ${row("pa", "Beschattung anders", "wenn der Schalter unten an ist", num("pos_shading_alt", "", 0, 100, 1, "%"), "Zum Beispiel eine stärkere Beschattung bei Hitzewarnung oder im Homeoffice.")}
-        </div>
-        <label class="field"><span><ha-icon icon="mdi:toggle-switch-outline"></ha-icon> Schalter für „Beschattung anders“</span>${ent("shading_alt_entity", bin)}</label>
-        <div class="wxrows">
-          ${row("pt", "Toleranz", "Abweichung, die noch als erreicht gilt", num("tolerance", 0, 0, 20, 1, "%"))}
-          ${row("pd", "Fahrzeit", "einmal ganz auf oder zu", num("drive_time", 90, 5, 300, 5, "s"), "Solange Rollwerk fährt, gilt eine Bewegung nicht als „von Hand“.")}
-        </div>`;
-        break;
-      case "time":
-        body = `${featOff}${choice("time_mode", [["times", "Uhrzeiten", "mdi:clock-outline"], ["calendar", "Kalender", "mdi:calendar"]])}
-          ${p.time_mode === "calendar" ? `
-            <label class="field"><span><ha-icon icon="mdi:calendar"></ha-icon> Kalender</span>${ent("calendar", (id) => id.startsWith("calendar."), "–")}</label>
-            <div class="wxrows">
-              ${row("co", "Termin fürs Öffnen", "Titel enthält", text("cal_open"), "Beginn des Termins = früheste, Ende = späteste Zeit zum Öffnen.")}
-              ${row("cc", "Termin fürs Schließen", "Titel enthält", text("cal_close"), "Beginn = früheste, Ende = späteste Zeit zum Schließen.")}
-            </div>` : `
-            ${lbl("Öffnen · Werktag")}<div class="wxrows">${row("ue", "Frühestens", "", time("up_early"))}${row("ul", "Spätestens", "", time("up_late"))}</div>
-            ${lbl("Öffnen · Wochenende & Feiertag")}<div class="wxrows">${row("uew", "Frühestens", "", time("up_early_we"))}${row("ulw", "Spätestens", "", time("up_late_we"))}</div>
-            ${lbl("Schließen · vor einem Werktag")}<div class="wxrows">${row("de", "Frühestens", "", time("down_early"))}${row("dl", "Spätestens", "", time("down_late"))}</div>
-            ${lbl("Schließen · vor freiem Tag")}<div class="wxrows">${row("dew", "Frühestens", "", time("down_early_we"))}${row("dlw", "Spätestens", "", time("down_late_we"))}</div>
-            <label class="field"><span><ha-icon icon="mdi:calendar-arrow-right"></ha-icon> Sensor „Arbeitstag morgen“ (fürs Schließen)</span>${ent("workday_tomorrow", (id) => id.startsWith("binary_sensor.") && /workday|arbeitstag/.test(id))}</label>
-            ${note("Ob heute frei ist, erkennt Hauswerk am Wochenende und am Sensor „Arbeitstag“ (Hauswerk › Anwesenheit). Ohne „Arbeitstag morgen“ gelten abends die Zeiten von heute.")}`}`;
-        break;
-      case "bright":
-        body = `${featOff}<label class="field"><span><ha-icon icon="mdi:brightness-5"></ha-icon> Helligkeitssensor</span>${ent("brightness_sensor", dc("illuminance", "sensor"))}</label>
-          <div class="wxrows">
-            ${row("bu", "Öffnen ab", "", num("brightness_up", 0, 0, 200000, 10, "lx"))}
-            ${row("bd", "Schließen bis", "", num("brightness_down", 0, 0, 200000, 10, "lx"))}
-            ${row("bh", "Spielraum", "gegen Hin und Her", num("brightness_hyst", 0, 0, 10000, 10, "lx"))}
-            ${row("bt", "Mindestens so lange", "", num("brightness_duration", 30, 0, 3600, 5, "s"), "Erst wenn der Wert so lange am Stück erreicht ist, fährt der Rollladen – kurze Wolken lösen nichts aus.")}
-          </div>`;
-        break;
-      case "sun": {
-        const el = this._rwStatus?.sun?.elevation;
-        body = `${featOff}<div class="wxrows">
-            ${row("su", "Öffnen ab", "Sonnenhöhe", num("sun_up", 0, -20, 60, 0.5, "°"), "0° = Sonnenaufgang. Negativ = vorher (Dämmerung), z. B. −4°.")}
-            ${row("sd", "Schließen bis", "Sonnenhöhe", num("sun_down", 0, -20, 60, 0.5, "°"))}
-            ${row("st", "Mindestens so lange", "", num("sun_duration", 30, 0, 3600, 5, "s"))}
-          </div>${el != null ? note(`Sonne jetzt ${fmt(el, 1)}° hoch.`, "mdi:white-balance-sunny") : ""}`;
+      case "tag": {
+        const mode = this._rwMode(p);
+        const win = (a, b) => (mode === "time" ? row(a, "Uhrzeit", "", time(a)) : `${row(a, "Frühestens", "", time(a))}${row(b, "Spätestens", "", time(b))}`);
+        body = `${!d.pid ? `<label class="field"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name</span>${text("name")}</label>` : ""}
+          ${lbl("Wonach?")}${choice("_mode", [["time", "Uhrzeit", "mdi:clock-outline"], ["sun", "Mit der Sonne", "mdi:weather-sunset"], ...(ex || mode === "cal" ? [["cal", "Kalender", "mdi:calendar"]] : []), ...(ex || mode === "free" ? [["free", "Nur Sonne", "mdi:white-balance-sunny"]] : [])], "rwp-mode")}
+          ${mode === "sun" ? note("Öffnet frühestens zur ersten Zeit, sobald die Sonne hoch genug steht – spätestens zur zweiten. Abends genauso andersherum.", "mdi:weather-sunset") : ""}
+          <div class="wxrows">${row("up", "Morgens öffnen", "", feat("up"))}</div>
+          ${has("up") && mode !== "cal" && mode !== "free" ? `${lbl("Öffnen · Werktag")}<div class="wxrows">${win("up_early", "up_late")}</div>${lbl("Öffnen · Wochenende & Feiertag")}<div class="wxrows">${win("up_early_we", "up_late_we")}</div>` : ""}
+          <div class="wxrows">${row("down", "Abends schließen", "", feat("down"))}</div>
+          ${has("down") && mode !== "cal" && mode !== "free" ? `${lbl("Schließen · vor Werktag")}<div class="wxrows">${win("down_early", "down_late")}</div>${lbl("Schließen · vor freiem Tag")}<div class="wxrows">${win("down_early_we", "down_late_we")}</div>` : ""}
+          ${mode === "sun" || mode === "free" ? `${lbl("Sonnenhöhe")}<div class="wxrows">
+            ${row("su", "Öffnen ab", "0° = Sonnenaufgang", num("sun_up", 0, -20, 60, 0.5, "°"), "Negativ = in der Dämmerung, z. B. −4°. Positiv = erst wenn die Sonne über Nachbarhäusern steht.")}
+            ${row("sd", "Schließen ab", "0° = Sonnenuntergang", num("sun_down", 0, -20, 60, 0.5, "°"))}</div>` : ""}
+          ${mode === "cal" ? `<label class="field"><span><ha-icon icon="mdi:calendar"></ha-icon> Kalender</span>${ent("calendar", (id) => id.startsWith("calendar."), "–")}</label>
+            <div class="wxrows">${row("co", "Termin fürs Öffnen", "Titel enthält", text("cal_open"), "Beginn = früheste, Ende = späteste Zeit.")}${row("cc", "Termin fürs Schließen", "Titel enthält", text("cal_close"))}</div>` : ""}
+          ${note("Feiertage und Sonnenstand kommen aus Hauswerk › Einstellungen (Anwesenheit bzw. Wetter).", "mdi:home-cog-outline")}
+          ${exBox(`${lbl("Helligkeit")}<div class="wxrows">${row("bf", "Helligkeit nutzen", "", feat("brightness"))}</div>
+            ${has("brightness") ? `<label class="field"><span><ha-icon icon="mdi:brightness-5"></ha-icon> Helligkeitssensor</span>${ent("brightness_sensor", dc("illuminance", "sensor"))}</label>
+            <div class="wxrows">${row("bu", "Öffnen ab", "", num("brightness_up", 0, 0, 200000, 10, "lx"))}${row("bd", "Schließen bis", "", num("brightness_down", 0, 0, 200000, 10, "lx"))}
+              ${row("bh", "Spielraum", "", num("brightness_hyst", 0, 0, 10000, 10, "lx"))}${row("bt", "Mindestens so lange", "", num("brightness_duration", 30, 0, 3600, 5, "s"))}</div>` : ""}
+            <div class="wxrows">${row("st", "Sonne mindestens so lange", "", num("sun_duration", 30, 0, 3600, 5, "s"))}</div>
+            ${lbl("Sonne und Helligkeit verknüpfen")}${choice("bs_operator", [["or", "Eins reicht"], ["and", "Beide nötig"]])}
+            <label class="field"><span><ha-icon icon="mdi:calendar-arrow-right"></ha-icon> Sensor „Arbeitstag morgen“ (fürs Schließen)</span>${ent("workday_tomorrow", (id) => id.startsWith("binary_sensor.") && /workday|arbeitstag/.test(id))}</label>`)}`;
         break;
       }
-      case "vent":
-        body = `${featOff}${note("Die Kontakte (offen/gekippt) stellst du je Rollladen ein. Ganz offen = Aussperrschutz, gekippt = Lüftungsstellung.", "mdi:window-open-variant")}
-          ${lbl("Lüften")}${checks("vent_options", RW_VENT)}
-          ${lbl("Aussperrschutz auch bei gekipptem Fenster")}${checks("lockout_tilted", RW_LOCK_TILTED)}`;
-        break;
       case "shade": {
-        const condRow = (k) => chips(k, RW_SHADE_CONDS);
-        const live = Object.entries(this._rwStatus?.covers || {}).filter(([, c]) => c.profile === d.pid && c.shade_start);
+        const live = Object.entries(st.covers || {}).filter(([, c]) => c.profile === d.pid && c.shade_start);
         const sym = (v) => (v == null ? "–" : v ? "✓" : "✗");
-        body = `${featOff}
-          ${lbl("Beschattung beginnt, wenn …")}<small class="muted">alle davon (und)</small>${condRow("shade_start_and")}<small class="muted">mindestens eins davon (oder)</small>${condRow("shade_start_or")}
-          ${lbl("Beschattung endet, wenn …")}<small class="muted">alle davon (und)</small>${condRow("shade_end_and")}<small class="muted">mindestens eins davon (oder)</small>${condRow("shade_end_or")}
-          ${note("Nicht messbare Bedingungen (kein Sensor) zählen nicht mit.")}
-          ${lbl("Sonne")}<div class="wxrows">
-            ${row("az1", "Richtung von", "Himmelsrichtung (Azimut)", num("azimuth_start", 95, 0, 360, 1, "°"), "Ab dieser Richtung scheint die Sonne aufs Fenster. 90° = Ost, 180° = Süd, 270° = West.")}
-            ${row("az2", "Richtung bis", "", num("azimuth_end", 265, 0, 360, 1, "°"))}
-            ${row("el1", "Höhe mindestens", "", num("elevation_min", 25, 0, 90, 1, "°"), "Tief stehende Sonne wird oft von Nachbarhäusern oder Bäumen verdeckt.")}
-            ${row("el2", "Höhe höchstens", "", num("elevation_max", 90, 0, 90, 1, "°"), "Steht die Sonne sehr hoch, schützt oft schon der Dachüberstand.")}
-          </div>
-          ${lbl("Helligkeit")}<label class="field"><span><ha-icon icon="mdi:brightness-5"></ha-icon> Sensor</span>${ent("shade_brightness_sensor", dc("illuminance", "sensor"))}</label>
-          <div class="wxrows">${row("sb1", "Beginnt ab", "", num("shade_bright_start", 35000, 0, 200000, 100, "lx"))}${row("sb2", "Endet unter", "", num("shade_bright_end", 25000, 0, 200000, 100, "lx"))}</div>
-          ${lbl("Temperatur innen (Sensor 1)")}<label class="field"><span><ha-icon icon="mdi:home-thermometer-outline"></ha-icon> Sensor</span>${ent("temp1_sensor", dc("temperature", "sensor"))}</label>
-          <div class="wxrows">${row("t1", "Ab", "", num("temp1_min", 18, 0, 40, 0.5, "°C"))}${row("t1h", "Spielraum", "", num("temp1_hyst", 0.2, 0, 5, 0.1, "°C"))}</div>
-          ${lbl("Temperatur außen (Sensor 2)")}<label class="field"><span><ha-icon icon="mdi:thermometer"></ha-icon> Sensor (leer = Hauswerk › Wetter)</span>${ent("temp2_sensor", dc("temperature", "sensor"), "aus Hauswerk › Wetter")}</label>
-          <div class="wxrows">${row("t2", "Ab", "", num("temp2_min", 18, -10, 45, 0.5, "°C"))}${row("t2h", "Spielraum", "", num("temp2_hyst", 0.2, 0, 5, 0.1, "°C"))}</div>
-          ${lbl("Wettervorhersage")}<label class="field"><span><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon> Wetterdienst (leer = Hauswerk › Wetter)</span>${ent("forecast_entity", (id) => id.startsWith("weather."), "aus Hauswerk › Wetter")}</label>
-          <div class="wxrows">${row("fc", "Höchstwert heute ab", "", num("forecast_temp", "", -10, 45, 0.5, "°C"))}</div>
-          <small class="muted">Wetterlage</small>${chips("weather_conditions", RW_WEATHER)}
-          ${lbl("Eigene Bedingung")}<label class="field"><span><ha-icon icon="mdi:toggle-switch-outline"></ha-icon> Schalter/Sensor (an = erfüllt)</span>${ent("shade_custom", bin)}</label>
-          ${lbl("Warten")}<div class="wxrows">
-            ${row("w1", "Vor Beginn", "", num("shade_wait_start", 300, 0, 7200, 30, "s"), "So lange müssen die Bedingungen am Stück erfüllt sein.")}
-            ${row("w2", "Vor Ende", "", num("shade_wait_end", 300, 0, 7200, 30, "s"))}
-            ${row("w3", "Sofort enden", "wenn die Sonne die Fassade verlässt", bool("shade_end_immediate"))}
-          </div>
-          ${live.length ? `${lbl("Jetzt")}<div class="evlist">${live.map(([id, c]) => `<div class="ev ${c.shading ? "live" : ""}"><ha-icon icon="${c.shading ? "mdi:sun-thermometer-outline" : "mdi:window-shutter"}"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${RW_SHADE_CONDS.filter(([k]) => c.shade_start[k] != null).map(([k, l]) => `${l} ${sym(c.shade_start[k])}`).join(" · ")}</small></span>${c.shading ? `<em class="badge">AKTIV</em>` : ""}</div>`).join("")}</div>` : ""}`;
+        body = `<div class="wxrows">${row("sf", "Sonnenschutz", "tagsüber gegen Hitze und Blendung", feat("shading"))}</div>
+          ${has("shading") ? `${lbl("Wohin zeigt das Fenster?")}${this._rwCompass(p)}
+          <div class="rwsent">Beschatten, wenn die Sonne aufs Fenster scheint und es draußen wärmer als ${num("temp2_min", 18, -10, 45, 0.5, "°C")} ist – Rollladen dann auf ${num("pos_shading", 25, 0, 100, 5, "%")}.</div>
+          ${note("Außentemperatur aus Hauswerk › Wetter. Wartezeit 5 Minuten, damit kurze Sonne nichts auslöst.", "mdi:home-cog-outline")}
+          ${live.length ? `${lbl("Jetzt")}<div class="evlist">${live.map(([id, c]) => `<div class="ev ${c.shading ? "live" : ""}"><ha-icon icon="${c.shading ? "mdi:sun-thermometer-outline" : "mdi:window-shutter"}"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${RW_SHADE_CONDS.filter(([k]) => c.shade_start[k] != null).map(([k, l]) => `${l} ${sym(c.shade_start[k])}`).join(" · ")}</small></span>${c.shading ? `<em class="badge">AKTIV</em>` : ""}</div>`).join("")}</div>` : ""}
+          ${exBox(`${lbl("Beschattung beginnt, wenn …")}<small class="muted">alle davon</small>${chips("shade_start_and", RW_SHADE_CONDS)}<small class="muted">eins davon</small>${chips("shade_start_or", RW_SHADE_CONDS)}
+            ${lbl("Beschattung endet, wenn …")}<small class="muted">alle davon</small>${chips("shade_end_and", RW_SHADE_CONDS)}<small class="muted">eins davon</small>${chips("shade_end_or", RW_SHADE_CONDS)}
+            ${note("Nicht messbare Bedingungen (kein Sensor) zählen nicht mit.")}
+            <div class="wxrows">${row("az1", "Richtung von", "", num("azimuth_start", 95, 0, 360, 1, "°"))}${row("az2", "Richtung bis", "", num("azimuth_end", 265, 0, 360, 1, "°"))}
+              ${row("el1", "Sonnenhöhe mindestens", "", num("elevation_min", 25, 0, 90, 1, "°"), "Tief stehende Sonne wird oft von Nachbarhäusern oder Bäumen verdeckt.")}${row("el2", "Sonnenhöhe höchstens", "", num("elevation_max", 90, 0, 90, 1, "°"))}
+              ${row("t2h", "Spielraum außen", "", num("temp2_hyst", 0.2, 0, 5, 0.1, "°C"))}</div>
+            <label class="field"><span><ha-icon icon="mdi:thermometer"></ha-icon> Eigener Außensensor (leer = Hauswerk › Wetter)</span>${ent("temp2_sensor", dc("temperature", "sensor"), "aus Hauswerk › Wetter")}</label>
+            <label class="field"><span><ha-icon icon="mdi:home-thermometer-outline"></ha-icon> Temperatur innen</span>${ent("temp1_sensor", dc("temperature", "sensor"))}</label>
+            <div class="wxrows">${row("t1", "Innen ab", "", num("temp1_min", 18, 0, 40, 0.5, "°C"))}${row("t1h", "Spielraum innen", "", num("temp1_hyst", 0.2, 0, 5, 0.1, "°C"))}</div>
+            <label class="field"><span><ha-icon icon="mdi:brightness-5"></ha-icon> Helligkeitssensor</span>${ent("shade_brightness_sensor", dc("illuminance", "sensor"))}</label>
+            <div class="wxrows">${row("sb1", "Beginnt ab", "", num("shade_bright_start", 35000, 0, 200000, 100, "lx"))}${row("sb2", "Endet unter", "", num("shade_bright_end", 25000, 0, 200000, 100, "lx"))}
+              ${row("fc", "Vorhersage-Höchstwert ab", "aus Hauswerk › Wetter", num("forecast_temp", "", -10, 45, 0.5, "°C"))}</div>
+            <small class="muted">Wetterlage</small>${chips("weather_conditions", RW_WEATHER)}
+            <label class="field"><span><ha-icon icon="mdi:toggle-switch-outline"></ha-icon> Eigene Bedingung (an = erfüllt)</span>${ent("shade_custom", bin)}</label>
+            <div class="wxrows">${row("w1", "Warten vor Beginn", "", num("shade_wait_start", 300, 0, 7200, 30, "s"))}${row("w2", "Warten vor Ende", "", num("shade_wait_end", 300, 0, 7200, 30, "s"))}
+              ${row("w3", "Sofort enden", "wenn die Sonne das Fenster verlässt", bool("shade_end_immediate"))}
+              ${row("pa", "Andere Stellung", "wenn der Schalter an ist", num("pos_shading_alt", "", 0, 100, 1, "%"))}</div>
+            <label class="field"><span><ha-icon icon="mdi:toggle-switch-outline"></ha-icon> Schalter für andere Stellung</span>${ent("shading_alt_entity", bin)}</label>`)}` : ""}`;
         break;
       }
-      case "res":
-        body = `<label class="field"><span><ha-icon icon="mdi:bed-outline"></ha-icon> Bewohner-Sensor (an = schläft)</span>${ent("resident_sensor", bin)}</label>
-          ${checks("resident_config", RW_RESIDENT)}
-          ${note("Solange der Sensor an ist, öffnet der Rollladen morgens nicht. Für Schlafzimmer oder Kinderzimmer – z. B. mit einem Schalter oder dem Schlafmodus vom Handy.", "mdi:sleep")}`;
+      case "vent": {
+        const mine = Object.entries(this._data.rollwerk?.covers || {}).filter(([, c]) => (c.profile || "standard") === (d.pid || ""));
+        body = `${lbl("Tür ganz offen")}${choice("pos_lockout", [["", "Nicht herunterfahren"], ["30", "Höchstens 30 %"], ["50", "Höchstens 50 %"]], "rwp-lock")}
+          ${note("So sperrt dich die Terrassentür nicht aus. Hochfahren geht immer.", "mdi:door-open")}
+          <div class="wxrows">${row("vf", "Fenster gekippt: lüften", "Rollladen auf Lüftungsstellung", feat("ventilate"))}${has("ventilate") ? row("pv", "Lüftungsstellung", "", num("pos_ventilate", 30, 0, 100, 5, "%")) : ""}</div>
+          ${lbl("Kontakte")}${mine.length ? `<div class="evlist">${mine.map(([id, c]) => `<div class="ev"><ha-icon icon="mdi:window-shutter"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${[c.contact_open ? `offen: ${esc(this._entityName(c.contact_open))}` : "", c.contact_tilted ? `gekippt: ${esc(this._entityName(c.contact_tilted))}` : ""].filter(Boolean).join(" · ") || "kein Kontakt"}</small></span><button class="link" data-action="pop-open" data-pop="rwc:${esc(id)}">ändern</button></div>`).join("")}</div>` : note("Noch kein Rollladen nutzt dieses Verhalten.")}
+          ${exBox(`${lbl("Lüften")}${checks("vent_options", RW_VENT)}${lbl("Aussperrschutz auch bei gekipptem Fenster")}${checks("lockout_tilted", RW_LOCK_TILTED)}`)}`;
         break;
-      case "man":
-        body = `${note("Verstellt jemand den Rollladen von Hand (Taster, App), merkt Rollwerk das.", "mdi:hand-back-right-outline")}
-          ${lbl("Die Hand-Stellung bleibt bei …")}${checks("manual_block", RW_MANUAL)}
-          ${note("Nichts gewählt: der nächste automatische Wechsel übernimmt wieder.")}
-          ${lbl("Übersteuerung zurücksetzen")}${checks("manual_reset", RW_RESET)}
-          <div class="wxrows">
-            ${(p.manual_reset || []).includes("fixed") ? row("rt", "Uhrzeit", "", time("reset_time")) : ""}
-            ${(p.manual_reset || []).includes("timeout") ? row("ro", "Nach", "", num("reset_timeout", 5, 1, 1440, 1, "Min.")) : ""}
-            ${(p.manual_reset || []).includes("in_position") ? row("rp", "In Stellung", "", num("reset_position", 100, 0, 100, 1, "%"), "Fährt jemand den Rollladen von Hand in diese Stellung, übernimmt die Automatik wieder.") : ""}
-            ${row("rr", "Danach gleich fahren", "auf die aktuelle Sollstellung", bool("manual_recover"))}
-          </div>`;
+      }
+      case "exc": {
+        const manual = !(p.manual_block || []).length ? "next" : (p.manual_reset || []).includes("timeout") ? "hours" : "night";
+        body = `${lbl("Wenn niemand zu Hause ist")}${choice("away_mode", [["normal", "Wie immer"], ["closed", "Tagsüber zu"], ["shade", "Beschattet"]])}
+          <div class="rq-facts"><span style="--c:${st.away ? "#94a3b8" : "#22c55e"}"><ha-icon icon="${st.away ? "mdi:home-export-outline" : "mdi:home-account"}"></ha-icon>${st.away ? "Gerade niemand zu Hause" : "Jemand ist zu Hause"}</span>${st.vacation ? `<span style="--c:#34d399"><ha-icon icon="mdi:palm-tree"></ha-icon>Urlaub</span>` : ""}</div>
+          <div class="wxrows">${row("vr", "Urlaub: Zeiten verschieben", "zufällig bis zu", num("vacation_random", 0, 0, 60, 5, "Min."), "Im Urlaub öffnet und schließt jeder Rollladen jeden Tag etwas anders – das Haus wirkt bewohnt.")}</div>
+          ${note(`Wer zu Hause ist und wann Urlaub ist, stellst du einmal für alle Module ein: <button class="link inline" data-action="settings-go" data-sub="presence">Anwesenheit</button> · <button class="link inline" data-action="settings-go" data-sub="vacation">Urlaub</button>.`, "mdi:home-cog-outline")}
+          ${lbl("Von Hand verstellt – Stellung bleibt …")}<div class="segs small">${[["next", "bis zum nächsten Wechsel"], ["night", "bis Mitternacht"], ["hours", "einige Stunden"]].map(([v, l]) => `<button class="seg ${manual === v ? "on" : ""}" data-action="rwp-man" data-v="${v}" ${dis}>${l}</button>`).join("")}</div>
+          ${manual === "hours" ? `<div class="wxrows">${row("ro", "Wie lange", "", num("reset_timeout", 120, 5, 1440, 5, "Min."))}</div>` : ""}
+          ${lbl("Schlafzimmer")}<label class="field"><span><ha-icon icon="mdi:bed-outline"></ha-icon> Schlaf-Schalter (an = schläft)</span>${ent("resident_sensor", bin)}</label>
+          ${p.resident_sensor ? checks("resident_config", RW_RESIDENT) : note("Solange der Schalter an ist, öffnet der Rollladen morgens nicht – z. B. der Schlafmodus vom Handy.", "mdi:sleep")}
+          ${exBox(`${lbl("Hand-Stellung bleibt bei …")}${checks("manual_block", RW_MANUAL)}${lbl("Zurücksetzen")}${checks("manual_reset", RW_RESET)}
+            <div class="wxrows">${(p.manual_reset || []).includes("fixed") ? row("rt", "Uhrzeit", "", time("reset_time")) : ""}${(p.manual_reset || []).includes("in_position") ? row("rp", "In Stellung", "", num("reset_position", 100, 0, 100, 1, "%")) : ""}
+              ${row("rr", "Danach gleich fahren", "auf die aktuelle Sollstellung", bool("manual_recover"))}</div>
+            ${lbl("Erzwingen per Schalter")}${RW_FORCE.map(([k, l, i]) => `<label class="field"><span><ha-icon icon="${i}"></ha-icon> ${l}</span>${ent(k, bin)}</label>`).join("")}`)}`;
         break;
-      case "delay":
-        body = `<div class="wxrows">
-            ${row("df", "Fest", "", num("delay_fix", 0, 0, 600, 1, "s"))}
-            ${row("dr", "Zufällig bis", "", num("delay_random", 5, 0, 600, 1, "s"), "Verteilt die Fahrten, damit nicht alle Rollläden gleichzeitig fahren – schont die Funkverbindung und wirkt bewohnt.")}
-          </div>`;
-        break;
-      case "force":
-        body = `${note("Ist einer dieser Schalter an, gilt er vor allem anderen (außer Sturm). Z. B. ein input_boolean oder Szenen-Schalter.", "mdi:gesture-tap-button")}
-          ${RW_FORCE.map(([k, l, i]) => `<label class="field"><span><ha-icon icon="${i}"></ha-icon> ${l}</span>${ent(k, bin)}</label>`).join("")}`;
-        break;
-      case "beh":
-        body = checks("behavior", RW_BEHAVIOR);
+      }
+      case "fine":
+        body = `<label class="field"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name</span>${text("name")}</label>
+          <div class="wxrows">${row("po", "Offen", "100 % = ganz offen", num("pos_open", 100, 0, 100, 1, "%"))}${row("pc", "Geschlossen", "z. B. 10 % für Lüftungsschlitze", num("pos_close", 0, 0, 100, 1, "%"))}</div>
+          ${exBox(`<div class="wxrows">${row("pt", "Toleranz", "", num("tolerance", 0, 0, 20, 1, "%"))}${row("pd", "Fahrzeit", "einmal ganz auf oder zu", num("drive_time", 90, 5, 300, 5, "s"))}
+            ${row("df", "Verzögerung fest", "", num("delay_fix", 0, 0, 600, 1, "s"))}${row("dr", "Verzögerung zufällig bis", "", num("delay_random", 5, 0, 600, 1, "s"), "Verteilt die Fahrten, damit nicht alle Rollläden gleichzeitig funken.")}</div>
+            ${lbl("Verhalten im Detail")}${checks("behavior", RW_BEHAVIOR)}`)}
+          ${d.pid ? note(users.length ? `Genutzt von: ${users.map(esc).join(", ")}` : "Noch kein Rollladen nutzt dieses Verhalten – zuordnen im Rollladen.", "mdi:window-shutter") : ""}
+          ${this._admin && d.pid && d.pid !== "standard" ? `<button class="secondary danger small" data-action="rwp-del"><ha-icon icon="mdi:delete-outline"></ha-icon>${d.confirm ? "Wirklich löschen? Rollläden nutzen dann „Standard“" : "Verhalten löschen"}</button>` : ""}`;
         break;
     }
+    const tl = d.pid ? st.timelines?.[d.pid] : null;
     const isNew = !d.pid;
     return {
-      icon: meta[2], c: meta[3], title: isNew ? "Neues Profil" : meta[1], sub: `Profil „${esc(p.name || "")}“`,
-      body: `<div class="rwsecs">${RW_SECTIONS.map(([x, t, i, c, f]) => `<button class="rwsec ${x === sec ? "on" : ""} ${f && !(p.features || []).includes(f) ? "off" : ""}" data-action="rwp-sec" data-sec="${x}" style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${t}</button>`).join("")}</div>${body}`,
+      icon: meta[2], c: meta[3], title: isNew ? "Neues Verhalten" : esc(p.name || ""), sub: `Verhalten · ${meta[1]}`,
+      body: `<div class="rwtop">${tl ? `<div class="grow">${this._rwDayBar(tl)}</div>` : `<span class="grow muted small">${isNew ? "Tagesleiste nach dem Anlegen" : ""}</span>`}
+          <button class="rwexp ${ex ? "on" : ""}" data-action="rw-expert" title="Alle Einstellungen wie bei der Cover Control Automation"><ha-icon icon="mdi:school-outline"></ha-icon>Experte</button></div>
+        <div class="rwsecs">${RW_SECTIONS.map(([x, t, i, c, f]) => `<button class="rwsec ${x === sec ? "on" : ""} ${f && !(p.features || []).includes(f) ? "off" : ""}" data-action="rwp-sec" data-sec="${x}" style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${t}</button>`).join("")}</div>${body}`,
       foot: `<button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
         ${this._admin ? `<button class="primary" data-action="rwp-save"><ha-icon icon="mdi:content-save-outline"></ha-icon>${isNew ? "Anlegen" : "Speichern"}</button>` : ""}`,
     };
@@ -2596,13 +2601,14 @@ class HauswerkPanel extends HTMLElement {
     return {
       icon: "mdi:window-shutter", c: "#0ea5e9", title: "Rollladen", sub: `${esc(this._entityName(entityId))}${rs.area ? ` · ${esc(rs.area)}` : ""}`,
       body: `
-        <div class="wxrows">${tog("auto", true, "Automatik", "nach dem Profil fahren")}${tog("storm", true, "Sturmschutz", "bei Sturm hochfahren")}</div>
-        <div class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Profil</span>
+        <div class="wxrows">${tog("auto", true, "Automatik", "nach dem Verhalten fahren")}${tog("storm", true, "Sturmschutz", "bei Sturm hochfahren")}</div>
+        <div class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Verhalten</span>
           <div class="segs small">${profiles.map((x) => `<button class="seg ${x.id === pid ? "on" : ""}" data-action="rwc-set" data-k="profile" data-v="${esc(x.id)}" ${dis}>${esc(x.name)}</button>`).join("")}</div></div>
-        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${esc(this._rwSecSum("fn", this._data.rollwerk?.profiles?.[pid] || {}))} · <button class="link inline" data-action="pop-open" data-pop="rwp:${esc(pid)}:fn">Profil bearbeiten</button></p>
+        ${this._rwDayBar(this._rwStatus?.timelines?.[pid])}
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${esc(this._rwProfSum({ id: pid, ...(this._data.rollwerk?.profiles?.[pid] || {}) }))} · <button class="link inline" data-action="pop-open" data-pop="rwp:${esc(pid)}:tag">Verhalten bearbeiten</button></p>
         <label class="field"><span><ha-icon icon="mdi:door-open"></ha-icon> Kontakt „ganz offen“ – Aussperrschutz</span>${sel("contact_open")}</label>
         <label class="field"><span><ha-icon icon="mdi:window-open-variant"></ha-icon> Kontakt „gekippt“ – Lüften</span>${sel("contact_tilted")}</label>
-        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Ganz offen: der Rollladen fährt nicht herunter, bis zu ist – so sperrt dich die Terrassentür nicht aus. Gekippt: Lüftungsstellung (Funktion „Lüften“ im Profil). Ein Kontakt mit mehreren Zuständen (offen/gekippt) kann bei beiden stehen.</p>
+        <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Ganz offen: der Rollladen fährt nicht herunter, bis zu ist – so sperrt dich die Terrassentür nicht aus. Gekippt: Lüftungsstellung (Verhalten › Fenster & Lüften). Ein Kontakt mit mehreren Zuständen (offen/gekippt) kann bei beiden stehen.</p>
         ${rs.reason ? `<div class="rq-facts"><span style="--c:#0ea5e9"><ha-icon icon="mdi:robot-outline"></ha-icon>${esc(rs.reason)}${rs.target != null ? ` → ${rs.target} %` : ""}</span>${rs.up ? `<span><ha-icon icon="mdi:weather-sunset-up"></ha-icon>${rs.up.join("–")}</span>` : ""}${rs.down ? `<span><ha-icon icon="mdi:weather-sunset-down"></ha-icon>${rs.down.join("–")}</span>` : ""}</div>` : ""}`,
       foot: `<button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
         ${this._admin ? `<button class="primary" data-action="rwc-save" data-id="${esc(entityId)}"><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>` : ""}`,
@@ -2757,7 +2763,7 @@ class HauswerkPanel extends HTMLElement {
         { g: "Darstellung", start: true, icon: "mdi:view-dashboard-edit-outline", c: "#2dd4bf", title: "Widgets der Startseite",
           sum: `${n} Widget${n === 1 ? "" : "s"} · für alle Benutzer gleich`, words: "start dashboard widget übersicht anpassen" },
         ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => v === "settings" || v === "shutset") || m.views[0], icon: `logo:${m.logo}`, c: m.id === "rollwerk" ? "#0ea5e9" : "#fb923c", title: m.name,
-          sum: m.id === "rollwerk" ? `${(p.rw_covers || []).length} Rollläden · ${Object.keys(this._data.rollwerk?.profiles || {}).length} Profile` : `${rooms.length} ${rooms.length === 1 ? "Raum" : "Räume"} · Heizpläne, Vorheizen, Saison und mehr`,
+          sum: m.id === "rollwerk" ? `${(p.rw_covers || []).length} Rollläden · ${Object.keys(this._data.rollwerk?.profiles || {}).length} Verhalten` : `${rooms.length} ${rooms.length === 1 ? "Raum" : "Räume"} · Heizpläne, Vorheizen, Saison und mehr`,
           words: m.id === "rollwerk" ? "rollwerk rollladen rollo module" : "heizen heizung räume module" })),
         ...COMING.map((m) => ({ g: "Module", soon: true, icon: m.icon, c: "#94a3b8", title: m.name, sum: "Kommt später", words: `${m.name.toLowerCase()} module` })),
         { g: "System", go: "log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll",
@@ -3059,7 +3065,7 @@ class HauswerkPanel extends HTMLElement {
     if (id === "rwiz") return this._wizPop();
     if (String(id).startsWith("rwc:")) return this._rwcPop(id.slice(4));
     if (RW_POPS.includes(id)) return this._rwPop(id);
-    if (String(id).startsWith("rwp:")) { const [, pid, sec] = String(id).split(":"); return this._rwpPop(pid, sec || "fn"); }
+    if (String(id).startsWith("rwp:")) { const [, pid, sec] = String(id).split(":"); return this._rwpPop(pid, RW_SECTIONS.some(([x]) => x === sec) ? sec : "tag"); }
     const p = this._settings;
     const s = this._status || {};
     const { minutes, segs, sw, head, dis } = this._setHelpers(p);
@@ -3543,8 +3549,11 @@ class HauswerkPanel extends HTMLElement {
                 "Ein eigener Temperatursensor misst meist genauer als der Wetterdienst. Die Vorhersage kommt weiterhin vom Wetterdienst. Heizwerk nutzt ihn auch für die Sommerpause nach Außentemperatur.")}
               <div class="wxr-pk">${this._picker("outside_sensor", p.outside_sensor ? [p.outside_sensor] : [])}</div></div>
               <div class="wxsrc">${row("sunsrc", "Sonnenstand", sun ? "für Tageszeit, Sonnenauf- und -untergang" : "nicht gefunden – Integration „Sonne“ hinzufügen", "",
-                "Die Entität der Home-Assistant-Integration „Sonne“ (meist sun.sun). Hauswerk nutzt sie für die Darstellung nach Tageszeit und zeigt Sonnenauf- und -untergang – künftig auch für Rollläden.")}
+                "Die Entität der Home-Assistant-Integration „Sonne“ (meist sun.sun). Hauswerk nutzt sie für die Darstellung nach Tageszeit, Sonnenauf- und -untergang und für die Rollläden (Rollwerk).")}
               <div class="wxr-pk">${this._picker("sun_entity", [p.sun_entity || (S["sun.sun"] ? "sun.sun" : null)].filter(Boolean))}</div></div>
+              <div class="wxsrc">${row("windsrc", "Böen von", p.wind_sensor ? "eigener Windsensor" : "leer = vom Wetterdienst", "",
+                "Ein eigener Wind- oder Böen-Sensor (z. B. Wetterstation auf dem Dach). Rollwerk nutzt ihn für den Sturmschutz der Rollläden.")}
+              <div class="wxr-pk">${this._picker("wind_sensor", p.wind_sensor ? [p.wind_sensor] : [])}</div></div>
             </div>
             ${head("mdi:clock-outline", "Jetzt")}
             ${w ? `
@@ -3555,7 +3564,7 @@ class HauswerkPanel extends HTMLElement {
               ${row("wind", "Wind", a.wind_gust_speed != null ? `Böen ${fmt(a.wind_gust_speed)} ${esc(unit)}` : "", a.wind_speed != null ? `${fmt(a.wind_speed)} ${esc(unit)}` : "–",
                 "Mittlere Windgeschwindigkeit laut Wetterdienst; Böen, falls der Dienst sie liefert.")}
               ${row("sun", "Sonne", sun ? `Höhe ${fmt(sa.elevation)}°` : `${esc(sunId)} fehlt`, sun ? (sun.state === "above_horizon" ? "über dem Horizont" : "unter dem Horizont") : "–",
-                "Aus der Home-Assistant-Integration „Sonne“ (oben unter „Sonnenstand“ wählbar). Hauswerk nutzt sie für die Darstellung nach Tageszeit – künftig auch für Rollläden.")}
+                "Aus der Home-Assistant-Integration „Sonne“ (oben unter „Sonnenstand“ wählbar). Hauswerk nutzt sie für die Darstellung nach Tageszeit und für die Rollläden (Rollwerk).")}
               ${row("rise", "Sonnenaufgang", "nächster Sonnenaufgang", hhmm(sa.next_rising), "Nächster Sonnenaufgang laut Sonnenstand-Entität.")}
               ${row("set", "Sonnenuntergang", "nächster Sonnenuntergang", hhmm(sa.next_setting), "Nächster Sonnenuntergang laut Sonnenstand-Entität.")}
             </div>` : `<p class="note warn"><ha-icon icon="mdi:weather-cloudy-alert"></ha-icon>Keine Wetter-Entität gefunden – z. B. die Integration „Met.no“ oder „OpenWeatherMap“ einrichten.</p>`}
@@ -5298,8 +5307,60 @@ class HauswerkPanel extends HTMLElement {
         this._pop.draft.prof[el.dataset.k] = el.dataset.v;
         this._renderPop();
         break;
-      case "rwp-feat":
-        this._pop.draft.prof.features = [...new Set([...(this._pop.draft.prof.features || []), el.dataset.v])];
+      case "rwp-feat": {
+        const pr = this._pop.draft.prof;
+        const f = new Set(pr.features || []);
+        if (el.type === "checkbox" ? !el.checked : f.has(el.dataset.v) && el.tagName !== "BUTTON") f.delete(el.dataset.v);
+        else f.add(el.dataset.v);
+        pr.features = [...f];
+        this._renderPop();
+        break;
+      }
+      case "rwp-mode": {
+        const pr = this._pop.draft.prof;
+        const f = new Set(pr.features || []);
+        const v = el.dataset.v;
+        f.delete("sun");
+        if (v === "free") f.delete("time"); else f.add("time");
+        if (v === "sun" || v === "free") f.add("sun");
+        if (v === "time" || v === "cal") f.delete("brightness");
+        pr.time_mode = v === "cal" ? "calendar" : "times";
+        if (v === "time") for (const [a, b] of [["up_early", "up_late"], ["up_early_we", "up_late_we"], ["down_early", "down_late"], ["down_early_we", "down_late_we"]]) pr[b] = pr[a];
+        pr.features = [...f];
+        this._renderPop();
+        break;
+      }
+      case "rwp-dir": {
+        const pr = this._pop.draft.prof;
+        const dir = Number(el.dataset.v);
+        pr.window_dir = dir;
+        pr.azimuth_start = (dir - 75 + 360) % 360;
+        pr.azimuth_end = (dir + 75) % 360;
+        this._renderPop();
+        break;
+      }
+      case "rwp-lock":
+        this._pop.draft.prof.pos_lockout = el.dataset.v === "" ? null : Number(el.dataset.v);
+        if (el.dataset.v !== "") this._pop.draft.prof.features = [...new Set([...(this._pop.draft.prof.features || []), "ventilate"])];
+        this._renderPop();
+        break;
+      case "rwp-man": {
+        const pr = this._pop.draft.prof;
+        const v = el.dataset.v;
+        pr.manual_block = v === "next" ? [] : ["opening", "closing", "shading", "ventilation"];
+        pr.manual_reset = v === "night" ? ["fixed"] : v === "hours" ? ["timeout"] : [];
+        if (v === "night") pr.reset_time = "00:01";
+        if (v === "hours" && !(pr.reset_timeout > 5)) pr.reset_timeout = 120;
+        this._renderPop();
+        break;
+      }
+      case "rw-expert":
+        this._expert = !this._expertOn();
+        try {
+          localStorage.setItem("hauswerk.experte", this._expert ? "1" : "0");
+        } catch (err) {
+          /* ohne Speicher: gilt bis zum Neuladen */
+        }
         this._renderPop();
         break;
       case "rwp-sec": {
@@ -5316,7 +5377,7 @@ class HauswerkPanel extends HTMLElement {
         this._data.rollwerk.profiles = res.profiles;
         this._closePop();
         this._renderMain();
-        this._toast(d.pid ? "Gespeichert" : "Profil angelegt");
+        this._toast(d.pid ? "Gespeichert" : "Verhalten angelegt");
         break;
       }
       case "rwp-del": {
@@ -5327,7 +5388,7 @@ class HauswerkPanel extends HTMLElement {
         this._data.rollwerk.covers = res.covers;
         this._closePop();
         this._renderMain();
-        this._toast("Profil gelöscht");
+        this._toast("Verhalten gelöscht");
         break;
       }
       case "rwc-save": {
@@ -5666,7 +5727,7 @@ code { background:var(--card2); padding:1px 6px; border-radius:6px; font-size:12
 .icon.auto-off { color:#f87171; background:color-mix(in srgb, #f87171 14%, transparent); }
 .room.off .acts { opacity:1; }
 .room-t { flex:1; min-width:0; }
-.room-t h4 { margin:0; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.room-t h4 { margin:0; font-size:16px; line-height:1.25; white-space:normal; overflow-wrap:break-word; hyphens:manual; }
 .room-t small { color:var(--muted); font-size:12px; }
 .mode { display:inline-flex; align-items:center; gap:5px; padding:4px 10px 4px 8px; border-radius:99px; font-size:12px; font-weight:600;
   color:var(--ct); background:color-mix(in srgb, var(--c) 15%, transparent); border:1px solid color-mix(in srgb, var(--c) 35%, transparent); white-space:nowrap; }
@@ -5857,6 +5918,39 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .rrow:first-child { border-top:none; }
 .rrow small { display:block; color:var(--muted); font-size:12px; }
 
+/* Rollwerk: Tagesleiste, Kompass, Experte */
+.rwday { margin:2px 0 4px; }
+.rwday-bar { position:relative; height:12px; border-radius:99px; background:color-mix(in srgb, #1e293b 55%, var(--card2)); overflow:hidden; }
+.rwday.small .rwday-bar { height:7px; }
+.rwday-bar i { position:absolute; top:0; bottom:0; }
+.rwday-bar .d-day { background:color-mix(in srgb, #38bdf8 55%, var(--card2)); }
+.rwday-bar .d-shade { background:repeating-linear-gradient(135deg, #f97316 0 4px, #fb923c 4px 8px); }
+.rwday-bar .d-now { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--text); border-radius:2px; }
+.rwday-lab { position:relative; height:16px; font-size:11px; color:var(--muted); }
+.rwday-lab span { position:absolute; transform:translateX(-50%); white-space:nowrap; }
+.rw-next { display:flex; flex-direction:column; gap:4px; margin:4px 0 2px; }
+.rw-next small { display:flex; align-items:center; gap:5px; color:var(--muted); font-size:12px; }
+.rw-next small ha-icon { --mdc-icon-size:14px; }
+.rwtop { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.rwexp { flex:none; display:inline-flex; align-items:center; gap:5px; padding:6px 11px; border-radius:99px; border:1px solid var(--line2); background:var(--card2); color:var(--muted); font:inherit; font-size:12px; cursor:pointer; }
+.rwexp.on { color:#fff; background:#8b5cf6; border-color:#8b5cf6; }
+.rwex { margin-top:16px; padding:12px; border-radius:14px; border:1px dashed color-mix(in srgb, #8b5cf6 45%, transparent); background:color-mix(in srgb, #8b5cf6 5%, transparent); }
+.rwex-h { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:700; color:#8b5cf6; text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px; }
+.rwex-h ha-icon { --mdc-icon-size:16px; }
+.compass { display:flex; flex-direction:column; align-items:center; gap:4px; margin:4px 0 10px; }
+.compass svg { width:min(250px, 100%); height:auto; }
+.cp-ring { fill:var(--card2); stroke:var(--line2); stroke-width:1.5; }
+.cp-sec { fill:color-mix(in srgb, #f97316 28%, transparent); stroke:#f97316; stroke-width:1.5; }
+.cp-win { stroke:#0ea5e9; stroke-width:5; stroke-linecap:round; }
+.cp-house { fill:var(--card); stroke:var(--text); stroke-width:1.5; }
+.cp-sun { fill:#facc15; stroke:#f59e0b; stroke-width:2; }
+.cp-b { cursor:pointer; }
+.cp-b circle { fill:var(--card); stroke:var(--line2); stroke-width:1.5; }
+.cp-b text { font-size:11px; font-weight:700; text-anchor:middle; fill:var(--text); pointer-events:none; }
+.cp-b.on circle { fill:#0ea5e9; stroke:#0ea5e9; }
+.cp-b.on text { fill:#fff; }
+.rwsent { line-height:2.4; padding:10px 12px; border-radius:14px; background:var(--card2); margin-bottom:6px; }
+.rwsent .unit { display:inline-flex; vertical-align:middle; width:112px; }
 /* Raum-Assistent */
 .wiz-bar { display:flex; gap:4px; margin:-2px 0 16px; overflow-x:auto; scrollbar-width:none; }
 .wiz-dot { flex:1; min-width:52px; display:flex; flex-direction:column; align-items:center; gap:4px; border:0; background:none; color:var(--muted); font:inherit; font-size:11px; cursor:pointer; padding:0; }
@@ -6301,7 +6395,9 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .rm-head { display:flex; align-items:center; gap:8px; min-width:0; }
 .rm-ic { width:28px; height:28px; border-radius:9px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--rc) 18%, transparent); color:var(--rct); }
 .rm-ic ha-icon { --mdc-icon-size:17px; }
-.rm-name { flex:1; min-width:0; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rm-name { flex:1; min-width:0; font-size:15px; line-height:1.25; text-align:left; white-space:normal; overflow-wrap:break-word; hyphens:manual; }
+.rm-ind { display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-height:0; }
+.rm-ind:empty { display:none; }
 .rm-fire { color:#fb923c; --mdc-icon-size:16px; }
 .rm-win { color:#22d3ee; --mdc-icon-size:16px; }
 .icon.tiny { width:28px; height:28px; }
@@ -6452,6 +6548,7 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 /* Raum-Detailseite */
 .rlink { all:unset; cursor:pointer; display:block; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .rlink:hover { color:var(--accent); text-decoration:underline; text-underline-offset:3px; }
+.rm-name.rlink, .room-t .rlink { white-space:normal; overflow:visible; text-overflow:clip; overflow-wrap:break-word; hyphens:manual; }
 .rpage .room { margin-bottom:14px; }
 .rp-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; }
 .rp-grid .card { margin:0; }

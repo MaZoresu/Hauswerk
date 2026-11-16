@@ -681,3 +681,31 @@ def test_rollwerk_migration(hw):
     p = rw.profiles["fassade_s"]
     assert p["azimuth_start"] == 120 and p["azimuth_end"] == 240 and p["temp2_min"] == 26
     assert "shading" in p["features"] and "sun" in p["features"] and p["up_early"] == "06:45"
+
+
+def test_rollwerk_anwesenheit_und_tagesleiste(hw):
+    """Niemand zu Hause (Hauswerk › Anwesenheit): tagsüber zu; Tagesleiste und „Als Nächstes“ ohne Sonnenbahn."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 7, 16, 9, 0, tzinfo=timezone.utc)  # 10:00 lokal, Donnerstag
+        hass = Hass()
+        hass.set("cover.wz", "open", {"current_position": 100, "supported_features": 15}, "Wohnzimmer")
+        hass.set("sun.sun", "above_horizon", {"azimuth": 120, "elevation": 30}, "Sonne")
+        log, haus, ctl = await _setup(hw, hass)
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        await rw.async_start()
+        await rw.async_save_profile("standard", dict(rw.profiles["standard"], away_mode="closed", delay_random=0))
+        await rw.async_save_settings({"rw_covers": ["cover.wz"]})
+        haus.away = True
+        await rw.async_evaluate()
+        return rw, hass
+
+    rw, hass = asyncio.run(run())
+    assert hass.calls[-1] == ("cover", "set_cover_position", {"entity_id": "cover.wz", "position": 0})
+    st = rw.status()
+    assert st["covers"]["cover.wz"]["reason"] == "Niemand zu Hause – bleibt zu"
+    tl = st["timelines"]["standard"]
+    assert tl["open"] == "06:00" and tl["close"] == "16:00" and tl["shade"] == []
+    assert st["covers"]["cover.wz"]["next"] == "16:00 schließt"

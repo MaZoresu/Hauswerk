@@ -2,6 +2,28 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.27.0 – 2026-11-16
+
+### Neu
+- **Rollwerk einfacher:** Ein „Profil“ heißt jetzt **Verhalten** und hat nur noch fünf Abschnitte:
+  - **Tagesablauf:** nach Uhrzeit oder mit der Sonne
+  - **Sonnenschutz**
+  - **Fenster & Lüften**
+  - **Ausnahmen**
+  - **Feinheiten**
+  
+  Zu sehen sind zuerst nur die wichtigen Einstellungen. Alles Weitere wie bei der Cover Control Automation (und/oder-Bedingungen, Helligkeit, Wartezeiten, Erzwingen, Verhalten im Detail) erscheint mit **Experte**.
+- **Kompass:** Beim Sonnenschutz tippst du an, wohin das Fenster zeigt. Der Bereich, in dem die Sonne zählt, und die Sonne jetzt sind eingezeichnet.
+- **Tagesleiste:** Für jedes Verhalten und an jedem Rollladen zeigt eine Leiste, wann heute geöffnet wird, wann Beschattung möglich ist und wann geschlossen wird. Dazu steht „Als Nächstes: …“ am Rollladen.
+- **Anwesenheit und Urlaub aus Hauswerk:** Je Verhalten wählbar, was passiert, wenn niemand zu Hause ist (wie immer, tagsüber zu, beschattet). Im Urlaub lassen sich die Zeiten zufällig verschieben. Eigene Sensoren dafür braucht Rollwerk nicht.
+- **Böen-Sensor unter Hauswerk › Wetter:** gilt für alle Module. Ein in Rollwerk gewählter Sensor wird übernommen.
+
+### Geändert
+- Die Einstellungsliste von Rollwerk zeigt je Verhalten eine Zeile statt zwölf; Feiertage, Sonnenstand, Wetter und Sturmgrenze kommen nur noch aus Hauswerk.
+
+### Behoben
+- **Raumnamen abgeschnitten:** Auf den Raumkacheln (kompakt und detailliert) stehen lange Namen jetzt vollständig, bei Bedarf in zwei Zeilen; die Symbole stehen darunter.
+
 ## 0.26.0 – 2026-11-16
 
 ### Neu

@@ -96,6 +96,10 @@ PROFILE_SPEC: dict[str, tuple[Any, str]] = {
     # Bewohner
     "resident_sensor": (None, "entity"),
     "resident_config": ([], "list"),   # opening, closing, allow_shading, allow_opening, allow_ventilation
+    # Anwesenheit und Urlaub kommen aus Hauswerk › Anwesenheit / Urlaub
+    "away_mode": ("normal", "choice"),  # normal | closed (tagsüber zu) | shade (tagsüber Beschattungsstellung)
+    "vacation_random": (0, "num"),      # Urlaub: Öffnen/Schließen zufällig bis zu X Minuten später
+    "window_dir": (None, "num"),        # Himmelsrichtung des Fensters (Kompass), daraus Richtung von/bis
     # Manuelle Übersteuerung
     "manual_block": ([], "list"),      # opening, closing, ventilation, shading
     "manual_reset": ([], "list"),      # fixed, timeout, in_position
@@ -148,6 +152,8 @@ class Rollwerk:
         self._cal: dict[str, list[dict[str, Any]]] = {}
         self._cal_at = 0.0
         self._started_at = 0.0
+        self._track_cache: tuple | None = None
+        self._tl_cache: dict = {}
         self._unsubs: list[Callable[[], None]] = []
         self._state_unsub: Callable[[], None] | None = None
         self._pending: Callable[[], None] | None = None
@@ -163,6 +169,10 @@ class Rollwerk:
         self._persist = stored.get("persist") or {}
         if not self.profiles:
             self._migrate(old)
+        # Böen-Sensor gehört jetzt zu Hauswerk › Wetter (gilt für alle Module)
+        if self.settings.get("rw_wind_entity") and not self.haus.settings.get("wind_sensor"):
+            self.haus.settings["wind_sensor"] = self.settings["rw_wind_entity"]
+            self.haus._save()
 
     def _migrate(self, old: dict[str, Any]) -> None:
         """Aus den Einstellungen von 0.24 (eine Einstellung für alle, Fassade je Rollladen) Profile machen."""
@@ -409,7 +419,7 @@ class Rollwerk:
 
     def _wind(self) -> float | None:
         """Aktuelle Böen in km/h: eigener Sensor, sonst Wetterdienst (Böen, sonst Wind)."""
-        entity_id = self.settings.get("rw_wind_entity")
+        entity_id = self.haus.settings.get("wind_sensor") or self.settings.get("rw_wind_entity")
         if entity_id:
             state = self.hass.states.get(entity_id)
             value = _float(state.state) if state is not None else None
@@ -644,6 +654,13 @@ class Rollwerk:
         elif rt.get("resident_was") and not resident and "opening" in rconf and day and "up" in feats:
             target, reason, cat = p_open, "Bewohner ist wach", "resident"
         rt["resident_was"] = resident
+        # Anwesenheit aus Hauswerk: niemand zu Hause (oder Urlaub) -> tagsüber zu bzw. beschattet
+        away = bool(getattr(self.haus, "away", False) or getattr(self.haus, "vacation", False))
+        if away and day and cat in ("open", "shading", "none") and prof.get("away_mode") in ("closed", "shade"):
+            if prof["away_mode"] == "closed":
+                target, reason, cat = p_close, "Niemand zu Hause – bleibt zu", "away"
+            else:
+                target, reason, cat = p_shade, "Niemand zu Hause – Beschattung", "away"
         if "prevent_higher_position_closing" in behavior and cat == "close" and pos is not None and target is not None and target > pos:
             target, reason = None, "Abends: nicht höher fahren"
         if "prevent_opening_multiple_times" in behavior and cat == "open" and rt.get("auto_opened_on") == today and rt.get("sent_cat") != "open":
@@ -756,6 +773,8 @@ class Rollwerk:
                 continue
             rt["manual_at"] = None  # eine automatische Fahrt beendet die Übersteuerung
             delay = float(prof.get("delay_fix") or 0) + random.uniform(0, float(prof.get("delay_random") or 0))
+            if cat in ("open", "close") and getattr(self.haus, "vacation", False) and prof.get("vacation_random"):
+                delay += random.uniform(0, float(prof["vacation_random"]) * 60)  # Urlaub: wirkt bewohnt
             if cat == "ventilation" and "ventilation_start_no_delay" in set(prof.get("vent_options") or []):
                 delay = 0
             await self._schedule_move(entity_id, target, reason, delay)
@@ -798,6 +817,99 @@ class Rollwerk:
         else:
             async_call_later(self.hass, delay, go)
 
+    # ------------------------------------------------------------ Tagesleiste
+    def _sun_track(self) -> list[tuple[int, float, float]] | None:
+        """Sonnenstand heute alle 10 Minuten (Minute, Azimut, Höhe) – aus dem Standort von Home Assistant."""
+        today = dt_util.now().date()
+        if self._track_cache and self._track_cache[0] == today:
+            return self._track_cache[1]
+        track = None
+        try:
+            from homeassistant.helpers.sun import get_astral_location  # noqa: PLC0415
+
+            location, elevation = get_astral_location(self.hass)
+            start = dt_util.start_of_local_day()
+            track = []
+            for m in range(0, 1440, 10):
+                when = start + timedelta(minutes=m)
+                track.append((m, float(location.solar_azimuth(when, elevation)), float(location.solar_elevation(when, elevation))))
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Sonnenbahn nicht berechenbar: %s", err)
+        self._track_cache = (today, track)
+        return track
+
+    def timeline(self, pid: str) -> dict[str, Any]:
+        """Voraussichtlicher Tag eines Profils: öffnen, Beschattung (möglich), schließen."""
+        prof = {**PROFILE_DEFAULTS, **(self.profiles.get(pid) or {})}
+        key = (pid, dt_util.now().date().isoformat(), repr(sorted(prof.items(), key=lambda kv: kv[0])), self._free_day())
+        if key in self._tl_cache:
+            return self._tl_cache[key]
+        feats = set(prof.get("features") or [])
+        track = self._sun_track()
+        up, down = self._windows(prof)
+        sun_on = "sun" in feats and track is not None
+        approx = "brightness" in feats
+
+        def first(lo: int, hi: int, test) -> int | None:
+            for m, az, el in track or []:
+                if lo <= m <= hi and test(el):
+                    return m
+            return None
+
+        open_at = close_at = None
+        if "up" in feats:
+            if "time" in feats and up:
+                hit = first(up[0], up[1], lambda el: el >= float(prof.get("sun_up") or 0)) if sun_on else None
+                open_at = hit if hit is not None else (up[1] if sun_on else up[0])
+            elif sun_on:
+                open_at = first(0, 1439, lambda el: el >= float(prof.get("sun_up") or 0))
+        if "down" in feats:
+            if "time" in feats and down:
+                hit = first(down[0], down[1], lambda el: el <= float(prof.get("sun_down") or 0)) if sun_on else None
+                close_at = hit if hit is not None else (down[1] if sun_on else down[0])
+            elif sun_on:
+                close_at = first(max(open_at or 0, 720), 1439, lambda el: el <= float(prof.get("sun_down") or 0))
+        shade: list[list[int]] = []
+        if "shading" in feats and track:
+            lo, hi = open_at if open_at is not None else 0, close_at if close_at is not None else 1440
+            seg = None
+            for m, az, el in track:
+                cond = shade_conditions({"azimuth": az, "elevation": el}, prof)[0]
+                ok = lo <= m < hi and cond.get("azimuth") and cond.get("elevation")
+                if ok and seg is None:
+                    seg = [m, m + 10]
+                elif ok:
+                    seg[1] = m + 10
+                elif seg is not None:
+                    shade.append(seg)
+                    seg = None
+            if seg is not None:
+                shade.append(seg)
+
+        def hm(m: int | None) -> str | None:
+            return None if m is None else f"{min(m, 1439) // 60:02d}:{min(m, 1439) % 60:02d}"
+
+        out = {"open": hm(open_at), "close": hm(close_at), "shade": [[hm(a), hm(b)] for a, b in shade], "approx": approx,
+               "open_min": open_at, "close_min": close_at, "shade_min": shade, "sun": track is not None}
+        if len(self._tl_cache) > 50:
+            self._tl_cache.clear()
+        self._tl_cache[key] = out
+        return out
+
+    @staticmethod
+    def next_event(tl: dict[str, Any], now_min: int) -> str | None:
+        events = []
+        if tl.get("open_min") is not None:
+            events.append((tl["open_min"], "öffnet"))
+        for a, b in tl.get("shade_min") or []:
+            events += [(a, "Beschattung möglich"), (b, "Beschattung endet")]
+        if tl.get("close_min") is not None:
+            events.append((tl["close_min"], "schließt"))
+        for m, what in sorted(events):
+            if m > now_min:
+                return f"{'ca. ' if tl.get('approx') else ''}{m // 60:02d}:{m % 60:02d} {what}"
+        return None
+
     # ------------------------------------------------------------ Fürs Panel
     def status(self) -> dict[str, Any]:
         def hm(minutes: int | None) -> str | None:
@@ -805,6 +917,9 @@ class Rollwerk:
 
         azimuth, elevation = self._sun()
         covers = {}
+        local = dt_util.now()
+        now_min = local.hour * 60 + local.minute
+        timelines = {pid: self.timeline(pid) for pid in self.profiles}
         for entity_id in self.settings.get("rw_covers") or []:
             rt = self._rt.get(entity_id) or {}
             cfg = self.covers.get(entity_id) or {}
@@ -825,6 +940,7 @@ class Rollwerk:
                 "up": [hm(up[0]), hm(up[1])] if up else None,
                 "down": [hm(down[0]), hm(down[1])] if down else None,
                 "opened_today": rt.get("opened_on") == dt_util.now().date().isoformat(),
+                "next": self.next_event(timelines.get(cfg.get("profile") or "standard") or {}, now_min) if cfg.get("auto", True) else None,
             }
         return {
             "covers": covers,
@@ -833,4 +949,6 @@ class Rollwerk:
             "storm_kmh": self.haus.settings.get("storm_kmh") or 70,
             "free_day": self._free_day(),
             "forecast": self._fc,
+            "timelines": {pid: {k: v for k, v in tl.items() if not k.endswith("_min")} for pid, tl in timelines.items()},
+            "away": bool(getattr(self.haus, "away", False)), "vacation": bool(getattr(self.haus, "vacation", False)),
         }
