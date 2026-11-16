@@ -10,6 +10,9 @@ MODULE_HEATING = "heizen"
 # Hauswerk-Kern: zentrale Einstellungen und Hauszustände (Anwesenheit, Urlaub, Wetter)
 MODULE_HOUSE = "haus"
 HOUSE_STORAGE_KEY = f"{DOMAIN}.{MODULE_HOUSE}"
+# Modul Rollwerk (Rollläden): hass.data[DOMAIN][MODULE_SHUTTER], Speicher hauswerk.rollwerk
+MODULE_SHUTTER = "rollwerk"
+SHUTTER_STORAGE_KEY = f"{DOMAIN}.{MODULE_SHUTTER}"
 
 STORAGE_KEY = f"{DOMAIN}.{MODULE_HEATING}"
 STORAGE_VERSION = 1
@@ -46,7 +49,15 @@ SETTING_LABELS = {
     "notify_battery": "Benachrichtigungen", "notify_quiet": "Ruhezeit", "notify_quiet_from": "Ruhezeit", "notify_quiet_to": "Ruhezeit",
     "battery_low": "Batterie-Warnung", "preheat_weather": "Vorheizen nach Wetter", "workday_entity": "Arbeitstag-Sensor",
     "workday_as": "Feiertage wie", "vent_rh": "Lüften-Hinweis", "sun_entity": "Sonne",
-    "notify_ha": "Mitteilung in Home Assistant",
+    "notify_ha": "Mitteilung in Home Assistant", "notify_cold": "Benachrichtigungen",
+    "demand_entity": "Wärmeanforderung", "demand_action": "Wärmeanforderung", "demand_low": "Wärmeanforderung",
+    "demand_valve": "Wärmeanforderung", "rw_covers": "Rollwerk: Rollläden", "rw_open_mode": "Rollwerk: Öffnen",
+    "rw_open_offset": "Rollwerk: Öffnen", "rw_open_not_before": "Rollwerk: Öffnen", "rw_open_not_before_we": "Rollwerk: Öffnen",
+    "rw_open_time": "Rollwerk: Öffnen", "rw_open_time_we": "Rollwerk: Öffnen", "rw_close_mode": "Rollwerk: Schließen",
+    "rw_close_offset": "Rollwerk: Schließen", "rw_close_not_after": "Rollwerk: Schließen", "rw_close_time": "Rollwerk: Schließen",
+    "rw_shade": "Rollwerk: Sonnenschutz", "rw_shade_temp": "Rollwerk: Sonnenschutz", "rw_shade_pos": "Rollwerk: Sonnenschutz",
+    "rw_shade_elev": "Rollwerk: Sonnenschutz", "rw_storm": "Rollwerk: Sturmschutz", "rw_wind_entity": "Rollwerk: Sturmschutz",
+    "rw_vacation_random": "Rollwerk: Urlaub", "demand_hold": "Wärmeanforderung", "demand_preheat": "Wärmeanforderung",
     "radio_entities": "Funk-Auslastung", "radio_limit": "Funk-Grenze", "pair_mode": "Kopplung",
 }
 
@@ -107,6 +118,7 @@ HOUSE_DEFAULTS = {
     "notify_offline_min": 15,     # … seit so vielen Minuten
     "notify_frost": "normal",     # Frost erwartet (Grenze: cold_snap_temp)
     "notify_battery": "normal",   # Batterie schwach
+    "notify_cold": "normal",      # Heizkörper bleibt kalt trotz offenem Ventil
     "notify_ha": False,           # zusätzlich als Mitteilung in Home Assistant (Glocke in der Seitenleiste)
     "notify_quiet": True,         # Ruhezeit: Nachrichten erst danach senden
     "notify_quiet_from": "22:00",
@@ -148,6 +160,13 @@ HEAT_DEFAULTS = {
     "preheat_weather": False,     # Vorlaufzeit nach Außentemperatur anpassen (kälter = früher)
     # Lüften: Hinweis, wenn drinnen ab dieser Luftfeuchte und draußen trockenere Luft (0 = aus)
     "vent_rh": 65,
+    # Wärmeanforderung an den Wärmeerzeuger (z. B. Zone der Vaillant-Anlage); leer = aus
+    "demand_entity": None,        # climate.* des Wärmeerzeugers
+    "demand_action": "lower",     # lower = Soll absenken | off = Zone ausschalten, solange kein Raum Wärme braucht
+    "demand_low": 17.0,           # °C bei „lower“
+    "demand_valve": 15,           # ab dieser Ventilöffnung (%) braucht ein Raum Wärme
+    "demand_hold": 20,            # Minuten ohne Bedarf, bis abgesenkt wird
+    "demand_preheat": 0.0,        # beim Vorheizen das Soll des Wärmeerzeugers um so viel °C anheben (0 = nein)
 }
 
 # Alle Einstellungen zusammen (so sieht sie das Panel)

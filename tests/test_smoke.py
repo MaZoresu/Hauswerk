@@ -66,6 +66,8 @@ def _stub_homeassistant():
     helpers.entity_registry = _mod("homeassistant.helpers.entity_registry",
          async_get=lambda hass: types.SimpleNamespace(async_get=REG.get),
          async_entries_for_device=lambda r, d: [e for e in REG.values() if e.device_id == d])
+    helpers.area_registry = _mod("homeassistant.helpers.area_registry",
+                                 async_get=lambda hass: types.SimpleNamespace(async_get_area=lambda a: None))
     _mod("homeassistant.helpers.dispatcher", async_dispatcher_send=lambda *a: None)
     _mod("homeassistant.helpers.event", async_call_later=noop, async_track_state_change_event=noop,
          async_track_time_interval=noop)
@@ -92,7 +94,7 @@ def hw(tmp_path_factory):
     root = tmp_path_factory.mktemp("pkg")
     pkg = root / "hw"
     pkg.mkdir()
-    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py"):
+    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py"):
         shutil.copy(SRC / name, pkg / name)
     (pkg / "__init__.py").write_text("")
     sys.path.insert(0, str(root))
@@ -100,6 +102,7 @@ def hw(tmp_path_factory):
         Heizen=importlib.import_module("hw.controller").Heizen,
         Haus=importlib.import_module("hw.core").Haus,
         Protokoll=importlib.import_module("hw.log").Protokoll,
+        Rollwerk=importlib.import_module("hw.rollwerk").Rollwerk,
         const=importlib.import_module("hw.const"),
     )
 
@@ -533,3 +536,112 @@ def test_rolle_selbst(hw):
         assert {d["entity_id"] for dom, s, d in hass.calls if s == "set_temperature"} == {"climate.wth", "climate.trv"}
 
     asyncio.run(run())
+
+
+def test_ventil_kalt_und_waermeanforderung(hw):
+    """Ventil aus Nachbar-Sensor, kalter Heizkörper, Wärmeanforderung an den Wärmeerzeuger, Ventil-Statistik."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 16, 9, 0, tzinfo=timezone.utc)  # Komfort
+        hass = Hass()
+        hass.set("climate.trv", "heat", {"current_temperature": 19.0, "temperature": 21.0}, "Heizkörper Küche")
+        hass.set("sensor.trv_ventil_offnungsgrad", "100", {"unit_of_measurement": "%"}, "Ventil")
+        hass.set("climate.vaillant", "auto", {"temperature": 22.5}, "Vaillant Zone")
+        REG["climate.trv"] = types.SimpleNamespace(entity_id="climate.trv", device_id="dt", domain="climate", disabled_by=None)
+        REG["sensor.trv_ventil_offnungsgrad"] = types.SimpleNamespace(entity_id="sensor.trv_ventil_offnungsgrad", device_id="dt", domain="sensor", disabled_by=None)
+        log, haus, ctl = await _setup(hw, hass)
+        await ctl.async_start()
+        await ctl.async_save_settings({"demand_entity": "climate.vaillant", "demand_hold": 20})
+        await ctl.async_save_room({"id": "k", "name": "Küche", "comfort": 21, "eco": 18, "enabled": True,
+                                   "climates": ["climate.trv"],
+                                   "schedule": [{"days": [0, 1, 2, 3, 4, 5, 6], "start": "06:00", "end": "22:00"}]})
+        res = ctl.status()["rooms"]["k"]
+        assert res["valve"] == 100 and res["cold_radiator"] is None
+        assert ctl.status()["demand"]["need"] == ["Küche"]
+        # eine Stunde später: kaum wärmer -> kalt
+        NOW[0] += timedelta(minutes=61)
+        hass.set("climate.trv", "heat", {"current_temperature": 19.1, "temperature": 21.0}, "Heizkörper Küche")
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["k"]
+        assert res["cold_radiator"]["minutes"] >= 60
+        assert ctl.status()["cold_rooms"] == ["k"]
+        ctl._record_stats()
+        # Raum warm, Ventil zu: nach 20 Min. ohne Bedarf wird die Vaillant abgesenkt
+        hass.set("climate.trv", "heat", {"current_temperature": 21.2, "temperature": 21.0}, "Heizkörper Küche")
+        hass.set("sensor.trv_ventil_offnungsgrad", "0", {"unit_of_measurement": "%"}, "Ventil")
+        await ctl.async_evaluate()
+        assert ctl.status()["demand"].get("state") in (None, "normal")
+        NOW[0] += timedelta(minutes=21)
+        await ctl.async_evaluate()
+        assert ctl.status()["demand"]["state"] == "low"
+        assert ("climate", "set_temperature", {"entity_id": "climate.vaillant", "temperature": 17.0}) in hass.calls
+        # wieder Bedarf: zurück auf die gemerkten 22,5 °C
+        hass.set("climate.vaillant", "auto", {"temperature": 17.0}, "Vaillant Zone")
+        hass.set("sensor.trv_ventil_offnungsgrad", "60", {"unit_of_measurement": "%"}, "Ventil")
+        await ctl.async_evaluate()
+        assert ctl.status()["demand"]["state"] == "normal"
+        assert hass.calls[-1] == ("climate", "set_temperature", {"entity_id": "climate.vaillant", "temperature": 22.5})
+        rep = ctl.report(1)["k"][0]
+        assert rep["valve_avg"] == 100 and rep["valve_hours"][11] == 100
+        await ctl.async_stop()
+        return log
+
+    log = asyncio.run(run())
+    titles = [e["title"] for e in log.entries]
+    assert "Heizkörper bleibt kalt" in titles
+    assert any(t.startswith("Wärmeanforderung: keine") for t in titles)
+
+
+def test_rollwerk(hw):
+    """Abends zu, morgens auf, Sonnenschutz, Aussperrschutz, Sturm, Handbetrieb bleibt bis zum nächsten Wechsel."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 7, 16, 18, 0, tzinfo=timezone.utc)  # 20:00 lokal, Donnerstag
+        hass = Hass()
+        feat = {"supported_features": 15}
+        hass.set("cover.wz", "open", {"current_position": 100, **feat}, "Wohnzimmer")
+        hass.set("cover.tuer", "open", {"current_position": 100, **feat}, "Terrassentür")
+        hass.set("binary_sensor.tuer", "on", {}, "Terrassentür Kontakt")
+        hass.set("weather.home", "sunny", {"temperature": 29, "wind_gust_speed": 20, "wind_speed_unit": "km/h"}, "Wetter")
+        hass.set("sun.sun", "above_horizon", {"azimuth": 200, "elevation": 30}, "Sonne")
+        log, haus, ctl = await _setup(hw, hass)
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        await rw.async_start()  # Start: nichts fahren
+        assert not [c for c in hass.calls if c[0] == "cover"]
+        await rw.async_save_settings({"rw_covers": ["cover.wz", "cover.tuer"], "rw_open_mode": "time", "rw_close_mode": "time",
+                                      "rw_close_time": "21:00", "rw_shade": True, "rw_shade_temp": 25})
+        await rw.async_save_cover("cover.wz", {"facade": "S", "shade": True})
+        await rw.async_save_cover("cover.tuer", {"door": "binary_sensor.tuer"})
+        # 20:00, Sonne auf der Südseite, 29 °C: Wohnzimmer beschattet, Tür bleibt offen
+        assert ("cover", "set_cover_position", {"entity_id": "cover.wz", "position": 30}) in hass.calls
+        assert rw.status()["covers"]["cover.wz"]["reason"] == "Sonnenschutz"
+        # 21:00 Nacht: Wohnzimmer zu; Tür offen -> Rollladen bleibt oben
+        NOW[0] = datetime(2026, 7, 16, 20, 1, tzinfo=timezone.utc)  # 21:01 lokal
+        hass.set("cover.wz", "open", {"current_position": 30, **feat}, "Wohnzimmer")
+        await rw.async_evaluate()
+        assert hass.calls[-1] == ("cover", "set_cover_position", {"entity_id": "cover.wz", "position": 0})
+        assert rw.status()["covers"]["cover.tuer"]["blocked"] == "Tür offen"
+        # Tür zu: jetzt fährt er
+        hass.set("binary_sensor.tuer", "off", {}, "Terrassentür Kontakt")
+        await rw.async_evaluate()
+        assert hass.calls[-1] == ("cover", "set_cover_position", {"entity_id": "cover.tuer", "position": 0})
+        # von Hand hochgefahren: bleibt so (kein neuer Befehl), Status zeigt Handbetrieb
+        hass.set("cover.wz", "open", {"current_position": 100, **feat}, "Wohnzimmer")
+        n = len(hass.calls)
+        await rw.async_evaluate()
+        assert len(hass.calls) == n and rw.status()["covers"]["cover.wz"]["manual"]
+        # Sturm: alle hoch
+        hass.set("cover.tuer", "closed", {"current_position": 0, **feat}, "Terrassentür")
+        hass.set("weather.home", "sunny", {"temperature": 20, "wind_gust_speed": 90, "wind_speed_unit": "km/h"}, "Wetter")
+        await rw.async_evaluate()
+        st = rw.status()
+        assert st["storm"] and st["covers"]["cover.wz"]["target"] == 100
+        assert hass.calls[-1] == ("cover", "set_cover_position", {"entity_id": "cover.tuer", "position": 100})
+        return log
+
+    log = asyncio.run(run())
+    titles = [e["title"] for e in log.entries]
+    assert "Sturmschutz: Rollläden hoch" in titles and "Terrassentür bleibt oben – Tür offen" in titles

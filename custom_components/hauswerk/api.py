@@ -10,7 +10,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_HEATING, MODULE_HOUSE, MODULE_LOG
+from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_HEATING, MODULE_HOUSE, MODULE_LOG, MODULE_SHUTTER
 from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, parse_hm
 
 
@@ -192,6 +192,32 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_offline_min"): vol.All(vol.Coerce(int), vol.Range(min=1, max=720)),
         vol.Optional("notify_frost"): NOTIFY_MODE,
         vol.Optional("notify_battery"): NOTIFY_MODE,
+        vol.Optional("notify_cold"): NOTIFY_MODE,
+        # Rollwerk
+        vol.Optional("rw_covers"): vol.All([vol.All(str, vol.Match(r"^cover\.[a-z0-9_]+$"))], vol.Length(max=60)),
+        vol.Optional("rw_open_mode"): vol.In(["sun", "time", "off"]),
+        vol.Optional("rw_open_offset"): vol.All(vol.Coerce(int), vol.Range(min=-120, max=240)),
+        vol.Optional("rw_open_not_before"): _hm,
+        vol.Optional("rw_open_not_before_we"): _hm,
+        vol.Optional("rw_open_time"): _hm,
+        vol.Optional("rw_open_time_we"): _hm,
+        vol.Optional("rw_close_mode"): vol.In(["sun", "time", "off"]),
+        vol.Optional("rw_close_offset"): vol.All(vol.Coerce(int), vol.Range(min=-120, max=240)),
+        vol.Optional("rw_close_not_after"): _hm,
+        vol.Optional("rw_close_time"): _hm,
+        vol.Optional("rw_shade"): bool,
+        vol.Optional("rw_shade_temp"): vol.All(vol.Coerce(float), vol.Range(min=10, max=40)),
+        vol.Optional("rw_shade_pos"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+        vol.Optional("rw_shade_elev"): vol.All(vol.Coerce(int), vol.Range(min=0, max=60)),
+        vol.Optional("rw_storm"): bool,
+        vol.Optional("rw_wind_entity"): _opt(ENTITY),
+        vol.Optional("rw_vacation_random"): bool,
+        vol.Optional("demand_entity"): _opt(vol.All(str, vol.Match(r"^climate\.[a-z0-9_]+$"))),
+        vol.Optional("demand_action"): vol.In(["lower", "off"]),
+        vol.Optional("demand_low"): vol.All(vol.Coerce(float), vol.Range(min=5, max=25)),
+        vol.Optional("demand_valve"): vol.All(vol.Coerce(int), vol.Range(min=1, max=80)),
+        vol.Optional("demand_hold"): vol.All(vol.Coerce(int), vol.Range(min=5, max=180)),
+        vol.Optional("demand_preheat"): vol.All(vol.Coerce(float), vol.Range(min=0, max=5)),
         vol.Optional("notify_ha"): bool,
         vol.Optional("sun_entity"): _opt(vol.All(str, vol.Match(r"^sun\.[a-z0-9_]+$"))),
         vol.Optional("notify_quiet"): bool,
@@ -230,10 +256,14 @@ def _haus(hass: HomeAssistant):
     return (hass.data.get(DOMAIN) or {}).get(MODULE_HOUSE)
 
 
+def _rw(hass: HomeAssistant):
+    return (hass.data.get(DOMAIN) or {}).get(MODULE_SHUTTER)
+
+
 def _settings(hass: HomeAssistant) -> dict:
-    """Alle Einstellungen, wie das Panel sie sieht: zentral (Kern) und Heizwerk."""
-    haus, ctl = _haus(hass), _ctl(hass)
-    return {**(haus.settings if haus else {}), **(ctl.settings if ctl else {})}
+    """Alle Einstellungen, wie das Panel sie sieht: zentral (Kern), Heizwerk und Rollwerk (rw_…)."""
+    haus, ctl, rw = _haus(hass), _ctl(hass), _rw(hass)
+    return {**(haus.settings if haus else {}), **(ctl.settings if ctl else {}), **(rw.settings if rw else {})}
 
 
 def _log(hass: HomeAssistant):
@@ -292,6 +322,7 @@ def ws_get(hass: HomeAssistant, connection, msg) -> None:
                 for room_id in ctl.rooms
             },
             "status": ctl.status(),
+            "rollwerk": {"covers": _rw(hass).covers, "status": _rw(hass).status()} if _rw(hass) else None,
             "defaults": TYPE_DEFAULTS,
             "modes": MODES,
             "is_admin": _may_edit(hass, connection),
@@ -372,7 +403,10 @@ async def ws_settings_save(hass: HomeAssistant, connection, msg) -> None:
         settings.pop("allow_users", None)  # die Freigabe selbst ändern nur Admins
     # Zentrale Einstellungen an den Kern, der Rest an Heizwerk
     house = {k: v for k, v in settings.items() if k in HOUSE_KEYS}
-    heat = {k: v for k, v in settings.items() if k not in HOUSE_KEYS}
+    shutter = {k: v for k, v in settings.items() if k.startswith("rw_")}
+    heat = {k: v for k, v in settings.items() if k not in HOUSE_KEYS and not k.startswith("rw_")}
+    if shutter and _rw(hass):
+        await _rw(hass).async_save_settings(shutter, by=_who(connection))
     if house:
         await _haus(hass).async_save_settings(house, by=_who(connection))
     if heat:
@@ -506,6 +540,72 @@ async def ws_notify_test(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"])
 
 
+COVER_SCHEMA = vol.Schema(
+    {
+        vol.Optional("facade"): _opt(vol.In(["N", "NO", "O", "SO", "S", "SW", "W", "NW"])),
+        vol.Optional("shade"): bool,
+        vol.Optional("shade_pos"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=100))),
+        vol.Optional("storm"): bool,
+        vol.Optional("door"): _opt(vol.All(str, vol.Match(r"^(binary_sensor|input_boolean)\.[a-z0-9_]+$"))),
+        vol.Optional("auto"): bool,
+        vol.Optional("night_pos"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=100))),
+    },
+    extra=vol.REMOVE_EXTRA,
+)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/rollwerk/subscribe"})
+@callback
+def ws_rw_subscribe(hass: HomeAssistant, connection, msg) -> None:
+    rw = _rw(hass)
+    if rw is None:
+        return _not_ready(connection, msg)
+
+    @callback
+    def forward(status: dict) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], status))
+
+    connection.subscriptions[msg["id"]] = rw.subscribe(forward)
+    connection.send_result(msg["id"])
+    forward(rw.status())
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "hauswerk/rollwerk/cover/save", vol.Required("entity_id"): ENTITY, vol.Required("cover"): dict}
+)
+@require_editor
+@websocket_api.async_response
+async def ws_rw_cover_save(hass: HomeAssistant, connection, msg) -> None:
+    rw = _rw(hass)
+    if rw is None:
+        return _not_ready(connection, msg)
+    try:
+        cfg = COVER_SCHEMA(msg["cover"])
+    except vol.Invalid as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    await rw.async_save_cover(msg["entity_id"], cfg, by=_who(connection))
+    connection.send_result(msg["id"], {"covers": rw.covers})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "hauswerk/rollwerk/command",
+        vol.Required("entity_ids"): vol.All([vol.All(str, vol.Match(r"^cover\.[a-z0-9_]+$"))], vol.Length(min=1, max=60)),
+        vol.Required("action"): vol.In(["open", "close", "stop", "position"]),
+        vol.Optional("position"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+    }
+)
+@websocket_api.async_response
+async def ws_rw_command(hass: HomeAssistant, connection, msg) -> None:
+    """Rollläden von Hand fahren (dürfen alle Benutzer)."""
+    rw = _rw(hass)
+    if rw is None:
+        return _not_ready(connection, msg)
+    await rw.async_command(msg["entity_ids"], msg["action"], msg.get("position"), by=_who(connection))
+    connection.send_result(msg["id"])
+
+
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/log/get"})
 @callback
 def ws_log_get(hass: HomeAssistant, connection, msg) -> None:
@@ -545,6 +645,9 @@ COMMANDS = (
     ws_plan_delete,
     ws_calendar_import,
     ws_notify_test,
+    ws_rw_subscribe,
+    ws_rw_cover_save,
+    ws_rw_command,
     ws_log_get,
     ws_log_subscribe,
 )

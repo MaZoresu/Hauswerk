@@ -24,6 +24,12 @@ const states = {
   "binary_sensor.flur_bewegung": st("off", { friendly_name: "Flur Bewegung", device_class: "motion" }),
   "climate.wohnzimmer_heizkoerper2": st("heat", { friendly_name: "Heizkörper Wohnzimmer Fenster", current_temperature: 22.4, temperature: 22.5, model: "HMIP-eTRV" }),
   "climate.wohnzimmer_heizkoerper": st("heat", { friendly_name: "Heizkörper Wohnzimmer", current_temperature: 21.2, temperature: 21, model: "HMIP-eTRV" }),
+  "climate.vaillant_zone": st("auto", { friendly_name: "Vaillant Zone 1", temperature: 22.5, hvac_modes: ["off", "auto"] }),
+  "cover.ra_wohnzimmer": st("open", { friendly_name: "Wohnzimmer", current_position: 30, supported_features: 15, device_class: "shutter" }),
+  "cover.ra_kuche_links": st("open", { friendly_name: "Küche Links", current_position: 100, supported_features: 15, device_class: "shutter" }),
+  "cover.ra_kuche_rechts": st("open", { friendly_name: "Küche Rechts", current_position: 55, supported_features: 15, device_class: "shutter" }),
+  "cover.ma_terasse": st("open", { friendly_name: "Küche Tür", current_position: 100, supported_features: 15, device_class: "shutter" }),
+  "binary_sensor.terrassentuer": st("on", { friendly_name: "Terrassentür", device_class: "door" }),
   "sensor.ccu3_duty_cycle_level": st("22", { friendly_name: "CCU3 Duty Cycle", unit_of_measurement: "%" }),
   "sensor.hmip_router_duty_cycle_level": st("9.5", { friendly_name: "Router Duty Cycle", unit_of_measurement: "%" }),
   "climate.wohnzimmer": st("heat", { model: "HmIP-WTH-2", friendly_name: "Wandthermostat Wohnzimmer", current_temperature: 20.4, temperature: 21, hvac_action: "heating", pi_heating_demand: 42 }),
@@ -53,7 +59,7 @@ const settings = {
   look_theme: "auto", look_accent: null, look_background: "pattern", look_header_weather: true, look_header_clock: false, cold_snap_temp: 0, storm_kmh: 70, home_zone: "zone.home", proximity_m: 500,
   notify_targets: ["mobile_app_pixel_8"], notify_window: true, notify_window_min: 30, notify_offline: true, notify_offline_min: 15,
   notify_frost: true, notify_battery: true, notify_quiet: true, notify_quiet_from: "22:00", notify_quiet_to: "07:00", battery_low: 20,
-  preheat_weather: true, workday_entity: "binary_sensor.arbeitstag", workday_as: 6, vent_rh: 65,
+  preheat_weather: true, workday_entity: "binary_sensor.arbeitstag", workday_as: 6, vent_rh: 65, demand_entity: "climate.vaillant_zone", demand_action: "lower", demand_low: 17, demand_valve: 15, demand_hold: 20, demand_preheat: 1, rw_covers: ["cover.ra_wohnzimmer", "cover.ra_kuche_links", "cover.ra_kuche_rechts", "cover.ma_terasse"], rw_shade: true, rw_shade_temp: 24, rw_shade_pos: 30,
 };
 const rooms = {
   a1: { id: "a1", name: "Wohnzimmer", type: "heizkoerper", comfort: 21, eco: 18, climates: ["climate.wohnzimmer", "climate.wohnzimmer_heizkoerper", "climate.wohnzimmer_heizkoerper2"], assist_entities: ["climate.wohnzimmer_heizkoerper2"], windows: [], enabled: true,
@@ -66,6 +72,7 @@ const status = {
   rooms: {
     a1: { mode: "komfort", mode_label: "Komfort", target: 21, room_temp: 20.4, heating: true, humidity: 48, next_change: 120, preheat_factor: 1.06,
       battery_low: [{ id: "sensor.thermostat_wohnzimmer_batterie", name: "Thermostat Wohnzimmer Batterie", level: 14 }],
+      valve: 100, valve_all: 100, cold_radiator: { minutes: 74, valve: 100, rise: 0.1 },
       followers: ["climate.wohnzimmer_heizkoerper"], pair_broken: [], duty_blocked: [], assist: { entities: ["climate.wohnzimmer_heizkoerper2"], on: true, diff: 0.5, room_temp: 20.4 },
       conflicts: [{ id: "climate.wohnzimmer", name: "Thermostat Wohnzimmer", by: ["Raumklima Wohnzimmer (raumklima)"], writes: 0 }] },
     b2: { mode: "eco", mode_label: "Eco", target: 20, room_temp: 21.8, heating: false, humidity: 72, next_change: 300, preheat_factor: 1.06,
@@ -73,12 +80,22 @@ const status = {
   },
   radio: { level: 22, entity: "sensor.ccu3_duty_cycle_level", busy: false, limit: 70, entities: ["sensor.ccu3_duty_cycle_level", "sensor.hmip_router_duty_cycle_level"] },
   commands_hour: 6,
+  demand: { entity: "climate.vaillant_zone", state: "normal", need: ["Wohnzimmer"], orig_temp: 22.5, action: "lower" },
+  cold_rooms: ["a1"],
   away: false, vacation: false, summer: false, outside_temp: 6.5, plan_events: {}, plan_errors: {},
 };
 const defaults = { heizkoerper: { window_delay: 60, pause_mode: "frost", lead_min: 15, preheat_max: 90 }, flaeche: { window_delay: 900, pause_mode: "frost", lead_min: 120, preheat_max: 240 } };
 const report = (days) => Object.fromEntries(Object.keys(rooms).map((id) => [id, Array.from({ length: days }, (_, i) => ({
-  date: new Date(Date.now() - (days - 1 - i) * 864e5).toISOString().slice(0, 10), heat_min: 60 + i * 7, pause_min: 5, comfort_min: 300, openings: 1, avg_temp: 20.5 }))]));
+  date: new Date(Date.now() - (days - 1 - i) * 864e5).toISOString().slice(0, 10), heat_min: 60 + i * 7, pause_min: 5, comfort_min: 300, openings: 1, avg_temp: 20.5,
+  valve_hours: Array.from({ length: 24 }, (_, h) => Math.max(0, Math.round((id.length * 7 + 40) * Math.exp(-((h - 6.5) ** 2) / 3) + (h >= 17 && h <= 21 ? 35 : 0) + (h >= 1 && h <= 4 ? 0 : 5)))),
+  valve_avg: 30 + id.length }))]));
 window.wsLog = [];
+const rwCovers = { "cover.ra_wohnzimmer": { facade: "S" }, "cover.ra_kuche_links": { facade: "O" }, "cover.ma_terasse": { facade: "S", door: "binary_sensor.terrassentuer" } };
+const rwStatus = { open_at: "07:12", close_at: "16:47", sunrise: "07:12", sunset: "16:32", free_day: false, sun: { azimuth: 214, elevation: 18 }, gust: 32, storm: false, storm_kmh: 70,
+  covers: { "cover.ra_wohnzimmer": { area: "Wohnzimmer", target: 30, reason: "Sonnenschutz", shading: true },
+    "cover.ra_kuche_links": { area: "Küche", target: 100, reason: "Tag" },
+    "cover.ra_kuche_rechts": { area: "Küche", target: 100, reason: "Tag", manual: true },
+    "cover.ma_terasse": { area: "Küche", target: 0, reason: "Nacht", blocked: "Tür offen" } } };
 const areas = { wz: { area_id: "wz", name: "Wohnzimmer" }, bad: { area_id: "bad", name: "Bad" }, kueche: { area_id: "kueche", name: "Küche" }, garten: { area_id: "garten", name: "Garten" } };
 const devices = { d1: { id: "d1", area_id: "wz" }, d2: { id: "d2", area_id: "bad" } };
 const entities = {
@@ -91,7 +108,9 @@ const hass = {
   states, areas, devices, entities, themes: { darkMode: false }, user: { is_admin: true },
   callWS: async (msg) => {
     wsLog.push(msg.type);
-    if (msg.type === "hauswerk/heizen/get") return { settings, rooms, plans: {}, target_sensors: {}, status, defaults, modes: {}, is_admin: true, user_admin: true };
+    if (msg.type === "hauswerk/heizen/get") return { settings, rooms, plans: {}, target_sensors: {}, status, defaults, modes: {}, is_admin: true, user_admin: true, rollwerk: { covers: rwCovers, status: rwStatus } };
+    if (msg.type === "hauswerk/rollwerk/command") return null;
+    if (msg.type === "hauswerk/rollwerk/cover/save") { rwCovers[msg.entity_id] = msg.cover; return { covers: rwCovers }; }
     if (msg.type === "hauswerk/heizen/report") return report(msg.days);
     if (msg.type === "hauswerk/heizen/settings/save") return Object.assign(settings, msg.settings);
     if (msg.type === "history/history_during_period") return {};

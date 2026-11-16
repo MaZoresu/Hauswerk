@@ -10,7 +10,7 @@ Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite 
 | Modul | Stand |
 |---|---|
 | **Heizwerk** | fertig – raumweise Heizungsregelung (früher eine eigene Integration) |
-| Rollladen | geplant |
+| **Rollwerk** | neu – Rollläden nach Sonne, Uhrzeit, Hitze und Sturm, mit Aussperrschutz |
 | Licht | geplant |
 | Garten | geplant |
 
@@ -126,6 +126,10 @@ Alle Werte lassen sich je Raum ändern; seltene Feinheiten (Absenkgrenze, Fenste
 | Wandthermostat und Heizkörper gekoppelt | Raum › Geräte | Wandthermostat und Heizkörper-Thermostate im Raum (erkannt am Modell, z. B. HmIP-WTH und HmIP-eTRV, sonst am Namen): Hauswerk stellt nur das Wandthermostat, die Heizkörper folgen über die CCU. Weicht ein Heizkörper länger als 15 Min. ab, stellt Hauswerk ihn wieder selbst. „Alle selbst stellen“ schaltet das ab |
 | Mischbetrieb (Fußbodenheizung + Heizkörper) | Raum › Geräte | Gewählte Heizkörper-Thermostate (in der CCU aus der Heizgruppe genommen, auf manuell) sind Zusatzheizung: zu (Frostschutz), solange die Fußbodenheizung über das Wandthermostat reicht; Raum-Soll (um den Messfehler am Heizkörper erhöht), wenn der Raum X °C (Standard 0,5) unter Soll liegt, beim Vorheizen und Boost – bis 0,1 °C unter Soll. Nicht gewählte Heizkörper folgen weiter dem Wandthermostat |
 | Funk-Auslastung (Duty Cycle) | Hauswerk › Einstellungen › Funk-Auslastung | Duty-Cycle-Sensoren (automatisch alle %-Sensoren mit „duty_cycle“, z. B. CCU, Access Point, Router): ab X % (Standard 70) nur Betriebsart-Wechsel und Änderungen ab 1 °C, höchstens alle 15 Min. je Thermostat, keine Ventil- und Kalibrier-Befehle. Geräte mit „Duty Cycle erreicht“ bekommen keine Befehle |
+| Heizkörper bleibt kalt | automatisch, Glocke und Nachricht | Ventil eine Stunde ≥ 90 % offen, Raum ≥ 0,5 °C unter Soll und kaum wärmer (< 0,3 °C): Hinweis auf Luft im Heizkörper, hängenden Ventilstift oder fehlende Wärme; bei mehreren Räumen gleichzeitig: Heizung prüfen |
+| Wärmeanforderung | Heizwerk › Einstellungen › Wärmeanforderung | Wärmeerzeuger (z. B. Zone der Vaillant-Anlage) absenken oder ausschalten, wenn X Min. kein Raum Wärme braucht (Ventil unter X %, kein Vorheizen/Boost); sofort zurück, sobald ein Raum Wärme braucht; beim Vorheizen optional anheben. Gemerkte Werte werden wiederhergestellt |
+| Ventilverlauf | Heizwerk › Bericht | Ø Ventilöffnung je Raum und Stunde als Wärmekarte (inkl. Fußbodenheizung an/aus) |
+| Diagnose | Geräte & Dienste › Hauswerk › ⋮ › Diagnose herunterladen | Einstellungen, Räume, Zustände aller beteiligten Entitäten (mit Gerätemodell) und die letzten 1500 Protokolleinträge als Datei |
 | Batterie-Warnung | Hauswerk › Einstellungen › Benachrichtigungen | Batterie-Sensoren an den Geräten von Thermostaten, Fensterkontakten und Raumsensoren; unter X % Hinweis unter der Glocke und auf Wunsch Nachricht |
 
 ## Vorrang der Betriebsarten
@@ -149,6 +153,21 @@ Danach kann **Warm genug** einen Raum noch abschalten (außer beim Boost).
 | `sensor.hauswerk_<raum>_soll` | Solltemperatur, Attribute: Betriebsart, Raumtemperatur, Luftfeuchte, Fenster offen, heizt |
 | `sensor.hauswerk_<raum>_heizdauer_heute` | Heizminuten heute |
 
+# Modul Rollwerk
+
+Rollläden nach Sonne, Uhrzeit, Hitze und Sturm (Rollwerk › Rollläden und Rollwerk › Einstellungen).
+
+- **Rollläden-Seite:** nach Räumen aus Home Assistant, je Rollladen Stellung, was die Automatik gerade will und warum, ↑ ■ ↓ und Schieberegler; oben Öffnen/Schließen heute, Sonnenstand, Böen und „Alle hoch/runter“.
+- **Morgens öffnen:** Sonnenaufgang ± Versatz, aber nicht vor „frühestens“ (Werktag/Wochenende getrennt, Feiertage über „Arbeitstag“) – oder feste Uhrzeit, oder gar nicht.
+- **Abends schließen:** Sonnenuntergang + Versatz, spätestens um X – oder feste Uhrzeit, oder gar nicht. Je Rollladen eine Nachtstellung (z. B. 10 % für Lüftungsschlitze).
+- **Sonnenschutz:** Fassade je Rollladen (N … NW); scheint die Sonne darauf (±60°, mindestens X° hoch) und ist es draußen ab X °C warm, fährt er auf die Sonnenschutz-Stellung.
+- **Sturmschutz:** ab der Sturmgrenze aus Hauswerk › Wetter hoch, Ende nach 15 Min. unter 80 %; Böen vom Wetterdienst oder eigenem Sensor.
+- **Aussperrschutz:** Tür- oder Fensterkontakt je Rollladen – offen = nicht herunterfahren.
+- **Von Hand:** Rollwerk fährt nur bei einem Wechsel; wer einen Rollladen verstellt, behält die Stellung bis zum nächsten Wechsel. Je Rollladen lässt sich die Automatik ausschalten.
+- **Urlaub:** Zeiten auf Wunsch täglich zufällig ±15 Min.
+
+Alles steht im Protokoll (Befehle, Sturm, Aussperrschutz, Fahrten von Hand).
+
 # Aufbau des Projekts
 
 ```
@@ -159,6 +178,8 @@ custom_components/hauswerk/
   logic.py          Modul Heizwerk: Regel-Logik ohne Home-Assistant-Abhängigkeit (getestet)
   controller.py     Modul Heizwerk: Speicher, Zustandsüberwachung, Ansteuerung der Thermostate, Statistik
   log.py            Protokoll für alle Module (config/.storage/hauswerk.protokoll, 14 Tage)
+  rollwerk.py       Modul Rollwerk: Rollläden (config/.storage/hauswerk.rollwerk)
+  diagnostics.py    Diagnose-Download (Geräte & Dienste › Hauswerk › Diagnose herunterladen)
   api.py            WebSocket-Befehle fürs Panel (hauswerk/heizen/get, /subscribe, /room/save …, hauswerk/log/get, /subscribe, hauswerk/notify/test)
   sensor.py, switch.py, entity.py
   brand/            Logo und Symbol für Home Assistant (icon.png, logo.png, dark_logo.png, je mit @2x)

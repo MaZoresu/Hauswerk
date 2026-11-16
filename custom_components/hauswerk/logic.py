@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 import math
+import re
 from typing import Any
 
 DAY_MIN = 1440
@@ -712,3 +713,112 @@ def assist_on(mode: str, room_temp: float | None, target: float | None, diff: fl
     if was_on:
         return room_temp < target - 0.1
     return room_temp <= target - max(0.1, diff)
+
+
+# ------------------------------------------------------------ Ventile, kalte Heizkörper, Wärmeanforderung
+VALVE_ATTRS = ("valve_position", "valve_opening", "valve_tappet", "pi_heating_demand", "heating_demand",
+               "heating_power_request", "heating_power", "position", "valve")
+# Sensoren am Thermostat-Gerät: Homematic „Ventilöffnungsgrad“, Bosch „Ventilstößel“, Zigbee „pi_heating_demand“,
+# tado „Heizleistung“ (sensor.*_heating), Netatmo „heating_power_request“
+VALVE_WORDS = re.compile(r"ventil|valve|stellung|st(ö|oe)(ß|ss)el|tappet|heating_demand|heizbedarf|pi_heating|heating_power|heizleistung|_heating$|position", re.I)
+VALVE_SKIP = re.compile(r"max|min|limit|grenze|offset", re.I)
+COLD_MINUTES = 60  # so lange Ventil (fast) ganz offen ohne Erwärmung = Heizkörper bleibt kalt
+NO_HEAT_MODES = ("fenster", "sommer", "aus", "warm", "entkalken")
+
+
+def cold_radiator(valve: float | None, room_temp: float | None, target: float | None, mode: str,
+                  windows_open: bool, run: dict | None, now: float) -> tuple[dict | None, bool]:
+    """Bleibt ein Heizkörper kalt, obwohl sein Ventil offen ist?
+
+    run: laufende Beobachtung {since, t0} oder None. Ergebnis: (neue Beobachtung, kalt?).
+    Kalt heißt: Ventil ≥ 90 % seit COLD_MINUTES Minuten, der Raum mindestens 0,5 °C unter Soll und
+    in der Zeit um weniger als 0,3 °C wärmer geworden. Wird der Raum wärmer, beginnt die Messung neu.
+    """
+    active = (valve is not None and valve >= 90 and room_temp is not None and target is not None
+              and target - room_temp >= 0.5 and mode not in NO_HEAT_MODES and not windows_open)
+    if not active:
+        return None, False
+    if run is None or room_temp - run["t0"] >= 0.3:
+        return {"since": now, "t0": room_temp}, False
+    return run, now - run["since"] >= COLD_MINUTES * 60
+
+
+def demand_state(need: bool, current: str | None, no_need_since: float | None, now: float, hold_min: float,
+                 preheat: bool, raise_by: float) -> str:
+    """Wärmeanforderung an den Wärmeerzeuger: 'low' (abgesenkt/aus), 'normal' oder 'raise' (Vorheizen).
+
+    Abgesenkt wird erst, wenn hold_min Minuten lang kein Raum Wärme braucht; Bedarf hebt sofort wieder an.
+    """
+    if need:
+        return "raise" if preheat and raise_by > 0 else "normal"
+    if current == "low":
+        return "low"
+    if no_need_since is not None and now - no_need_since >= hold_min * 60:
+        return "low"
+    return current or "normal"
+
+
+# ------------------------------------------------------------ Rollwerk (Rollläden)
+FACADES = {"N": 0, "NO": 45, "O": 90, "SO": 135, "S": 180, "SW": 225, "W": 270, "NW": 315}
+
+
+def facade_sun(azimuth: float | None, elevation: float | None, facade: str | None, min_elev: float = 15,
+               width: float = 60) -> bool:
+    """Scheint die Sonne auf diese Fassade? (Azimut höchstens width° neben der Fassadenrichtung, hoch genug)"""
+    if azimuth is None or elevation is None or facade not in FACADES or elevation < min_elev:
+        return False
+    diff = abs((float(azimuth) - FACADES[facade] + 180) % 360 - 180)
+    return diff <= width
+
+
+def day_window(sunrise_min: int | None, sunset_min: int | None, settings: dict, free_day: bool,
+               jitter: int = 0) -> tuple[int, int]:
+    """Öffnen und Schließen heute als Tagesminuten.
+
+    Sonne: Sonnenaufgang + Versatz, aber nicht vor „frühestens“; Sonnenuntergang + Versatz, aber nicht nach
+    „spätestens“. Feste Zeit: Uhrzeit (am Wochenende/Feiertag eigene). jitter verschiebt beides (Urlaub).
+    """
+    def hm(key: str, default: str) -> int:
+        try:
+            return parse_hm(settings.get(key) or default)
+        except (TypeError, ValueError):
+            return parse_hm(default)
+
+    if (settings.get("rw_open_mode") or "sun") == "sun" and sunrise_min is not None:
+        not_before = hm("rw_open_not_before_we" if free_day else "rw_open_not_before", "08:00" if free_day else "06:30")
+        open_at = max(sunrise_min + int(settings.get("rw_open_offset") or 0), not_before)
+    else:
+        open_at = hm("rw_open_time_we" if free_day else "rw_open_time", "08:30" if free_day else "07:00")
+    if (settings.get("rw_close_mode") or "sun") == "sun" and sunset_min is not None:
+        close_at = min(sunset_min + int(settings.get("rw_close_offset") or 0), hm("rw_close_not_after", "22:30"))
+    else:
+        close_at = hm("rw_close_time", "21:00")
+    return max(0, min(DAY_MIN - 1, open_at + jitter)), max(0, min(DAY_MIN - 1, close_at + jitter))
+
+
+def cover_target(now_min: int, open_at: int, close_at: int, settings: dict, cover: dict, *, sun_on_facade: bool,
+                 outside: float | None, storm: bool, was_shading: bool = False) -> tuple[int | None, str, bool]:
+    """Sollposition eines Rollladens (100 = offen, 0 = zu), Begründung und ob gerade beschattet wird.
+
+    Vorrang: Automatik aus > Sturm (hochfahren) > Nacht > Sonnenschutz > Tag. None = nichts tun.
+    """
+    if cover.get("auto") is False:
+        return None, "Automatik aus", False
+    if storm and cover.get("storm", True):
+        return 100, "Sturmschutz", False
+    open_mode = settings.get("rw_open_mode") or "sun"
+    close_mode = settings.get("rw_close_mode") or "sun"
+    day = open_at <= now_min < close_at
+    night_pos = int(cover.get("night_pos") if cover.get("night_pos") is not None else 0)
+    if not day:
+        if (now_min >= close_at and close_mode == "off") or (now_min < open_at and open_mode == "off" and close_mode == "off"):
+            return None, "keine Zeit eingestellt", False
+        return night_pos, "Nacht", False
+    shade_temp = float(settings.get("rw_shade_temp") or 24)
+    hot = outside is not None and outside >= (shade_temp - 1 if was_shading else shade_temp)
+    if settings.get("rw_shade") and cover.get("shade", True) and cover.get("facade") and sun_on_facade and hot:
+        pos = cover.get("shade_pos")
+        return int(pos if pos is not None else settings.get("rw_shade_pos") or 30), "Sonnenschutz", True
+    if open_mode == "off":
+        return None, "Tag (morgens nicht automatisch öffnen)", False
+    return 100, "Tag", False

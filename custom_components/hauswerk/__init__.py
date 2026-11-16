@@ -4,7 +4,8 @@ Module:
 - Heizwerk (intern „heizen“): raumweise Heizungsregelung mit Fensterpause, Heizplänen und Anwesenheit
 - Kern (core.py): Anwesenheit, Urlaub, Wetter, Darstellung – gilt für alle Module
 - Protokoll: was wann warum entschieden wurde (für alle Module)
-- Rollladen, Licht, Garten: geplant
+- Rollwerk (intern „rollwerk“): Rollläden nach Sonne, Uhrzeit, Hitze und Sturm
+- Licht, Garten: geplant
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ from .const import (
     MODULE_HEATING,
     MODULE_HOUSE,
     MODULE_LOG,
+    MODULE_SHUTTER,
     NAME,
     PANEL_COMPONENT,
     PANEL_ICON,
@@ -32,6 +34,7 @@ from .const import (
 from .controller import Heizen
 from .core import Haus
 from .log import Protokoll
+from .rollwerk import Rollwerk
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,13 +75,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await heating.async_load()
     await haus.async_load(legacy=heating.loaded_settings)
     heating.drop_house_settings()
-    hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HOUSE: haus, MODULE_HEATING: heating}
+    shutters = Rollwerk(hass, log, haus)
+    await shutters.async_load()
+    hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HOUSE: haus, MODULE_HEATING: heating, MODULE_SHUTTER: shutters}
 
     api.async_register(hass)
     await _async_register_panel(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await haus.async_start()
     await heating.async_start()
+    await shutters.async_start()
     return True
 
 

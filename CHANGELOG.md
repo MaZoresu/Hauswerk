@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.24.0 – 2026-11-16
+
+### Neu
+- **Modul Rollwerk:** Rollläden morgens auf (Sonnenaufgang mit „frühestens“ für Werktag und Wochenende, oder feste Uhrzeit), abends zu (Sonnenuntergang mit „spätestens“, oder feste Uhrzeit), **Sonnenschutz** nach Fassade, Sonnenstand und Außentemperatur, **Sturmschutz** (hoch ab der Sturmgrenze aus Hauswerk › Wetter) und **Aussperrschutz** (bei offener Tür nicht herunterfahren). Von Hand verstellte Rollläden bleiben bis zum nächsten Wechsel so. Eigene Seite mit allen Rollläden nach Räumen, ↑ ■ ↓, Schieberegler und „Alle hoch/runter“; Einstellungen je Rollladen (Fassade, Nachtstellung, Tür, Automatik). Im Urlaub auf Wunsch zufällige Zeiten.
+- **Heizkörper bleibt kalt:** Steht ein Ventil eine Stunde lang auf 90 % oder mehr und der Raum wird nicht wärmer, erscheint ein Hinweis (Luft im Heizkörper, Ventilstift, Heizung?) und auf Wunsch eine Nachricht. Bei mehreren Räumen gleichzeitig: Hinweis, die Heizung zu prüfen.
+- **Wärmeanforderung:** Heizwerk kann den Wärmeerzeuger (z. B. die Zone der Vaillant-Anlage) absenken oder ausschalten, wenn kein Raum Wärme braucht, und beim Vorheizen anheben. Sobald ein Raum Wärme braucht, kommt der alte Wert sofort zurück. Standardmäßig aus – unter *Heizwerk › Einstellungen › Wärmeanforderung* einschalten.
+- **Ventilverlauf im Bericht:** Ø Ventilöffnung je Raum und Stunde als Wärmekarte – zeigt, welche Räume viel Wärme brauchen und ob Komfortzeiten zu früh oder zu spät beginnen.
+- **Diagnose herunterladen:** unter *Geräte & Dienste › Hauswerk › ⋮* – Einstellungen, Zustände aller beteiligten Geräte und das Protokoll als Datei, zur Fehlersuche.
+
+### Geändert
+- Die Ventilöffnung liest jetzt auch Hauswerk selbst (nicht nur das Panel) – aus dem Thermostat, aus %-Sensoren am selben Gerät und aus den Anzeige-Geräten (Fußbodenheizung an = 100 %).
+
 ## 0.23.3 – 2026-11-16
 
 ### Neu

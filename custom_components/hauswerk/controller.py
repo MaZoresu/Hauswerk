@@ -46,7 +46,12 @@ from .logic import (
     calibration_offset,
     compensated,
     battery_level,
+    cold_radiator,
     compute_target,
+    demand_state,
+    VALVE_ATTRS,
+    VALVE_SKIP,
+    VALVE_WORDS as VALVE_SENSOR_WORDS,
     drop_within,
     events_to_blocks,
     find_references,
@@ -146,6 +151,11 @@ class Heizen:
         self._dev_duty: dict[str, list[str]] = {}
         # Gesendete Befehle (Zeitpunkte) für die Funk-Anzeige
         self._sent_at: list[float] = []
+        # Quellen der Ventilöffnung je Raum (Thermostate, %-Sensoren am Gerät, Anzeige-Geräte)
+        self._valve_src: dict[str, list[str]] = {}
+        # Wärmeanforderung: Zustand (low/normal/raise), gemerkte Werte des Wärmeerzeugers
+        self.demand: dict[str, Any] = {}
+        self._no_need_since: float | None = None
 
     # ------------------------------------------------------------ Speicher
     async def async_load(self) -> None:
@@ -166,6 +176,7 @@ class Heizen:
         self.turned_off = stored.get("turned_off") or {}
         self.heat_rates = stored.get("heat_rates") or {}
         self.plans = stored.get("plans") or {}
+        self.demand = stored.get("demand") or {}
 
     def _data(self) -> dict[str, Any]:
         return {
@@ -175,6 +186,7 @@ class Heizen:
             "stats": self.stats,
             "turned_off": self.turned_off,
             "heat_rates": self.heat_rates,
+            "demand": self.demand,
         }
 
     def _save(self, delay: float = 2) -> None:
@@ -226,6 +238,7 @@ class Heizen:
         self._find_batteries()
         self._kinds = {}
         self._find_duty_flags()
+        self._find_valves()
         self._refs_at = 0.0
 
     def _find_duty_flags(self) -> None:
@@ -241,6 +254,64 @@ class Heizen:
                     e.entity_id for e in er.async_entries_for_device(registry, entry.device_id)
                     if e.domain == "binary_sensor" and "duty_cycle" in e.entity_id and e.disabled_by is None
                 ]
+
+    # ------------------------------------------------------------ Ventile
+    def _find_valves(self) -> None:
+        """Woher die Ventilöffnung eines Raums kommt: Thermostate, %-Sensoren an deren Geräten, Anzeige-Geräte."""
+        registry = er.async_get(self.hass)
+        self._valve_src = {}
+        for room_id, room in self.rooms.items():
+            src: list[str] = []
+            for entity_id in list(room.get("climates") or []) + list(room.get("show_entities") or []):
+                src.append(entity_id)
+                if not entity_id.startswith("climate."):
+                    continue
+                entry = registry.async_get(entity_id)
+                if entry is None or not entry.device_id:
+                    continue
+                siblings = [
+                    e for e in er.async_entries_for_device(registry, entry.device_id)
+                    if e.entity_id != entity_id and e.disabled_by is None and e.domain in ("sensor", "number")
+                    and VALVE_SENSOR_WORDS.search(f"{e.entity_id} {getattr(e, 'original_name', None) or ''} {getattr(e, 'translation_key', None) or ''}")
+                    and not VALVE_SKIP.search(e.entity_id)
+                ]
+                sensors = [e.entity_id for e in siblings if e.domain == "sensor"]
+                src.extend(sensors or [e.entity_id for e in siblings if e.domain == "number"])
+            self._valve_src[room_id] = list(dict.fromkeys(src))
+
+    def _valve_of(self, entity_id: str) -> tuple[float | None, bool]:
+        """Öffnung in % einer Quelle und ob es ein Heizkörper-Ventil ist (False = Schalter/Fußbodenheizung)."""
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in BAD_STATES:
+            return None, True
+        domain = entity_id.split(".", 1)[0]
+        attrs = state.attributes
+        if domain == "climate":
+            for key in VALVE_ATTRS:
+                value = _float(attrs.get(key))
+                if value is not None:
+                    return value, True
+            return None, True
+        if domain in ("switch", "input_boolean"):
+            return (100.0 if state.state == "on" else 0.0), False
+        if domain in ("valve", "cover"):
+            return _float(attrs.get("current_position")), True
+        if attrs.get("unit_of_measurement") == "%" or domain == "number":
+            return _float(state.state), True
+        return None, True
+
+    def _valves(self, room_id: str) -> tuple[float | None, float | None]:
+        """(höchste Heizkörper-Ventilöffnung, höchste Öffnung inkl. Fußbodenheizung) eines Raums."""
+        radiator: list[float] = []
+        every: list[float] = []
+        for entity_id in self._valve_src.get(room_id) or []:
+            value, is_valve = self._valve_of(entity_id)
+            if value is None:
+                continue
+            every.append(value)
+            if is_valve:
+                radiator.append(value)
+        return (max(radiator) if radiator else None), (max(every) if every else None)
 
     def _duty_blocked(self, entity_id: str) -> bool:
         return any(
@@ -717,6 +788,9 @@ class Heizen:
             "liming": self._liming,
             "eco_force": bool(self.settings.get("eco_force")),
             "long_away": getattr(self, "_long_away", False),
+            "demand": {**{k: v for k, v in self.demand.items() if k != "since_no_need"},
+                       "action": self.settings.get("demand_action") or "lower"} if self.settings.get("demand_entity") else None,
+            "cold_rooms": [rid for rid in self.rooms if (self._rt(rid).get("result") or {}).get("cold_radiator")],
             "commands_hour": len([x for x in self._sent_at if dt_util.utcnow().timestamp() - x < 3600]),
         }
 
@@ -1175,6 +1249,10 @@ class Heizen:
                 schedule_next_on=schedule_next_on,
             )
             rt["warm"] = result["mode"] == "warm"
+            valve, valve_all = self._valves(room_id)
+            run, cold = cold_radiator(valve, room_temp, result["target"], result["mode"], open_since is not None,
+                                      rt.get("cold_run"), now)
+            rt["cold_run"] = run
             self._assist(room, rt, result, room_temp)
             self._learn(room_id, rt, result, room_temp, now)
             result.update(
@@ -1210,7 +1288,12 @@ class Heizen:
                 conflicts=self._conflicts(room, now),
                 duty_blocked=[c for c in room.get("climates") or [] if self._duty_blocked(c)],
                 assist=self._assist_status(room, rt),
+                valve=valve,
+                valve_all=valve_all,
+                cold_radiator={"minutes": int((now - run["since"]) // 60), "valve": valve,
+                               "rise": round(room_temp - run["t0"], 1)} if cold else None,
             )
+            self._cold_notice(room_id, room, result)
             for c in result["conflicts"]:
                 if f"conflict:{c['id']}" not in self._flags:
                     self._flags[f"conflict:{c['id']}"] = True
@@ -1245,6 +1328,10 @@ class Heizen:
             except Exception:  # noqa: BLE001 - ein defektes Thermostat soll die anderen nicht stoppen
                 _LOGGER.exception("Fehler beim Regeln von %s", room.get("name"))
 
+        try:
+            await self._demand(now)
+        except Exception:  # noqa: BLE001 - Wärmeerzeuger nicht erreichbar: Räume trotzdem weiter regeln
+            _LOGGER.exception("Fehler bei der Wärmeanforderung")
         status = self.status()
         for cb in list(self._subscribers):
             cb(status)
@@ -1514,6 +1601,133 @@ class Heizen:
         self.log.add("command", f"{self._name(entity_id)} → {self._t(value)} °C",
                      label or f"Ziel {self._t(result['target'])} °C · {MODES[result['mode']]}{extra}", room.get("id"), room.get("name"))
 
+    # ------------------------------------------------------------ Kalte Heizkörper
+    def _cold_notice(self, room_id: str, room: dict, result: dict) -> None:
+        cold = result.get("cold_radiator")
+        key = f"cold:{room_id}"
+        if cold:
+            name = room.get("name") or room_id
+            text = (f"{name}: Ventil {cold['valve']:.0f} % offen seit {cold['minutes']} Min., Raum nur +{self._t(cold['rise'])} °C – "
+                    "Luft im Heizkörper, hängender Ventilstift oder Heizung ohne Wärme?")
+            if key not in self._flags:
+                self._flags[key] = True
+                self.log.add("health", "Heizkörper bleibt kalt", text, room_id, name)
+            self.haus.notify(key, "cold", "Heizkörper bleibt kalt", text, room_id, name)
+        else:
+            self._flags.pop(key, None)
+            self.haus.clear(key)
+
+    # ------------------------------------------------------------ Wärmeanforderung
+    async def _demand(self, now: float) -> None:
+        """Wärmeerzeuger (z. B. Zone der Vaillant-Anlage) absenken, wenn kein Raum Wärme braucht."""
+        entity_id = self.settings.get("demand_entity")
+        d = self.demand
+        if not entity_id:
+            if d.get("state") in ("low", "raise") and d.get("entity"):
+                await self._demand_restore(d["entity"], "Wärmeanforderung ausgeschaltet")
+            self.demand = {}
+            self._no_need_since = None
+            return
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in BAD_STATES:
+            d["error"] = "nicht erreichbar"
+            return
+        d.pop("error", None)
+        if d.get("entity") not in (None, entity_id) and d.get("state") in ("low", "raise"):
+            await self._demand_restore(d["entity"], "anderer Wärmeerzeuger gewählt")
+            d.clear()
+        d["entity"] = entity_id
+        threshold = float(self.settings.get("demand_valve") or 15)
+        need_rooms: list[str] = []
+        preheat = False
+        for room_id, room in self.rooms.items():
+            res = self._rt(room_id).get("result") or {}
+            if not room.get("enabled", True) or res.get("target") is None or res.get("hvac_off"):
+                continue
+            mode = res.get("mode")
+            valve = res.get("valve_all")
+            if mode in ("vorheizen", "boost"):
+                preheat = preheat or mode == "vorheizen"
+                need_rooms.append(room.get("name") or room_id)
+            elif valve is not None:
+                if valve >= threshold:
+                    need_rooms.append(room.get("name") or room_id)
+            elif res.get("room_temp") is not None and res["room_temp"] < res["target"] - 0.3:
+                need_rooms.append(room.get("name") or room_id)  # ohne Ventilwert: nach Temperatur
+        need = bool(need_rooms)
+        if need:
+            self._no_need_since = None
+        elif self._no_need_since is None:
+            self._no_need_since = now
+        before = d.get("state") or "normal"
+        new = demand_state(need, before, self._no_need_since, now, float(self.settings.get("demand_hold") or 20),
+                           preheat, float(self.settings.get("demand_preheat") or 0))
+        d.update(need=need_rooms, since_no_need=self._no_need_since)
+        attrs = state.attributes
+        current_t = _float(attrs.get("temperature"))
+        action = self.settings.get("demand_action") or "lower"
+        if new == before:
+            # Abgesenkt, aber der Wärmeerzeuger steht wieder anders (z. B. Schnellwahl abgelaufen): höchstens alle 30 Min. erneut senden
+            if new in ("low", "raise") and now - float(d.get("sent_at") or 0) >= 1800:
+                wanted = d.get("sent_temp")
+                if (action == "off" and new == "low" and state.state != "off") or (
+                        wanted is not None and current_t is not None and abs(current_t - wanted) >= 0.25):
+                    await self._demand_apply(entity_id, new, action, "erneut gesendet", now)
+            self._save()
+            return
+        if before == "normal":
+            # Werte des Wärmeerzeugers merken, um sie später wiederherzustellen
+            d["orig_temp"] = current_t
+            d["orig_mode"] = state.state if state.state != "off" else (d.get("orig_mode") or "auto")
+        why = f"braucht Wärme: {', '.join(need_rooms[:4])}" if need else f"seit {int((now - (self._no_need_since or now)) // 60)} Min. kein Raum über {threshold:.0f} % Ventil"
+        if new == "normal":
+            await self._demand_restore(entity_id, why)
+        else:
+            await self._demand_apply(entity_id, new, action, why, now)
+        d["state"] = new
+        d["changed"] = now
+        self._save()
+
+    async def _demand_apply(self, entity_id: str, new: str, action: str, why: str, now: float) -> None:
+        d = self.demand
+        name = self._name(entity_id)
+        if new == "low" and action == "off":
+            await self._call("climate", "set_hvac_mode", {"entity_id": entity_id, "hvac_mode": "off"})
+            d["sent_temp"] = None
+            self.log.add("target", f"Wärmeanforderung: keine – {name} aus", why)
+        else:
+            if new == "low":
+                value = float(self.settings.get("demand_low") or 17)
+                title = f"Wärmeanforderung: keine – {name} auf {self._t(value)} °C"
+            else:
+                base = d.get("orig_temp") or _float(self.hass.states.get(entity_id).attributes.get("temperature")) or 20.0
+                value = base + float(self.settings.get("demand_preheat") or 0)
+                title = f"Wärmeanforderung: Vorheizen – {name} auf {self._t(value)} °C"
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state == "off":
+                await self._call("climate", "set_hvac_mode", {"entity_id": entity_id, "hvac_mode": d.get("orig_mode") or "auto"})
+            await self._call("climate", "set_temperature", {"entity_id": entity_id, "temperature": round(value, 1)})
+            d["sent_temp"] = round(value, 1)
+            self.log.add("target", title, why)
+        d["sent_at"] = now
+
+    async def _demand_restore(self, entity_id: str, why: str) -> None:
+        """Wärmeerzeuger auf die gemerkten Werte zurück."""
+        d = self.demand
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state in BAD_STATES:
+            return
+        if state.state == "off" and d.get("orig_mode"):
+            await self._call("climate", "set_hvac_mode", {"entity_id": entity_id, "hvac_mode": d["orig_mode"]})
+        orig = d.get("orig_temp")
+        current = _float(state.attributes.get("temperature"))
+        if orig is not None and (current is None or abs(current - orig) >= 0.05):
+            await self._call("climate", "set_temperature", {"entity_id": entity_id, "temperature": orig})
+        d["sent_temp"] = None
+        d["sent_at"] = dt_util.utcnow().timestamp()
+        self.log.add("target", f"Wärmeanforderung: {self._name(entity_id)} wieder normal"
+                     + (f" ({self._t(orig)} °C)" if orig is not None else ""), why)
+
     # ------------------------------------------------------------ Statistik
     def _stat(self, room_id: str) -> dict[str, float]:
         day = dt_util.now().date().isoformat()
@@ -1535,6 +1749,11 @@ class Heizen:
             if result.get("room_temp") is not None:
                 bucket["tsum"] += result["room_temp"]
                 bucket["tn"] += 1
+            valve = result.get("valve_all")
+            if valve is not None:
+                hour = dt_util.now().hour
+                bucket.setdefault("vh", [0.0] * 24)[hour] += valve
+                bucket.setdefault("vn", [0] * 24)[hour] += 1
             for day in [d for d in self.stats[room_id] if d < cutoff]:
                 del self.stats[room_id][day]
         self._save(30)
@@ -1556,6 +1775,9 @@ class Heizen:
                         "comfort_min": b.get("comfort", 0),
                         "openings": b.get("open", 0),
                         "avg_temp": round(b["tsum"] / b["tn"], 1) if b.get("tn") else None,
+                        # Ø Ventilöffnung je Stunde (None = keine Werte) und über den Tag
+                        "valve_hours": [round(s / n) if n else None for s, n in zip(b.get("vh") or [0] * 24, b.get("vn") or [0] * 24)],
+                        "valve_avg": round(sum(b["vh"]) / sum(b["vn"])) if sum(b.get("vn") or []) else None,
                     }
                 )
             out[room_id] = rows

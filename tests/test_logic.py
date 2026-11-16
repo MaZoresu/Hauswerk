@@ -354,3 +354,38 @@ def test_assist_on():
     assert L.assist_on("boost", 22.0, 30.0, 0.5, False)
     assert not L.assist_on("fenster", 15.0, 7.0, 0.5, True)
     assert L.assist_on("eco", None, 18.0, 0.5, False)
+
+
+def test_cold_radiator():
+    run, cold = L.cold_radiator(100, 19.0, 21.0, "komfort", False, None, 0)
+    assert run == {"since": 0, "t0": 19.0} and not cold
+    run, cold = L.cold_radiator(100, 19.1, 21.0, "komfort", False, run, 3600)
+    assert cold  # eine Stunde offen, nur +0,1 °C
+    run2, cold = L.cold_radiator(100, 19.4, 21.0, "komfort", False, run, 3700)
+    assert not cold and run2["t0"] == 19.4  # wird wärmer: neu messen
+    assert L.cold_radiator(50, 19.0, 21.0, "komfort", False, run, 7200) == (None, False)
+    assert L.cold_radiator(100, 19.0, 21.0, "fenster", False, run, 7200) == (None, False)
+    assert L.cold_radiator(100, 19.0, 21.0, "komfort", True, run, 7200) == (None, False)
+
+
+def test_demand_state():
+    assert L.demand_state(True, "low", None, 0, 20, False, 0) == "normal"
+    assert L.demand_state(True, "normal", None, 0, 20, True, 1.5) == "raise"
+    assert L.demand_state(False, "normal", 0, 600, 20, False, 0) == "normal"  # erst nach 20 Min.
+    assert L.demand_state(False, "normal", 0, 1200, 20, False, 0) == "low"
+    assert L.demand_state(False, "low", 0, 5, 20, False, 0) == "low"
+
+
+def test_rollwerk_logic():
+    assert L.facade_sun(180, 30, "S") and not L.facade_sun(90, 30, "W") and not L.facade_sun(180, 5, "S")
+    assert L.facade_sun(350, 20, "N")
+    s = {"rw_open_mode": "sun", "rw_open_not_before": "06:30", "rw_close_mode": "sun", "rw_close_offset": 15, "rw_close_not_after": "22:30"}
+    assert L.day_window(5 * 60, 21 * 60 + 40, s, False) == (6 * 60 + 30, 21 * 60 + 55)
+    assert L.day_window(8 * 60, 16 * 60 + 30, s, False) == (8 * 60, 16 * 60 + 45)
+    assert L.day_window(5 * 60, 22 * 60 + 30, s, True)[0] == 8 * 60  # Wochenende frühestens 08:00
+    t, why, _ = L.cover_target(12 * 60, 420, 1260, {"rw_shade": True, "rw_shade_temp": 24}, {"facade": "S"},
+                               sun_on_facade=True, outside=28, storm=False)
+    assert (t, why) == (30, "Sonnenschutz")
+    assert L.cover_target(23 * 60, 420, 1260, {}, {}, sun_on_facade=False, outside=10, storm=False)[:2] == (0, "Nacht")
+    assert L.cover_target(23 * 60, 420, 1260, {}, {"storm": True}, sun_on_facade=False, outside=10, storm=True)[0] == 100
+    assert L.cover_target(12 * 60, 420, 1260, {}, {"auto": False}, sun_on_facade=False, outside=10, storm=True)[0] is None
