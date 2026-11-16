@@ -107,6 +107,8 @@ ROOM_SCHEMA = vol.Schema(
         vol.Optional("shower_rise"): _opt(vol.All(vol.Coerce(float), vol.Range(min=3, max=40))),
         # Weitere Geräte nur zur Anzeige (z. B. Heizkörper-Thermostat oder Stellantrieb neben dem Wandthermostat)
         vol.Optional("show_entities", default=[]): ENTITY_LIST,
+        # Wandthermostat und Heizkörper-Thermostate gekoppelt (z. B. Homematic IP): nur das Wandthermostat stellen
+        vol.Optional("pair_mode"): _opt(vol.In(["auto", "off"])),
     },
     extra=vol.REMOVE_EXTRA,
 )
@@ -191,6 +193,8 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_quiet_from"): _hm,
         vol.Optional("notify_quiet_to"): _hm,
         vol.Optional("battery_low"): vol.All(vol.Coerce(int), vol.Range(min=5, max=60)),
+        vol.Optional("radio_entities"): ENTITY_LIST,
+        vol.Optional("radio_limit"): vol.All(vol.Coerce(int), vol.Range(min=30, max=95)),
         # Vorheizen nach Wetter, Feiertage, Lüften
         vol.Optional("preheat_weather"): bool,
         vol.Optional("workday_entity"): _opt(vol.All(str, vol.Match(r"^binary_sensor\.[a-z0-9_]+$"))),

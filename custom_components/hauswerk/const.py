@@ -47,6 +47,7 @@ SETTING_LABELS = {
     "battery_low": "Batterie-Warnung", "preheat_weather": "Vorheizen nach Wetter", "workday_entity": "Arbeitstag-Sensor",
     "workday_as": "Feiertage wie", "vent_rh": "Lüften-Hinweis", "sun_entity": "Sonne",
     "notify_ha": "Mitteilung in Home Assistant",
+    "radio_entities": "Funk-Auslastung", "radio_limit": "Funk-Grenze", "pair_mode": "Kopplung",
 }
 
 PANEL_URL = "hauswerk"
@@ -111,6 +112,9 @@ HOUSE_DEFAULTS = {
     "notify_quiet_from": "22:00",
     "notify_quiet_to": "07:00",
     "battery_low": 20,            # Batterie-Warnung unter so viel Prozent
+    # Funk (z. B. Homematic Duty Cycle): Sensoren (leer = automatisch) und Grenze, ab der gedrosselt wird
+    "radio_entities": [],
+    "radio_limit": 70,
 }
 HOUSE_KEYS = frozenset(HOUSE_DEFAULTS)
 

@@ -11,9 +11,9 @@ from typing import Any
 import uuid
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
+from homeassistant.const import EVENT_CALL_SERVICE, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.core import Context, Event, HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     async_call_later,
@@ -48,6 +48,7 @@ from .logic import (
     compute_target,
     drop_within,
     events_to_blocks,
+    find_references,
     holiday_week_minute,
     keyword_match,
     keywords,
@@ -57,10 +58,12 @@ from .logic import (
     next_comfort,
     smart_lead,
     occupied,
+    radio_should_send,
     rise_within,
     room_setting,
     snap,
     summer_state,
+    thermostat_kind,
     valve_opening,
     ventilate_advice,
     weather_lead_factor,
@@ -77,6 +80,10 @@ OWN_CHANGE_GRACE = 20  # Sekunden, in denen Änderungen am Thermostat als eigene
 VALVE_INTERVAL = 300  # Sekunden zwischen zwei Ventilstellungen
 CALIBRATION_WORDS = ("calibration", "offset", "kalibrier")
 VALVE_WORDS = ("valve", "position", "opening", "ventil")
+CONFLICT_WRITES = 3  # so viele fremde Befehle ...
+CONFLICT_WINDOW = 2 * 3600  # ... innerhalb dieser Zeit gelten als zweite Regelung
+PAIR_GRACE = 900  # Sekunden, die ein gekoppeltes Heizkörper-Thermostat vom Wandthermostat abweichen darf
+CLIMATE_SERVICES = {"set_temperature", "set_hvac_mode", "set_preset_mode", "turn_on", "turn_off", "toggle"}
 COMFORT_MODES = ("komfort", "vorheizen", "manuell", "party", "boost", "belegt")
 NO_TUNING_MODES = ("fenster", "sommer", "entkalken", "warm")
 
@@ -125,6 +132,19 @@ class Heizen:
         self._lead_factor = 1.0
         # Batterie-Entitäten je Raum (an den Geräten der Thermostate, Fenster und Sensoren)
         self._batteries: dict[str, list[str]] = {}
+        # Eigene Befehle (Context-IDs), um sie von fremden zu unterscheiden
+        self._own_ctx: dict[str, float] = {}
+        # Fremde Befehle an unsere Thermostate: entity_id -> [(Zeit, Herkunft)] und deren Context-IDs
+        self._foreign: dict[str, list[tuple[float, str]]] = {}
+        self._foreign_ctx: dict[str, str] = {}
+        # Andere Regelungen, die unsere Thermostate in ihren Attributen nennen: entity_id -> [{id, name, platform}]
+        self._refs: dict[str, list[dict[str, str]]] = {}
+        self._refs_at = 0.0
+        # Art des Thermostats (wall/trv/None) und Duty-Cycle-Melder am Gerät
+        self._kinds: dict[str, str | None] = {}
+        self._dev_duty: dict[str, list[str]] = {}
+        # Gesendete Befehle (Zeitpunkte) für die Funk-Anzeige
+        self._sent_at: list[float] = []
 
     # ------------------------------------------------------------ Speicher
     async def async_load(self) -> None:
@@ -165,6 +185,7 @@ class Heizen:
             async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1))
         )
         self._track_entities()
+        self._unsubs.append(self.hass.bus.async_listen(EVENT_CALL_SERVICE, self._on_service_call))
         # Änderungen von Anwesenheit, Urlaub und zentralen Einstellungen
         self._unsubs.append(self.haus.subscribe(self._schedule_eval))
         await self._async_refresh_plan_calendars(force=True)
@@ -202,6 +223,168 @@ class Heizen:
                 self.hass, sorted(ids), self._on_state_change
             )
         self._find_batteries()
+        self._kinds = {}
+        self._find_duty_flags()
+        self._refs_at = 0.0
+
+    def _find_duty_flags(self) -> None:
+        """Duty-Cycle-Melder (binary_sensor) am Gerät jedes Thermostats, z. B. Homematic IP."""
+        registry = er.async_get(self.hass)
+        self._dev_duty = {}
+        for room in self.rooms.values():
+            for entity_id in room.get("climates") or []:
+                entry = registry.async_get(entity_id)
+                if entry is None or not entry.device_id:
+                    continue
+                self._dev_duty[entity_id] = [
+                    e.entity_id for e in er.async_entries_for_device(registry, entry.device_id)
+                    if e.domain == "binary_sensor" and "duty_cycle" in e.entity_id and e.disabled_by is None
+                ]
+
+    def _duty_blocked(self, entity_id: str) -> bool:
+        return any(
+            (s := self.hass.states.get(b)) is not None and s.state == "on" for b in self._dev_duty.get(entity_id) or []
+        )
+
+    # ------------------------------------------------------------ Eigene und fremde Befehle
+    async def _call(self, domain: str, service: str, data: dict[str, Any]) -> None:
+        """Dienst aufrufen und als eigenen Befehl merken."""
+        now = dt_util.utcnow().timestamp()
+        ctx = Context()
+        self._own_ctx[ctx.id] = now
+        if len(self._own_ctx) > 300:
+            self._own_ctx = {k: v for k, v in self._own_ctx.items() if now - v < 600}
+        self._sent_at = [x for x in self._sent_at if now - x < 3600] + [now]
+        await self.hass.services.async_call(domain, service, data, context=ctx)
+
+    def _controlled(self) -> set[str]:
+        out: set[str] = set()
+        for room in self.rooms.values():
+            out.update(room.get("climates") or [])
+        return out
+
+    def _origin(self, context) -> str:
+        """Herkunft eines fremden Befehls: Automation oder Skript (über den auslösenden Context), sonst andere Integration."""
+        parent = getattr(context, "parent_id", None)
+        if parent:
+            for domain in ("automation", "script"):
+                for state in self.hass.states.async_all(domain):
+                    if getattr(state.context, "id", None) == parent:
+                        return f"{'Automation' if domain == 'automation' else 'Skript'} „{state.name}“"
+            return "Automation oder Skript"
+        return "andere Integration"
+
+    @callback
+    def _on_service_call(self, event: Event) -> None:
+        data = event.data or {}
+        if data.get("domain") != "climate" or data.get("service") not in CLIMATE_SERVICES:
+            return
+        context = event.context
+        if getattr(context, "id", None) in self._own_ctx or getattr(context, "user_id", None):
+            return  # eigener Befehl oder von einer Person in Home Assistant
+        targets = (data.get("service_data") or {}).get("entity_id") or []
+        if isinstance(targets, str):
+            targets = [targets]
+        mine = self._controlled() & set(targets)
+        if not mine:
+            return
+        now = dt_util.utcnow().timestamp()
+        origin = self._origin(context)
+        for entity_id in mine:
+            writes = [w for w in self._foreign.get(entity_id, []) if now - w[0] < CONFLICT_WINDOW]
+            self._foreign[entity_id] = writes + [(now, origin)]
+        self._foreign_ctx[context.id] = origin
+        if len(self._foreign_ctx) > 200:
+            self._foreign_ctx = dict(list(self._foreign_ctx.items())[-100:])
+
+    def _scan_refs(self, now: float) -> None:
+        """Andere Regelungen suchen, die unsere Thermostate in ihren Attributen nennen (alle 10 Minuten)."""
+        if now - self._refs_at < 600:
+            return
+        self._refs_at = now
+        ids = self._controlled()
+        shown = {e for room in self.rooms.values() for e in room.get("show_entities") or []}
+        registry = er.async_get(self.hass)
+        refs: dict[str, list[dict[str, str]]] = {}
+        for state in self.hass.states.async_all("climate"):
+            if state.entity_id in ids or state.entity_id in shown:
+                continue
+            for found in find_references(dict(state.attributes), ids):
+                entry = registry.async_get(state.entity_id)
+                refs.setdefault(found, []).append(
+                    {"id": state.entity_id, "name": state.name, "platform": getattr(entry, "platform", None) or ""}
+                )
+        self._refs = refs
+
+    def _conflicts(self, room: dict, now: float) -> list[dict[str, Any]]:
+        out = []
+        for entity_id in room.get("climates") or []:
+            by = [f"{r['name']} ({r['platform']})" if r["platform"] else r["name"] for r in self._refs.get(entity_id, [])]
+            writes = [w for w in self._foreign.get(entity_id, []) if now - w[0] < CONFLICT_WINDOW]
+            self._foreign[entity_id] = writes
+            if len(writes) >= CONFLICT_WRITES:
+                for origin in dict.fromkeys(w[1] for w in writes):
+                    if origin != "andere Integration" or not by:
+                        by.append(origin)
+            if by:
+                out.append({"id": entity_id, "name": self._name(entity_id), "by": by, "writes": len(writes)})
+        return out
+
+    # ------------------------------------------------------------ Wandthermostat und Heizkörper gekoppelt
+    def _kind(self, entity_id: str) -> str | None:
+        if entity_id not in self._kinds:
+            state = self.hass.states.get(entity_id)
+            model = state.attributes.get("model") if state is not None else None
+            if not model:
+                entry = er.async_get(self.hass).async_get(entity_id)
+                if entry is not None and entry.device_id:
+                    device = dr.async_get(self.hass).async_get(entry.device_id)
+                    model = getattr(device, "model", None)
+            self._kinds[entity_id] = thermostat_kind(model, entity_id, state.name if state is not None else None)
+        return self._kinds[entity_id]
+
+    def _followers(self, room: dict, rt: dict, now: float) -> set[str]:
+        """Heizkörper-Thermostate, die dem Wandthermostat folgen und deshalb nicht selbst gestellt werden.
+
+        Bestätigt wird die Kopplung laufend: weicht der Sollwert länger als 15 Minuten ab, stellt
+        Hauswerk das Heizkörper-Thermostat wieder selbst.
+        """
+        if room.get("pair_mode") == "off":
+            return set()
+        climates = room.get("climates") or []
+        walls = [c for c in climates if self._kind(c) == "wall"]
+        trvs = [c for c in climates if self._kind(c) == "trv"]
+        if not walls or not trvs:
+            return set()
+        broken = rt.setdefault("pair_broken", {})
+        diverge = rt.setdefault("pair_diverge", {})
+        wall = next((self.hass.states.get(w) for w in walls if (s := self.hass.states.get(w)) is not None and s.state not in BAD_STATES), None)
+        wall_t = _float(wall.attributes.get("temperature")) if wall is not None and wall.state != "off" else None
+        out = set()
+        for trv in trvs:
+            if trv in broken:
+                continue
+            state = self.hass.states.get(trv)
+            trv_t = _float(state.attributes.get("temperature")) if state is not None and state.state not in BAD_STATES and state.state != "off" else None
+            if wall_t is not None and trv_t is not None and abs(wall_t - trv_t) > 0.3:
+                since = diverge.setdefault(trv, now)
+                if now - since >= PAIR_GRACE:
+                    broken[trv] = now
+                    diverge.pop(trv, None)
+                    self.log.add("health", f"{self._name(trv)} folgt dem Wandthermostat nicht",
+                                 f"Soll {self._t(trv_t)} statt {self._t(wall_t)} °C seit {int((now - since) // 60)} Min. · Hauswerk stellt es wieder selbst",
+                                 room.get("id"), room.get("name"))
+                    continue
+            else:
+                diverge.pop(trv, None)
+            out.add(trv)
+        if out != rt.get("followers_logged"):
+            if out:
+                self.log.add("health", "Wandthermostat stellt die Heizkörper",
+                             f"{', '.join(self._name(w) for w in walls)} → {', '.join(self._name(f) for f in sorted(out))} · Hauswerk stellt nur das Wandthermostat",
+                             room.get("id"), room.get("name"))
+            rt["followers_logged"] = out
+        return out
 
     def _find_batteries(self) -> None:
         """Batterie-Sensoren an den Geräten jedes Raums suchen (Thermostate, Fenster, Sensoren)."""
@@ -501,6 +684,7 @@ class Heizen:
             "liming": self._liming,
             "eco_force": bool(self.settings.get("eco_force")),
             "long_away": getattr(self, "_long_away", False),
+            "commands_hour": len([x for x in self._sent_at if dt_util.utcnow().timestamp() - x < 3600]),
         }
 
     def _state_float(self, entity_id: str | None) -> float | None:
@@ -593,6 +777,8 @@ class Heizen:
         for room_id in self._room_for(entity_id, "climates"):
             room = self.rooms[room_id]
             rt = self._rt(room_id)
+            if entity_id in (rt.get("followers") or set()):
+                continue  # folgt dem Wandthermostat – dessen Änderung zählt
             sent = rt["last_sent"].get(entity_id)
             if sent and (abs(sent[0] - new_t) < 0.05 or now - sent[1] < OWN_CHANGE_GRACE):
                 continue
@@ -601,7 +787,8 @@ class Heizen:
             if new.state == "off":
                 continue
             # Herkunft: mit Benutzer = Home-Assistant-Oberfläche/App, ohne = am Gerät gedreht
-            from_ui = getattr(new.context, "user_id", None) is not None
+            foreign = self._foreign_ctx.get(getattr(new.context, "id", None))
+            from_ui = getattr(new.context, "user_id", None) is not None or foreign is not None
             if from_ui and room.get("manual_ui") is False:
                 continue
             if not from_ui and room.get("manual_device") is False:
@@ -613,7 +800,7 @@ class Heizen:
             self.log.add(
                 "manual",
                 f"Von Hand: {self._t(rt['override']['temp'])} °C",
-                f"{'in Home Assistant geändert' if from_ui else 'am Thermostat gedreht'} ({new.name}) · gilt bis {self._hm(rt['override']['until'])}",
+                f"{f'von {foreign}' if foreign else 'in Home Assistant geändert' if from_ui else 'am Thermostat gedreht'} ({new.name}) · gilt bis {self._hm(rt['override']['until'])}",
                 room_id,
                 room.get("name"),
             )
@@ -827,6 +1014,8 @@ class Heizen:
         now = dt_util.utcnow().timestamp()
         week_min = week_minute(now_local.weekday(), now_local.hour, now_local.minute)
         self.haus.update()
+        self.haus.update_radio()
+        self._scan_refs(now)
         away = self.haus.away
         vacation = self.haus.vacation
         outside = self.haus.outside_temp()
@@ -922,6 +1111,7 @@ class Heizen:
 
             # Nach dem Duschen nachheizen: Luftfeuchte steigt in 15 Minuten stark
             override = self._shower(room_id, room, rt, override, paused, now) or override
+            rt["followers"] = self._followers(room, rt, now)
             rt["occupied"] = self._occupancy(room, rt, now)
             schedule_on, schedule_next_on = self._schedule_entity(room, now)
             lead, rate, upcoming = self._preheat(room_id, room, room_temp, plan_min, schedule_next_on)
@@ -976,7 +1166,19 @@ class Heizen:
                 vent=ventilate_advice(room_temp, humidity, out_temp, out_rh, float(self.settings.get("vent_rh") or 0))
                 if not open_since else None,
                 battery_low=self._battery_low(room_id),
+                followers=sorted(rt["followers"]),
+                pair_broken=sorted(rt.get("pair_broken") or {}),
+                conflicts=self._conflicts(room, now),
+                duty_blocked=[c for c in room.get("climates") or [] if self._duty_blocked(c)],
             )
+            for c in result["conflicts"]:
+                if f"conflict:{c['id']}" not in self._flags:
+                    self._flags[f"conflict:{c['id']}"] = True
+                    self.log.add("health", f"Zweite Regelung an {c['name']}",
+                                 f"{', '.join(c['by'])} stellt dieses Thermostat ebenfalls", room_id, room.get("name"))
+            for c in room.get("climates") or []:
+                if not any(x["id"] == c for x in result["conflicts"]):
+                    self._flags.pop(f"conflict:{c}", None)
             rt["result"] = result
             self._room_notices(room_id, room, result, open_since, now)
             # Entscheidung protokollieren, sobald sich Betriebsart oder Ziel ändern
@@ -1084,7 +1286,14 @@ class Heizen:
                 if entity_id in self.turned_off:
                     await self._restore_mode(entity_id, room)
             return
+        followers = rt.get("followers") or set()
         for entity_id in room.get("climates") or []:
+            if self._duty_blocked(entity_id):
+                continue  # Gerät darf gerade nicht funken
+            if entity_id in followers:
+                if entity_id in self.turned_off and not result["hvac_off"]:
+                    await self._restore_mode(entity_id, room)  # von früher (vor der Kopplung) noch aus
+                continue  # folgt dem Wandthermostat
             state = self.hass.states.get(entity_id)
             if state is None or state.state in BAD_STATES:
                 continue
@@ -1102,7 +1311,7 @@ class Heizen:
                 if state.state != "off":
                     self.turned_off[entity_id] = state.state
                     self._save()
-                    await self.hass.services.async_call(
+                    await self._call(
                         "climate", "set_hvac_mode", {"entity_id": entity_id, "hvac_mode": "off"}
                     )
                     self.log.add("command", f"{self._name(entity_id)} → aus", MODES[result["mode"]], room.get("id"), room.get("name"))
@@ -1119,7 +1328,7 @@ class Heizen:
 
     async def _calibrate(self, room: dict, rt: dict, room_temp: float | None, now: float, entity_id: str) -> None:
         """Offset des Thermostats so setzen, dass es die Temperatur des Raumsensors misst."""
-        if not room.get("calibration") or not room.get("temp_sensor"):
+        if not room.get("calibration") or not room.get("temp_sensor") or self.haus.radio_busy:
             return
         interval = float(self.settings.get("calibration_interval") or 10) * 60
         if now - rt["calib_at"].get(entity_id, 0) < interval:
@@ -1142,7 +1351,7 @@ class Heizen:
             )
             rt["calib_at"][entity_id] = now
             if new is not None:
-                await self.hass.services.async_call(
+                await self._call(
                     "number", "set_value", {"entity_id": number_id, "value": new}
                 )
                 self.log.add("command", f"{self._name(number_id)} → Offset {self._t(new)} °C",
@@ -1153,7 +1362,7 @@ class Heizen:
         self, room: dict, rt: dict, result: dict, room_temp: float | None, now: float, entity_id: str
     ) -> None:
         """Ventilöffnung direkt vorgeben (für Thermostate mit Ventil-Entität)."""
-        if not room.get("valve_control"):
+        if not room.get("valve_control") or (self.haus.radio_busy and result["mode"] != "entkalken"):
             return
         max_open = float(room_setting(room, "valve_max") or 100)
         if result["mode"] == "entkalken":
@@ -1176,7 +1385,7 @@ class Heizen:
             if not changed_a_lot and now - rt["valve_at"].get(number_id, 0) < VALVE_INTERVAL:
                 continue
             rt["valve_at"][number_id] = now
-            await self.hass.services.async_call(
+            await self._call(
                 "number", "set_value", {"entity_id": number_id, "value": value}
             )
             self.log.add("command", f"{self._name(number_id)} → Ventil {value:.0f} %",
@@ -1185,7 +1394,7 @@ class Heizen:
     async def _restore_mode(self, entity_id: str, room: dict | None = None) -> None:
         previous = self.turned_off.pop(entity_id, None) or "heat"
         self._save()
-        await self.hass.services.async_call(
+        await self._call(
             "climate", "set_hvac_mode", {"entity_id": entity_id, "hvac_mode": previous}
         )
         room = room or {}
@@ -1228,8 +1437,15 @@ class Heizen:
         hysteresis = max(step, 0.5) if use_comp else 0.05
         if current is not None and abs(current - value) < hysteresis:
             return
+        # Funk ausgelastet: nur Wechsel der Betriebsart oder größere Änderungen, höchstens alle 15 Minuten
+        last = rt["last_sent"].get(entity_id)
+        last_mode = rt.setdefault("sent_mode", {}).get(entity_id)
+        if not radio_should_send(self.haus.radio_busy, current, value, now - last[1] if last else None,
+                                 important=last_mode != result["mode"]):
+            return
+        rt["sent_mode"][entity_id] = result["mode"]
         rt["last_sent"][entity_id] = (value, now)
-        await self.hass.services.async_call(
+        await self._call(
             "climate", "set_temperature", {"entity_id": entity_id, "temperature": value}
         )
         extra = f" · gesendet {self._t(value)} °C (Ausgleich)" if abs(value - result["target"]) >= 0.05 else ""

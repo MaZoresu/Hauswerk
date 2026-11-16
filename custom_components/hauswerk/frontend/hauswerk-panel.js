@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk; Rollladen, Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.21.1";
+const VERSION = "0.22.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -114,6 +114,7 @@ const PICKERS = {
   comfort_entity: { scope: "room", multi: false, domains: ["input_number", "number", "sensor"] },
   eco_entity: { scope: "room", multi: false, domains: ["input_number", "number", "sensor"] },
   proximity_sensors: { scope: "settings", multi: true, domains: ["sensor"] },
+  radio_entities: { scope: "settings", multi: true, domains: ["sensor"] },
   outside_sensor: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "temperature" },
   season_entity: { scope: "settings", multi: false, domains: ["input_boolean", "switch", "binary_sensor", "schedule"] },
   schedule_entity: { scope: "room", multi: false, domains: ["schedule", "calendar", "input_boolean", "binary_sensor"] },
@@ -142,6 +143,7 @@ const PICK_HINTS = {
   presence_sensor: ["präsenz", "praesenz", "bewegung", "motion", "presence", "occupancy"],
   outside_sensor: ["außen", "aussen", "outdoor", "garten", "wetter", "balkon", "terrasse"],
   proximity_sensors: ["entfernung", "distance", "nähe", "proximity", "abstand"],
+  radio_entities: ["duty_cycle", "duty cycle", "duty", "funk", "carrier"],
   calibration_entities: ["calibration", "offset", "kalibrier"],
   valve_entities: ["valve", "ventil", "position", "opening"],
   comfort_entity: ["komfort", "comfort"],
@@ -215,7 +217,7 @@ const COMING = [
 ];
 const SLUGS = { start: "start", house: "einstellungen", log: "protokoll", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])) };
 // Pop-ups, die zu den zentralen Hauswerk-Einstellungen gehören (alle anderen gehören zu Heizwerk)
-const HOUSE_POPS = ["presence", "vacation", "weather", "notify", "access", "look"];
+const HOUSE_POPS = ["presence", "vacation", "weather", "notify", "radio", "access", "look"];
 // Akzentfarben der Darstellung: [gespeicherter Wert (null = Standard), Name, Anzeigefarbe]
 const ACCENTS = [
   [null, "Türkis", "#14b8a6"], ["#0ea5e9", "Himmelblau"], ["#3b82f6", "Blau"], ["#8b5cf6", "Violett"],
@@ -612,12 +614,19 @@ class HauswerkPanel extends HTMLElement {
         add("warn", b.level === 0 ? "mdi:battery-alert-variant-outline" : "mdi:battery-10", `Batterie schwach${b.level ? ` · ${fmt(b.level, 0)} %` : ""}`, `${r.name} · ${b.name}`, "room-edit", { id: r.id, rtab: "devices" });
       if (rs.vent) add("info", "mdi:weather-windy", `Jetzt lüften – ${fmt(rs.vent.rh, 0)} % Luftfeuchte`, `${r.name} · draußen trockenere Luft (${fmt(rs.vent.outside_g)} statt ${fmt(rs.vent.inside_g)} g/m³), Taupunkt ${fmt(rs.vent.dew_point)} °C`, "settings-go", { sub: "vent" });
       else if (rs.humidity >= 70) add("info", "mdi:water-alert", `Luftfeuchte ${fmt(rs.humidity, 0)} %`, `${r.name} · Lüften bringt gerade wenig, draußen ist es ähnlich feucht`, "settings-go", { sub: "vent" });
+      for (const c of rs.conflicts || [])
+        add("warn", "mdi:account-switch-outline", "Zweite Regelung stellt dasselbe Thermostat", `${r.name} · ${c.name} · ${c.by.join(", ")}`, "room-edit", { id: r.id, rtab: "devices" });
+      for (const c of rs.pair_broken || [])
+        add("info", "mdi:link-variant-off", "Heizkörper folgt dem Wandthermostat nicht", `${r.name} · ${this._entityName(c)} – Hauswerk stellt es selbst`, "room-edit", { id: r.id, rtab: "devices" });
+      for (const c of rs.duty_blocked || [])
+        add("warn", "mdi:access-point-off", "Gerät darf gerade nicht funken", `${r.name} · ${this._entityName(c)} · Duty Cycle erreicht`, "settings-go", { sub: "radio" });
       if (rs.window_virtual) add("info", "mdi:window-open-variant", "Fenster vermutlich offen", `${r.name} · Temperatur fällt schnell – Fensterpause`, "tab", { tab: "overview" });
     }
     for (const o of this._openWindows ? this._openWindows() : []) {
       const mins = o.s.last_changed ? (Date.now() - new Date(o.s.last_changed)) / 60000 : 0;
       if (mins >= 30) add("info", "mdi:window-open-variant", `Fenster seit ${mins < 90 ? `${Math.round(mins)} Min.` : `${fmt(mins / 60)} h`} offen`, `${o.room.name} · ${this._entityName(o.id)}`, "tab", { tab: "overview" });
     }
+    if (s.radio?.busy) add("warn", "mdi:access-point-network", `Funk ausgelastet · ${fmt(s.radio.level, 0)} %`, `${this._entityName(s.radio.entity)} · Hauswerk sendet nur wichtige Änderungen`, "settings-go", { sub: "radio" });
     if (s.vacation_calendar_error) add("warn", "mdi:calendar-alert", "Urlaubskalender nicht lesbar", s.vacation_calendar_error, "settings-go", { sub: "vacation" });
     for (const [pid, err] of Object.entries(s.plan_errors || {})) add("warn", "mdi:calendar-alert", `Kalender von Plan „${this._data.plans?.[pid]?.name || pid}“ nicht lesbar`, err, "plan-sel", { kind: "plan", id: pid });
     for (const x of this._wxAlerts()) add("info", x.icon, x.text, x.sub, "settings-go", { sub: "weather" });
@@ -1561,7 +1570,8 @@ class HauswerkPanel extends HTMLElement {
         const st = S[id];
         const bad = !st || ["unavailable", "unknown"].includes(st.state);
         const v = this._valveOf(id);
-        return dev("mdi:thermostat", "Thermostat · stellt ein", id, bad ? "nicht erreichbar" : `${val(id, "current_temperature")} → ${val(id, "temperature")}${st.attributes.hvac_action === "heating" ? " · heizt" : ""}${v != null ? ` · Ventil ${fmt(v, 0)} %` : ""}`, !bad);
+        const follows = (s.followers || []).includes(id);
+        return dev(follows ? "mdi:radiator" : "mdi:thermostat", follows ? "Heizkörper · folgt dem Wandthermostat" : "Thermostat · stellt ein", id, bad ? "nicht erreichbar" : `${val(id, "current_temperature")} → ${val(id, "temperature")}${st.attributes.hvac_action === "heating" ? " · heizt" : ""}${v != null ? ` · Ventil ${fmt(v, 0)} %` : ""}`, !bad);
       }),
       ...(room.windows || []).map((id) => {
         const st = S[id];
@@ -2262,6 +2272,13 @@ class HauswerkPanel extends HTMLElement {
         ...COMING.map((m) => ({ g: "Module", soon: true, icon: m.icon, c: "#94a3b8", title: m.name, sum: "Kommt später", words: `${m.name.toLowerCase()} module` })),
         { g: "System", go: "log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll",
           sum: "Was wann warum entschieden wurde · 14 Tage", words: "protokoll log verlauf ereignisse warum debug" },
+        (() => {
+          const rd = s.radio || {};
+          return { g: "System", id: "radio", icon: "mdi:access-point-network", c: rd.busy ? "#f97316" : "#64748b", title: "Funk-Auslastung",
+            sum: rd.level != null ? `${fmt(rd.level, 0)} % · ${rd.busy ? "ausgelastet – Hauswerk drosselt" : `drosselt ab ${fmt(rd.limit ?? 70, 0)} %`} · ${s.commands_hour ?? 0} Befehle/Std.`
+              : (rd.entities || []).length ? "Sensor gerade ohne Wert" : "Kein Duty-Cycle-Sensor gefunden",
+            warn: !!rd.busy, words: "funk duty cycle homematic ccu auslastung befehle drosseln" };
+        })(),
         { g: "System", id: "access", icon: "mdi:shield-account-outline", c: "#94a3b8", title: "Berechtigungen",
           sum: p.allow_users ? "Alle Benutzer dürfen ändern" : "Nur Administratoren dürfen ändern", words: "admin benutzer rechte tablet speichern" },
       ];
@@ -2767,6 +2784,31 @@ class HauswerkPanel extends HTMLElement {
         };
       }
 
+      case "radio": {
+        const rd = this._status?.radio || {};
+        const ids = rd.entities || [];
+        const val = (id) => {
+          const x = this._hass.states[id];
+          return !x || ["unavailable", "unknown"].includes(x.state) ? "nicht erreichbar" : `${fmt(Number(x.state), 1)} %`;
+        };
+        const blocked = Object.values(this._status?.rooms || {}).flatMap((x) => x.duty_blocked || []);
+        return {
+          icon: "mdi:access-point-network", c: "#64748b", title: "Funk-Auslastung", sub: "Hauswerk · Duty Cycle, z. B. Homematic IP",
+          body: `
+            <div class="rq-facts">
+              <span style="--c:${rd.busy ? "#f97316" : "#22c55e"}"><ha-icon icon="mdi:access-point"></ha-icon>${rd.level != null ? `Jetzt ${fmt(rd.level, 0)} %` : "kein Wert"}</span>
+              <span style="--c:${rd.busy ? "#f97316" : "#22c55e"}"><ha-icon icon="${rd.busy ? "mdi:speedometer-slow" : "mdi:check"}"></ha-icon>${rd.busy ? "ausgelastet – gedrosselt" : "frei"}</span>
+              <span style="--c:#64748b"><ha-icon icon="mdi:send-outline"></ha-icon>${this._status?.commands_hour ?? 0} Befehle in der letzten Stunde</span>
+            </div>
+            <p class="muted">Funkzentralen wie die Homematic-CCU dürfen nur begrenzt senden (Duty Cycle, 1 % der Zeit). Bei 100 % nimmt sie keine Befehle mehr an – Thermostate bleiben dann auf dem alten Wert. Ab der Grenze schickt Hauswerk nur noch Wechsel der Betriebsart (z. B. Fenster auf, Komfort beginnt) und Änderungen ab 1 °C, höchstens alle 15 Minuten je Thermostat, und lässt Ventil- und Kalibrier-Befehle weg. Meldet ein einzelnes Gerät „Duty Cycle erreicht“, bekommt es solange keine Befehle.</p>
+            <label class="field narrow"><span><ha-icon icon="mdi:speedometer"></ha-icon> Drosseln ab</span>${minutes("radio_limit", 70, 30, 95, 5, "%")}</label>
+            <div class="lbl">${(p.radio_entities || []).length ? "Gewählte Sensoren" : "Automatisch gefunden"} (höchster Wert zählt)</div>
+            <div class="evlist">${ids.map((id) => `<div class="wrow"><ha-icon icon="mdi:access-point"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${esc(id)}</small></span><em class="${id === rd.entity && rd.busy ? "bad" : ""}">${val(id)}</em></div>`).join("") || `<p class="muted small">Kein Sensor mit „duty_cycle“ gefunden – ohne Sensor drosselt Hauswerk nicht.</p>`}</div>
+            ${blocked.length ? `<p class="muted small"><ha-icon icon="mdi:alert-outline"></ha-icon>Gerade gesperrt: ${blocked.map((x) => esc(this._entityName(x))).join(", ")}</p>` : ""}
+            <div class="field"><span>Sensoren selbst wählen (leer = automatisch)</span>${this._picker("radio_entities", p.radio_entities || [])}</div>`,
+        };
+      }
+
       case "notify": {
         const services = Object.keys(this._hass.services?.notify || {})
           .filter((x) => !["notify", "persistent_notification", "send_message"].includes(x))
@@ -3171,6 +3213,18 @@ class HauswerkPanel extends HTMLElement {
 
       devices: () => `
         <div class="field"><span><ha-icon icon="mdi:thermostat"></ha-icon> Thermostate – Heizwerk stellt diese ein (z. B. das Wandthermostat)</span>${this._picker("climates", r.climates || [])}</div>
+        ${(r.climates || []).length > 1 ? (() => {
+          const rs = this._status?.rooms?.[r.id] || {};
+          const fol = rs.followers || [];
+          const brk = rs.pair_broken || [];
+          const state = r.pair_mode === "off" ? "Hauswerk stellt alle Thermostate selbst."
+            : fol.length ? `Gekoppelt: ${fol.map((x) => esc(this._entityName(x))).join(", ")} folg${fol.length > 1 ? "en" : "t"} dem Wandthermostat – Hauswerk stellt nur das Wandthermostat.`
+            : brk.length ? `${brk.map((x) => esc(this._entityName(x))).join(", ")} folgt dem Wandthermostat nicht – Hauswerk stellt es selbst.`
+            : "Kein Paar aus Wandthermostat und Heizkörper-Thermostat erkannt.";
+          return `<div class="field"><span><ha-icon icon="mdi:link-variant"></ha-icon> Wandthermostat und Heizkörper gekoppelt</span>
+            ${segs("pair-mode", r.pair_mode || "auto", [["auto", "Automatisch erkennen", "mdi:link-variant"], ["off", "Alle selbst stellen", "mdi:link-variant-off"]])}</div>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>${state} Bei Homematic IP steuert das Wandthermostat die Heizkörper-Thermostate im selben CCU-Raum selbst. Hauswerk erkennt das am Gerätemodell (z. B. HmIP-WTH und HmIP-eTRV) und prüft laufend: weicht ein Heizkörper länger als 15 Minuten ab, stellt Hauswerk ihn wieder selbst. Das spart Funkbefehle.</p>`;
+        })() : ""}
         <div class="field"><span><ha-icon icon="mdi:eye-outline"></ha-icon> Weitere Geräte – nur anzeigen</span>${this._picker("show_entities", r.show_entities || [])}</div>
         <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Z. B. Heizkörper-Thermostat oder Stellantrieb der Fußbodenheizung: Heizwerk zeigt Ventilöffnung und Werte an der Raumkarte und auf der Raumseite, stellt aber nichts daran ein.</p>
         <div class="field"><span><ha-icon icon="mdi:window-closed-variant"></ha-icon> Fenster- und Türkontakte</span>${this._picker("windows", r.windows || [])}</div>
@@ -4057,6 +4111,10 @@ class HauswerkPanel extends HTMLElement {
         this._renderDialog();
         if (this._pop) this._renderPop();
         this._toast("Wird beim nächsten Aufheizen neu gelernt");
+        break;
+      case "pair-mode":
+        this._dialog.room.pair_mode = el.dataset.v === "auto" ? null : el.dataset.v;
+        this._renderDialog();
         break;
       case "presence-mode":
         this._dialog.room.presence_mode = el.dataset.v;

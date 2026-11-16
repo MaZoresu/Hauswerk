@@ -105,6 +105,12 @@ class Haus:
         self._fc_at = 0.0
         self.frost_low: float | None = None
         self.frost_day: str | None = None
+        # Funk-Auslastung (Duty Cycle): gefundene Sensoren und aktueller Zustand
+        self._radio_found: list[str] = []
+        self._radio_at = 0.0
+        self.radio_level: float | None = None
+        self.radio_entity: str | None = None
+        self.radio_busy = False
         self._listeners: set[Callable[[], None]] = set()
         self._unsubs: list[Callable[[], None]] = []
         self._state_unsub: Callable[[], None] | None = None
@@ -180,6 +186,7 @@ class Haus:
         await self._async_refresh_calendar()
         await self._async_refresh_forecast()
         self._flush_queue()
+        self.update_radio()
         self.update()
         if (self.away, self.approaching, self.vacation) != before:
             self._notify(update=False)
@@ -523,6 +530,38 @@ class Haus:
             return None
         return _float(state.state)
 
+    # ------------------------------------------------------------ Funk (Duty Cycle)
+    def radio_entities(self) -> list[str]:
+        """Gewählte Sensoren oder automatisch alle %-Sensoren mit „duty_cycle“ (Homematic CCU, Access Point, Router)."""
+        chosen = list(self.settings.get("radio_entities") or [])
+        if chosen:
+            return chosen
+        now = dt_util.utcnow().timestamp()
+        if now - self._radio_at > 600 or not self._radio_found:
+            self._radio_at = now
+            self._radio_found = sorted(
+                s.entity_id for s in self.hass.states.async_all("sensor")
+                if "duty_cycle" in s.entity_id and s.attributes.get("unit_of_measurement") == "%"
+            )
+        return self._radio_found
+
+    @callback
+    def update_radio(self) -> None:
+        level = None
+        entity = None
+        for entity_id in self.radio_entities():
+            state = self.hass.states.get(entity_id)
+            value = _float(state.state) if state is not None else None
+            if value is not None and (level is None or value > level):
+                level, entity = value, entity_id
+        limit = float(self.settings.get("radio_limit") or 70)
+        busy = level is not None and (level >= limit or (self.radio_busy and level >= limit - 10))
+        if busy != self.radio_busy:
+            name = self._name(entity) if entity else "Funk"
+            self.log.add("health", "Funk ausgelastet – Befehle werden gedrosselt" if busy else "Funk wieder frei",
+                         f"{name}: {_de(level)} % (Grenze {limit:.0f} %)" if level is not None else None)
+        self.radio_level, self.radio_entity, self.radio_busy = level, entity, busy
+
     def status(self) -> dict[str, Any]:
         return {
             "away": self.away,
@@ -535,4 +574,6 @@ class Haus:
             "outside_temp": self.outside_temp(),
             "frost_low": self.frost_low,
             "notify_queued": len(self._queued),
+            "radio": {"level": self.radio_level, "entity": self.radio_entity, "busy": self.radio_busy,
+                      "entities": self.radio_entities(), "limit": self.settings.get("radio_limit") or 70},
         }

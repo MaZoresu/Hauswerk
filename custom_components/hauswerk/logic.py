@@ -604,3 +604,61 @@ def battery_level(state: str | None, device_class: str | None, unit: str | None)
         return float(state)
     except (TypeError, ValueError):
         return None
+
+
+# ------------------------------------------------------------ Andere Regelungen, Kopplung, Funk
+def find_references(value: Any, ids: set[str], found: set[str] | None = None, depth: int = 0) -> set[str]:
+    """Welche der Entitäts-IDs kommen irgendwo in den Attributen vor (auch verschachtelt)?"""
+    found = set() if found is None else found
+    if depth > 6 or not ids:
+        return found
+    if isinstance(value, str):
+        if value in ids:
+            found.add(value)
+    elif isinstance(value, dict):
+        for item in value.values():
+            find_references(item, ids, found, depth + 1)
+    elif isinstance(value, (list, tuple, set)):
+        for item in value:
+            find_references(item, ids, found, depth + 1)
+    return found
+
+
+_WALL = ("wth", "bwth", "sth", "wandthermostat", "wall_thermostat", "wall thermostat", "raumthermostat")
+_TRV = ("etrv", "trv", "heizkörper", "heizkorper", "heizkoerper", "radiator", "stellantrieb")
+
+
+def thermostat_kind(model: str | None, entity_id: str, name: str | None = None) -> str | None:
+    """'wall' für Wandthermostate, 'trv' für Heizkörper-Thermostate, sonst None.
+
+    Das Modell (z. B. HmIP-WTH-2, HmIP-eTRV-2) gilt vor dem Namen.
+    """
+    model_l = (model or "").lower()
+    if model_l:
+        if any(w in model_l for w in ("wth", "sth", "wall")):
+            return "wall"
+        if "trv" in model_l:
+            return "trv"
+    text = f"{entity_id} {name or ''}".lower()
+    if any(w in text for w in _WALL):
+        return "wall"
+    if any(w in text for w in _TRV):
+        return "trv"
+    return None
+
+
+def radio_should_send(
+    busy: bool,
+    current: float | None,
+    value: float,
+    since_last: float | None,
+    important: bool = False,
+    min_step: float = 1.0,
+    min_interval: float = 900,
+) -> bool:
+    """Bei ausgelastetem Funk nur wichtige oder größere Änderungen senden, höchstens alle 15 Minuten."""
+    if not busy or important or current is None:
+        return True
+    if abs(value - current) < min_step:
+        return False
+    return since_last is None or since_last >= min_interval

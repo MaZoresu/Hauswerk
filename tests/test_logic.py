@@ -312,3 +312,25 @@ def test_battery_level():
     assert L.battery_level("off", "battery", None) == 100
     assert L.battery_level("3.1", "voltage", "V") is None
     assert L.battery_level("x", "battery", "%") is None
+
+
+# ------------------------------------------------------------------ Andere Regelungen, Kopplung, Funk
+def test_find_references_nested():
+    attrs = {"settings": {"trv": "climate.wth", "heat_sources": [{"entity": "climate.trv"}]}, "x": "climate.andere"}
+    assert L.find_references(attrs, {"climate.wth", "climate.trv", "climate.bad"}) == {"climate.wth", "climate.trv"}
+
+
+def test_thermostat_kind():
+    assert L.thermostat_kind("HmIP-WTH-2", "climate.s_wth_wohnzimmer_1") == "wall"
+    assert L.thermostat_kind("HMIP-eTRV", "climate.a_heizkorper_wohnzimmer_1") == "trv"
+    assert L.thermostat_kind(None, "climate.heizkoerper_bad") == "trv"
+    assert L.thermostat_kind(None, "climate.wohnzimmer", "Wandthermostat Wohnzimmer") == "wall"
+    assert L.thermostat_kind("Thermostat X", "climate.bad") is None
+
+
+def test_radio_should_send():
+    assert L.radio_should_send(False, 20.0, 20.5, 10)
+    assert not L.radio_should_send(True, 20.0, 20.5, 2000)  # kleine Änderung
+    assert not L.radio_should_send(True, 20.0, 22.0, 300)  # zu bald
+    assert L.radio_should_send(True, 20.0, 22.0, 1000)
+    assert L.radio_should_send(True, 20.0, 20.5, 10, important=True)  # Wechsel der Betriebsart

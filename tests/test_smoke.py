@@ -21,6 +21,15 @@ TZ = timezone(timedelta(hours=1))
 NOW = [datetime(2026, 11, 16, 7, 0, tzinfo=timezone.utc)]
 STORES: dict[str, object] = {}  # Speicher je Schlüssel (wie .storage/ in Home Assistant)
 REG: dict[str, object] = {}  # Entitäten-Register: entity_id -> Eintrag mit device_id
+DEVS: dict[str, object] = {}  # Geräte-Register: device_id -> Eintrag mit model
+
+
+class Context:
+    _n = 0
+
+    def __init__(self, user_id=None, parent_id=None):
+        Context._n += 1
+        self.id, self.user_id, self.parent_id = f"ctx{Context._n}", user_id, parent_id
 
 
 class Store:
@@ -48,10 +57,13 @@ def _stub_homeassistant():
     noop = lambda *a, **k: (lambda: None)  # noqa: E731
     _mod("homeassistant")
     _mod("homeassistant.config_entries", ConfigEntry=object)
-    _mod("homeassistant.const", STATE_HOME="home", STATE_UNAVAILABLE="unavailable", STATE_UNKNOWN="unknown")
-    _mod("homeassistant.core", Event=object, HomeAssistant=object, callback=lambda f: f)
-    _mod("homeassistant.helpers")
-    _mod("homeassistant.helpers.entity_registry",
+    _mod("homeassistant.const", STATE_HOME="home", STATE_UNAVAILABLE="unavailable", STATE_UNKNOWN="unknown",
+         EVENT_CALL_SERVICE="call_service")
+    _mod("homeassistant.core", Event=object, HomeAssistant=object, Context=Context, callback=lambda f: f)
+    helpers = _mod("homeassistant.helpers")
+    helpers.device_registry = _mod("homeassistant.helpers.device_registry",
+                                   async_get=lambda hass: types.SimpleNamespace(async_get=DEVS.get))
+    helpers.entity_registry = _mod("homeassistant.helpers.entity_registry",
          async_get=lambda hass: types.SimpleNamespace(async_get=REG.get),
          async_entries_for_device=lambda r, d: [e for e in REG.values() if e.device_id == d])
     _mod("homeassistant.helpers.dispatcher", async_dispatcher_send=lambda *a: None)
@@ -97,7 +109,7 @@ class State:
         self.entity_id, self.state, self.attributes = entity_id, state, attributes or {}
         self.name = name or entity_id
         self.last_changed = NOW[0]
-        self.context = types.SimpleNamespace(user_id=None)
+        self.context = Context()
 
 
 class Hass:
@@ -106,12 +118,18 @@ class Hass:
         self.st = {}
         self.calls = []
         self.states = types.SimpleNamespace(
-            get=self.st.get, async_entity_ids=lambda domain: [e for e in self.st if e.startswith(f"{domain}.")])
+            get=self.st.get, async_entity_ids=lambda domain: [e for e in self.st if e.startswith(f"{domain}.")],
+            async_all=lambda domain=None: [s for e, s in self.st.items() if domain is None or e.startswith(f"{domain}.")])
         self.services = types.SimpleNamespace(async_call=self._call)
+        self.listeners = []
+        self.bus = types.SimpleNamespace(async_listen=lambda ev, cb: self.listeners.append(cb) or (lambda: None))
         self.forecast = None
 
     async def _call(self, domain, service, data, **kw):
         self.calls.append((domain, service, data))
+        ctx = kw.get("context") or Context()
+        for cb in self.listeners:
+            cb(types.SimpleNamespace(data={"domain": domain, "service": service, "service_data": data}, context=ctx))
         if (domain, service) == ("weather", "get_forecasts"):
             return {data["entity_id"]: {"forecast": self.forecast or []}}
         return None
@@ -383,3 +401,72 @@ def test_feiertage_wandern_in_den_kern(hw):
     assert haus.settings["persons"] == ["person.jens"]
     assert "workday_entity" not in ctl.settings and ctl.settings["frost_temp"] == 6.5
     assert "workday_entity" not in STORES[hw.const.STORAGE_KEY]["settings"]
+
+
+def test_zweite_regelung_kopplung_und_funk(hw):
+    """Andere Regelung erkennen, Wandthermostat/Heizkörper koppeln, bei vollem Funk drosseln."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        DEVS.clear()
+        NOW[0] = datetime(2026, 11, 16, 7, 0, tzinfo=timezone.utc)  # 08:00 lokal
+        hass = Hass()
+        hass.set("climate.wth", "heat", {"current_temperature": 20.0, "temperature": 18.0, "model": "HmIP-WTH-2"}, "WTH Wohnzimmer")
+        hass.set("climate.trv", "heat", {"current_temperature": 20.0, "temperature": 18.0, "model": "HMIP-eTRV"}, "Heizkörper Wohnzimmer")
+        hass.set("climate.fremd", "heat", {"settings": {"trv": "climate.wth"}}, "Raumklima Wohnzimmer")
+        hass.set("sensor.ccu_duty_cycle_level", "22", {"unit_of_measurement": "%"}, "CCU Duty Cycle")
+        hass.set("binary_sensor.wth_duty_cycle", "off")
+        REG["climate.wth"] = types.SimpleNamespace(entity_id="climate.wth", device_id="dw", domain="climate", disabled_by=None, platform="homematicip_local")
+        REG["binary_sensor.wth_duty_cycle"] = types.SimpleNamespace(entity_id="binary_sensor.wth_duty_cycle", device_id="dw", domain="binary_sensor", disabled_by=None)
+        REG["climate.fremd"] = types.SimpleNamespace(entity_id="climate.fremd", device_id=None, domain="climate", disabled_by=None, platform="raumklima")
+        log, haus, ctl = await _setup(hw, hass)
+        await ctl.async_start()
+        await ctl.async_save_room({"id": "wz", "name": "Wohnzimmer", "comfort": 21, "eco": 18, "enabled": True,
+                                   "climates": ["climate.wth", "climate.trv"],
+                                   "schedule": [{"days": [0, 1, 2, 3, 4, 5, 6], "start": "08:00", "end": "22:00"}]})
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["wz"]
+        # 1. Andere Regelung nennt unser Wandthermostat
+        assert res["conflicts"] and "raumklima" in res["conflicts"][0]["by"][0]
+        # 2. Nur das Wandthermostat wird gestellt
+        assert res["followers"] == ["climate.trv"]
+        temps = [d["entity_id"] for dom, s, d in hass.calls if s == "set_temperature"]
+        assert set(temps) == {"climate.wth"}
+        # eigene Befehle zählen nicht als fremd
+        assert not ctl._foreign.get("climate.wth")
+        # fremde Befehle (Automation/Integration) werden gezählt
+        for _ in range(3):
+            ctl._on_service_call(types.SimpleNamespace(
+                data={"domain": "climate", "service": "set_temperature", "service_data": {"entity_id": "climate.trv", "temperature": 19}},
+                context=Context()))
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["wz"]
+        assert any(c["id"] == "climate.trv" and "andere Integration" in c["by"] for c in res["conflicts"])
+        # Heizkörper folgt nicht: nach 15 Min. stellt Hauswerk es wieder selbst
+        hass.set("climate.wth", "heat", {"current_temperature": 20.0, "temperature": 21.0, "model": "HmIP-WTH-2"}, "WTH Wohnzimmer")
+        hass.set("climate.trv", "heat", {"current_temperature": 20.0, "temperature": 18.0, "model": "HMIP-eTRV"}, "Heizkörper Wohnzimmer")
+        await ctl.async_evaluate()
+        NOW[0] += timedelta(minutes=16)
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["wz"]
+        assert res["followers"] == [] and res["pair_broken"] == ["climate.trv"]
+        assert any(d.get("entity_id") == "climate.trv" for dom, s, d in hass.calls if s == "set_temperature")
+        # 3. Funk ausgelastet: kleine Änderungen werden nicht gesendet; Gerät mit Duty-Cycle-Sperre gar nicht
+        hass.set("sensor.ccu_duty_cycle_level", "85", {"unit_of_measurement": "%"}, "CCU Duty Cycle")
+        await ctl.async_evaluate()
+        assert haus.radio_busy and ctl.status()["radio"]["level"] == 85
+        hass.set("binary_sensor.wth_duty_cycle", "on")
+        n = len(hass.calls)
+        hass.set("climate.wth", "heat", {"current_temperature": 20.0, "temperature": 18.0, "model": "HmIP-WTH-2"}, "WTH Wohnzimmer")
+        await ctl.async_evaluate()
+        assert not [d for dom, s, d in hass.calls[n:] if d.get("entity_id") == "climate.wth"]
+        assert ctl.status()["rooms"]["wz"]["duty_blocked"] == ["climate.wth"]
+        await ctl.async_stop()
+        return log
+
+    log = asyncio.run(run())
+    titles = [e["title"] for e in log.entries]
+    assert "Funk ausgelastet – Befehle werden gedrosselt" in titles
+    assert any(t.startswith("Zweite Regelung") for t in titles)
+    assert "Wandthermostat stellt die Heizkörper" in titles
+    assert "Heizkörper Wohnzimmer folgt dem Wandthermostat nicht" in titles
