@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.44.0 – 2026-11-17
+
+### Neu
+- **Tabletmodus** für Wand-Tablets – je Gerät unter Einstellungen › Darstellung oder über die Adresse `…/hauswerk?tablet` (z. B. Start-Adresse in Fully Kiosk):
+  - **Leisten unten:** Start, Heizwerk, Rollwerk, Kraftwerk und Einstellungen als große Tasten am unteren Rand, darüber die Unterleiste (z. B. Räume · Bericht · Einstellungen). Oben bleiben Titel, Wetter, Suche und Glocke.
+  - **Kein Scrollen:** Jede Seite wird so groß wie möglich dargestellt und passt auf den Bildschirm; Listen (Einstellungen, Bericht, Protokoll, Heizpläne, Raum) stehen zweispaltig. Passt es nicht auf eine Seite, gibt es höchstens eine zweite – wischen oder die Punkte unten antippen. Rollläden-Räume stehen nebeneinander.
+  - **Bildschirmschoner** nach 1, 2 (Standard), 5 oder 10 Minuten ohne Berührung: abgedunkelt mit großer Uhr, Datum, Wetter, kurzem Hausstand (heizt, Fenster offen, Rollläden, Solar, niemand zu Hause) und bis zu drei Hinweisen. Nachts (22–6 Uhr) noch dunkler, der Inhalt wandert jede Minute ein Stück gegen Einbrennen, neue Hinweise leuchten auf. Dabei geht es zurück zur Startseite, offene Fenster schließen sich. Antippen weckt auf, ohne etwas zu schalten.
+  - **Fully Kiosk:** Mit eingeschalteter JavaScript-Schnittstelle dunkelt Hauswerk im Bildschirmschoner zusätzlich das Display ab (abschaltbar). Der Bildschirm bleibt an, wo der Browser es erlaubt.
+
 ## 0.43.1 – 2026-11-17
 
 ### Geändert

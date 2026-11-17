@@ -82,6 +82,15 @@ Licht · Garten              geplant, ausgegraut
 - **Räume:** schmales Banner mit Ø-Temperatur, Kurzurteil (z. B. „2 Räume unter Soll“), Wetter und Kennzahlen (heizende Räume, Fenster, Außen, Luftfeuchte, heute geheizt). Raumkacheln **detailliert** (Boost und „⋯“-Menü für Heizplan, Bearbeiten und Automatik; heutiger Zeitplan; nur der wichtigste Hinweis) oder **kompakt** (Übersicht vieler Räume); die Wahl merkt sich jedes Gerät. Symbole an der Kachel: Fenster offen, Präsenz, Ventilöffnung in %, Fußbodenheizung (nur solange sie heizt) und Luftfeuchte – Details als Quickinfo. **Ein Tipp auf die Kachel** öffnet das Schnellmenü für manuelle Änderungen: Wunschtemperatur (± oder Komfort/Eco), Dauer (bis Planwechsel, 1/2/4/8 h), Boost, zurück zum Plan, Raumseite, Heizplan und Automatik.
 - Hell oder dunkel folgt dem Design von Home Assistant.
 
+## Tabletmodus (Wand-Tablet)
+
+Unter *Einstellungen › Darstellung › Tabletmodus* je Gerät einschalten – oder als Start-Adresse `…/hauswerk?tablet` eintragen (z. B. in Fully Kiosk; `?tablet=0` schaltet ihn wieder aus).
+
+- **Leisten unten:** Start, Module und Einstellungen sowie die Unterleiste (Räume · Bericht · Einstellungen) stehen am unteren Rand.
+- **Kein Scrollen:** Jede Seite passt sich der Auflösung an – Größe und bei Listen zwei Spalten. Passt es nicht auf eine Seite, gibt es eine zweite zum Wischen (Punkte unten).
+- **Bildschirmschoner** nach 1–10 Minuten ohne Berührung: abgedunkelt mit großer Uhr, Datum, Wetter, Hausstand und Hinweisen; nachts noch dunkler, der Inhalt wandert gegen Einbrennen; neue Hinweise leuchten auf. Dabei geht es zurück zur Startseite. Antippen weckt auf, ohne etwas zu schalten.
+- **Fully Kiosk:** „Bildschirm anlassen“ einschalten; mit eingeschalteter JavaScript-Schnittstelle dunkelt Hauswerk das Display im Bildschirmschoner zusätzlich ab.
+
 ## Heizkörper oder Flächenheizung
 
 | Einstellung | Heizkörper | Flächenheizung | Warum |

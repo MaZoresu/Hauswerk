@@ -532,3 +532,76 @@ def test_modul_logos_passen_in_ihren_platz(panel):
             return r.width > box.width + 1 || r.height > box.height + 1 ? `${{l.parentElement.className}}: ${{Math.round(r.width)}} > ${{Math.round(box.width)}}` : null;
         }}).filter(Boolean)""")
         assert not bad, f"{view}: {bad}"
+
+
+@pytest.fixture
+def tablet(browser, server):
+    page = browser.new_page(viewport={"width": 1280, "height": 800})
+    page.goto(f"{server}/dev/vorschau.html?tablet")
+    page.wait_for_function(f"{EL} && {EL}._data")
+    p = Panel(page)
+    p.wait(300)
+    yield p
+    page.close()
+
+
+def test_tablet_ohne_scrollen(tablet):
+    """?tablet schaltet den Tabletmodus ein: Leisten unten, keine Seite scrollt, höchstens zwei Seiten zum Wischen."""
+    p = tablet
+    assert p.js(f"{EL}.hasAttribute('tablet')")
+    assert p.js("localStorage.getItem('hauswerk.tablet')") == "1"
+    for view in ["start", "overview", "report", "shutters", "shutset", "kwflow", "kwrep", "house"]:
+        p.view(view)
+        p.wait(300)
+        assert p.js("document.scrollingElement.scrollHeight <= innerHeight + 1"), f"{view}: Seite scrollt"
+        main = p.js(f"(() => {{ const m = {EL}.shadowRoot.getElementById('main'); return [m.scrollHeight, m.clientHeight]; }})()")
+        assert main[0] <= main[1] + 1, f"{view}: Inhalt scrollt {main}"
+        assert p.js(f"{EL}._tPages") <= 2, f"{view}: {p.js(f'{EL}._tPages')} Seiten"
+        # Leisten unten: Unterleiste und Navigation unter dem Inhalt
+        bottom = p.js(f"(() => {{ const r = {EL}.shadowRoot; return [r.getElementById('main').getBoundingClientRect().bottom, r.getElementById('bnav').getBoundingClientRect().top]; }})()")
+        assert bottom[0] <= bottom[1], f"{view}: Navigation nicht unten"
+        p.ok(f"Tablet {view}")
+    # Heizwerk-Einstellungen: zwei Seiten, Punkte und Wischen
+    p.view("settings")
+    p.wait(300)
+    if p.js(f"{EL}._tPages") > 1:
+        p.click('#tdots button[data-i="1"]')
+        p.wait(500)
+        assert p.js(f"{EL}._tPage.settings") == 1
+        p.page.mouse.move(600, 400)
+        p.page.mouse.down()
+        p.page.mouse.move(900, 410, steps=5)
+        p.page.mouse.up()
+        p.wait(500)
+        assert p.js(f"{EL}._tPage.settings") == 0
+
+
+def test_tablet_bildschirmschoner(tablet):
+    p = tablet
+    p.view("overview")
+    p.js(f"() => {{ {EL}._openPop('look'); }}")
+    p.wait()
+    assert "Tabletmodus" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    p.click('#pop [data-action="tablet-opt"][data-k="saver"][data-v="1"]')
+    assert p.js("localStorage.getItem('hauswerk.tablet.saver')") == "1"
+    # nach einer Minute ohne Berührung: Schoner, zurück zur Startseite, Pop-up zu
+    p.js(f"() => {{ {EL}._lastAct = Date.now() - 61000; {EL}._saverTick(); }}")
+    p.wait(300)
+    assert not p.js(f"{EL}.shadowRoot.getElementById('saver').hidden")
+    assert p.js(f"{EL}._tab") == "start" and not p.js(f"{EL}._pop")
+    text = p.js(f"{EL}.shadowRoot.getElementById('saver').innerText")
+    assert ":" in text and "Antippen" in text
+    assert p.js(f"getComputedStyle({EL}.shadowRoot.querySelector('.sv-in')).opacity") < "0.7"
+    # Antippen weckt nur auf
+    n = len(p.sent())
+    p.page.mouse.click(640, 400)
+    p.wait(200)
+    assert p.js(f"{EL}.shadowRoot.getElementById('saver').hidden")
+    assert len(p.sent()) == n and not p.js(f"{EL}._pop")
+    # Tabletmodus ausschalten
+    p.js(f"() => {{ {EL}._openPop('look'); }}")
+    p.wait()
+    p.click('#pop [data-action="tablet-toggle"]')
+    assert not p.js(f"{EL}.hasAttribute('tablet')")
+    assert p.js("localStorage.getItem('hauswerk.tablet')") == "0"
+    p.ok("Bildschirmschoner")

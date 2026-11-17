@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.43.1";
+const VERSION = "0.44.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -667,11 +667,14 @@ class HauswerkPanel extends HTMLElement {
       <div class="app">
         <div id="chips"></div>
         <main id="main"><div class="loading"><div class="spinner"></div></div></main>
+        <div id="tdots" class="tdots"></div>
       </div>
       <nav id="bnav" class="bnav" aria-label="Navigation"></nav>
       <div id="dialog"></div>
       <div id="pop"></div>
-      <div id="toast" class="toast" hidden></div>`;
+      <div id="toast" class="toast" hidden></div>
+      <div id="saver" class="saver" hidden data-action="saver-wake"></div>`;
+    this._tabletApply();
     this._renderChrome();
     // Kopfzeile schrumpft, sobald gescrollt wird (funktioniert mit jedem Scroll-Container)
     if (this._io) this._io.disconnect();
@@ -686,6 +689,7 @@ class HauswerkPanel extends HTMLElement {
       root.addEventListener("click", (e) => this._onClick(e));
       root.addEventListener("pointerdown", (e) => this._wDragStart(e));
       root.addEventListener("pointerdown", (e) => this._rwWinDrag(e));
+      root.addEventListener("pointerdown", (e) => this._tSwipeStart(e));
       if (!this._keyBound) {
         this._keyBound = true;
         window.addEventListener("keydown", (e) => {
@@ -748,7 +752,11 @@ class HauswerkPanel extends HTMLElement {
 
   _setView(view, push = true) {
     if (this._tab === "plans" && view !== "plans" && this._plan?.dirty && !confirm("Ungespeicherte Änderungen am Heizplan verwerfen?")) return;
-    if (view !== this._tab) this._setQuery = "";
+    if (view !== this._tab) {
+      this._setQuery = "";
+      if (this._tPage) this._tPage[view] = 0;
+      if (this._tFit) delete this._tFit[view];
+    }
     this._tab = view;
     if (view === "settings" || view === "house") this._settings = null;
     // Adresse nur innerhalb von Home Assistant ändern (nicht in der Vorschau-Datei)
@@ -937,12 +945,297 @@ class HauswerkPanel extends HTMLElement {
     const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom,
       shutters: this._viewShutters, shutset: () => this._settingsPage("rw"),
       kwflow: this._viewKwFlow, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw") }[this._tab] || this._viewStart;
+    let html;
     try {
-      main.innerHTML = view.call(this);
+      html = view.call(this);
     } catch (err) {
       const name = SUB_VIEWS.find((v) => v.id === this._tab)?.name || { start: "Startseite", house: "Einstellungen", log: "Protokoll" }[this._tab] || this._tab;
-      main.innerHTML = this._failCard(`Die Seite „${name}“`, err);
+      html = this._failCard(`Die Seite „${name}“`, err);
     }
+    if (this._tablet) {
+      main.innerHTML = `<div class="tpages">${html}</div>`;
+      this._tabletFit();
+    } else main.innerHTML = html;
+  }
+
+  // ------------------------------------------------------------ Tabletmodus
+  /** Tabletmodus an? Je Gerät gemerkt; „?tablet“ bzw. „?tablet=0“ in der Adresse schaltet ihn (z. B. Start-Adresse in Fully). */
+  _tabletRead() {
+    try {
+      const q = new URLSearchParams(location.search);
+      if (q.has("tablet")) localStorage.setItem("hauswerk.tablet", q.get("tablet") === "0" ? "0" : "1");
+      return localStorage.getItem("hauswerk.tablet") === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  _tabletOpt(key, dflt) {
+    try {
+      const v = localStorage.getItem(`hauswerk.tablet.${key}`);
+      return v == null ? dflt : v;
+    } catch (e) {
+      return dflt;
+    }
+  }
+
+  _tabletSet(key, value) {
+    try {
+      localStorage.setItem(key ? `hauswerk.tablet.${key}` : "hauswerk.tablet", String(value));
+    } catch (e) {
+      /* ohne Speicher: gilt bis zum Neuladen */
+    }
+  }
+
+  /** Tabletmodus einschalten bzw. ausschalten: Leisten unten, Seiten statt Scrollen, Bildschirmschoner. */
+  _tabletApply() {
+    if (this._tablet == null) this._tablet = this._tabletRead();
+    this.toggleAttribute("tablet", this._tablet);
+    this._tPage = this._tPage || {};
+    clearInterval(this._saverTimer);
+    if (!this._tablet) {
+      this._saverHide();
+      this._wakeLock?.release?.().catch?.(() => {});
+      this._wakeLock = null;
+      return;
+    }
+    this._lastAct = Date.now();
+    if (!this._actBound) {
+      this._actBound = true;
+      const act = () => (this._lastAct = Date.now());
+      for (const ev of ["pointerdown", "keydown", "wheel", "touchstart"]) window.addEventListener(ev, act, { capture: true, passive: true });
+      window.addEventListener("resize", () => this._tablet && this._tabletFit(true));
+      document.addEventListener("visibilitychange", () => this._tablet && document.visibilityState === "visible" && this._keepAwake());
+    }
+    this._keepAwake();
+    this._saverTimer = setInterval(() => this._saverTick(), 10000);
+  }
+
+  /** Bildschirm anlassen (wo der Browser es erlaubt; in Fully zusätzlich „Bildschirm anlassen“ einschalten). */
+  async _keepAwake() {
+    try {
+      if ("wakeLock" in navigator && !this._wakeLock) {
+        this._wakeLock = await navigator.wakeLock.request("screen");
+        this._wakeLock.addEventListener?.("release", () => (this._wakeLock = null));
+      }
+    } catch (e) {
+      this._wakeLock = null;
+    }
+  }
+
+  /** Abschnitt „Tabletmodus“ in Darstellung (gilt sofort, nur auf diesem Gerät). */
+  _tabletBox() {
+    const on = !!this._tablet;
+    const saver = this._tabletOpt("saver", "2");
+    const fully = this._tabletOpt("fully", "1") === "1";
+    const opt = (k, v, l, cur) => `<button class="seg ${cur === v ? "on" : ""}" data-action="tablet-opt" data-k="${k}" data-v="${v}">${l}</button>`;
+    return `
+      <div class="lbl" style="margin-top:18px"><ha-icon icon="mdi:tablet-dashboard"></ha-icon> Tabletmodus · dieses Gerät</div>
+      <button class="xcard ${on ? "on" : ""}" data-action="tablet-toggle" role="switch" aria-checked="${on}">
+        <span class="xc-box" aria-hidden="true">${on ? "✓" : ""}</span>
+        <span class="grow"><b>Tabletmodus</b><small>Leisten unten, kein Scrollen – höchstens zwei Seiten zum Wischen –, Bildschirmschoner mit großer Uhr.</small></span>
+        <ha-icon class="xc-ic" icon="mdi:tablet"></ha-icon></button>
+      ${on ? `
+      <div class="field"><span>Bildschirmschoner nach</span><div class="segs small">${[["0", "Aus"], ["1", "1 Min."], ["2", "2 Min."], ["5", "5 Min."], ["10", "10 Min."]].map(([v, l]) => opt("saver", v, l, saver)).join("")}</div></div>
+      <p class="muted small">Abgedunkelt mit großer Uhr, Datum, Wetter, kurzem Hausstand und Hinweisen – nachts (22–6 Uhr) noch dunkler; der Inhalt wandert jede Minute ein Stück gegen Einbrennen. Dabei geht es zurück zur Startseite. Antippen weckt auf, ohne etwas zu schalten.</p>
+      ${window.fully ? `<label class="check"><span><b>Fully: Display mit abdunkeln</b><small>Senkt die Helligkeit über Fully, solange der Bildschirmschoner läuft.</small></span>
+        <button class="seg ${fully ? "on" : ""}" data-action="tablet-opt" data-k="fully" data-v="${fully ? "0" : "1"}">${fully ? "An" : "Aus"}</button></label>` : ""}
+      <button class="secondary" data-action="saver-test"><ha-icon icon="mdi:clock-outline"></ha-icon>Bildschirmschoner jetzt zeigen</button>` : ""}
+      <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Für Fully als Start-Adresse <code>…/hauswerk?tablet</code> eintragen – dann startet das Tablet immer im Tabletmodus. In Fully „Bildschirm anlassen“ und für das Abdunkeln die JavaScript-Schnittstelle einschalten.</p>`;
+  }
+
+  /** Seite ohne Scrollen: Größe (und bei Listen zwei Spalten) so wählen, dass alles auf eine Seite passt – höchstens zwei Seiten zum Wischen. */
+  _tabletFit(full = false) {
+    const main = this.shadowRoot.getElementById("main");
+    const box = main?.querySelector(".tpages");
+    if (!box) return;
+    const W = main.clientWidth, H = main.clientHeight;
+    if (!W || !H) return;
+    const GAP = 40;
+    const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66];
+    const maxZ = Math.max(1, Math.min(1.4, W / 860, H / 560));
+    const zs = ZOOMS.filter((z) => z <= maxZ + 0.001);
+    const tab = this._tab;
+    // Listen-Seiten dürfen zweispaltig werden (breites Tablet); Kachel-Seiten bleiben einspaltig
+    const ks = ["start", "overview", "shutters", "kwflow"].includes(tab) || W < 900 ? [1] : [1, 2];
+    const layout = (z, k) => {
+      const colW = (W / z - ((k - 1) * GAP) / z) / k;
+      box.style.zoom = z;
+      box.style.width = `${W / z}px`;
+      box.style.height = `${H / z}px`;
+      box.style.columnWidth = `${colW}px`;
+      box.style.columnGap = `${GAP / z}px`;
+      box.classList.toggle("two", k === 2);
+      const cols = Math.max(1, Math.round((box.scrollWidth + GAP / z) / (colW + GAP / z)));
+      return Math.ceil(cols / k);
+    };
+    const key = `${W}x${H}`;
+    const prev = this._tFit?.[tab];
+    let best = null;
+    // schneller Weg: letzte Wahl gilt noch (gleiche Größe, nicht mehr Seiten als vorher)
+    if (!full && prev && prev.key === key) {
+      const n = layout(prev.z, prev.k);
+      if (n <= prev.n) best = { ...prev, n };
+    }
+    if (!best) {
+      const opts = [];
+      for (const k of ks) {
+        let two = null;
+        for (const z of zs) {
+          const n = layout(z, k);
+          if (n === 1) { opts.push({ z, k, n }); two = null; break; }
+          if (n <= 2 && !two) two = { z, k, n };
+        }
+        if (two) opts.push(two);
+        if (!opts.some((o) => o.k === k)) opts.push({ z: zs[zs.length - 1], k, n: layout(zs[zs.length - 1], k) });
+      }
+      opts.sort((x, y) => x.n - y.n || y.z - x.z || x.k - y.k);
+      best = { ...opts[0], key };
+      best.n = layout(best.z, best.k);
+    }
+    this._tFit = { ...(this._tFit || {}), [tab]: best };
+    this._tZoom = { ...(this._tZoom || {}), [tab]: best.z };
+    const n = best.n;
+    this._tPages = n;
+    const page = Math.min(this._tPage[tab] || 0, n - 1);
+    this._tPage[tab] = page;
+    box.scrollLeft = page * (box.clientWidth + GAP / best.z);
+    const dots = this.shadowRoot.getElementById("tdots");
+    if (dots) dots.innerHTML = n > 1 ? Array.from({ length: n }, (_, k) => `<button class="${k === page ? "on" : ""}" data-action="tpage" data-i="${k}" aria-label="Seite ${k + 1}"></button>`).join("") : "";
+  }
+
+  _tabletGo(page) {
+    const main = this.shadowRoot.getElementById("main");
+    const box = main?.querySelector(".tpages");
+    if (!box) return;
+    const n = this._tPages || 1;
+    page = Math.max(0, Math.min(n - 1, page));
+    this._tPage[this._tab] = page;
+    const z = this._tZoom?.[this._tab] || 1;
+    box.scrollTo({ left: page * (box.clientWidth + 40 / z), behavior: "smooth" });
+    this.shadowRoot.querySelectorAll("#tdots button").forEach((b, k) => b.classList.toggle("on", k === page));
+  }
+
+  /** Wischen zwischen den Seiten (nicht beim Ziehen von Widgets oder Rollläden). */
+  _tSwipeStart(e) {
+    if (!this._tablet || (this._tPages || 1) < 2) return;
+    const path = e.composedPath();
+    if (!path.includes(this.shadowRoot.getElementById("main"))) return;
+    if (path.some((n) => n.dataset?.drag !== undefined || n.dataset?.rwwin !== undefined || ["INPUT", "SELECT", "TEXTAREA"].includes(n.tagName))) return;
+    const x0 = e.clientX, y0 = e.clientY;
+    const up = (ev) => {
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      const dx = ev.clientX - x0, dy = ev.clientY - y0;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+        this._swiped = Date.now();
+        this._tabletGo((this._tPage[this._tab] || 0) + (dx < 0 ? 1 : -1));
+      }
+    };
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
+  // ------------------------------------------------------------ Bildschirmschoner
+  _saverTick() {
+    const min = Number(this._tabletOpt("saver", "2"));
+    const el = this.shadowRoot.getElementById("saver");
+    if (!el) return;
+    if (!el.hidden) return this._saverRender();
+    if (min > 0 && this._data && Date.now() - (this._lastAct || 0) >= min * 60000) this._saverShow();
+  }
+
+  _saverShow() {
+    const el = this.shadowRoot.getElementById("saver");
+    if (!el || !this._data) return;
+    // zurück zur Startseite, offene Fenster schließen
+    if (this._pop) this._closePopQuiet();
+    if (this._dialog) { this._dialog = null; this._renderDialog(); }
+    this._wEdit = false;
+    if (this._tab !== "start" && !(this._tab === "plans" && this._plan?.dirty)) this._setView("start");
+    this._tPage.start = 0;
+    this._saverSeen = new Set(this._hints().map((h) => `${h.text}|${h.sub}`));
+    this._saverNew = {};
+    el.hidden = false;
+    this._saverRender();
+    // Fully Kiosk: Display zusätzlich abdunkeln (JavaScript-Schnittstelle in Fully einschalten)
+    try {
+      if (window.fully && this._tabletOpt("fully", "1") === "1") {
+        this._fullyBright = Number(window.fully.getScreenBrightness());
+        if (this._fullyBright > 0) window.fully.setScreenBrightness(Math.max(1, Math.round(this._fullyBright * (this._saverNight() ? 0.05 : 0.15))));
+      }
+    } catch (e) {
+      this._fullyBright = null;
+    }
+  }
+
+  _saverHide() {
+    const el = this.shadowRoot?.getElementById("saver");
+    if (el) el.hidden = true;
+    this._lastAct = Date.now();
+    try {
+      if (window.fully && this._fullyBright > 0) window.fully.setScreenBrightness(this._fullyBright);
+    } catch (e) {
+      /* Fully nicht erreichbar */
+    }
+    this._fullyBright = null;
+  }
+
+  _saverNight() {
+    const h = new Date().getHours();
+    return h >= 22 || h < 6;
+  }
+
+  _saverRender() {
+    const el = this.shadowRoot.getElementById("saver");
+    if (!el || el.hidden || !this._data) return;
+    const now = new Date();
+    const time = now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    const date = now.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
+    const w = this._weather();
+    const f = this._facts();
+    const parts = [];
+    if (f.heating) parts.push(["mdi:fire", `${f.heating} ${f.heating === 1 ? "Raum heizt" : "Räume heizen"}`]);
+    if (f.open) parts.push(["mdi:window-open-variant", `${f.open} Fenster offen`]);
+    const covers = this._data.rollwerk ? this._rwCovers() : [];
+    if (covers.length) {
+      const pos = covers.map((c) => this._rwPos(c.st)).filter((x) => x != null);
+      parts.push(["mdi:window-shutter", `Rollläden: ${pos.filter((x) => x >= 95).length} offen · ${pos.filter((x) => x <= 5).length} zu`]);
+    }
+    const set = this._data.settings || {};
+    if ((set.kw_solar || []).length && this._kwFlow) {
+      const fl = this._kwFlow();
+      if (fl.solar != null) parts.push(["mdi:solar-power-variant", `Solar ${this._kwFmt(fl.solar)}`]);
+    }
+    if (this._status?.away) parts.push(["mdi:home-export-outline", "Niemand zu Hause"]);
+    const hints = this._hints();
+    const t = Date.now();
+    for (const h of hints) {
+      const k = `${h.text}|${h.sub}`;
+      if (!this._saverSeen.has(k)) { this._saverSeen.add(k); this._saverNew[k] = t; }
+    }
+    const shown = hints.slice(0, 3);
+    // gegen Einbrennen: Inhalt jede Minute ein wenig verschieben
+    const minute = Math.floor(t / 60000);
+    if (minute !== this._saverMin) {
+      this._saverMin = minute;
+      this._saverShift = [Math.round((Math.random() - 0.5) * 8), Math.round((Math.random() - 0.5) * 8)];
+    }
+    const [dx, dy] = this._saverShift || [0, 0];
+    el.classList.toggle("night", this._saverNight());
+    el.innerHTML = `
+      <div class="sv-in" style="transform:translate(${dx}vw, ${dy}vh)">
+        <div class="sv-time">${time}</div>
+        <div class="sv-date">${esc(date)}</div>
+        ${w ? `<div class="sv-wx"><ha-icon icon="${w.icon}"></ha-icon><b>${fmt(w.temp)}°</b><span>${esc(w.label)}${w.extra ? ` · ${esc(w.extra)}` : ""}</span></div>` : ""}
+        ${parts.length ? `<div class="sv-facts">${parts.map(([i, l]) => `<span><ha-icon icon="${i}"></ha-icon>${esc(l)}</span>`).join("")}</div>` : ""}
+        ${shown.length ? `<div class="sv-hints">${shown.map((h) => {
+          const k = `${h.text}|${h.sub}`;
+          const fresh = this._saverNew[k] && t - this._saverNew[k] < 5 * 60000;
+          return `<div class="sv-h ${h.lvl} ${fresh ? "new" : ""}"><ha-icon icon="${h.icon}"></ha-icon><span><b>${esc(h.text)}</b>${h.sub ? `<small>${esc(h.sub)}</small>` : ""}</span></div>`;
+        }).join("")}${hints.length > shown.length ? `<small class="sv-more">und ${hints.length - shown.length} weitere</small>` : ""}</div>` : ""}
+        <div class="sv-tap">Antippen zum Aufwecken</div>
+      </div>`;
   }
 
   // ------------------------------------------------------------ Bausteine
@@ -5216,7 +5509,8 @@ class HauswerkPanel extends HTMLElement {
             <div class="field"><span>Größe</span><div class="segs small">${[["s", "Kompakt", "mdi:format-font-size-decrease"], ["m", "Normal", "mdi:format-size"], ["l", "Groß", "mdi:format-font-size-increase"]]
               .map(([v, l, i]) => `<button class="seg ${size === v ? "on" : ""}" data-action="look-size" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${l}</button>`)
               .join("")}</div></div>
-            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Die Größe gilt nur für dieses Gerät und sofort – z. B. größer auf dem Wand-Tablet, kompakter am Handy. Alles andere gilt nach dem Speichern für alle.</p>`,
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Die Größe gilt nur für dieses Gerät und sofort – z. B. größer auf dem Wand-Tablet, kompakter am Handy. Alles andere gilt nach dem Speichern für alle.</p>
+            ${this._tabletBox()}`,
         };
       }
 
@@ -6318,6 +6612,13 @@ class HauswerkPanel extends HTMLElement {
 
   async _onClickInner(e) {
     const path = e.composedPath();
+    // Tabletmodus: Bildschirmschoner weckt nur auf, nach dem Wischen kein Klick
+    if (path.some((n) => n.id === "saver")) {
+      e.preventDefault();
+      this._saverHide();
+      return;
+    }
+    if (this._swiped && Date.now() - this._swiped < 400) return;
     if (!path.some((n) => n.classList?.contains("picker"))) {
       this.shadowRoot.querySelectorAll(".pick-list").forEach((l) => (l.hidden = true));
     }
@@ -7147,6 +7448,25 @@ class HauswerkPanel extends HTMLElement {
       case "start-edit":
         this._wEdit = true;
         this._setView("start");
+        break;
+      case "tpage":
+        this._tabletGo(Number(el.dataset.i));
+        break;
+      case "tablet-toggle":
+        this._tablet = !this._tablet;
+        this._tabletSet(null, this._tablet ? "1" : "0");
+        this._tabletApply();
+        this._renderPop();
+        this._renderMain();
+        break;
+      case "tablet-opt":
+        this._tabletSet(el.dataset.k, el.dataset.v);
+        this._lastAct = Date.now();
+        this._renderPop();
+        break;
+      case "saver-test":
+        this._closePopQuiet();
+        this._saverShow();
         break;
       case "rw-cmd":
         if (this._pop?.id?.startsWith("rwpos:")) this._pop.draft = {};
@@ -8329,7 +8649,8 @@ kbd { font:600 11px/1 ui-monospace, monospace; padding:2px 6px; border-radius:5p
 .rw-ctl .sbtn ha-icon { --mdc-icon-size:20px; }
 .rw-c[data-action] { cursor:pointer; }
 .rw-c[data-action]:hover { border-color:color-mix(in srgb, var(--accent) 45%, var(--line)); }
-.rw-h { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); white-space:nowrap; }
+.rw-h { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); white-space:nowrap; min-width:0; }
+.rw-c .rw-ctl { flex-wrap:wrap; row-gap:8px; }
 .rw-h ha-icon { --mdc-icon-size:18px; }
 .rw-h b { color:var(--text, inherit); font-size:15px; font-variant-numeric:tabular-nums; }
 .rwpos { display:flex; gap:18px; align-items:stretch; margin:4px 0 14px; }
@@ -8953,6 +9274,61 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
   .si .t { display:none; }
   .si { padding:0 6px; }
 }
+/* ---------- Tabletmodus ---------- */
+:host([tablet]) { height:100vh; height:100dvh; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+:host([tablet]) .top { position:relative; flex:none; padding-left:20px; padding-right:20px; }
+:host([tablet]) .mtabs { display:none !important; }
+:host([tablet]) .top .ttl span { display:none; }
+:host([tablet]) .app { flex:1; min-height:0; width:100%; max-width:none; margin:0; padding:10px 20px 0; display:flex; flex-direction:column; }
+:host([tablet]) #main { order:1; flex:1; min-height:0; overflow:hidden; position:relative; }
+:host([tablet]) #tdots { order:2; }
+:host([tablet]) #chips { order:3; flex:none; }
+:host([tablet]) #chips nav { margin:8px 0 0; }
+:host([tablet]) .tpages { overflow:hidden; column-fill:auto; }
+:host([tablet]) .tpages article, :host([tablet]) .tpages .wdg, :host([tablet]) .tpages .srow, :host([tablet]) .tpages .hero,
+:host([tablet]) .tpages .card:not(.sgroup) { break-inside:avoid; }
+:host([tablet]) .tpages .sg-h { break-after:avoid; }
+:host([tablet]) .tpages .rw-area { display:inline-block; vertical-align:top; margin:0 14px 0 0; max-width:100%; }
+:host([tablet]) .tpages .rw-area .rw-grid { display:flex; flex-wrap:wrap; gap:12px; }
+:host([tablet]) .tpages .rw-area .rw-c { width:300px; }
+:host([tablet]) .tpages h3, :host([tablet]) .tpages .shead, :host([tablet]) .tpages .sub-h { break-after:avoid; }
+.tdots { display:none; }
+:host([tablet]) .tdots { display:flex; justify-content:center; gap:10px; min-height:18px; padding:6px 0 0; }
+.tdots button { all:unset; cursor:pointer; width:10px; height:10px; border-radius:99px; background:var(--track); transition:width .2s, background .2s; }
+.tdots button.on { width:26px; background:var(--accent); }
+:host([tablet]) .bnav { display:flex; position:static; flex:none; z-index:8; gap:6px; padding:8px 20px calc(8px + env(safe-area-inset-bottom));
+  background:color-mix(in srgb, var(--card) 94%, transparent); border-top:1px solid var(--line); }
+:host([tablet]) .bn { all:unset; cursor:pointer; flex:1; display:flex; flex-direction:row; justify-content:center; align-items:center; gap:10px; padding:10px 0; border-radius:14px; font-size:16px; font-weight:600; color:var(--muted); }
+:host([tablet]) .bn .bi { position:relative; display:grid; place-items:center; width:44px; height:36px; border-radius:99px; }
+:host([tablet]) .bn ha-icon { --mdc-icon-size:26px; }
+:host([tablet]) .bn .mlogo { width:30px; height:30px; }
+:host([tablet]) .bn.on { color:var(--text); background:color-mix(in srgb, var(--accent) 14%, transparent); }
+:host([tablet]) .bn em { position:absolute; top:-3px; right:-2px; min-width:16px; height:16px; padding:0 4px; border-radius:99px; font-style:normal; font-size:10px; font-weight:800; display:grid; place-items:center; background:#fb923c; color:#1f1300; }
+:host([tablet]) .app { padding-bottom:0; }
+:host([tablet]) .savebar { position:sticky; bottom:0; }
+.saver { position:fixed; inset:0; z-index:50; background:#000; color:#e5e7eb; display:grid; place-items:center; cursor:pointer; user-select:none; }
+.saver[hidden] { display:none; }
+.saver .sv-in { display:flex; flex-direction:column; align-items:center; gap:min(1.6vh, 14px); max-height:94vh; text-align:center; opacity:.62; transition:transform 2s ease; max-width:92vw; }
+.saver.night .sv-in { opacity:.32; }
+.sv-time { font-size:min(22vw, 30vh); line-height:.95; font-weight:200; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+.sv-date { font-size:min(3.4vw, 5vh); font-weight:500; text-transform:capitalize; color:#cbd5e1; }
+.sv-wx { display:flex; align-items:center; gap:12px; font-size:min(2.8vw, 4vh); color:#cbd5e1; }
+.sv-wx ha-icon { --mdc-icon-size:min(5vw, 7vh); }
+.sv-wx b { font-size:min(4.2vw, 6vh); font-weight:500; color:#e5e7eb; }
+.sv-facts { display:flex; flex-wrap:wrap; justify-content:center; gap:10px 26px; font-size:min(2.2vw, 3.2vh); color:#94a3b8; }
+.sv-facts span { display:flex; align-items:center; gap:8px; }
+.sv-facts ha-icon { --mdc-icon-size:min(2.8vw, 4vh); }
+.sv-hints { display:flex; flex-direction:column; gap:8px; margin-top:6px; min-width:min(60vw, 720px); }
+.sv-h { display:flex; align-items:center; gap:12px; padding:min(1vh, 10px) 16px; border-radius:14px; background:rgba(255,255,255,.06); text-align:left; font-size:min(2vw, 3vh); }
+.sv-h ha-icon { --mdc-icon-size:min(2.8vw, 4vh); color:#94a3b8; }
+.sv-h.warn ha-icon { color:#fbbf24; }
+.sv-h b { display:block; font-weight:600; }
+.sv-h small { display:block; color:#94a3b8; font-size:.8em; }
+.sv-h.new { background:rgba(251,191,36,.16); box-shadow:0 0 0 2px rgba(251,191,36,.55); animation:svpulse 2s ease-in-out infinite; }
+@keyframes svpulse { 50% { box-shadow:0 0 0 6px rgba(251,191,36,.15); } }
+.saver .sv-more { color:#64748b; }
+.sv-tap { margin-top:8px; font-size:13px; color:#475569; }
+
 `;
 
 customElements.get("hauswerk-panel") || customElements.define("hauswerk-panel", HauswerkPanel);
