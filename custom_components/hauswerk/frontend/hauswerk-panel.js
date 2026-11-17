@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.42.0";
+const VERSION = "0.43.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -402,6 +402,15 @@ class HauswerkPanel extends HTMLElement {
       this._kwAt = Date.now();
       this._kwLive();
     }
+    // Pop-up „Höhe einstellen“: Stellung live (nicht während des Ziehens)
+    else if (this._pop?.id?.startsWith?.("rwpos:") && !this._rwDragging && Date.now() - (this._rwPosAt || 0) > 700) {
+      this._rwPosAt = Date.now();
+      const d = this._pop.draft || {};
+      const cur = this._rwPos(hass.states[this._pop.id.slice(6)]);
+      // Ziel erreicht oder lange her: wieder die echte Stellung zeigen
+      if (d.pos != null && (cur === d.pos || Date.now() - (d.at || 0) > 90000)) this._pop.draft = {};
+      this._renderPop();
+    }
     // Startseite mit Shortcuts, Werten, Wetter oder Fenstern: Änderungen in HA zeigen (höchstens alle 3 s)
     else if (this._tab === "start" && this._data && !this._busy && Date.now() - (this._hassAt || 0) > 3000 &&
       this._widgets().some((w) => ["shortcuts", "values", "weather", "windows", "energy"].includes(w.type))) {
@@ -671,6 +680,7 @@ class HauswerkPanel extends HTMLElement {
       const root = this.shadowRoot;
       root.addEventListener("click", (e) => this._onClick(e));
       root.addEventListener("pointerdown", (e) => this._wDragStart(e));
+      root.addEventListener("pointerdown", (e) => this._rwWinDrag(e));
       if (!this._keyBound) {
         this._keyBound = true;
         window.addEventListener("keydown", (e) => {
@@ -3119,6 +3129,102 @@ class HauswerkPanel extends HTMLElement {
     return (this._data?.settings?.rw_covers || []).map((id) => ({ id, st: this._hass.states[id], cfg: this._data.rollwerk?.covers?.[id] || {}, rs: this._rwStatus?.covers?.[id] || {} }));
   }
 
+  /** Behanghöhen aus dem Profil des Rollladens: [Name, Prozent, Symbol]. */
+  _rwPresets(id) {
+    const cfg = this._data.rollwerk?.covers?.[id] || {};
+    const prof = this._data.rollwerk?.profiles?.[cfg.profile || "standard"] || {};
+    const feat = prof.features || ["up", "down", "time", "ventilate"];
+    const num = (k, d) => (prof[k] == null || prof[k] === "" ? d : Number(prof[k]));
+    const list = [["Offen", num("pos_open", 100), "mdi:window-shutter-open"]];
+    if (feat.includes("shading")) list.push(["Beschattung", num("pos_shading", 25), "mdi:sun-thermometer-outline"]);
+    if (feat.includes("shading") && prof.pos_shading_alt != null && prof.pos_shading_alt !== "") list.push(["Beschattung 2", num("pos_shading_alt"), "mdi:weather-sunny"]);
+    if (prof.close_stage1) list.push(["Abends Stufe 1", num("pos_stage1", 50), "mdi:weather-sunset-down"]);
+    if (feat.includes("ventilate")) list.push(["Lüften", num("pos_ventilate", 30), "mdi:window-open-variant"]);
+    if (prof.pos_lockout != null && prof.pos_lockout !== "") list.push(["Tür offen", num("pos_lockout"), "mdi:door-open"]);
+    list.push(["Geschlossen", num("pos_close", 0), "mdi:window-shutter"]);
+    return list.filter(([, v]) => Number.isFinite(v));
+  }
+
+  /** Pop-up „Höhe einstellen“: Fenster zum Ziehen, Behanghöhen aus dem Profil, hoch/Stopp/runter. */
+  _rwPosPop(id) {
+    const c = this._rwCovers().find((x) => x.id === id) || { id, st: this._hass.states[id], cfg: {}, rs: {} };
+    const bad = !c.st || ["unavailable", "unknown"].includes(c.st.state);
+    const cur = this._rwPos(c.st);
+    const want = this._pop?.draft?.pos;
+    const v = want ?? cur ?? 0;
+    const moving = c.st?.state === "opening" ? "fährt hoch" : c.st?.state === "closing" ? "fährt runter" : "";
+    const txt = (x) => (x >= 100 ? "offen" : x <= 0 ? "zu" : `${fmt(x, 0)} % offen`);
+    const prof = this._rwProfName(c.cfg.profile || "standard");
+    const presets = this._rwPresets(id);
+    const auto = c.cfg.auto !== false;
+    return {
+      icon: "mdi:window-shutter", c: "#0ea5e9", title: this._entityName(id), sub: `Rollwerk · Höhe einstellen`,
+      body: `
+        <div class="rwpos">
+          <div class="rwwin ${bad ? "off" : ""}" data-rwwin="${esc(id)}" style="--v:${v}" role="slider" aria-label="Höhe" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${v}" tabindex="0">
+            <div class="rwwin-glass"></div>
+            <div class="rwwin-sh"><i></i></div>
+            ${presets.map(([n, pv]) => `<span class="rwwin-mark" style="--m:${pv}" title="${esc(n)} · ${fmt(pv, 0)} %"></span>`).join("")}
+            <span class="rwwin-val">${fmt(v, 0)} %</span>
+          </div>
+          <div class="rwpos-side">
+            <div class="rwpos-now"><b>${bad ? "nicht erreichbar" : want != null && want !== cur ? `fährt auf ${txt(want)}` : moving || (cur == null ? esc(c.st.state) : txt(cur))}</b>
+              <small>${want != null && cur != null && want !== cur ? `gerade ${txt(cur)}` : "Zum Verstellen im Fenster ziehen oder eine Höhe wählen."}</small></div>
+            <div class="rwpos-btns">
+              <button class="sbtn" data-action="rw-cmd" data-ids="${esc(id)}" data-a="open" title="hoch" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-up"></ha-icon></button>
+              <button class="sbtn" data-action="rw-cmd" data-ids="${esc(id)}" data-a="stop" title="Stopp" ${bad ? "disabled" : ""}><ha-icon icon="mdi:stop"></ha-icon></button>
+              <button class="sbtn" data-action="rw-cmd" data-ids="${esc(id)}" data-a="close" title="runter" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-down"></ha-icon></button>
+            </div>
+          </div>
+        </div>
+        <div class="sub-h"><ha-icon icon="mdi:tune-vertical"></ha-icon>Behanghöhen · Profil „${esc(prof)}“</div>
+        <div class="rwpre">${presets.map(([n, pv, ic]) => `<button class="rwpre-b ${Math.abs(v - pv) <= 2 ? "on" : ""}" data-action="rwpos-go" data-id="${esc(id)}" data-v="${pv}" ${bad ? "disabled" : ""}>
+          <ha-icon icon="${ic}"></ha-icon><span><span class="rwpre-n">${esc(n)}</span><b>${fmt(pv, 0)} %</b></span></button>`).join("")}</div>
+        ${auto ? `<p class="muted small"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>${c.rs.manual ? "Von Hand verstellt – die Automatik wartet bis zum nächsten Wechsel." : "Von Hand verstellt, wartet die Automatik danach bis zum nächsten Wechsel."}</p>
+          ${c.rs.manual ? `<button class="secondary" data-action="rw-cmd" data-ids="${esc(id)}" data-a="resume"><ha-icon icon="mdi:robot-outline"></ha-icon>Automatik übernimmt</button>` : ""}`
+          : `<p class="muted small"><ha-icon icon="mdi:robot-off-outline"></ha-icon>Automatik für diesen Rollladen ist aus.</p>`}
+        ${this._admin ? `<p class="muted small">Die Behanghöhen stellst du im Profil ein: <button class="link" data-action="pop-open" data-pop="rwp:${esc(c.cfg.profile || "standard")}:fine">Profil „${esc(prof)}“ › Feinheiten</button></p>` : ""}`,
+      foot: `<button class="secondary" data-action="pop-close">Fertig</button>`,
+    };
+  }
+
+  /** Rollladen auf eine Höhe fahren (aus dem Pop-up). */
+  _rwPosGo(id, v) {
+    v = Math.max(0, Math.min(100, Math.round(v)));
+    if (this._pop) this._pop.draft = { ...(this._pop.draft || {}), pos: v, at: Date.now() };
+    this._renderPop();
+    return this._ws({ type: "hauswerk/rollwerk/command", entity_ids: [id], action: "position", position: v });
+  }
+
+  /** Im Fenster ziehen: Höhe folgt dem Finger, gefahren wird beim Loslassen. */
+  _rwWinDrag(e) {
+    const win = e.composedPath().find((n) => n.dataset?.rwwin !== undefined);
+    if (!win || win.classList.contains("off")) return;
+    e.preventDefault();
+    const rect = win.getBoundingClientRect();
+    const at = (y) => Math.max(0, Math.min(100, Math.round((1 - (y - rect.top) / rect.height) * 100 / 5) * 5));
+    let v = at(e.clientY);
+    const show = () => {
+      win.style.setProperty("--v", v);
+      win.setAttribute("aria-valuenow", v);
+      const lab = win.querySelector(".rwwin-val");
+      if (lab) lab.textContent = `${v} %`;
+    };
+    this._rwDragging = true;
+    show();
+    const move = (ev) => { v = at(ev.clientY); show(); };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      this._rwDragging = false;
+      this._rwPosGo(win.dataset.rwwin, v);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
   _rwPos(st) {
     if (!st) return null;
     const p = Number(st.attributes?.current_position);
@@ -3199,7 +3305,7 @@ class HauswerkPanel extends HTMLElement {
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="open" title="hoch" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-up"></ha-icon></button>
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="stop" title="Stopp" ${bad ? "disabled" : ""}><ha-icon icon="mdi:stop"></ha-icon></button>
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="close" title="runter" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-down"></ha-icon></button>
-            <input class="rw-range" type="range" min="0" max="100" step="5" value="${p ?? 0}" data-rwpos="${esc(c.id)}" style="--v:${p ?? 0}%" ${bad ? "disabled" : ""} aria-label="Stellung">
+            <button class="secondary small rw-h" data-action="pop-open" data-pop="rwpos:${esc(c.id)}" ${bad ? "disabled" : ""} title="Höhe einstellen"><ha-icon icon="mdi:arrow-expand-vertical"></ha-icon>Höhe${p != null && !bad ? ` · ${fmt(p, 0)} %` : ""}</button>
           </div>
         </article>`;
     };
@@ -4549,6 +4655,7 @@ class HauswerkPanel extends HTMLElement {
       return this._cwizPop();
     }
     if (String(id).startsWith("rwc:")) return this._rwcPop(id.slice(4));
+    if (String(id).startsWith("rwpos:")) return this._rwPosPop(id.slice(6));
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (KW_POPS.includes(id)) return this._kwPop(id);
     if (id === "setup") return this._setupPop();
@@ -6073,14 +6180,6 @@ class HauswerkPanel extends HTMLElement {
       if (list) list.innerHTML = this._settingsList();
       return;
     }
-    if (t.dataset.rwpos && isChange) {
-      this._ws({ type: "hauswerk/rollwerk/command", entity_ids: [t.dataset.rwpos], action: "position", position: Number(t.value) });
-      return;
-    }
-    if (t.dataset.rwpos) {
-      t.style.setProperty("--v", `${t.value}%`);
-      return;
-    }
     if (t.dataset.kwname && this._pop?.id === "kwcons") {
       const p = this._settings;
       p.kw_names = { ...(p.kw_names || {}) };
@@ -7053,7 +7152,11 @@ class HauswerkPanel extends HTMLElement {
         this._setView("start");
         break;
       case "rw-cmd":
+        if (this._pop?.id?.startsWith("rwpos:")) this._pop.draft = {};
         await this._ws({ type: "hauswerk/rollwerk/command", entity_ids: el.dataset.ids.split(",").filter(Boolean), action: el.dataset.a });
+        break;
+      case "rwpos-go":
+        await this._rwPosGo(el.dataset.id, Number(el.dataset.v));
         break;
       case "rwc-set":
         this._pop.draft.cfg[el.dataset.k] = el.dataset.v || null;
@@ -8225,7 +8328,29 @@ kbd { font:600 11px/1 ui-monospace, monospace; padding:2px 6px; border-radius:5p
 .rw-ctl { display:flex; align-items:center; gap:8px; }
 .rw-ctl .sbtn { width:40px; height:40px; flex:none; }
 .rw-ctl .sbtn ha-icon { --mdc-icon-size:20px; }
-.rw-range { flex:1; min-width:60px; accent-color:var(--accent); height:28px; }
+.rw-h { margin-left:auto; }
+.rwpos { display:flex; gap:18px; align-items:stretch; margin:4px 0 14px; }
+.rwwin { --v:50; position:relative; width:150px; height:220px; flex:none; border-radius:12px; border:6px solid color-mix(in srgb, var(--muted) 45%, var(--card)); background:color-mix(in srgb, var(--card) 70%, #bae6fd); overflow:hidden; cursor:ns-resize; touch-action:none; user-select:none; }
+.rwwin.off { opacity:.5; cursor:not-allowed; }
+.rwwin-glass { position:absolute; inset:0; background:linear-gradient(160deg, #e0f2fe, #bae6fd 55%, #7dd3fc); }
+.rwwin-glass::before { content:""; position:absolute; left:50%; top:0; bottom:0; width:4px; margin-left:-2px; background:color-mix(in srgb, var(--muted) 45%, var(--card)); }
+.rwwin-sh { position:absolute; left:0; right:0; top:0; height:calc((100 - var(--v)) * 1%); background:repeating-linear-gradient(180deg, #94a3b8 0 9px, #64748b 9px 11px); transition:height .15s; }
+.rwwin-sh i { position:absolute; left:0; right:0; bottom:-8px; height:8px; background:#475569; border-radius:0 0 3px 3px; }
+.rwwin-mark { position:absolute; right:0; width:12px; height:2px; top:calc((100 - var(--m)) * 1%); background:var(--accent); box-shadow:0 0 0 1px #fff; }
+.rwwin-val { position:absolute; left:50%; bottom:10px; transform:translateX(-50%); padding:3px 9px; border-radius:999px; background:rgba(15,23,42,.72); color:#fff; font-weight:700; font-size:14px; }
+.rwpos-side { display:flex; flex-direction:column; justify-content:space-between; gap:12px; min-width:0; }
+.rwpos-now b { display:block; font-size:18px; }
+.rwpos-now small { display:block; color:var(--muted); margin-top:4px; }
+.rwpos-btns { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
+.rwpre { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:8px; margin-bottom:12px; }
+.rwpre-b { display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:inherit; font:inherit; cursor:pointer; text-align:left; }
+.rwpre-b > span { flex:1; min-width:0; display:flex; flex-direction:column; }
+.rwpre-n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rwpre-b b { font-variant-numeric:tabular-nums; font-size:13px; color:var(--muted); }
+.rwpre-b.on b { color:var(--accent); }
+.rwpre-b ha-icon { --mdc-icon-size:20px; color:var(--muted); }
+.rwpre-b.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--card)); }
+.rwpre-b.on ha-icon { color:var(--accent); }
 .segs.small.rw-fac { display:grid; grid-template-columns:repeat(9, minmax(0, 1fr)); gap:4px; }
 .segs.small.rw-fac .seg { padding:8px 0; font-size:12.5px; justify-content:center; }
 .rwsug { padding:12px 14px; margin:4px 0 12px; border-radius:16px; background:color-mix(in srgb, #eab308 9%, var(--card)); border:1px solid color-mix(in srgb, #eab308 40%, transparent); }

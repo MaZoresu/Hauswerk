@@ -315,6 +315,36 @@ def test_rollwerk_profile_und_rolllaeden(panel):
         panel.ok(f"Rollladen {cover} speichern")
 
 
+def test_rollladen_hoehe_popup(panel):
+    """Kein Schieberegler mehr in der Kachel; „Höhe“ öffnet ein Pop-up mit Fenster zum Ziehen und den Behanghöhen des Profils."""
+    panel.view("shutters")
+    assert not panel.has(".rw-range, input[type=range]")
+    cover = panel.js(f"{EL}._data.settings.rw_covers[0]")
+    panel.click(f'.rw-h[data-pop="rwpos:{cover}"]')
+    assert panel.js(f"{EL}._pop?.id") == f"rwpos:{cover}"
+    names = panel.js(f"[...{EL}.shadowRoot.querySelectorAll('#pop .rwpre-n')].map((x) => x.textContent)")
+    assert names[0] == "Offen" and names[-1] == "Geschlossen", names
+    # Behanghöhe antippen -> fährt dorthin
+    n = len(panel.sent())
+    panel.click('#pop .rwpre-b[data-v]:not([data-v="100"])')
+    v = panel.js(f"Number({EL}.shadowRoot.querySelector('#pop .rwpre-b.on').dataset.v)")
+    msg = panel.sent()[n:]
+    assert any(m.get("action") == "position" and m.get("position") == v and m.get("entity_ids") == [cover] for m in msg), msg
+    # im Fenster ziehen: oben = offen, unten = zu
+    box = panel.js(f"(() => {{ const r = {EL}.shadowRoot.querySelector('#pop .rwwin').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }})()")
+    x, y, w, h = box
+    n = len(panel.sent())
+    panel.page.mouse.move(x + w / 2, y + h * 0.5)
+    panel.page.mouse.down()
+    panel.page.mouse.move(x + w / 2, y + h * 0.3, steps=4)
+    panel.page.mouse.up()
+    panel.wait(200)
+    msg = [m for m in panel.sent()[n:] if m.get("action") == "position"]
+    assert msg and msg[-1]["position"] == 70, msg
+    panel.click('#pop [data-action="pop-close"]')
+    panel.ok("Höhe einstellen")
+
+
 def test_rollwerk_assistent(panel):
     panel.view("shutset")
     panel.js(f"{EL}._cwizOpen()")

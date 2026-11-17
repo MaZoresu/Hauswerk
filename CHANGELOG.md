@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.43.0 – 2026-11-17
+
+### Neu
+- **Rollwerk: Höhe einstellen im Pop-up.** Der Schieberegler in den Rollladen-Kacheln entfällt; dafür gibt es den Knopf **Höhe** (mit aktueller Stellung). Er öffnet ein Fenster mit:
+  - einem **Rollladen zum Ziehen** – im Fenster nach oben oder unten ziehen, gefahren wird beim Loslassen (in 5-%-Schritten). Kleine Marken zeigen die Behanghöhen des Profils.
+  - den **Behanghöhen aus dem Profil** als Knöpfe: Offen, Beschattung (und Beschattung 2), Abends Stufe 1, Lüften, Tür offen und Geschlossen – je nachdem, was im Profil eingeschaltet ist. Ein Tipp fährt dorthin.
+  - hoch, Stopp und runter, der Stellung live sowie „Automatik übernimmt“, wenn von Hand verstellt.
+  - einem Sprung zu Profil › Feinheiten, um die Behanghöhen zu ändern.
+
 ## 0.42.0 – 2026-11-17
 
 ### Neu
