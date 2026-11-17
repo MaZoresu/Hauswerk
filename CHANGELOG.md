@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.39.1 – 2026-11-17
+
+### Behoben
+- **Protokoll:** Die Modul-Symbole im Filter „Heizwerk & Haus · Rollwerk · Kraftwerk“ waren zu groß und überdeckten den Anfang der Beschriftung. Ein Klicktest prüft jetzt, dass Modul-Symbole nirgends über ihren Platz hinausragen.
+
 ## 0.39.0 – 2026-11-17
 
 ### Neu

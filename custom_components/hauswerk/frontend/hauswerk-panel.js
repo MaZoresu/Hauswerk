@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.39.0";
+const VERSION = "0.39.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -8165,8 +8165,9 @@ kbd { font:600 11px/1 ui-monospace, monospace; padding:2px 6px; border-radius:5p
 .rwsug-v { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
 .rwsug-v span { padding:3px 9px; border-radius:99px; background:var(--card2); font-size:12px; font-weight:600; }
 .rwhint { display:inline-block; margin:0 4px; padding:0 7px; border-radius:99px; font-size:11px; line-height:1.6; color:#a16207; background:color-mix(in srgb, #eab308 15%, transparent); vertical-align:middle; }
-.lg-logo { display:inline-flex; width:16px; height:16px; }
-.lg-logo svg { width:16px; height:16px; }
+.lg-logo { display:inline-flex; flex:none; width:18px; height:18px; }
+.lg-logo .mlogo { width:18px; height:18px; border-radius:5px; filter:none; }
+.lg-logo svg { width:18px; height:18px; }
 .rwdel { padding:12px 14px; margin-bottom:12px; border-radius:14px; border:1px solid color-mix(in srgb, #ef4444 45%, transparent); background:color-mix(in srgb, #ef4444 8%, var(--card)); }
 .rwdel > b { display:flex; align-items:center; gap:8px; color:#dc2626; margin-bottom:8px; }
 .rwdel select { width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--line2); background:var(--card); color:var(--text); font:inherit; }

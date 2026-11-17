@@ -433,3 +433,14 @@ def test_vorheizen_im_tagesplan(panel):
         titles = panel.js(f"[...{EL}.shadowRoot.querySelectorAll('.dbar .dpre')].map((x) => x.title)")
         assert titles and all(t.startswith("Vorheizen ab") for t in titles), (view, titles)
         panel.ok(f"Vorheizen in der Ansicht {view}")
+
+
+def test_modul_logos_passen_in_ihren_platz(panel):
+    """Modul-Logos (z. B. im Protokoll-Filter) dürfen nicht über ihren Platz hinausragen und den Text überdecken."""
+    for view in ("log", "house", "start"):
+        panel.view(view)
+        bad = panel.js(f"""[...{EL}.shadowRoot.querySelectorAll('.mlogo')].map((l) => {{
+            const box = l.parentElement.getBoundingClientRect(), r = l.getBoundingClientRect();
+            return r.width > box.width + 1 || r.height > box.height + 1 ? `${{l.parentElement.className}}: ${{Math.round(r.width)}} > ${{Math.round(box.width)}}` : null;
+        }}).filter(Boolean)""")
+        assert not bad, f"{view}: {bad}"
