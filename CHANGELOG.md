@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.44.2 – 2026-11-17
+
+### Neu
+- **Tabletmodus blendet die Seitenleiste von Home Assistant aus** – für mehr Platz und größere Kacheln. Über ☰ oben links lässt sie sich jederzeit kurz öffnen. Schaltest du den Tabletmodus aus, kommt sie so zurück, wie sie vorher war. Abschaltbar unter Darstellung › Tabletmodus › „Seitenleiste von Home Assistant ausblenden“. Gilt nur für diesen Browser (z. B. Fully), nicht für Handy oder PC.
+
 ## 0.44.1 – 2026-11-17
 
 ### Geändert

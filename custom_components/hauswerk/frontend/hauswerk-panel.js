@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.44.1";
+const VERSION = "0.44.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -993,6 +993,7 @@ class HauswerkPanel extends HTMLElement {
     this.toggleAttribute("tablet", this._tablet);
     this._tPage = this._tPage || {};
     clearInterval(this._saverTimer);
+    this._tabletSidebar(this._tablet && this._tabletOpt("sidebar", "1") === "1");
     if (!this._tablet) {
       this._saverHide();
       this._wakeLock?.release?.().catch?.(() => {});
@@ -1009,6 +1010,28 @@ class HauswerkPanel extends HTMLElement {
     }
     this._keepAwake();
     this._saverTimer = setInterval(() => this._saverTick(), 10000);
+  }
+
+  /** Seitenleiste von Home Assistant ausblenden (Einstellung „immer ausblenden“ dieses Browsers) – beim Ausschalten wie vorher. */
+  _tabletSidebar(hide) {
+    const dock = (v) => this.dispatchEvent(new CustomEvent("hass-dock-sidebar", { detail: { dock: v }, bubbles: true, composed: true }));
+    try {
+      const PREV = "hauswerk.tablet.sidebar_prev";
+      const cur = localStorage.getItem("dockedSidebar");
+      if (hide) {
+        if (localStorage.getItem(PREV) == null) localStorage.setItem(PREV, cur ?? "");
+        if (cur !== '"always_hidden"') dock("always_hidden");
+      } else {
+        const prev = localStorage.getItem(PREV);
+        if (prev == null) return;
+        localStorage.removeItem(PREV);
+        let v = "docked";
+        try { v = prev ? JSON.parse(prev) : "docked"; } catch (e) { v = "docked"; }
+        if (cur !== JSON.stringify(v)) dock(v);
+      }
+    } catch (e) {
+      /* ohne Speicher: Seitenleiste bleibt, wie sie ist */
+    }
   }
 
   /** Bildschirm anlassen (wo der Browser es erlaubt; in Fully zusätzlich „Bildschirm anlassen“ einschalten). */
@@ -1038,6 +1061,8 @@ class HauswerkPanel extends HTMLElement {
       ${on ? `
       <div class="field"><span>Bildschirmschoner nach</span><div class="segs small">${[["0", "Aus"], ["1", "1 Min."], ["2", "2 Min."], ["5", "5 Min."], ["10", "10 Min."]].map(([v, l]) => opt("saver", v, l, saver)).join("")}</div></div>
       <p class="muted small">Abgedunkelt mit großer Uhr, Datum, Wetter, kurzem Hausstand und Hinweisen – nachts (22–6 Uhr) noch dunkler; der Inhalt wandert jede Minute ein Stück gegen Einbrennen. Dabei geht es zurück zur Startseite. Antippen weckt auf, ohne etwas zu schalten.</p>
+      <label class="check"><span><b>Seitenleiste von Home Assistant ausblenden</b><small>Mehr Platz für Hauswerk. Über ☰ oben links lässt sie sich jederzeit kurz öffnen; ohne Tabletmodus kommt sie wie vorher zurück.</small></span>
+        <button class="seg ${this._tabletOpt("sidebar", "1") === "1" ? "on" : ""}" data-action="tablet-opt" data-k="sidebar" data-v="${this._tabletOpt("sidebar", "1") === "1" ? "0" : "1"}">${this._tabletOpt("sidebar", "1") === "1" ? "An" : "Aus"}</button></label>
       ${window.fully ? `<label class="check"><span><b>Fully: Display mit abdunkeln</b><small>Senkt die Helligkeit über Fully, solange der Bildschirmschoner läuft.</small></span>
         <button class="seg ${fully ? "on" : ""}" data-action="tablet-opt" data-k="fully" data-v="${fully ? "0" : "1"}">${fully ? "An" : "Aus"}</button></label>` : ""}
       <button class="secondary" data-action="saver-test"><ha-icon icon="mdi:clock-outline"></ha-icon>Bildschirmschoner jetzt zeigen</button>` : ""}
@@ -7464,6 +7489,7 @@ class HauswerkPanel extends HTMLElement {
         break;
       case "tablet-opt":
         this._tabletSet(el.dataset.k, el.dataset.v);
+        if (el.dataset.k === "sidebar") this._tabletSidebar(el.dataset.v === "1");
         this._lastAct = Date.now();
         this._renderPop();
         break;
@@ -7772,6 +7798,7 @@ code { background:var(--card2); padding:1px 6px; border-radius:6px; font-size:12
 .menu { all:unset; cursor:pointer; width:40px; height:40px; border-radius:50%; display:grid; place-items:center; flex:none; }
 .menu ha-icon { --mdc-icon-size:24px; }
 :host(:not([narrow])) .menu { display:none; }
+:host([tablet]) .menu { display:grid !important; }
 .brand svg { width:44px; height:44px; display:block; }
 .ttl { display:flex; flex-direction:column; min-width:0; flex:1; line-height:1.2; }
 .ttl small { font-size:10.5px; letter-spacing:.14em; font-weight:800; color:var(--accent); }

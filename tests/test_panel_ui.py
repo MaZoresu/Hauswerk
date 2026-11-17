@@ -610,3 +610,19 @@ def test_tablet_bildschirmschoner(tablet):
     assert not p.js(f"{EL}.hasAttribute('tablet')")
     assert p.js("localStorage.getItem('hauswerk.tablet')") == "0"
     p.ok("Bildschirmschoner")
+
+
+def test_tablet_seitenleiste(tablet):
+    """Im Tabletmodus wird die Seitenleiste von Home Assistant ausgeblendet; ausgeschaltet kommt der vorige Zustand zurück."""
+    p = tablet
+    p.js("""() => { window.hwDock = []; window.addEventListener('hass-dock-sidebar', (e) => { window.hwDock.push(e.detail.dock);
+        localStorage.setItem('dockedSidebar', JSON.stringify(e.detail.dock)); }); }""")
+    # Zustand vor dem Tabletmodus: angedockt
+    p.js(f"() => {{ localStorage.removeItem('hauswerk.tablet.sidebar_prev'); localStorage.setItem('dockedSidebar', '\"docked\"'); {EL}._tabletApply(); }}")
+    assert p.js("window.hwDock") == ["always_hidden"]
+    assert p.js(f"getComputedStyle({EL}.shadowRoot.querySelector('.menu')).display") != "none"
+    p.js(f"() => {{ {EL}._openPop('look'); }}")
+    p.wait()
+    p.click('#pop [data-action="tablet-toggle"]')
+    assert p.js("window.hwDock") == ["always_hidden", "docked"]
+    assert p.js("localStorage.getItem('hauswerk.tablet.sidebar_prev')") is None
