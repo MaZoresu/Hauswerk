@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.43.0";
+const VERSION = "0.43.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -401,6 +401,11 @@ class HauswerkPanel extends HTMLElement {
     else if (this._tab === "kwflow" && this._data && Date.now() - (this._kwAt || 0) > 1000) {
       this._kwAt = Date.now();
       this._kwLive();
+    }
+    // Rollläden-Seite: Stellung sofort zeigen, sobald Home Assistant sie meldet
+    else if (this._tab === "shutters" && this._data && !this._busy && !this._pop && this._rwChanged(hass)) {
+      clearTimeout(this._rwT);
+      this._rwT = setTimeout(() => this._tab === "shutters" && !this._pop && this._renderMain(), 150);
     }
     // Pop-up „Höhe einstellen“: Stellung live (nicht während des Ziehens)
     else if (this._pop?.id?.startsWith?.("rwpos:") && !this._rwDragging && Date.now() - (this._rwPosAt || 0) > 700) {
@@ -3129,20 +3134,13 @@ class HauswerkPanel extends HTMLElement {
     return (this._data?.settings?.rw_covers || []).map((id) => ({ id, st: this._hass.states[id], cfg: this._data.rollwerk?.covers?.[id] || {}, rs: this._rwStatus?.covers?.[id] || {} }));
   }
 
-  /** Behanghöhen aus dem Profil des Rollladens: [Name, Prozent, Symbol]. */
-  _rwPresets(id) {
-    const cfg = this._data.rollwerk?.covers?.[id] || {};
-    const prof = this._data.rollwerk?.profiles?.[cfg.profile || "standard"] || {};
-    const feat = prof.features || ["up", "down", "time", "ventilate"];
-    const num = (k, d) => (prof[k] == null || prof[k] === "" ? d : Number(prof[k]));
-    const list = [["Offen", num("pos_open", 100), "mdi:window-shutter-open"]];
-    if (feat.includes("shading")) list.push(["Beschattung", num("pos_shading", 25), "mdi:sun-thermometer-outline"]);
-    if (feat.includes("shading") && prof.pos_shading_alt != null && prof.pos_shading_alt !== "") list.push(["Beschattung 2", num("pos_shading_alt"), "mdi:weather-sunny"]);
-    if (prof.close_stage1) list.push(["Abends Stufe 1", num("pos_stage1", 50), "mdi:weather-sunset-down"]);
-    if (feat.includes("ventilate")) list.push(["Lüften", num("pos_ventilate", 30), "mdi:window-open-variant"]);
-    if (prof.pos_lockout != null && prof.pos_lockout !== "") list.push(["Tür offen", num("pos_lockout"), "mdi:door-open"]);
-    list.push(["Geschlossen", num("pos_close", 0), "mdi:window-shutter"]);
-    return list.filter(([, v]) => Number.isFinite(v));
+  /** Hat sich ein Rollladen in Home Assistant geändert (Zustand oder Stellung)? */
+  _rwChanged(hass) {
+    const ids = this._data?.settings?.rw_covers || [];
+    const sig = ids.map((id) => { const st = hass.states[id]; return st ? `${st.state}:${st.attributes?.current_position ?? ""}` : "-"; }).join("|");
+    if (sig === this._rwSig) return false;
+    this._rwSig = sig;
+    return true;
   }
 
   /** Pop-up „Höhe einstellen“: Fenster zum Ziehen, Behanghöhen aus dem Profil, hoch/Stopp/runter. */
@@ -3154,8 +3152,7 @@ class HauswerkPanel extends HTMLElement {
     const v = want ?? cur ?? 0;
     const moving = c.st?.state === "opening" ? "fährt hoch" : c.st?.state === "closing" ? "fährt runter" : "";
     const txt = (x) => (x >= 100 ? "offen" : x <= 0 ? "zu" : `${fmt(x, 0)} % offen`);
-    const prof = this._rwProfName(c.cfg.profile || "standard");
-    const presets = this._rwPresets(id);
+    const presets = RW_HEIGHTS;
     const auto = c.cfg.auto !== false;
     return {
       icon: "mdi:window-shutter", c: "#0ea5e9", title: this._entityName(id), sub: `Rollwerk · Höhe einstellen`,
@@ -3177,13 +3174,13 @@ class HauswerkPanel extends HTMLElement {
             </div>
           </div>
         </div>
-        <div class="sub-h"><ha-icon icon="mdi:tune-vertical"></ha-icon>Behanghöhen · Profil „${esc(prof)}“</div>
+        <div class="sub-h"><ha-icon icon="mdi:tune-vertical"></ha-icon>Behanghöhe</div>
         <div class="rwpre">${presets.map(([n, pv, ic]) => `<button class="rwpre-b ${Math.abs(v - pv) <= 2 ? "on" : ""}" data-action="rwpos-go" data-id="${esc(id)}" data-v="${pv}" ${bad ? "disabled" : ""}>
           <ha-icon icon="${ic}"></ha-icon><span><span class="rwpre-n">${esc(n)}</span><b>${fmt(pv, 0)} %</b></span></button>`).join("")}</div>
         ${auto ? `<p class="muted small"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>${c.rs.manual ? "Von Hand verstellt – die Automatik wartet bis zum nächsten Wechsel." : "Von Hand verstellt, wartet die Automatik danach bis zum nächsten Wechsel."}</p>
           ${c.rs.manual ? `<button class="secondary" data-action="rw-cmd" data-ids="${esc(id)}" data-a="resume"><ha-icon icon="mdi:robot-outline"></ha-icon>Automatik übernimmt</button>` : ""}`
           : `<p class="muted small"><ha-icon icon="mdi:robot-off-outline"></ha-icon>Automatik für diesen Rollladen ist aus.</p>`}
-        ${this._admin ? `<p class="muted small">Die Behanghöhen stellst du im Profil ein: <button class="link" data-action="pop-open" data-pop="rwp:${esc(c.cfg.profile || "standard")}:fine">Profil „${esc(prof)}“ › Feinheiten</button></p>` : ""}`,
+`,
       foot: `<button class="secondary" data-action="pop-close">Fertig</button>`,
     };
   }
@@ -3293,7 +3290,7 @@ class HauswerkPanel extends HTMLElement {
       const icon = bad ? "mdi:window-shutter-alert" : p != null && p >= 95 ? "mdi:window-shutter-open" : "mdi:window-shutter";
       const why = c.rs.reason && c.cfg.auto !== false ? `Automatik: ${c.rs.reason}${c.rs.target != null ? ` → ${c.rs.target >= 100 ? "offen" : c.rs.target === 0 ? "zu" : `${c.rs.target} %`}` : ""}` : "";
       return `
-        <article class="card rw-c ${bad ? "bad" : ""}">
+        <article class="card rw-c ${bad ? "bad" : ""}" data-action="pop-open" data-pop="rwpos:${esc(c.id)}" role="button" tabindex="0" title="Höhe einstellen">
           <div class="rw-top">
             <span class="sr-ic" style="--c:${p != null && p <= 5 ? "#64748b" : "#0ea5e9"}"><ha-icon icon="${icon}"></ha-icon></span>
             <span class="grow"><b>${esc(this._entityName(c.id))}</b><small>${esc(posTxt)}${why ? ` · ${esc(why)}` : ""}</small></span>
@@ -3305,7 +3302,7 @@ class HauswerkPanel extends HTMLElement {
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="open" title="hoch" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-up"></ha-icon></button>
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="stop" title="Stopp" ${bad ? "disabled" : ""}><ha-icon icon="mdi:stop"></ha-icon></button>
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="close" title="runter" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-down"></ha-icon></button>
-            <button class="secondary small rw-h" data-action="pop-open" data-pop="rwpos:${esc(c.id)}" ${bad ? "disabled" : ""} title="Höhe einstellen"><ha-icon icon="mdi:arrow-expand-vertical"></ha-icon>Höhe${p != null && !bad ? ` · ${fmt(p, 0)} %` : ""}</button>
+            <span class="rw-h" data-rwh="${esc(c.id)}"><ha-icon icon="mdi:arrow-expand-vertical"></ha-icon>Behanghöhe <b>${p != null && !bad ? `${fmt(p, 0)} %` : "–"}</b></span>
           </div>
         </article>`;
     };
@@ -7363,6 +7360,8 @@ class HauswerkPanel extends HTMLElement {
 
 /* Eigenes Zeichen: Flamme in einem Thermostat-Ring */
 // Symbole der Module – gleiche Hausform wie das Hauswerk-Logo, eigene Farbe und eigenes Innenleben
+// Behanghöhen im Pop-up „Höhe einstellen“ (fest, nicht aus den Profilen)
+const RW_HEIGHTS = [["Offen", 100, "mdi:window-shutter-open"], ["Halb offen", 50, "mdi:window-shutter-settings"], ["Viertel offen", 25, "mdi:window-shutter-settings"], ["Geschlossen", 0, "mdi:window-shutter"]];
 const EXPERT_MOD = { house: "haus", heat: "heizen", rw: "rollwerk", kw: "kraftwerk" };
 const MODULE_LOGOS = {
   heizen: `<svg viewBox="0 0 48 48" aria-hidden="true">
@@ -8328,7 +8327,11 @@ kbd { font:600 11px/1 ui-monospace, monospace; padding:2px 6px; border-radius:5p
 .rw-ctl { display:flex; align-items:center; gap:8px; }
 .rw-ctl .sbtn { width:40px; height:40px; flex:none; }
 .rw-ctl .sbtn ha-icon { --mdc-icon-size:20px; }
-.rw-h { margin-left:auto; }
+.rw-c[data-action] { cursor:pointer; }
+.rw-c[data-action]:hover { border-color:color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.rw-h { margin-left:auto; display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); white-space:nowrap; }
+.rw-h ha-icon { --mdc-icon-size:18px; }
+.rw-h b { color:var(--text, inherit); font-size:15px; font-variant-numeric:tabular-nums; }
 .rwpos { display:flex; gap:18px; align-items:stretch; margin:4px 0 14px; }
 .rwwin { --v:50; position:relative; width:150px; height:220px; flex:none; border-radius:12px; border:6px solid color-mix(in srgb, var(--muted) 45%, var(--card)); background:color-mix(in srgb, var(--card) 70%, #bae6fd); overflow:hidden; cursor:ns-resize; touch-action:none; user-select:none; }
 .rwwin.off { opacity:.5; cursor:not-allowed; }

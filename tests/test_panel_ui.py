@@ -316,14 +316,18 @@ def test_rollwerk_profile_und_rolllaeden(panel):
 
 
 def test_rollladen_hoehe_popup(panel):
-    """Kein Schieberegler mehr in der Kachel; „Höhe“ öffnet ein Pop-up mit Fenster zum Ziehen und den Behanghöhen des Profils."""
+    """Kein Schieberegler in der Kachel, Behanghöhe nur als Info; Tipp auf die Kachel öffnet das Pop-up mit 100/50/25/0 %."""
     panel.view("shutters")
-    assert not panel.has(".rw-range, input[type=range]")
+    assert not panel.has(".rw-range, input[type=range], button.rw-h")
     cover = panel.js(f"{EL}._data.settings.rw_covers[0]")
-    panel.click(f'.rw-h[data-pop="rwpos:{cover}"]')
+    assert panel.has(f'.rw-h[data-rwh="{cover}"]')
+    # Knöpfe in der Kachel öffnen das Pop-up nicht
+    panel.click(f'.rw-c[data-pop="rwpos:{cover}"] [data-a="stop"]')
+    assert not panel.js(f"{EL}._pop")
+    panel.click(f'.rw-c[data-pop="rwpos:{cover}"] .rw-top b')
     assert panel.js(f"{EL}._pop?.id") == f"rwpos:{cover}"
-    names = panel.js(f"[...{EL}.shadowRoot.querySelectorAll('#pop .rwpre-n')].map((x) => x.textContent)")
-    assert names[0] == "Offen" and names[-1] == "Geschlossen", names
+    vals = panel.js(f"[...{EL}.shadowRoot.querySelectorAll('#pop .rwpre-b')].map((x) => Number(x.dataset.v))")
+    assert vals == [100, 50, 25, 0], vals
     # Behanghöhe antippen -> fährt dorthin
     n = len(panel.sent())
     panel.click('#pop .rwpre-b[data-v]:not([data-v="100"])')
@@ -342,6 +346,11 @@ def test_rollladen_hoehe_popup(panel):
     msg = [m for m in panel.sent()[n:] if m.get("action") == "position"]
     assert msg and msg[-1]["position"] == 70, msg
     panel.click('#pop [data-action="pop-close"]')
+    # Kachel zeigt eine neue Stellung sofort (ohne auf Rollwerk zu warten)
+    panel.js(f"""(id) => {{ const h = {EL}.hass; const st = h.states[id];
+        {EL}.hass = {{ ...h, states: {{ ...h.states, [id]: {{ ...st, state: 'open', attributes: {{ ...st.attributes, current_position: 40 }} }} }} }}; }}""", cover)
+    panel.wait(400)
+    assert panel.js(f"(id) => {EL}.shadowRoot.querySelector(`.rw-h[data-rwh=\"${{id}}\"] b`).textContent", cover) == "40 %"
     panel.ok("Höhe einstellen")
 
 

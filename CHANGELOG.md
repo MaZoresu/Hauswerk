@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.43.1 – 2026-11-17
+
+### Geändert
+- **Rollwerk-Kacheln:** Ein Tipp auf die Kachel öffnet „Höhe einstellen“ (hoch, Stopp, runter und Zahnrad bleiben eigene Knöpfe). Die Behanghöhe steht nur noch als Info in der Kachel.
+- **Behanghöhen im Pop-up fest:** Offen 100 %, Halb offen 50 %, Viertel offen 25 %, Geschlossen 0 % – nicht mehr aus den Profilen.
+
+### Behoben
+- **Kachel zeigte die Stellung verzögert:** Die Rollläden-Seite wartete auf die nächste Meldung von Rollwerk. Jetzt erscheint jede Stellung sofort, sobald Home Assistant sie meldet.
+
 ## 0.43.0 – 2026-11-17
 
 ### Neu
