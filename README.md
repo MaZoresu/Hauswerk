@@ -86,8 +86,8 @@ Licht · Garten              geplant, ausgegraut
 
 Unter *Einstellungen › Darstellung › Tabletmodus* je Gerät einschalten – oder als Start-Adresse `…/hauswerk?tablet` eintragen (z. B. in Fully Kiosk; `?tablet=0` schaltet ihn wieder aus).
 
-- **Leisten unten:** Start, Module und Einstellungen sowie die Unterleiste (Räume · Bericht · Einstellungen) stehen am unteren Rand.
-- **Kein Scrollen:** Jede Seite passt sich der Auflösung an – Größe und bei Listen zwei Spalten. Passt es nicht auf eine Seite, gibt es eine zweite zum Wischen (Punkte unten).
+- **Unterleiste unten:** Die Modul-Tasten bleiben oben; die Unterleiste des Moduls (z. B. Räume · Bericht · Einstellungen) steht groß am unteren Rand.
+- **Kein Scrollen:** Jede Seite passt sich der Auflösung an – so groß wie gut lesbar, bei Listen zwei Spalten. Passt es nicht auf eine Seite, gibt es eine zweite zum Wischen (Punkte unten).
 - **Bildschirmschoner** nach 1–10 Minuten ohne Berührung: abgedunkelt mit großer Uhr, Datum, Wetter, Hausstand und Hinweisen; nachts noch dunkler, der Inhalt wandert gegen Einbrennen; neue Hinweise leuchten auf. Dabei geht es zurück zur Startseite. Antippen weckt auf, ohne etwas zu schalten.
 - **Fully Kiosk:** „Bildschirm anlassen“ einschalten; mit eingeschalteter JavaScript-Schnittstelle dunkelt Hauswerk das Display im Bildschirmschoner zusätzlich ab.
 

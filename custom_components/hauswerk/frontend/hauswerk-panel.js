@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.44.0";
+const VERSION = "0.44.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1053,7 +1053,8 @@ class HauswerkPanel extends HTMLElement {
     if (!W || !H) return;
     const GAP = 40;
     const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66];
-    const maxZ = Math.max(1, Math.min(1.4, W / 860, H / 560));
+    // so groß wie die Breite erlaubt (mindestens ~820 px Inhaltsbreite), höchstens 140 %
+    const maxZ = Math.max(1, Math.min(1.4, W / 820));
     const zs = ZOOMS.filter((z) => z <= maxZ + 0.001);
     const tab = this._tab;
     // Listen-Seiten dürfen zweispaltig werden (breites Tablet); Kachel-Seiten bleiben einspaltig
@@ -1078,18 +1079,20 @@ class HauswerkPanel extends HTMLElement {
       if (n <= prev.n) best = { ...prev, n };
     }
     if (!best) {
+      // Lesbarkeit vor „alles auf eine Seite“: eine Seite nur, wenn sie kaum kleiner ist als zwei Seiten
       const opts = [];
       for (const k of ks) {
-        let two = null;
+        let z1 = null, z2 = null;
         for (const z of zs) {
           const n = layout(z, k);
-          if (n === 1) { opts.push({ z, k, n }); two = null; break; }
-          if (n <= 2 && !two) two = { z, k, n };
+          if (n <= 2 && z2 == null) z2 = z;
+          if (n === 1) { z1 = z; break; }
         }
-        if (two) opts.push(two);
-        if (!opts.some((o) => o.k === k)) opts.push({ z: zs[zs.length - 1], k, n: layout(zs[zs.length - 1], k) });
+        if (z1 != null && (z2 == null || z1 >= 1 || z1 >= z2 - 0.11)) opts.push({ z: z1, k, n: 1 });
+        else if (z2 != null) opts.push({ z: z2, k, n: 2 });
+        else opts.push({ z: zs[zs.length - 1], k, n: layout(zs[zs.length - 1], k) });
       }
-      opts.sort((x, y) => x.n - y.n || y.z - x.z || x.k - y.k);
+      opts.sort((x, y) => (Math.min(x.n, 3) > 2) - (Math.min(y.n, 3) > 2) || y.z - x.z || x.n - y.n || x.k - y.k);
       best = { ...opts[0], key };
       best.n = layout(best.z, best.k);
     }
@@ -9277,13 +9280,12 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 /* ---------- Tabletmodus ---------- */
 :host([tablet]) { height:100vh; height:100dvh; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
 :host([tablet]) .top { position:relative; flex:none; padding-left:20px; padding-right:20px; }
-:host([tablet]) .mtabs { display:none !important; }
+:host([tablet]) .mtabs { display:flex !important; }
 :host([tablet]) .top .ttl span { display:none; }
 :host([tablet]) .app { flex:1; min-height:0; width:100%; max-width:none; margin:0; padding:10px 20px 0; display:flex; flex-direction:column; }
 :host([tablet]) #main { order:1; flex:1; min-height:0; overflow:hidden; position:relative; }
 :host([tablet]) #tdots { order:2; }
 :host([tablet]) #chips { order:3; flex:none; }
-:host([tablet]) #chips nav { margin:8px 0 0; }
 :host([tablet]) .tpages { overflow:hidden; column-fill:auto; }
 :host([tablet]) .tpages article, :host([tablet]) .tpages .wdg, :host([tablet]) .tpages .srow, :host([tablet]) .tpages .hero,
 :host([tablet]) .tpages .card:not(.sgroup) { break-inside:avoid; }
@@ -9296,14 +9298,11 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 :host([tablet]) .tdots { display:flex; justify-content:center; gap:10px; min-height:18px; padding:6px 0 0; }
 .tdots button { all:unset; cursor:pointer; width:10px; height:10px; border-radius:99px; background:var(--track); transition:width .2s, background .2s; }
 .tdots button.on { width:26px; background:var(--accent); }
-:host([tablet]) .bnav { display:flex; position:static; flex:none; z-index:8; gap:6px; padding:8px 20px calc(8px + env(safe-area-inset-bottom));
-  background:color-mix(in srgb, var(--card) 94%, transparent); border-top:1px solid var(--line); }
-:host([tablet]) .bn { all:unset; cursor:pointer; flex:1; display:flex; flex-direction:row; justify-content:center; align-items:center; gap:10px; padding:10px 0; border-radius:14px; font-size:16px; font-weight:600; color:var(--muted); }
-:host([tablet]) .bn .bi { position:relative; display:grid; place-items:center; width:44px; height:36px; border-radius:99px; }
-:host([tablet]) .bn ha-icon { --mdc-icon-size:26px; }
-:host([tablet]) .bn .mlogo { width:30px; height:30px; }
-:host([tablet]) .bn.on { color:var(--text); background:color-mix(in srgb, var(--accent) 14%, transparent); }
-:host([tablet]) .bn em { position:absolute; top:-3px; right:-2px; min-width:16px; height:16px; padding:0 4px; border-radius:99px; font-style:normal; font-size:10px; font-weight:800; display:grid; place-items:center; background:#fb923c; color:#1f1300; }
+:host([tablet]) .bnav { display:none !important; }
+/* Unterleiste unten: groß zum Antippen */
+:host([tablet]) #chips nav { margin:8px 0 calc(10px + env(safe-area-inset-bottom)); padding:6px; gap:6px; }
+:host([tablet]) #chips nav button { padding:14px 12px; font-size:16px; }
+:host([tablet]) #chips nav button ha-icon { --mdc-icon-size:22px; }
 :host([tablet]) .app { padding-bottom:0; }
 :host([tablet]) .savebar { position:sticky; bottom:0; }
 .saver { position:fixed; inset:0; z-index:50; background:#000; color:#e5e7eb; display:grid; place-items:center; cursor:pointer; user-select:none; }

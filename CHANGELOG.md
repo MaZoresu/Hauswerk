@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.44.1 – 2026-11-17
+
+### Geändert
+- **Tabletmodus: Kacheln größer und lesbar.** Bisher wurde verkleinert, bis alles auf eine Seite passte – mit vielen Widgets wurde die Schrift winzig, und die Bildschirmhöhe begrenzte die Größe. Jetzt geht Lesbarkeit vor: Eine Seite gibt es nur, wenn sie kaum kleiner ist; sonst wird größer dargestellt und auf eine zweite Seite zum Wischen verteilt. Die Größe richtet sich nach der Breite (bis 140 %).
+- **Tabletmodus: Modul-Tasten oben.** Start, Heizwerk, Rollwerk und Kraftwerk bleiben oben wie gewohnt; unten steht nur noch die Unterleiste des Moduls (z. B. Räume · Bericht · Einstellungen) mit größeren Tasten.
+
 ## 0.44.0 – 2026-11-17
 
 ### Neu

@@ -557,9 +557,14 @@ def test_tablet_ohne_scrollen(tablet):
         main = p.js(f"(() => {{ const m = {EL}.shadowRoot.getElementById('main'); return [m.scrollHeight, m.clientHeight]; }})()")
         assert main[0] <= main[1] + 1, f"{view}: Inhalt scrollt {main}"
         assert p.js(f"{EL}._tPages") <= 2, f"{view}: {p.js(f'{EL}._tPages')} Seiten"
-        # Leisten unten: Unterleiste und Navigation unter dem Inhalt
-        bottom = p.js(f"(() => {{ const r = {EL}.shadowRoot; return [r.getElementById('main').getBoundingClientRect().bottom, r.getElementById('bnav').getBoundingClientRect().top]; }})()")
-        assert bottom[0] <= bottom[1], f"{view}: Navigation nicht unten"
+        # Modul-Tasten oben, nur die Unterleiste (Räume · Bericht · Einstellungen) unten
+        r = p.js(f"""(() => {{ const r = {EL}.shadowRoot; const m = r.querySelector('.mtabs').getBoundingClientRect();
+            const sub = r.querySelector('#chips nav'); return [m.height, m.bottom, r.getElementById('main').getBoundingClientRect().top,
+            r.getElementById('main').getBoundingClientRect().bottom, sub ? sub.getBoundingClientRect().top : null, getComputedStyle(r.getElementById('bnav')).display]; }})()""")
+        assert r[0] > 0 and r[1] <= r[2], f"{view}: Modul-Tasten nicht oben {r}"
+        assert r[5] == "none", f"{view}: untere Modul-Leiste sichtbar"
+        if view not in ("start", "house"):
+            assert r[4] is not None and r[4] >= r[3], f"{view}: Unterleiste nicht unten {r}"
         p.ok(f"Tablet {view}")
     # Heizwerk-Einstellungen: zwei Seiten, Punkte und Wischen
     p.view("settings")
