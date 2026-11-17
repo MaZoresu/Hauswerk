@@ -233,6 +233,11 @@ def test_jedes_widget_hinzufuegen(panel):
     for t in types_:
         panel.js(f"{EL}._openPop('widget-add')")
         panel.wait()
+        panel.click(f'[data-action="w-pick"][data-type="{t}"]')
+        assert panel.has(".wprev .wdg"), f"keine Vorschau für {t}"
+        for size in ("s", "l", "m"):
+            panel.click(f'[data-action="w-pick-size"][data-v="{size}"]')
+            panel.ok(f"Vorschau {t} in Größe {size}")
         panel.click(f'[data-action="w-add"][data-type="{t}"]')
         panel.ok(f"Widget {t} hinzufügen")
         panel.js(f"{EL}._closePop()")
@@ -350,3 +355,71 @@ def test_fehler_wird_angezeigt(panel):
     panel.js(f"{EL}._lastErr = null")
     panel.errors.clear()
     panel.js(f"(() => {{ const r = {EL}.shadowRoot; r.querySelectorAll('.hw-fail').forEach((x) => x.remove()); }})()")
+
+
+def test_widgets_ziehen(panel):
+    """Im Anpassen-Modus ein Widget am Griff nach hinten ziehen – die neue Reihenfolge wird gespeichert."""
+    panel.page.set_viewport_size({"width": 1100, "height": 900})
+    panel.view("start")
+    before = [w["type"] for w in panel.js(f"{EL}._widgets()")]
+    panel.click('[data-action="w-edit"]')
+    grip = panel.page.locator("hauswerk-panel .wdg[data-wi='0'] .wdrag")
+    target = panel.page.locator(f"hauswerk-panel .wdg[data-wi='{len(before) - 1}']")
+    g, t = grip.bounding_box(), target.bounding_box()
+    panel.page.mouse.move(g["x"] + g["width"] / 2, g["y"] + g["height"] / 2)
+    panel.page.mouse.down()
+    for k in range(1, 11):
+        panel.page.mouse.move(t["x"] + t["width"] * 0.8 * k / 10 + 1, t["y"] + t["height"] * 0.9 * k / 10 + 1)
+        panel.wait(30)
+    panel.page.mouse.move(t["x"] + t["width"] * 0.8, t["y"] + t["height"] * 0.9)
+    panel.page.mouse.up()
+    panel.wait(400)
+    after = [w["type"] for w in panel.js(f"{EL}._widgets()")]
+    assert after != before and sorted(after) == sorted(before), (before, after)
+    assert after[-1] == before[0] or after.index(before[0]) > 0
+    panel.ok("Widgets ziehen")
+
+
+def test_suche_ueber_alles(panel):
+    panel.view("start")
+    panel.page.keyboard.press("/")
+    panel.wait(200)
+    assert panel.js(f"{EL}._pop?.id") == "search", "„/“ öffnet die Suche nicht"
+    field = panel.page.locator("hauswerk-panel [data-action=g-search]")
+    for q in ("bad", "urlaub", "batterie", "sturm", "rollladen", "wohn", "xyzxyz"):
+        field.fill(q)
+        panel.wait(80)
+        panel.ok(f"Suche „{q}“")
+        assert panel.has("#gs-list [data-action=gs-log]"), "Protokoll-Suche fehlt"
+    field.fill("urlaub")
+    panel.wait(80)
+    panel.click("#gs-list .srow[data-gs]")
+    panel.ok("Treffer öffnen")
+    assert panel.js(f"{EL}._pop?.id") != "search", "Suche bleibt nach dem Sprung offen"
+
+
+def test_einrichtung(panel):
+    panel.js(f"{EL}._data.settings.persons = []")
+    panel.view("start")
+    assert panel.has(".setup-card"), "Hinweis „Hauswerk einrichten“ fehlt auf der Startseite"
+    panel.click('.setup-card [data-action="setup-open"]')
+    steps = panel.js(f"{EL}._setupSteps().length")
+    for i in range(steps):
+        assert panel.js(f"{EL}._pop?.draft?.step") == i
+        panel.ok(f"Einrichtung Schritt {i + 1}")
+        if panel.has('#pop [data-action="setup-all-persons"]'):
+            panel.click('#pop [data-action="setup-all-persons"]')
+        if panel.has('#pop [data-action="kw-take"]'):
+            panel.click('#pop [data-action="kw-take"]')
+        panel.click("#pop .sheet-foot .primary")
+    assert panel.js(f"{EL}._pop") is None
+    assert panel.js(f"{EL}._data.settings.persons"), "Personen wurden nicht gespeichert"
+    # Raum-Assistent aus der Einrichtung: danach zurück zum selben Schritt
+    panel.js(f"{EL}._setupOpen(3)")
+    panel.wait()
+    panel.click('#pop [data-action="setup-room"]')
+    assert panel.js(f"{EL}._pop?.id") == "rwiz"
+    panel.click('#pop [data-action="pop-close"]') if panel.has('#pop [data-action="pop-close"]') else panel.js(f"{EL}._closePop()")
+    panel.wait(200)
+    assert panel.js(f"[{EL}._pop?.id, {EL}._pop?.draft?.step]") == ["setup", 3]
+    panel.ok("Einrichtung mit Raum-Assistent")

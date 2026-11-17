@@ -47,7 +47,7 @@ RW_KEYS = frozenset(RW_DEFAULTS)
 PROFILE_SPEC: dict[str, tuple[Any, str]] = {
     "name": ("Standard", "text"),
     # Funktionen (auto_options) und Verknüpfung Helligkeit/Sonne
-    "features": (["up", "down", "time"], "list"),          # up, down, time, brightness, sun, ventilate, shading
+    "features": (["up", "down", "time", "ventilate"], "list"),  # up, down, time, brightness, sun, ventilate, shading
     "time_mode": ("times", "choice"),                       # times | calendar
     "bs_operator": ("or", "choice"),                        # or | and
     "behavior": ([], "list"),                               # Verhalten (individual_config)
@@ -236,6 +236,21 @@ class Rollwerk:
                 self._rt.setdefault(entity_id, {}).update(flags)
         if not self.profiles:
             self._migrate(old)
+        # 0.38: gekippte Fenster (seit 0.29 automatisch aus Heizwerk) lüften in allen Profilen – bisher war das
+        # Lüften standardmäßig aus, ein gekipptes Fenster wurde also abends ganz zugefahren.
+        if not self._persist.get("vent_default"):
+            changed = []
+            for prof in self.profiles.values():
+                feats = list(prof.get("features") or [])
+                if "ventilate" not in feats:
+                    prof["features"] = feats + ["ventilate"]
+                    changed.append(prof.get("name") or "?")
+            self._persist["vent_default"] = True
+            if changed:
+                self.log.add("settings", "Rollwerk: gekippte Fenster lüften jetzt",
+                             f"Lüftungsstellung bei gekipptem Fenster eingeschaltet in: {', '.join(changed)}. "
+                             "Abschalten je Profil unter Fenster & Lüften.", module="rollwerk")
+            self._save()
         # Böen-Sensor gehört jetzt zu Hauswerk › Wetter (gilt für alle Module)
         if self.settings.get("rw_wind_entity") and not self.haus.settings.get("wind_sensor"):
             self.haus.settings["wind_sensor"] = self.settings["rw_wind_entity"]
@@ -244,7 +259,7 @@ class Rollwerk:
     def _migrate(self, old: dict[str, Any]) -> None:
         """Aus den Einstellungen von 0.24 (eine Einstellung für alle, Fassade je Rollladen) Profile machen."""
         base = dict(PROFILE_DEFAULTS)
-        features = ["up", "down", "time"]
+        features = ["up", "down", "time", "ventilate"]
         if (old.get("rw_open_mode") or "sun") == "sun" or (old.get("rw_close_mode") or "sun") == "sun":
             features.append("sun")
         if old.get("rw_open_mode") == "off":
@@ -814,12 +829,9 @@ class Rollwerk:
             return 100, "Sturmschutz", "storm"
         if self._on(prof.get("force_up")):
             return p_open, f"Erzwungen: auf ({self._name(prof['force_up'])})", "force"
-        if self._on(prof.get("force_down")):
-            return p_close, f"Erzwungen: zu ({self._name(prof['force_down'])})", "force"
-        if self._on(prof.get("force_ventilate")):
-            return p_vent, f"Erzwungen: lüften ({self._name(prof['force_ventilate'])})", "force"
-        if self._on(prof.get("force_shading")):
-            return p_shade, f"Erzwungen: Beschattung ({self._name(prof['force_shading'])})", "force"
+        for key, p_forced, label in (("force_down", p_close, "zu"), ("force_ventilate", p_vent, "lüften"), ("force_shading", p_shade, "Beschattung")):
+            if self._on(prof.get(key)):
+                return self._door_floor(entity_id, prof, feats, pos, p_forced, f"Erzwungen: {label} ({self._name(prof[key])})", "force")
 
         day, why = self._day_phase(entity_id, prof, rt, now, now_min, elevation)
         shading, info = (False, {})
@@ -920,6 +932,19 @@ class Rollwerk:
                 and pos is not None and base_target > pos:
             target, reason, cat = None, "Lüften beendet – bleibt so", "none"
         rt["vent_was"] = rt["vent_active"]
+        return target, reason, cat
+
+    def _door_floor(self, entity_id: str, prof: dict, feats: set, pos: float | None, target: int | None,
+                    reason: str, cat: str) -> tuple[int | None, str, str]:
+        """Aussperrschutz auch beim Erzwingen: bei offener Tür nicht unter die Sperrstellung fahren."""
+        opens, _tilts, _src = self.contacts(entity_id)
+        open_now = [e for e in opens if self._contact(e)]
+        if not open_now:
+            return target, reason, cat
+        lock = prof.get("pos_lockout")
+        floor = int(lock) if ("ventilate" in feats and lock is not None) else (int(pos) if pos is not None else int(prof.get("pos_open") or 100))
+        if target is None or target < floor:
+            return floor, f"{self._name(open_now[0])} offen – nicht herunterfahren (trotz Erzwingen)", "ventilation"
         return target, reason, cat
 
     async def async_evaluate(self, initial: bool = False) -> None:

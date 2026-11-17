@@ -890,3 +890,56 @@ def test_kraftwerk(hw):
         await kw2.async_load()
         assert kw2.settings["kw_solar"] == ["sensor.pv"]
     asyncio.run(run())
+
+
+def test_rollwerk_fenster_in_jedem_fall(hw):
+    """Gekippt lüftet auch im Standard-Profil; eine offene Tür sperrt nie aus – auch nicht beim Erzwingen."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 7, 16, 20, 1, tzinfo=timezone.utc)  # 21:01 lokal, nach dem Schließen
+        hass = Hass()
+        for eid in ("cover.wz", "climate.wz", "binary_sensor.wz_fenster", "binary_sensor.wz_tuer"):
+            REG[eid] = types.SimpleNamespace(entity_id=eid, device_id=None, area_id="wohnen", domain=eid.split(".")[0], disabled_by=None)
+        hass.set("cover.wz", "open", {"current_position": 100, "supported_features": 15}, "Rollladen Wohnzimmer")
+        hass.set("climate.wz", "heat", {"current_temperature": 21, "temperature": 21}, "Wandthermostat")
+        hass.set("binary_sensor.wz_fenster", "on", {"device_class": "window"}, "Fenster Wohnzimmer")
+        hass.set("binary_sensor.wz_tuer", "off", {"device_class": "door"}, "Terrassentür")
+        hass.set("input_boolean.zu", "off", {}, "Alle zu")
+        hass.set("sun.sun", "below_horizon", {"azimuth": 300, "elevation": -5}, "Sonne")
+        log, haus, ctl = await _setup(hw, hass)
+        hass.data["hauswerk"] = {"heizen": ctl}
+        await ctl.async_save_room({"id": "wz", "name": "Wohnzimmer", "type": "heizkoerper", "comfort": 21, "eco": 18,
+                                   "climates": ["climate.wz"], "windows": ["binary_sensor.wz_fenster", "binary_sensor.wz_tuer"]})
+        # Profil wie aus 0.37 gespeichert: ohne „ventilate“
+        STORES["hauswerk.rollwerk"] = {"settings": {"rw_covers": ["cover.wz"]}, "covers": {},
+                                       "profiles": {"standard": dict(hw.Rollwerk.__init__.__globals__["PROFILE_DEFAULTS"],
+                                                                     features=["up", "down", "time"], down_early="21:00",
+                                                                     down_late="21:00", delay_random=0, force_down="input_boolean.zu")}}
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        assert "ventilate" in rw.profiles["standard"]["features"]
+        assert any("gekippte Fenster lüften" in e["title"] for e in log.entries)
+        await rw.async_start()
+        # nach dem Start nur Stand übernehmen (kein Fahren) – das Ziel zählt
+        out = {"tilted": (rw.status()["covers"]["cover.wz"]["target"], rw.status()["covers"]["cover.wz"]["reason"])}
+        # Tür auf, Fenster zu, „Alle zu“ erzwungen -> nicht herunterfahren
+        hass.set("cover.wz", "open", {"current_position": 30, "supported_features": 15}, "Rollladen Wohnzimmer")
+        hass.set("binary_sensor.wz_fenster", "off", {"device_class": "window"}, "Fenster Wohnzimmer")
+        hass.set("binary_sensor.wz_tuer", "on", {"device_class": "door"}, "Terrassentür")
+        hass.set("input_boolean.zu", "on", {}, "Alle zu")
+        n = len(hass.calls)
+        await rw.async_evaluate()
+        out["door"] = (hass.calls[n:], rw.status()["covers"]["cover.wz"])
+        # Tür zu -> Erzwingen greift
+        hass.set("binary_sensor.wz_tuer", "off", {"device_class": "door"}, "Terrassentür")
+        await rw.async_evaluate()
+        out["closed"] = hass.calls[-1][2].get("position")
+        return out
+
+    out = asyncio.run(run())
+    assert out["tilted"][0] == 30 and "gekippt" in out["tilted"][1]
+    calls, st = out["door"]
+    assert not any(c[2].get("position", 100) < 30 for c in calls), calls
+    assert "nicht herunterfahren" in st["reason"] and "Erzwingen" in st["reason"]
+    assert out["closed"] == 0

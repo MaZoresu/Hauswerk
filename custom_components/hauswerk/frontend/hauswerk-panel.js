@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.37.0";
+const VERSION = "0.38.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -670,6 +670,21 @@ class HauswerkPanel extends HTMLElement {
       this._listening = true;
       const root = this.shadowRoot;
       root.addEventListener("click", (e) => this._onClick(e));
+      root.addEventListener("pointerdown", (e) => this._wDragStart(e));
+      if (!this._keyBound) {
+        this._keyBound = true;
+        window.addEventListener("keydown", (e) => {
+          if (!this.isConnected || !this._data) return;
+          const typing = e.composedPath().some((n) => ["INPUT", "TEXTAREA", "SELECT"].includes(n.tagName) || n.isContentEditable);
+          if ((e.key === "/" && !typing) || (e.key.toLowerCase() === "k" && (e.ctrlKey || e.metaKey))) {
+            if (this._pop?.id === "search") return;
+            e.preventDefault();
+            if (this._pop) this._closePop();
+            this._openPop("search", { q: "" });
+            setTimeout(() => this.shadowRoot.querySelector("#pop [data-action=g-search]")?.focus(), 30);
+          }
+        });
+      }
       const safeInput = (e, change) => {
         try {
           this._onInput(e, change);
@@ -852,6 +867,7 @@ class HauswerkPanel extends HTMLElement {
         <div class="ttl"><small>HAUSWERK</small><b>${esc(title)}</b><span>Haussteuerung · Version ${VERSION}</span></div>
         <div class="hacts">
           ${this._data ? this._headInfo() : ""}
+          ${this._data ? `<button class="bell gsearch" data-action="search-open" title="Suchen (/)" aria-label="Suchen"><ha-icon icon="mdi:magnify"></ha-icon></button>` : ""}
           ${(() => {
             if (!this._data) return "";
             const h = this._hints();
@@ -949,6 +965,22 @@ class HauswerkPanel extends HTMLElement {
         <span class="hs-go">Anzeigen<ha-icon icon="mdi:chevron-right"></ha-icon></span>
       </button>` : ""}
 
+      ${(() => {
+        if (!this._admin) return "";
+        let off = false;
+        try {
+          off = localStorage.getItem("hauswerk.einrichtung.aus") === "1";
+        } catch (err) {
+          /* ohne Speicher */
+        }
+        const st = this._setupSteps().slice(1, -1);
+        const done = st.filter((x) => x.done).length;
+        if (off || st.filter((x) => !x.optional).every((x) => x.done)) return "";
+        return `<section class="card setup-card"><span class="sr-ic" style="--c:#2dd4bf"><ha-icon icon="mdi:rocket-launch-outline"></ha-icon></span>
+          <div class="grow"><b>Hauswerk einrichten</b><small>${done} von ${st.length} Schritten erledigt – Personen, Wetter, Räume, Rollläden, Energie</small>
+          <div class="setup-prog"><i style="width:${Math.round((done / st.length) * 100)}%"></i></div></div>
+          <button class="primary small" data-action="setup-open">Weiter</button><button class="icon tiny" data-action="setup-hide" title="Ausblenden"><ha-icon icon="mdi:close"></ha-icon></button></section>`;
+      })()}
       <div class="shead outer">
         <ha-icon icon="mdi:widgets-outline"></ha-icon><h3>Übersicht</h3><span class="grow"></span>
         ${this._admin ? `
@@ -956,7 +988,7 @@ class HauswerkPanel extends HTMLElement {
           <button class="link" data-action="w-edit"><ha-icon icon="${edit ? "mdi:check" : "mdi:pencil-outline"}"></ha-icon>${edit ? "Fertig" : "Anpassen"}</button>` : ""}
       </div>
       ${list.length
-        ? `<div class="wgrid">${list.map((w, i) => this._widget(w, i, edit, list.length)).join("")}</div>`
+        ? `${edit ? `<p class="muted small whint"><ha-icon icon="mdi:drag"></ha-icon>Am Griff ziehen, um Widgets zu verschieben.</p>` : ""}<div class="wgrid">${list.map((w, i) => this._widget(w, i, edit, list.length)).join("")}</div>`
         : `<section class="card empty small"><p>Keine Widgets.${this._admin ? ` <button class="link inline" data-action="w-add-open">Widget hinzufügen</button>` : ""}</p></section>`}
       ${n ? "" : `
       <section class="card empty">
@@ -978,6 +1010,57 @@ class HauswerkPanel extends HTMLElement {
     return w.size === "w" ? "l" : ["s", "m", "l"].includes(w.size) ? w.size : "m";
   }
 
+  /** Widgets der Startseite ziehen (Maus und Finger): die Karte wandert mit, losgelassen wird gespeichert. */
+  _wDragStart(e) {
+    const handle = e.composedPath().find((n) => n.dataset?.drag !== undefined);
+    if (!handle || !this._wEdit) return;
+    const card = handle.closest(".wdg");
+    const grid = card?.parentElement;
+    if (!card || !grid) return;
+    e.preventDefault();
+    const from = Number(card.dataset.wi);
+    card.classList.add("dragging");
+    let last = { x: e.clientX, y: e.clientY };
+    let raf = 0;
+    const scroller = () => {
+      // am Rand des Bildschirms mitscrollen
+      const edge = 70, h = window.innerHeight;
+      const dy = last.y < edge ? -12 : last.y > h - edge - 60 ? 12 : 0;
+      if (dy) {
+        window.scrollBy(0, dy);
+        this.shadowRoot.querySelector(".main, #main")?.scrollBy?.(0, dy);
+      }
+      raf = requestAnimationFrame(scroller);
+    };
+    raf = requestAnimationFrame(scroller);
+    const move = (ev) => {
+      last = { x: ev.clientX, y: ev.clientY };
+      card.style.pointerEvents = "none";
+      const over = this.shadowRoot.elementFromPoint(ev.clientX, ev.clientY)?.closest?.(".wdg");
+      card.style.pointerEvents = "";
+      if (!over || over === card || over.parentElement !== grid) return;
+      const r = over.getBoundingClientRect();
+      const after = ev.clientY > r.top + r.height / 2 || (Math.abs(ev.clientY - (r.top + r.height / 2)) < r.height / 4 && ev.clientX > r.left + r.width / 2);
+      grid.insertBefore(card, after ? over.nextSibling : over);
+    };
+    const up = async () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      card.classList.remove("dragging");
+      const order = [...grid.querySelectorAll(".wdg")].map((c) => Number(c.dataset.wi));
+      if (order.every((v, k) => v === k)) return;
+      const list = this._widgets();
+      await this._saveWidgets(order.map((k) => clone(list[k])));
+      this._toast("Reihenfolge gespeichert");
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    void from;
+  }
+
   async _saveWidgets(list) {
     this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { start_widgets: list } });
     this._renderMain();
@@ -995,8 +1078,9 @@ class HauswerkPanel extends HTMLElement {
     }
     const tools = edit
       ? `<span class="wtools">
-          <button class="icon tiny" data-action="w-move" data-i="${i}" data-d="-1" title="Nach vorne" ${i === 0 ? "disabled" : ""}><ha-icon icon="mdi:chevron-left"></ha-icon></button>
-          <button class="icon tiny" data-action="w-move" data-i="${i}" data-d="1" title="Nach hinten" ${i === count - 1 ? "disabled" : ""}><ha-icon icon="mdi:chevron-right"></ha-icon></button>
+          <button class="icon tiny wdrag" data-drag="${i}" title="Ziehen zum Verschieben" aria-label="Verschieben"><ha-icon icon="mdi:drag"></ha-icon></button>
+          <button class="icon tiny wmv" data-action="w-move" data-i="${i}" data-d="-1" title="Nach vorne" ${i === 0 ? "disabled" : ""}><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+          <button class="icon tiny wmv" data-action="w-move" data-i="${i}" data-d="1" title="Nach hinten" ${i === count - 1 ? "disabled" : ""}><ha-icon icon="mdi:chevron-right"></ha-icon></button>
           <button class="icon tiny" data-action="w-conf" data-i="${i}" title="Einstellen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>
           <button class="icon tiny danger-t" data-action="w-del" data-i="${i}" title="Entfernen"><ha-icon icon="mdi:close"></ha-icon></button>
         </span>`
@@ -1006,7 +1090,7 @@ class HauswerkPanel extends HTMLElement {
           ? `<button class="icon tiny" data-action="settings-go" data-sub="${def.pop}" title="Einstellungen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>`
           : "";
     return `
-      <section class="card wdg sz-${z} ${edit ? "edit" : ""}" style="--c:${def.c}">
+      <section class="card wdg sz-${z} ${edit ? "edit" : ""}" data-wi="${i}" style="--c:${def.c}">
         <div class="wh"><span class="wic"><ha-icon icon="${def.icon}"></ha-icon></span><b>${esc(w.title || def.name)}</b><span class="grow"></span>${tools}</div>
         <div class="wb">${body}</div>
       </section>`;
@@ -2632,7 +2716,10 @@ class HauswerkPanel extends HTMLElement {
     this._hass.callWS({ type: "energy/get_prefs" })
       .then((r) => (this._kwP = this._kwParse(r)))
       .catch(() => (this._kwP = this._kwParse({})))
-      .finally(() => this._renderMain());
+      .finally(() => {
+        this._renderMain();
+        if (this._pop && ["setup", "kwdetect"].includes(this._pop.id)) this._renderPop();
+      });
     return null;
   }
 
@@ -3520,7 +3607,7 @@ class HauswerkPanel extends HTMLElement {
   /** Neues Profil aus den Antworten: Kopie von „Standard“, angepasst an Raum, Richtung und Sonnenschutz. */
   _cwizProfile(d) {
     const base = clone(this._data.rollwerk?.profiles?.standard || {});
-    const f = new Set(["up", "down", "time"]);
+    const f = new Set(["up", "down", "time", "ventilate"]);
     if (d.mode === "sun") f.add("sun");
     if (d.use === "neben") { f.delete("up"); f.delete("down"); }
     const shade = d.shade && d.prof.window_dir != null;
@@ -3809,7 +3896,10 @@ class HauswerkPanel extends HTMLElement {
         calendar: p.vacation_calendar ? `Kalender ${this._entityName(p.vacation_calendar)}` : "Kalender – keiner gewählt",
       }[p.vacation_source || "period"];
       const n = this._widgets().length;
+      const su = this._setupSteps(p).slice(1, -1);
       return [
+        { g: "Haus", act: "setup-open", icon: "mdi:rocket-launch-outline", c: "#2dd4bf", title: "Einrichtung",
+          sum: `Assistent für ganz Hauswerk · ${su.filter((x) => x.done).length} von ${su.length} Schritten erledigt`, words: "assistent einrichten ersteinrichtung start schritte" },
         { g: "Haus", id: "presence", icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit",
           sum: persons ? `${persons} Person${persons > 1 ? "en" : ""} · abwesend nach ${p.away_delay} Min.${p.arrive_delay ? ` · zu Hause nach ${p.arrive_delay} Min.` : ""}${p.workday_entity ? " · Feiertage erkannt" : ""}` : "Noch keine Personen gewählt",
           warn: !persons, words: "personen abwesend heimweg nähe entfernung gäste feiertag arbeitstag workday wochenende" },
@@ -4099,6 +4189,226 @@ class HauswerkPanel extends HTMLElement {
       .join("");
   }
 
+  // ------------------------------------------------------------ Einrichtung (Assistent für ganz Hauswerk)
+  /** Schritte der Einrichtung mit Stand: erledigt, optional. */
+  _setupSteps(p = this._data.settings) {
+    const covers = (p.rw_covers || []).length;
+    return [
+      { id: "start", name: "Los geht's", icon: "mdi:hand-wave-outline" },
+      { id: "persons", name: "Personen", icon: "mdi:account-group-outline", done: (p.persons || []).length > 0 },
+      { id: "weather", name: "Wetter", icon: "mdi:weather-partly-cloudy", done: !!(p.weather_entity || p.outside_sensor || Object.keys(this._hass.states).some((e) => e.startsWith("weather."))) },
+      { id: "rooms", name: "Räume", icon: "logo:heizen", done: this._rooms().length > 0 },
+      { id: "covers", name: "Rollläden", icon: "logo:rollwerk", done: covers > 0, optional: true },
+      { id: "energy", name: "Energie", icon: "logo:kraftwerk", done: this._kwConfigured(p), optional: true },
+      { id: "done", name: "Fertig", icon: "mdi:flag-checkered" },
+    ];
+  }
+
+  _setupOpen(step = 0) {
+    this._setupBack = { step };
+    this._openPop("setup", { step });
+  }
+
+  /** Geänderte Einstellungen der Einrichtung speichern (Personen, Wetter, Kraftwerk). */
+  async _setupSave() {
+    if (!this._settings) return true;
+    const keys = ["persons", "weather_entity", "outside_sensor", "kw_solar", "kw_grid", "kw_battery", "kw_battery_soc", "kw_home"];
+    const diff = {};
+    for (const k of keys) if (JSON.stringify(this._settings[k] ?? null) !== JSON.stringify(this._data.settings[k] ?? null)) diff[k] = this._settings[k] ?? null;
+    if (!Object.keys(diff).length) return true;
+    try {
+      this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: diff });
+      this._settings = { ...clone(this._data.settings), ...this._settings };
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  /** Bereiche aus Home Assistant mit Thermostat, die noch kein Raum sind. */
+  _setupAreas() {
+    const used = new Set(this._rooms().flatMap((r) => r.climates || []));
+    return Object.values(this._hass.areas || {})
+      .map((a) => ({ id: a.area_id, name: a.name, climates: this._areaEntities(a.area_id).filter((e) => e.startsWith("climate.") && !used.has(e)) }))
+      .filter((a) => a.climates.length)
+      .sort((a, b) => a.name.localeCompare(b.name, "de"));
+  }
+
+  _setupPop() {
+    const d = this._pop.draft;
+    const p = this._settings;
+    const steps = this._setupSteps(p);
+    const st = steps[d.step];
+    const S = this._hass.states;
+    const bar = `<div class="wiz-bar">${steps.map((x, i) => `<button class="wiz-dot ${i === d.step ? "on" : x.done ? "done" : ""}" data-action="setup-go" data-i="${i}"><i>${x.done && i !== d.step ? "✓" : i + 1}</i><span>${x.name}</span></button>`).join("")}</div>`;
+    const lead = (t) => `<p class="wiz-lead">${t}</p>`;
+    let body = "";
+    switch (st.id) {
+      case "start":
+        body = `${lead("In wenigen Schritten ist Hauswerk bereit: wer hier wohnt, woher das Wetter kommt, welche Räume geheizt werden – und auf Wunsch Rollläden und Energie. Alles lässt sich später ändern; jeder Schritt kann übersprungen werden.")}
+          <div class="setup-list">${steps.slice(1, -1).map((x, i) => `<button class="srow" data-action="setup-go" data-i="${i + 1}">
+            <span class="sr-ic ${String(x.icon).startsWith("logo:") ? "logo" : ""}" style="--c:${x.done ? "#22c55e" : "#94a3b8"}">${modIcon(x.icon)}</span>
+            <span class="sr-t"><b>${x.name}${x.optional ? ` <em class="badge">OPTIONAL</em>` : ""}</b><small>${x.done ? "erledigt" : "noch offen"}</small></span>
+            <ha-icon class="sr-go" icon="${x.done ? "mdi:check-circle" : "mdi:chevron-right"}" style="${x.done ? "color:#22c55e" : ""}"></ha-icon></button>`).join("")}</div>`;
+        break;
+      case "persons": {
+        const all = Object.keys(S).filter((e) => e.startsWith("person.")).sort();
+        const chosen = new Set(p.persons || []);
+        const people = new Map(this._people(all).map((x) => [x.id, x]));
+        body = `${lead("Wer wohnt hier? Hauswerk weiß dann, wann niemand zu Hause ist – Heizwerk senkt ab, Rollwerk kann tagsüber zu bleiben.")}
+          ${all.length ? `<div class="pchips left">${all.map((id) => { const x = people.get(id); return `<button class="pchip ${chosen.has(id) ? "on" : ""} ${x?.home ? "home" : ""}" data-action="person-toggle" data-id="${esc(id)}" aria-pressed="${chosen.has(id)}"><i></i>${esc(x?.name || this._entityName(id))} · ${esc(!x ? "" : x.home ? "da" : x.distTxt || x.where || "")}</button>`; }).join("")}</div>`
+            : `<p class="muted">In Home Assistant gibt es noch keine Personen. Lege sie unter Einstellungen › Personen an – oder später unter Hauswerk › Anwesenheit.</p>`}
+          ${all.length && !chosen.size ? `<button class="link" data-action="setup-all-persons"><ha-icon icon="mdi:check-all"></ha-icon>Alle wählen</button>` : ""}
+          <p class="muted small">Gäste, Wartezeiten und Heimweg stellst du später unter <b>Hauswerk › Anwesenheit</b> ein.</p>`;
+        break;
+      }
+      case "weather": {
+        const ws = Object.keys(S).filter((e) => e.startsWith("weather.")).sort();
+        const cur = p.weather_entity || ws[0] || null;
+        const w = cur && S[cur];
+        body = `${lead("Das Wetter brauchen Vorheizen, Frostschutz, Sonnenschutz und Sturmschutz.")}
+          ${ws.length ? `<div class="lbl">Wetterdienst</div><div class="pchips left">${ws.map((id) => `<button class="pchip ${cur === id ? "on" : ""}" data-action="setup-weather" data-id="${esc(id)}"><i></i>${esc(this._entityName(id))}${S[id]?.attributes?.temperature != null ? ` · ${fmt(S[id].attributes.temperature, 1)} °C` : ""}</button>`).join("")}</div>`
+            : `<p class="muted">Kein Wetterdienst gefunden. Füge in Home Assistant z. B. „Met.no“ oder „DWD“ hinzu.</p>`}
+          ${w ? `<div class="rq-facts"><span style="--c:#60a5fa"><ha-icon icon="mdi:weather-partly-cloudy"></ha-icon>${esc(w.state)} · ${fmt(w.attributes?.temperature, 1)} °C</span></div>` : ""}
+          <div class="field"><span><ha-icon icon="mdi:thermometer"></ha-icon> Eigener Außensensor (optional, genauer als der Wetterdienst)</span>${this._picker("outside_sensor", p.outside_sensor)}</div>`;
+        break;
+      }
+      case "rooms": {
+        const rooms = this._rooms();
+        const areas = this._setupAreas();
+        body = `${lead("Heizwerk regelt jeden Raum einzeln. Der Raum-Assistent findet Thermostate, Fenster und Sensoren im Bereich und schlägt Temperaturen und Heizzeiten vor.")}
+          ${rooms.length ? `<div class="lbl">Schon angelegt</div><div class="pchips left">${rooms.map((r) => `<span class="pchip on static"><i></i>${esc(r.name)}</span>`).join("")}</div>` : ""}
+          ${areas.length ? `<div class="lbl">Bereiche mit Thermostat – noch kein Raum</div><div class="setup-list">${areas.map((a) => `<button class="srow" data-action="setup-room" data-area="${esc(a.id)}">
+            <span class="sr-ic" style="--c:#fb923c"><ha-icon icon="mdi:plus"></ha-icon></span><span class="sr-t"><b>${esc(a.name)}</b><small>${a.climates.map((e) => esc(this._entityName(e))).join(", ")}</small></span><ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon></button>`).join("")}</div>` : ""}
+          <button class="secondary" data-action="setup-room"><ha-icon icon="mdi:plus"></ha-icon>${rooms.length ? "Weiteren Raum anlegen" : "Raum anlegen"}</button>
+          ${!areas.length && !rooms.length ? `<p class="muted small">Tipp: Ordne Thermostate in Home Assistant einem Bereich zu – dann findet der Assistent sie von selbst.</p>` : ""}`;
+        break;
+      }
+      case "covers": {
+        const have = new Set(p.rw_covers || []);
+        const free = Object.keys(S).filter((e) => e.startsWith("cover.") && !have.has(e));
+        body = `${lead("Rollwerk fährt Rollläden morgens auf, abends zu, beschattet bei Sonne und lüftet bei gekipptem Fenster – Fensterkontakte kommen aus Heizwerk.")}
+          <div class="rq-facts"><span style="--c:#0ea5e9"><ha-icon icon="mdi:window-shutter"></ha-icon>${have.size} eingerichtet</span>${free.length ? `<span style="--c:#94a3b8"><ha-icon icon="mdi:window-shutter-open"></ha-icon>${free.length} weitere in Home Assistant</span>` : ""}</div>
+          ${free.length ? `<button class="secondary" data-action="setup-covers"><ha-icon icon="mdi:plus"></ha-icon>Rollläden hinzufügen</button>` : `<p class="muted small">${have.size ? "Alle Rollläden aus Home Assistant sind eingerichtet." : "In Home Assistant gibt es keine Rollläden (cover.*) – diesen Schritt einfach überspringen."}</p>`}`;
+        break;
+      }
+      case "energy": {
+        const sug = this._kwSuggest();
+        const P = this._kwPrefs();
+        const fl = this._kwFlow(p);
+        const found = [["kw_solar", "Solar"], ["kw_grid", "Netz"], ["kw_battery", "Batterie"]].filter(([k]) => (Array.isArray(sug[k]) ? sug[k].length : sug[k]));
+        body = `${lead("Kraftwerk zeigt live, woher dein Strom kommt – Solar, Netz, Batterie – und wie autark du heute warst.")}
+          ${this._kwConfigured(p) ? `<div class="rq-facts">${fl.has.solar ? `<span style="--c:#f59e0b"><ha-icon icon="mdi:solar-power-variant"></ha-icon>Solar ${this._kwFmt(fl.solar)}</span>` : ""}${fl.has.grid ? `<span style="--c:#8b5cf6"><ha-icon icon="mdi:transmission-tower"></ha-icon>Netz ${this._kwFmt(fl.grid, true)}</span>` : ""}<span style="--c:#0ea5e9"><ha-icon icon="mdi:home-lightning-bolt-outline"></ha-icon>Haus ${this._kwFmt(fl.home)}</span></div>`
+            : found.length ? `<p>Gefunden: <b>${found.map(([, l]) => l).join(", ")}</b>.</p><button class="secondary" data-action="kw-take" data-k="all"><ha-icon icon="mdi:auto-fix"></ha-icon>Erkannte Sensoren übernehmen</button>`
+              : `<p class="muted">Keine Leistungs-Sensoren (W/kW) gefunden. Ohne PV-Anlage oder Stromzähler-Anbindung diesen Schritt überspringen.</p>`}
+          <button class="link" data-action="setup-kw"><ha-icon icon="mdi:tune-variant"></ha-icon>Im Einzelnen prüfen</button>
+          <p class="muted small">${!P ? "Energie-Dashboard wird gelesen …" : P.ok ? "Tageswerte und Preise kommen aus dem Energie-Dashboard von Home Assistant ✓" : "Für Tageswerte, Autarkie und Kosten im Energie-Dashboard von Home Assistant Netz und Solar eintragen."}</p>`;
+        break;
+      }
+      case "done": {
+        const open = steps.filter((x) => x.done === false && !x.optional);
+        body = `<div class="setup-done"><ha-icon icon="${open.length ? "mdi:progress-check" : "mdi:check-decagram"}"></ha-icon>
+          <h2>${open.length ? "Fast fertig" : "Hauswerk ist eingerichtet"}</h2>
+          <p>${open.length ? `Noch offen: ${open.map((x) => x.name).join(", ")}. Du kannst jederzeit unter Hauswerk › Einstellungen › Einrichtung weitermachen.` : "Die Startseite zeigt jetzt alles Wichtige. Unter „Anpassen“ wählst du Widgets – und oben findet die Lupe jede Einstellung."}</p></div>
+          <div class="setup-list">${steps.slice(1, -1).map((x) => `<div class="srow static"><span class="sr-ic ${String(x.icon).startsWith("logo:") ? "logo" : ""}" style="--c:${x.done ? "#22c55e" : "#94a3b8"}">${modIcon(x.icon)}</span>
+            <span class="sr-t"><b>${x.name}</b><small>${x.done ? "erledigt" : x.optional ? "übersprungen" : "noch offen"}</small></span><ha-icon class="sr-go" icon="${x.done ? "mdi:check-circle" : "mdi:circle-outline"}" style="${x.done ? "color:#22c55e" : ""}"></ha-icon></div>`).join("")}</div>`;
+        break;
+      }
+    }
+    const last = d.step === steps.length - 1;
+    return {
+      icon: "mdi:rocket-launch-outline", c: "#2dd4bf", title: "Hauswerk einrichten", sub: `Schritt ${d.step + 1} von ${steps.length} · ${st.name}`,
+      body: `${bar}${body}`,
+      foot: `${d.step ? `<button class="secondary" data-action="setup-go" data-i="${d.step - 1}">Zurück</button>` : `<button class="secondary" data-action="setup-close">Später</button>`}
+        ${last ? `<button class="primary" data-action="setup-close"><ha-icon icon="mdi:check"></ha-icon>Fertig</button>`
+          : `<button class="primary" data-action="setup-go" data-i="${d.step + 1}">${st.optional && !st.done ? "Überspringen" : "Weiter"}<ha-icon icon="mdi:chevron-right"></ha-icon></button>`}`,
+    };
+  }
+
+  // ------------------------------------------------------------ Suche über alles
+  /** Für die Suche: klein, ohne Umlaute und Satzzeichen. */
+  _gsNorm(text) {
+    return String(text || "").toLowerCase().replace(/ä/g, "a").replace(/ö/g, "o").replace(/ü/g, "u").replace(/ß/g, "ss").replace(/[^a-z0-9.%° ]+/g, " ");
+  }
+
+  /** Alles, was sich finden lässt – je Eintrag Gruppe, Symbol, Titel, Unterzeile, Suchtext und Ziel (data-Attribute). */
+  _gsItems() {
+    const out = [];
+    const add = (g, icon, c, title, sub, words, attrs) => out.push({ g, icon, c, title, sub, hay: `${title} ${sub} ${words || ""}`, attrs });
+    const a = (action, data = {}) => `data-action="${action}" data-gs="1" ${Object.entries(data).map(([k, v]) => `data-${k}="${esc(v)}"`).join(" ")}`;
+    // Seiten
+    add("Seiten", "mdi:view-dashboard-outline", "#2dd4bf", "Start", "Übersicht mit Widgets", "dashboard startseite home", a("tab", { tab: "start" }));
+    for (const m of MODULES) for (const v of SUB_VIEWS.filter((x) => m.views.includes(x.id) && x.slug)) add("Seiten", `logo:${m.logo}`, "#94a3b8", `${m.name} › ${v.name}`, "", m.id, a("tab", { tab: v.id }));
+    add("Seiten", "mdi:cog-outline", "#64748b", "Hauswerk › Einstellungen", "für alle Module", "zahnrad", a("tab", { tab: "house" }));
+    add("Seiten", "mdi:text-box-search-outline", "#64748b", "Protokoll", "was wann warum entschieden wurde", "log verlauf", a("tab", { tab: "log" }));
+    // Räume und ihre Geräte
+    for (const r of this._rooms()) {
+      add("Räume", "mdi:door", this._roomColor(r.id), r.name, `${r.type === "flaeche" ? "Fußbodenheizung" : "Heizkörper"} · Komfort ${fmt(r.comfort, 1)} °C`, "raum zimmer", a("room-page", { id: r.id }));
+      const ents = [...(r.climates || []), ...(r.windows || []), r.temp_sensor, r.humidity_sensor, ...(r.extra || [])].filter(Boolean);
+      for (const id of ents) add("Geräte", this._hass.states[id]?.attributes?.icon || (id.startsWith("climate.") ? "mdi:thermostat" : id.startsWith("binary_sensor.") ? "mdi:window-closed-variant" : "mdi:eye-outline"),
+        "#94a3b8", this._entityName(id), `${r.name} · ${id}`, id, a("room-page", { id: r.id }));
+    }
+    // Heizpläne
+    for (const [pid, p] of Object.entries(this._data.plans || {})) add("Heizpläne", "mdi:calendar-clock", "#f59e0b", p.name || pid, "gemeinsamer Heizplan", "plan zeiten", a("plan-sel", { kind: "plan", id: pid }));
+    // Rollwerk
+    if (this._data.rollwerk) {
+      for (const c of this._rwCovers()) add("Rollläden", "mdi:window-shutter", "#0ea5e9", this._entityName(c.id), `${this._rwProfName(c.cfg.profile || "standard")}${c.rs.reason ? ` · ${c.rs.reason}` : ""}`, `rollladen rollo ${c.id}`, a("pop-open", { pop: `rwc:${c.id}` }));
+      for (const p of this._rwProfiles()) add("Profile", "mdi:tune-variant", "#0ea5e9", p.name, "Rollwerk-Profil", "profil rollwerk", a("pop-open", { pop: `rwp:${p.id}:tag` }));
+    }
+    // Kraftwerk
+    const kp = this._data.settings;
+    for (const id of kp.kw_consumers || []) add("Geräte", this._kwConsIcon(id, kp), "#0ea5e9", this._kwConsName(id, kp), `Verbraucher · ${this._kwFmt(this._kwW(id))}`, `kraftwerk strom ${id}`, a("pop-open", { pop: "kwcons" }));
+    // Einstellungen aller Module
+    const scopes = [["house", "Hauswerk"], ["heat", "Heizwerk"], ...(this._data.rollwerk ? [["rw", "Rollwerk"]] : []), ["kw", "Kraftwerk"]];
+    for (const [scope, label] of scopes) {
+      let rows = [];
+      try {
+        rows = this._settingRows(scope);
+      } catch (err) {
+        this._fail(`Suche › Einstellungen ${label}`, err);
+      }
+      for (const r of rows) {
+        if (r.soon || r.room || r.start) continue;
+        const attrs = r.newRoom ? a("room-new") : r.act ? a(r.act) : r.go ? a("tab", { tab: r.go }) : a("pop-open", { pop: r.id });
+        add(`Einstellungen · ${label}`, r.icon, r.c, r.title, r.sum, `${r.g} ${r.words || ""} einstellung`, attrs);
+      }
+    }
+    return out;
+  }
+
+  _gsList(q) {
+    const words = this._gsNorm(q).split(/\s+/).filter(Boolean);
+    if (!words.length) {
+      const recent = [["mdi:door", "Räume", "overview"], ["mdi:window-shutter", "Rollläden", "shutters"], ["mdi:transmission-tower", "Energiefluss", "kwflow"], ["mdi:chart-box-outline", "Bericht", "report"]];
+      return `<p class="muted small">Tippe, um zu suchen. Auf dem Computer öffnet <kbd>/</kbd> die Suche.</p>
+        <div class="gs-quick">${recent.map(([i, l, t]) => `<button class="chip" data-action="tab" data-tab="${t}" data-gs="1"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div>`;
+    }
+    const scored = [];
+    for (const it of this._gsItems()) {
+      const title = this._gsNorm(it.title), hay = this._gsNorm(it.hay);
+      if (!words.every((w) => hay.includes(w))) continue;
+      let score = 0;
+      for (const w of words) score += title.startsWith(w) ? 6 : new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(title) ? 4 : title.includes(w) ? 2 : 0;
+      score += { Räume: 3, Seiten: 2 }[it.g] || 0;
+      scored.push({ ...it, score });
+    }
+    scored.sort((x, y) => y.score - x.score);
+    const groups = new Map();
+    for (const it of scored) {
+      if (!groups.has(it.g)) groups.set(it.g, []);
+      if (groups.get(it.g).length < 6) groups.get(it.g).push(it);
+    }
+    // Gruppe mit dem besten Treffer zuerst
+    const order = [...groups.keys()].sort((x, y) => Math.max(...groups.get(y).map((i) => i.score)) - Math.max(...groups.get(x).map((i) => i.score)));
+    const row = (it) => `<button class="srow" ${it.attrs}>
+        <span class="sr-ic ${String(it.icon).startsWith("logo:") ? "logo" : ""}" style="--c:${it.c}">${modIcon(it.icon)}</span>
+        <span class="sr-t"><b>${esc(it.title)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ""}</span><ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon></button>`;
+    const log = `<button class="srow" data-action="gs-log" data-gs="1" data-q="${esc(q.trim())}"><span class="sr-ic" style="--c:#64748b"><ha-icon icon="mdi:text-box-search-outline"></ha-icon></span>
+        <span class="sr-t"><b>„${esc(q.trim())}“ im Protokoll suchen</b><small>14 Tage: Entscheidungen, Fahrten, Änderungen</small></span><ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon></button>`;
+    return `${scored.length ? order.map((g) => `<div class="gs-g"><div class="lbl">${esc(g)}</div>${groups.get(g).map(row).join("")}</div>`).join("") : `<p class="muted">Nichts gefunden für „${esc(q.trim())}“.</p>`}
+      <div class="gs-g"><div class="lbl">Protokoll</div>${log}</div>`;
+  }
+
   // ------------------------------------------------------------ Pop-ups
   _openPop(id, draft = {}) {
     this._settings = clone(this._data.settings);
@@ -4107,6 +4417,20 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _closePop() {
+    const was = this._pop?.id;
+    this._pop = null;
+    this._settings = null;
+    this._renderPop();
+    if (was === "setup") this._setupBack = null;
+    // aus der Einrichtung gestartet (Raum, Rollläden, Energie): danach dorthin zurück
+    if (this._setupBack && was && was !== "setup")
+      setTimeout(() => {
+        if (!this._pop && !this._dialog && this._setupBack) this._openPop("setup", { step: this._setupBack.step });
+      }, 60);
+  }
+
+  /** Pop-up schließen, ohne zur Einrichtung zurückzuspringen (es folgt gleich ein anderes). */
+  _closePopQuiet() {
     this._pop = null;
     this._settings = null;
     this._renderPop();
@@ -4164,6 +4488,11 @@ class HauswerkPanel extends HTMLElement {
     if (String(id).startsWith("rwc:")) return this._rwcPop(id.slice(4));
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (KW_POPS.includes(id)) return this._kwPop(id);
+    if (id === "setup") return this._setupPop();
+    if (id === "search")
+      return { icon: "mdi:magnify", c: "#2dd4bf", title: "Suchen", sub: "Seiten, Räume, Geräte, Rollläden, Profile, Einstellungen und Protokoll",
+        body: `<div class="search gs-in"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-action="g-search" placeholder="z. B. Bad, Urlaub, Batterie, Wallbox …" value="${esc(this._pop.draft.q || "")}" autocomplete="off" enterkeyhint="go"></div>
+          <div id="gs-list">${this._gsList(this._pop.draft.q || "")}</div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     if (id === "errtext")
       return { icon: "mdi:content-copy", c: "#64748b", title: "Diagnose", sub: "Text markieren und kopieren",
         body: `<textarea class="hw-errtext" readonly rows="12">${esc(this._pop.draft.text || this._failText())}</textarea>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
@@ -4569,15 +4898,25 @@ class HauswerkPanel extends HTMLElement {
 
       case "widget-add": {
         const have = new Set(this._widgets().map((w) => w.type));
+        const dr = this._pop.draft || {};
+        const preview = (k, d) => {
+          const size = dr.size || d.size || "m";
+          return `<div class="wprev">
+            <div class="segs small">${[["s", "Klein"], ["m", "Mittel"], ["l", "Groß"]].map(([v, l]) => `<button class="seg ${size === v ? "on" : ""}" data-action="w-pick-size" data-v="${v}">${l}</button>`).join("")}</div>
+            <div class="wgrid wprev-g">${this._widget({ id: "vorschau", type: k, size, title: null, entities: [] }, -1, false, 0)}</div>
+            ${d.config ? `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Nach dem Hinzufügen wählst du, was es zeigen soll.</p>` : ""}
+            <button class="primary" data-action="w-add" data-type="${k}" data-size="${size}"><ha-icon icon="mdi:plus"></ha-icon>${have.has(k) ? "Noch einmal hinzufügen" : "Hinzufügen"}</button>
+          </div>`;
+        };
         return {
-          icon: "mdi:widgets-outline", c: "#2dd4bf", title: "Widget hinzufügen", sub: "Erscheint auf der Startseite für alle Benutzer",
+          icon: "mdi:widgets-outline", c: "#2dd4bf", title: "Widget hinzufügen", sub: "Antippen für eine Vorschau mit deinen Daten",
           body: `<div class="wcat">${Object.entries(WIDGETS)
             .map(([k, d]) => `
-              <button class="wcat-i" data-action="w-add" data-type="${k}" style="--c:${d.c}">
+              <button class="wcat-i ${dr.sel === k ? "on" : ""}" data-action="w-pick" data-type="${k}" style="--c:${d.c}" aria-expanded="${dr.sel === k}">
                 <span class="sr-ic"><ha-icon icon="${d.icon}"></ha-icon></span>
                 <span class="sr-t"><b>${d.name}${have.has(k) ? ` <em class="badge">SCHON DA</em>` : ""}</b><small class="wrap">${d.text}</small></span>
-                <ha-icon class="sr-go" icon="mdi:plus"></ha-icon>
-              </button>`)
+                <ha-icon class="sr-go" icon="${dr.sel === k ? "mdi:chevron-up" : "mdi:chevron-down"}"></ha-icon>
+              </button>${dr.sel === k ? preview(k, d) : ""}`)
             .join("")}</div>`,
           foot: `<button class="secondary" data-action="pop-close">Schließen</button>`,
         };
@@ -5643,6 +5982,12 @@ class HauswerkPanel extends HTMLElement {
       this._renderLogList();
       return;
     }
+    if (t.dataset.action === "g-search" && this._pop?.id === "search") {
+      this._pop.draft.q = t.value;
+      const list = this.shadowRoot.getElementById("gs-list");
+      if (list) list.innerHTML = this._gsList(t.value);
+      return;
+    }
     if (t.dataset.action === "set-search") {
       // nur die Liste neu zeichnen, damit das Suchfeld den Fokus behält
       this._setQuery = t.value;
@@ -5807,13 +6152,14 @@ class HauswerkPanel extends HTMLElement {
     if (!el) return;
     const a = el.dataset.action;
     if (a === "room-quick" && path.some((n) => n.tagName === "DETAILS" || n.tagName === "SUMMARY" || n.tagName === "INPUT")) return;
-    if (["room-toggle", "plan-preset", "adv", "hmode", "room-plan", "set-search", "log-search"].includes(a)) {
+    if (["room-toggle", "plan-preset", "adv", "hmode", "room-plan", "set-search", "log-search", "g-search"].includes(a)) {
       if (a === "adv" && this._dialog) setTimeout(() => (this._dialog.advanced = el.open), 0);
       return;
     }
     if (el.tagName === "BUTTON") e.preventDefault();
     // Sprung aus der Hinweis-Liste: Liste schließen, dann Ziel öffnen
     if (el.dataset.hint && this._pop) this._closePop();
+    if (el.dataset.gs && this._pop?.id === "search") this._closePop();
 
     switch (a) {
       case "tab":
@@ -5821,6 +6167,71 @@ class HauswerkPanel extends HTMLElement {
         break;
       case "menu":
         this.dispatchEvent(new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true }));
+        break;
+      case "setup-hide":
+        try {
+          localStorage.setItem("hauswerk.einrichtung.aus", "1");
+        } catch (err) {
+          /* ohne Speicher: bis zum Neuladen */
+        }
+        this._renderMain();
+        this._toast("Ausgeblendet – die Einrichtung findest du unter Hauswerk › Einstellungen");
+        break;
+      case "setup-open":
+        this._setupOpen(0);
+        break;
+      case "setup-go": {
+        const i = Number(el.dataset.i);
+        if (!(await this._setupSave())) break;
+        this._pop.draft.step = Math.max(0, Math.min(this._setupSteps().length - 1, i));
+        this._setupBack = { step: this._pop.draft.step };
+        if (this._setupSteps()[this._pop.draft.step].id === "energy") this._kwPrefs();
+        this._renderPop();
+        this.shadowRoot.querySelector("#pop .sheet-body")?.scrollTo?.(0, 0);
+        break;
+      }
+      case "setup-close":
+        await this._setupSave();
+        this._setupBack = null;
+        this._closePop();
+        this._renderMain();
+        break;
+      case "setup-all-persons":
+        this._settings.persons = Object.keys(this._hass.states).filter((e) => e.startsWith("person."));
+        this._renderPop();
+        break;
+      case "setup-weather":
+        this._settings.weather_entity = el.dataset.id;
+        this._renderPop();
+        break;
+      case "setup-room":
+        if (!(await this._setupSave())) break;
+        this._closePopQuiet();
+        this._wizOpen();
+        if (el.dataset.area) {
+          this._wizArea(el.dataset.area);
+          this._pop.draft.step = 1;
+          this._renderPop();
+        }
+        break;
+      case "setup-covers":
+        if (!(await this._setupSave())) break;
+        this._closePopQuiet();
+        this._cwizOpen();
+        break;
+      case "setup-kw":
+        if (!(await this._setupSave())) break;
+        this._closePopQuiet();
+        this._openPop("kwdetect");
+        break;
+      case "search-open":
+        this._openPop("search", { q: "" });
+        setTimeout(() => this.shadowRoot.querySelector("#pop [data-action=g-search]")?.focus(), 30);
+        break;
+      case "gs-log":
+        this._logQuery = el.dataset.q || "";
+        this._logMod = "";
+        this._setView("log");
         break;
       case "room-open":
       case "room-page":
@@ -6020,10 +6431,19 @@ class HauswerkPanel extends HTMLElement {
       case "w-add-open":
         this._openPop("widget-add");
         break;
+      case "w-pick":
+        this._pop.draft = { ...(this._pop.draft || {}), sel: this._pop.draft?.sel === el.dataset.type ? null : el.dataset.type, size: null };
+        this._renderPop();
+        if (this._pop.draft.sel) this.shadowRoot.querySelector(".wprev")?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        break;
+      case "w-pick-size":
+        this._pop.draft.size = el.dataset.v;
+        this._renderPop();
+        break;
       case "w-add": {
         const def = WIDGETS[el.dataset.type];
         const list = clone(this._widgets());
-        const w = { id: Math.random().toString(16).slice(2, 10), type: el.dataset.type, size: def.size || "m", title: null, entities: [] };
+        const w = { id: Math.random().toString(16).slice(2, 10), type: el.dataset.type, size: el.dataset.size || def.size || "m", title: null, entities: [] };
         list.push(w);
         this._wEdit = true;
         await this._saveWidgets(list);
@@ -7537,6 +7957,38 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .wic { width:30px; height:30px; border-radius:10px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--c) 16%, transparent); color:var(--ct); }
 .wic ha-icon { --mdc-icon-size:18px; }
 .wtools { display:inline-flex; gap:2px; }
+.wdrag { cursor:grab; touch-action:none; }
+.gs-in { margin-bottom:12px; }
+.pchips.left { justify-content:flex-start; }
+.wiz-lead { margin:0 0 12px; }
+.setup-card { display:flex; align-items:center; gap:12px; padding:14px 16px; }
+.setup-card b { display:block; } .setup-card small { display:block; color:var(--muted); font-size:12.5px; }
+.setup-prog { height:6px; border-radius:99px; background:var(--card2); margin-top:8px; overflow:hidden; }
+.setup-prog i { display:block; height:100%; background:#2dd4bf; border-radius:99px; }
+.setup-list { display:grid; gap:6px; margin:10px 0; }
+.setup-list .srow { width:100%; }
+.srow.static { cursor:default; }
+.pchip.static { cursor:default; }
+.setup-done { text-align:center; display:flex; flex-direction:column; align-items:center; gap:6px; margin:6px 0 10px; }
+.setup-done > ha-icon { --mdc-icon-size:44px; color:#22c55e; }
+.setup-done h2 { margin:0; } .setup-done p { margin:0; color:var(--muted); }
+.gs-g { margin-bottom:10px; }
+.gs-g .srow { width:100%; }
+.gs-quick { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.gs-quick .chip { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border-radius:99px; border:1px solid var(--line); font-size:13px; font-weight:600; }
+.gs-quick .chip:hover { border-color:var(--accent); }
+.gs-quick .chip ha-icon { --mdc-icon-size:16px; color:var(--accent); }
+kbd { font:600 11px/1 ui-monospace, monospace; padding:2px 6px; border-radius:5px; border:1px solid var(--line2); }
+.wdg.dragging { opacity:.55; transform:scale(.98); box-shadow:0 12px 30px rgba(0,0,0,.25); z-index:2; }
+.whint { display:flex; align-items:center; gap:6px; margin:-4px 0 10px; }
+.whint ha-icon { --mdc-icon-size:16px; }
+@media (pointer: coarse) { .wtools .wmv { display:none; } }
+.wcat-i.on { border-color:var(--c); background:color-mix(in srgb, var(--c) 7%, var(--card2)); }
+.wprev { display:grid; gap:10px; padding:10px 4px 14px; }
+.wprev .segs { grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; }
+.wprev-g { pointer-events:none; }
+.wprev-g .wdg { box-shadow:none; border:1px solid var(--line); }
+.wprev > .primary { justify-self:stretch; justify-content:center; }
 .wtools .icon[disabled] { opacity:.3; cursor:default; }
 .danger-t { color:#f87171; }
 .wb { flex:1; min-width:0; }

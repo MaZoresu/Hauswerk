@@ -2,6 +2,20 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.38.0 – 2026-11-17
+
+### Neu
+- **Hauswerk einrichten** – ein Assistent für alles: Personen, Wetter, Räume (mit dem Raum-Assistenten, Bereiche mit Thermostat werden vorgeschlagen), Rollläden (mit dem Rollladen-Assistenten) und Energie (erkannte Sensoren übernehmen). Nach jedem Unter-Assistenten geht es an derselben Stelle weiter; jeder Schritt lässt sich überspringen. Solange etwas fehlt, zeigt die Startseite „Hauswerk einrichten – x von 5 erledigt“ (ausblendbar); jederzeit unter Hauswerk › Einstellungen › Einrichtung.
+- **Suche über alles** (Lupe oben, am Computer auch `/` oder Strg+K): Seiten, Räume, Geräte der Räume, Heizpläne, Rollläden, Profile, Verbraucher und alle Einstellungen aller Module – Umlaute egal, bester Treffer zuerst; dazu „… im Protokoll suchen“.
+- **Startseite: Widgets ziehen** – im Anpassen-Modus am Griff ziehen (Maus und Finger), die Reihenfolge wird beim Loslassen gespeichert. Am Handy entfallen dafür die Pfeile.
+- **Vorschau beim Hinzufügen:** Ein Tipp auf ein Widget zeigt es mit deinen Daten, in klein, mittel oder groß – erst „Hinzufügen“ legt es an, in der gewählten Größe.
+
+### Geändert
+- **Rollwerk: gekippte Fenster lüften jetzt in jedem Profil.** Seit 0.29 kommen die Fensterkontakte automatisch aus Heizwerk, das Lüften war aber standardmäßig aus – ein gekipptes Fenster wurde abends ganz zugefahren. Beim Update wird „Fenster gekippt: lüften“ in allen Profilen eingeschaltet (steht im Protokoll); abschalten je Profil unter Fenster & Lüften.
+
+### Behoben
+- **Aussperrschutz auch beim Erzwingen:** „Erzwingen: zu / lüften / Beschattung“ fuhr einen Rollladen trotz offener Tür herunter. Jetzt bleibt er bei offener Tür oben, bis sie zu ist.
+
 ## 0.37.0 – 2026-11-16
 
 ### Neu
