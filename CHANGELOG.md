@@ -2,6 +2,17 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.42.0 – 2026-11-17
+
+### Neu
+- **Experteneinstellungen je Modul:** Oben in den Einstellungen von Hauswerk, Heizwerk, Rollwerk und Kraftwerk gibt es jetzt je einen Haken **Experteneinstellungen**. Ohne Haken bleiben die Profi-Einstellungen dieses Moduls ausgeblendet:
+  - **Hauswerk:** Funk-Auslastung
+  - **Heizwerk:** Wärmeanforderung, Kalibrierung; im Raum-Dialog Regelung im Detail und Fenster-Feinheiten
+  - **Rollwerk:** Nach Neustart; im Profil alle Einstellungen der Cover Control Automation
+  - **Kraftwerk:** getrennte Einspeisung und Vorzeichen umdrehen (bleiben sichtbar, solange sie genutzt werden)
+  
+  Der Schalter „Experte“ im Raum-Dialog bzw. im Rollwerk-Profil ist derselbe wie der Haken des Moduls. Gemerkt wird er je Gerät; der bisherige gemeinsame Schalter gilt beim ersten Öffnen für Heizwerk und Rollwerk.
+
 ## 0.41.0 – 2026-11-17
 
 ### Neu

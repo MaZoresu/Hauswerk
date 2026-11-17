@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.41.0";
+const VERSION = "0.42.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -3054,14 +3054,15 @@ class HauswerkPanel extends HTMLElement {
         return { icon: "mdi:transmission-tower", c: "#8b5cf6", title: "Netz", sub: "Kraftwerk · Leistung jetzt",
           body: `<p class="muted">Ein Sensor mit Vorzeichen (meist + = Bezug, − = Einspeisung), z. B. vom Smart Meter oder Zählerlesekopf. Liefert dein Zähler Bezug und Einspeisung getrennt, wähle unten zusätzlich die Einspeisung.</p>
             <div class="field"><span><ha-icon icon="mdi:transmission-tower-import"></ha-icon> Netz-Leistung${p.kw_grid_export ? " (Bezug)" : ""}</span>${this._picker("kw_grid", p.kw_grid)}</div>
+            ${this._expertOn("kraftwerk") || p.kw_grid_invert || p.kw_grid_export ? `
             <div class="wxrows">${p.kw_grid_export ? "" : row("kwg1", "Vorzeichen umdrehen", "an, wenn Einspeisung positiv angezeigt wird", sw("kw_grid_invert"), "Manche Zähler zeigen die Einspeisung positiv. Schalte das an, wenn unten bei Sonne „Bezug“ steht, obwohl du einspeist.")}</div>
-            <div class="field"><span><ha-icon icon="mdi:transmission-tower-export"></ha-icon> Einspeisung getrennt (optional)</span>${this._picker("kw_grid_export", p.kw_grid_export)}</div>
+            <div class="field"><span><ha-icon icon="mdi:transmission-tower-export"></ha-icon> Einspeisung getrennt (optional)</span>${this._picker("kw_grid_export", p.kw_grid_export)}</div>` : `<p class="muted small"><ha-icon icon="mdi:school-outline"></ha-icon>Vorzeichen umdrehen und getrennte Einspeisung: Experteneinstellungen unter Kraftwerk › Einstellungen.</p>`}
             ${p.kw_grid ? live(fl.grid == null ? "kein Wert" : `jetzt ${this._kwFmt(Math.abs(fl.grid))} ${fl.grid > 5 ? "Bezug" : fl.grid < -5 ? "Einspeisung" : "ausgeglichen"}`, fl.grid > 5 ? "#8b5cf6" : "#10b981") : ""}` };
       case "kwbatt":
         return { icon: "mdi:home-battery-outline", c: "#ec4899", title: "Batterie", sub: "Kraftwerk · Leistung jetzt",
           body: `<p class="muted">Lade-/Entladeleistung des Speichers mit Vorzeichen (meist + = Entladen, − = Laden) und der Ladestand in %.</p>
             <div class="field"><span><ha-icon icon="mdi:home-battery-outline"></ha-icon> Batterie-Leistung</span>${this._picker("kw_battery", p.kw_battery)}</div>
-            <div class="wxrows">${row("kwb1", "Vorzeichen umdrehen", "an, wenn Laden positiv angezeigt wird", sw("kw_battery_invert"), "Schalte das an, wenn unten „entlädt“ steht, während der Speicher bei Sonne lädt.")}</div>
+            ${this._expertOn("kraftwerk") || p.kw_battery_invert ? `<div class="wxrows">${row("kwb1", "Vorzeichen umdrehen", "an, wenn Laden positiv angezeigt wird", sw("kw_battery_invert"), "Schalte das an, wenn unten „entlädt“ steht, während der Speicher bei Sonne lädt.")}</div>` : ""}
             <div class="field"><span><ha-icon icon="mdi:battery-50"></ha-icon> Ladestand (%)</span>${this._picker("kw_battery_soc", p.kw_battery_soc)}</div>
             ${p.kw_battery ? live(`${fl.soc != null ? `${fmt(fl.soc, 0)} % · ` : ""}${fl.batt == null ? "kein Wert" : fl.batt > 5 ? `entlädt ${this._kwFmt(fl.batt)}` : fl.batt < -5 ? `lädt ${this._kwFmt(-fl.batt)}` : "Ruhe"}`, "#ec4899") : ""}` };
       case "kwhome":
@@ -3281,7 +3282,7 @@ class HauswerkPanel extends HTMLElement {
       { g: "Profile", id: "rwp::tag", icon: "mdi:plus", c: "#0ea5e9", title: "Neues Profil", sum: "z. B. für eine Fassade oder das Schlafzimmer – startet als Kopie von „Standard“", words: "profil verhalten neu anlegen kopie" },
       { g: "Allgemein", id: "rwstorm", icon: "mdi:weather-windy-variant", c: "#ef4444", title: "Sturmschutz",
         sum: p.rw_storm !== false ? `hoch ab ${fmt(p.storm_kmh ?? 70, 0)} km/h Böen${s.gust != null ? ` · jetzt ${fmt(s.gust, 0)} km/h` : ""}` : "Aus", words: "sturm wind böen schutz" },
-      { g: "Allgemein", id: "rwrecovery", icon: "mdi:restart", c: "#64748b", title: "Nach Neustart",
+      { g: "Allgemein", id: "rwrecovery", x: true, icon: "mdi:restart", c: "#64748b", title: "Nach Neustart",
         sum: { never: "nichts nachholen", outage: "verpasste Wechsel nachholen", always: "immer auf Sollstellung fahren" }[p.rw_recovery || "never"], words: "neustart stromausfall nachholen recovery" },
       { g: "Allgemein", act: "rw-log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll",
         sum: "Fahrten, Übersteuerungen von Hand und Einstellungs-Änderungen von Rollwerk", words: "protokoll log fahrten verlauf änderungen" },
@@ -3351,7 +3352,7 @@ class HauswerkPanel extends HTMLElement {
       d.prof = clone(profiles[pid] || { ...(profiles.standard || Object.values(profiles)[0] || {}), name: "Neues Profil" });
     }
     const p = d.prof;
-    const ex = this._expertOn();
+    const ex = this._expertOn("rollwerk");
     const dis = this._admin ? "" : "disabled";
     const S = this._hass.states;
     const st = this._rwStatus || {};
@@ -3975,7 +3976,7 @@ class HauswerkPanel extends HTMLElement {
           sum: "Was wann warum entschieden wurde · 14 Tage", words: "protokoll log verlauf ereignisse warum debug" },
         (() => {
           const rd = s.radio || {};
-          return { g: "System", id: "radio", icon: "mdi:access-point-network", c: rd.busy ? "#f97316" : "#64748b", title: "Funk-Auslastung",
+          return { g: "System", id: "radio", x: true, icon: "mdi:access-point-network", c: rd.busy ? "#f97316" : "#64748b", title: "Funk-Auslastung",
             sum: rd.level != null ? `${fmt(rd.level, 0)} % · ${rd.busy ? "ausgelastet – Hauswerk drosselt" : `drosselt ab ${fmt(rd.limit ?? 70, 0)} %`} · ${s.commands_hour ?? 0} Befehle/Std.`
               : (rd.entities || []).length ? "Sensor gerade ohne Wert" : "Kein Duty-Cycle-Sensor gefunden",
             warn: !!rd.busy, words: "funk duty cycle homematic ccu auslastung befehle drosseln" };
@@ -4011,7 +4012,7 @@ class HauswerkPanel extends HTMLElement {
       (() => {
         const dm = s.demand;
         const label = { low: p.demand_action === "off" ? "aus – kein Raum braucht Wärme" : `abgesenkt auf ${fmt(p.demand_low ?? 17)} °C`, raise: "angehoben fürs Vorheizen", normal: "normal – Räume brauchen Wärme" };
-        return { g: "Heizen", id: "demand", icon: "mdi:water-boiler", c: dm?.state === "low" ? "#22c55e" : "#f97316", title: "Wärmeanforderung",
+        return { g: "Heizen", id: "demand", x: true, icon: "mdi:water-boiler", c: dm?.state === "low" ? "#22c55e" : "#f97316", title: "Wärmeanforderung",
           sum: p.demand_entity ? `${this._entityName(p.demand_entity)} · ${dm?.error ? "nicht erreichbar" : label[dm?.state || "normal"]}` : "Aus – Wärmeerzeuger läuft unabhängig",
           words: "vaillant kessel therme wärmepumpe heizung bedarf absenken vorlauf energie sparen" };
       })(),
@@ -4019,7 +4020,7 @@ class HauswerkPanel extends HTMLElement {
       { g: "Heizen", id: "boost", icon: "mdi:rocket-launch-outline", c: "#f43f5e", title: "Boost", sum: `${p.boost_minutes || 30} Min. volle Leistung`, words: "boost schnell" },
       { g: "Heizen", id: "liming", icon: "mdi:water-sync", c: "#38bdf8", title: "Entkalkungsschutz",
         sum: p.liming ? `${["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"][p.liming_day ?? 0]}, ${p.liming_time || "10:00"} Uhr · ${p.liming_minutes || 5} Min.` : "Aus", words: "ventil entkalken festsitzen" },
-      { g: "Heizen", id: "calibration", icon: "mdi:tune-vertical-variant", c: "#a78bfa", title: "Kalibrierung", sum: `Offset höchstens alle ${p.calibration_interval || 10} Min. anpassen`, words: "offset kalibrieren batterie" },
+      { g: "Heizen", id: "calibration", x: true, icon: "mdi:tune-vertical-variant", c: "#a78bfa", title: "Kalibrierung", sum: `Offset höchstens alle ${p.calibration_interval || 10} Min. anpassen`, words: "offset kalibrieren batterie" },
       ...rooms.map((r) => ({ g: "Räume", room: r, icon: roomIcon(r), c: this._roomColor(r.id), title: r.name,
         sum: `${TYPES[r.type].label} · ${(r.climates || []).length}× Thermostat · ${this._planLabel(r)}`, off: r.enabled === false, words: "raum thermostat" })),
     ];
@@ -4196,13 +4197,28 @@ class HauswerkPanel extends HTMLElement {
       : "";
     return `
       ${intro}
+      ${this._expertCard(scope)}
       <div class="setsearch search"><ha-icon icon="mdi:magnify"></ha-icon><input type="search" data-action="set-search" placeholder="Einstellung suchen …" value="${esc(this._setQuery || "")}" autocomplete="off"></div>
       <div id="set-list">${this._settingsList(scope)}</div>`;
   }
 
+  /** Haken „Experteneinstellungen“ oben in den Einstellungen jedes Moduls. */
+  _expertCard(scope) {
+    const mod = EXPERT_MOD[scope];
+    if (!mod) return "";
+    const on = this._expertOn(mod);
+    const name = { haus: "Hauswerk", heizen: "Heizwerk", rollwerk: "Rollwerk", kraftwerk: "Kraftwerk" }[mod];
+    const what = { haus: "Funk-Auslastung", heizen: "Wärmeanforderung, Kalibrierung und im Raum: Regelung im Detail, Fenster-Feinheiten", rollwerk: "Nach Neustart und im Profil alle Einstellungen der Cover Control Automation", kraftwerk: "getrennte Einspeisung und Vorzeichen umdrehen" }[mod];
+    return `<button class="xcard ${on ? "on" : ""}" data-action="expert-mod" data-mod="${mod}" role="switch" aria-checked="${on}">
+      <span class="xc-box" aria-hidden="true">${on ? "✓" : ""}</span>
+      <span class="grow"><b>Experteneinstellungen</b><small>${on ? `Alle Einstellungen von ${name} sichtbar` : `Blendet ein: ${what}`}</small></span>
+      <ha-icon class="xc-ic" icon="mdi:school-outline"></ha-icon></button>`;
+  }
+
   _settingsList(scope = this._tab === "house" ? "house" : this._tab === "shutset" ? "rw" : this._tab === "kwset" ? "kw" : "heat") {
     const q = (this._setQuery || "").toLowerCase().trim();
-    const rows = this._settingRows(scope).filter((r) => !q || `${r.g} ${r.title} ${r.sum} ${r.words}`.toLowerCase().includes(q));
+    const ex = this._expertOn(EXPERT_MOD[scope] || "haus");
+    const rows = this._settingRows(scope).filter((r) => (!r.x || ex) && (!q || `${r.g} ${r.title} ${r.sum} ${r.words}`.toLowerCase().includes(q)));
     if (!rows.length) return `<section class="card empty small"><p>Nichts gefunden für „${esc(q)}“.</p></section>`;
     const row = (r) => {
       const attrs = r.soon
@@ -5140,15 +5156,30 @@ class HauswerkPanel extends HTMLElement {
     return { icon: "mdi:cog", c: "#94a3b8", title: "Einstellung", body: "" };
   }
   // ------------------------------------------------------------ Raum-Dialog
-  _expertOn() {
-    if (this._expert == null) {
+  /** Experteneinstellungen je Modul ("haus", "heizen", "rollwerk", "kraftwerk"), gemerkt je Gerät. */
+  _expertOn(mod = "heizen") {
+    if (!this._expert || typeof this._expert !== "object") this._expert = {};
+    if (this._expert[mod] == null) {
       try {
-        this._expert = (localStorage.getItem("hauswerk.experte") ?? localStorage.getItem("heizwerk.experte")) === "1";
+        const own = localStorage.getItem(`hauswerk.experte.${mod}`);
+        // Früher galt ein Schalter für alles: Heizwerk und Rollwerk übernehmen ihn einmalig
+        const old = ["heizen", "rollwerk"].includes(mod) ? localStorage.getItem("hauswerk.experte") ?? localStorage.getItem("heizwerk.experte") : null;
+        this._expert[mod] = (own ?? old) === "1";
       } catch (e) {
-        this._expert = false;
+        this._expert[mod] = false;
       }
     }
-    return this._expert;
+    return this._expert[mod];
+  }
+
+  _setExpert(mod, on) {
+    this._expertOn(mod);
+    this._expert[mod] = !!on;
+    try {
+      localStorage.setItem(`hauswerk.experte.${mod}`, on ? "1" : "0");
+    } catch (err) {
+      /* ohne Speicher: gilt bis zum Neuladen */
+    }
   }
 
   // ------------------------------------------------------------ Raum-Assistent
@@ -5395,7 +5426,7 @@ class HauswerkPanel extends HTMLElement {
     const hint = `<p class="muted small"><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon>Leere Felder nutzen die Werte für ${TYPES[r.type].label} (grau).</p>`;
     const guessed = roomIcon({ ...r, icon: null });
     // Experten-Einstellungen nur auf Wunsch (gemerkt je Gerät)
-    const ex = this._expertOn();
+    const ex = this._expertOn("heizen");
     const expertHint = (keys) => {
       const n = keys.filter((k) => r[k] != null && r[k] !== "" && r[k] !== false && !(Array.isArray(r[k]) && !r[k].length)).length;
       return `<button class="xhint" data-action="expert"><ha-icon icon="mdi:school-outline"></ha-icon><span>${n ? `${n} Experten-Einstellung${n > 1 ? "en" : ""} aktiv` : "Weitere Einstellungen für Experten"}</span><span class="grow"></span>Anzeigen<ha-icon icon="mdi:chevron-right"></ha-icon></button>`;
@@ -6448,14 +6479,16 @@ class HauswerkPanel extends HTMLElement {
         }
         break;
       case "expert":
-        this._expert = !this._expertOn();
-        try {
-          localStorage.setItem("hauswerk.experte", this._expert ? "1" : "0");
-        } catch (err) {
-          /* ohne Speicher: gilt bis zum Neuladen */
-        }
+        this._setExpert("heizen", !this._expertOn("heizen"));
         this._renderDialog();
         break;
+      case "expert-mod": {
+        const mod = el.dataset.mod;
+        this._setExpert(mod, !this._expertOn(mod));
+        this._setQuery = this._setQuery || "";
+        this._renderMain();
+        break;
+      }
       case "hints-open":
         this._openPop("hints");
         break;
@@ -7100,12 +7133,7 @@ class HauswerkPanel extends HTMLElement {
         break;
       }
       case "rw-expert":
-        this._expert = !this._expertOn();
-        try {
-          localStorage.setItem("hauswerk.experte", this._expert ? "1" : "0");
-        } catch (err) {
-          /* ohne Speicher: gilt bis zum Neuladen */
-        }
+        this._setExpert("rollwerk", !this._expertOn("rollwerk"));
         this._renderPop();
         break;
       case "rwp-del-no":
@@ -7232,6 +7260,7 @@ class HauswerkPanel extends HTMLElement {
 
 /* Eigenes Zeichen: Flamme in einem Thermostat-Ring */
 // Symbole der Module – gleiche Hausform wie das Hauswerk-Logo, eigene Farbe und eigenes Innenleben
+const EXPERT_MOD = { house: "haus", heat: "heizen", rw: "rollwerk", kw: "kraftwerk" };
 const MODULE_LOGOS = {
   heizen: `<svg viewBox="0 0 48 48" aria-hidden="true">
   <defs><linearGradient id="hwlg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fdba74"/><stop offset="1" stop-color="#c2410c"/></linearGradient></defs>
@@ -8006,6 +8035,14 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .wtools { display:inline-flex; gap:2px; }
 .wdrag { cursor:grab; touch-action:none; }
 .dbar .dpre { background:repeating-linear-gradient(135deg, color-mix(in srgb, var(--pc) 85%, transparent) 0 3px, color-mix(in srgb, var(--pc) 30%, transparent) 3px 6px) !important; opacity:1; }
+.xcard { display:flex; align-items:center; gap:12px; width:100%; margin:0 0 12px; padding:12px 14px; border-radius:14px; border:1px solid var(--line); background:var(--card); color:inherit; font:inherit; text-align:left; cursor:pointer; }
+.xcard b { display:block; font-size:14px; }
+.xcard small { display:block; color:var(--muted); font-size:12px; margin-top:2px; }
+.xcard .xc-box { width:22px; height:22px; flex:none; border-radius:6px; border:2px solid var(--muted); display:grid; place-items:center; font-size:15px; font-weight:800; line-height:1; color:#fff; }
+.xcard .xc-ic { --mdc-icon-size:20px; color:var(--muted); flex:none; }
+.xcard.on { border-color:color-mix(in srgb, var(--accent) 55%, transparent); background:color-mix(in srgb, var(--accent) 8%, var(--card)); }
+.xcard.on .xc-box { background:var(--accent); border-color:var(--accent); }
+.xcard.on .xc-ic { color:var(--accent); }
 .rs-legend { display:flex; flex-wrap:wrap; gap:4px 12px; margin-top:5px; }
 .rs-pre, .rs-abs { display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted); }
 .rs-abs i { width:14px; height:8px; border-radius:2px; flex:none; background:repeating-linear-gradient(135deg, #64748b 0 3px, color-mix(in srgb, #64748b 30%, transparent) 3px 6px); }

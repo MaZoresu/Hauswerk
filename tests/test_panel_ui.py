@@ -246,6 +246,8 @@ def test_jedes_widget_hinzufuegen(panel):
 
 
 def _settings_pops(panel, view):
+    # mit Experteneinstellungen, damit auch deren Fenster geprüft werden
+    panel.js(f"() => ['haus', 'heizen', 'rollwerk', 'kraftwerk'].forEach((m) => {EL}._setExpert(m, true))")
     panel.view(view)
     return panel.js(f"[...{EL}.shadowRoot.querySelectorAll('.srow[data-action=\"pop-open\"]')].map((x) => x.dataset.pop)")
 
@@ -295,7 +297,7 @@ def test_rollwerk_profile_und_rolllaeden(panel):
     profiles = panel.js(f"Object.keys({EL}._data.rollwerk.profiles)")
     sections = panel.js("RW_SECTIONS.map((x) => x[0])")
     for expert in (False, True):
-        panel.js(f"{EL}._expert = {str(expert).lower()}; localStorage.setItem('hauswerk.experte', '{int(expert)}')")
+        panel.js(f"(on) => {EL}._setExpert('rollwerk', on)", expert)
         for pid in profiles:
             for sec in sections:
                 panel.js(f"(id) => {EL}._openPop(id)", f"rwp:{pid}:{sec}")
@@ -433,6 +435,34 @@ def test_vorheizen_im_tagesplan(panel):
         titles = panel.js(f"[...{EL}.shadowRoot.querySelectorAll('.dbar .dpre')].map((x) => x.title)")
         assert titles and all(t.startswith("Vorheizen ab") for t in titles), (view, titles)
         panel.ok(f"Vorheizen in der Ansicht {view}")
+
+
+@pytest.mark.parametrize("view,mod,rows", [
+    ("house", "haus", ["radio"]), ("settings", "heizen", ["demand", "calibration"]),
+    ("shutset", "rollwerk", ["rwrecovery"]), ("kwset", "kraftwerk", []),
+])
+def test_experte_je_modul(panel, view, mod, rows):
+    """Jedes Modul hat oben in den Einstellungen den Haken „Experteneinstellungen“; nur damit erscheinen dessen Profi-Einstellungen."""
+    panel.js(f"() => ['haus', 'heizen', 'rollwerk', 'kraftwerk'].forEach((m) => {EL}._setExpert(m, false))")
+    panel.view(view)
+    pops = lambda: panel.js(f"[...{EL}.shadowRoot.querySelectorAll('.srow[data-action=\"pop-open\"]')].map((x) => x.dataset.pop)")
+    assert panel.js(f"{EL}.shadowRoot.querySelector('.xcard').dataset.mod") == mod
+    assert not set(rows) & set(pops()), pops()
+    panel.click(".xcard")
+    assert panel.js(f"{EL}._expertOn('{mod}')") is True
+    assert set(rows) <= set(pops()), pops()
+    assert panel.js(f"localStorage.getItem('hauswerk.experte.{mod}')") == "1"
+    # die anderen Module bleiben aus
+    others = [m for m in ("haus", "heizen", "rollwerk", "kraftwerk") if m != mod]
+    assert not any(panel.js(f"{EL}._expertOn('{m}')") for m in others)
+    if mod == "kraftwerk":
+        panel.js(f"() => {EL}._openPop('kwgrid')")
+        panel.wait()
+        assert panel.has('#pop [data-k="kw_grid_invert"], #pop input[data-set="kw_grid_invert"]') or "Vorzeichen umdrehen" in panel.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+        panel.js(f"{EL}._closePop()")
+    panel.click(".xcard")
+    assert not set(rows) & set(pops())
+    panel.ok(f"Experte {mod}")
 
 
 def test_abwesend_im_tagesplan(panel):
