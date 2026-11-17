@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.46.0";
+const VERSION = "0.46.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1108,13 +1108,15 @@ class HauswerkPanel extends HTMLElement {
     const GAP = 40;
     // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
     const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
-    const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66].map((z) => Math.round(z * f * 100) / 100);
+    const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66, ...(["settings", "shutset", "kwset", "house"].includes(this._tab) ? [0.6, 0.55] : [])].map((z) => Math.round(z * f * 100) / 100);
     // so groß wie die Breite erlaubt (mindestens ~820 px Inhaltsbreite), höchstens 140 %
     const maxZ = Math.max(f, Math.min(1.4 * f, (W / 820) * f));
     const zs = ZOOMS.filter((z) => z <= maxZ + 0.001);
     const tab = this._tab;
     // Listen-Seiten dürfen zweispaltig werden (breites Tablet); Kachel-Seiten bleiben einspaltig
-    const ks = ["start", "overview", "shutters", "kwflow"].includes(tab) || W < 900 ? [1] : [1, 2];
+    // Einstellungsseiten immer auf eine Seite (bis zu drei Spalten, notfalls kleiner)
+    const onePage = ["settings", "shutset", "kwset", "house"].includes(tab);
+    const ks = ["start", "overview", "shutters", "kwflow"].includes(tab) || W < 900 ? [1] : onePage && W >= 1100 ? [1, 2, 3] : [1, 2];
     const layout = (z, k) => {
       const colW = (W / z - ((k - 1) * GAP) / z) / k;
       box.style.zoom = z;
@@ -1122,7 +1124,7 @@ class HauswerkPanel extends HTMLElement {
       box.style.height = `${H / z}px`;
       box.style.columnWidth = `${colW}px`;
       box.style.columnGap = `${GAP / z}px`;
-      box.classList.toggle("two", k === 2);
+      box.classList.toggle("two", k >= 2);
       const cols = Math.max(1, Math.round((box.scrollWidth + GAP / z) / (colW + GAP / z)));
       return Math.ceil(cols / k);
     };
@@ -1144,7 +1146,7 @@ class HauswerkPanel extends HTMLElement {
           if (n <= 2 && z2 == null) z2 = z;
           if (n === 1) { z1 = z; break; }
         }
-        if (z1 != null && (z2 == null || z1 >= 1 || z1 >= z2 - 0.11)) opts.push({ z: z1, k, n: 1 });
+        if (z1 != null && (onePage || z2 == null || z1 >= f || z1 >= z2 - 0.11 * f)) opts.push({ z: z1, k, n: 1 });
         else if (z2 != null) opts.push({ z: z2, k, n: 2 });
         else opts.push({ z: zs[zs.length - 1], k, n: layout(zs[zs.length - 1], k) });
       }
@@ -1169,9 +1171,14 @@ class HauswerkPanel extends HTMLElement {
     if (!box) return;
     const n = this._tPages || 1;
     page = Math.max(0, Math.min(n - 1, page));
+    if (page === (this._tPage[this._tab] || 0) && box.scrollLeft === page * (box.clientWidth + 40 / (this._tZoom?.[this._tab] || 1))) return;
     this._tPage[this._tab] = page;
     const z = this._tZoom?.[this._tab] || 1;
-    box.scrollTo({ left: page * (box.clientWidth + 40 / z), behavior: "smooth" });
+    // sofort springen (langsame Tablets ruckeln bei Animationen), kurz einblenden
+    box.scrollLeft = page * (box.clientWidth + 40 / z);
+    box.classList.remove("tflip");
+    void box.offsetWidth;
+    box.classList.add("tflip");
     this.shadowRoot.querySelectorAll("#tdots button").forEach((b, k) => b.classList.toggle("on", k === page));
   }
 
@@ -1190,22 +1197,30 @@ class HauswerkPanel extends HTMLElement {
     window.addEventListener("pointercancel", stop);
   }
 
-  /** Wischen zwischen den Seiten (nicht beim Ziehen von Widgets oder Rollläden). */
+  /** Wischen zwischen den Seiten: wechselt schon während der Bewegung (nicht erst beim Loslassen). */
   _tSwipeStart(e) {
     if (!this._tablet || (this._tPages || 1) < 2) return;
     const path = e.composedPath();
     if (!path.includes(this.shadowRoot.getElementById("main"))) return;
     if (path.some((n) => n.dataset?.drag !== undefined || n.dataset?.rwwin !== undefined || ["INPUT", "SELECT", "TEXTAREA"].includes(n.tagName))) return;
     const x0 = e.clientX, y0 = e.clientY;
-    const up = (ev) => {
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+    let done = false;
+    const move = (ev) => {
+      if (done) return;
       const dx = ev.clientX - x0, dy = ev.clientY - y0;
-      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      if (Math.abs(dx) > 35 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+        done = true;
         this._swiped = Date.now();
         this._tabletGo((this._tPage[this._tab] || 0) + (dx < 0 ? 1 : -1));
       }
     };
+    const up = (ev) => {
+      move(ev);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    window.addEventListener("pointermove", move, { passive: true });
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
   }
@@ -9638,7 +9653,9 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 :host([tablet]) #main { order:1; flex:1; min-height:0; overflow:hidden; position:relative; }
 :host([tablet]) #tdots { order:2; }
 :host([tablet]) #chips { order:3; flex:none; }
-:host([tablet]) .tpages { overflow:hidden; column-fill:auto; }
+:host([tablet]) .tpages { overflow:hidden; column-fill:auto; touch-action:pan-y pinch-zoom; }
+:host([tablet]) .tpages.tflip { animation:tflip .18s ease-out; }
+@keyframes tflip { from { opacity:.35; } to { opacity:1; } }
 :host([tablet]) .tpages article, :host([tablet]) .tpages .wdg, :host([tablet]) .tpages .srow, :host([tablet]) .tpages .hero,
 :host([tablet]) .tpages .card:not(.sgroup) { break-inside:avoid; }
 :host([tablet]) .tpages .sg-h { break-after:avoid; }
@@ -9647,9 +9664,9 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 :host([tablet]) .tpages .rw-area .rw-c { width:300px; }
 :host([tablet]) .tpages h3, :host([tablet]) .tpages .shead, :host([tablet]) .tpages .sub-h { break-after:avoid; }
 .tdots { display:none; }
-:host([tablet]) .tdots { display:flex; justify-content:center; gap:10px; min-height:18px; padding:6px 0 0; }
-.tdots button { all:unset; cursor:pointer; width:10px; height:10px; border-radius:99px; background:var(--track); transition:width .2s, background .2s; }
-.tdots button.on { width:26px; background:var(--accent); }
+:host([tablet]) .tdots { display:flex; justify-content:center; gap:4px; min-height:22px; padding:8px 0 0; }
+.tdots button { all:unset; cursor:pointer; width:12px; height:12px; border-radius:99px; background:var(--track); background-clip:content-box; padding:12px 10px; margin:-12px 0; transition:width .15s; }
+.tdots button.on { width:30px; background:var(--accent); background-clip:content-box; }
 :host([tablet]) .bnav { display:none !important; }
 /* Unterleiste unten: groß zum Antippen */
 :host([tablet]) #chips nav { margin:8px 0 calc(10px + env(safe-area-inset-bottom)); padding:6px; gap:6px; }
@@ -9703,6 +9720,25 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .tstart small { display:block; color:var(--muted); }
 
 /* ---------- Lage-Kachel (Kopf der Module) ---------- */
+/* Tabletmodus: dezent – eine Zeile mit Stand, Hinweise als kleine Zeile, ohne Hintergrundbild */
+:host([tablet]) .brief { padding:10px 14px !important; margin-bottom:10px; border-left-width:3px !important; background:var(--card) !important; color:var(--text) !important; box-shadow:none !important; border-radius:14px; }
+:host([tablet]) .brief.hero::before, :host([tablet]) .brief.hero::after { display:none !important; }
+:host([tablet]) .brief .br-top { align-items:center; gap:12px; }
+:host([tablet]) .brief .br-label { display:none; }
+:host([tablet]) .brief .br-big { font-size:26px; }
+:host([tablet]) .brief .br-big span { font-size:12px; }
+:host([tablet]) .brief .br-h { font-size:15px; font-weight:600; }
+:host([tablet]) .brief .br-h ha-icon { --mdc-icon-size:19px; }
+:host([tablet]) .brief .br-lines { flex-direction:row; flex-wrap:wrap; gap:4px 16px; margin-top:6px; }
+:host([tablet]) .brief .br-l { padding:2px 0; font-size:12.5px; color:var(--muted); }
+:host([tablet]) .brief .br-l:nth-child(n+3) { display:none; }
+:host([tablet]) .brief .br-l .br-go { display:none; }
+:host([tablet]) .brief .br-l > ha-icon:first-child { --mdc-icon-size:15px; }
+:host([tablet]) .brief .br-chips { display:none; }
+:host([tablet]) .brief .wx { padding:6px 10px; background:none; }
+:host([tablet]) .brief .wx ha-icon { --mdc-icon-size:22px; }
+:host([tablet]) .brief .wx small:last-child { display:none; }
+:host([tablet]) .brief .rw-all .secondary { padding:6px 10px; }
 .brief { position:relative; margin-bottom:14px; border-left:4px solid var(--tone) !important; }
 .brief.card { padding:16px 18px; }
 .br-top { display:flex; align-items:flex-start; gap:16px; position:relative; z-index:1; }

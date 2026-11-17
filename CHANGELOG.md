@@ -2,6 +2,16 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.46.1 – 2026-11-17
+
+### Geändert (Tabletmodus)
+- **Kopfkacheln dezent:** schlichte Karte ohne Hintergrundbild, eine Zeile mit dem Stand, darunter höchstens zwei kleine Hinweise; Werte-Chips entfallen.
+- **Einstellungsseiten auf einer Seite:** Heizwerk-, Rollwerk-, Kraftwerk- und Hauswerk-Einstellungen passen immer auf einen Bildschirm – bis zu drei Spalten, notfalls etwas kleiner.
+- **Seitenwechsel reagiert sofort:** Die Seite wechselt schon während der Wischbewegung (nicht erst beim Loslassen) und springt ohne ruckelnde Animation, kurz eingeblendet. Die Punkte unten sind größer zum Antippen.
+
+### Behoben
+- Im Tabletmodus machte die Größe „Groß“ die Seiten kleiner statt größer.
+
 ## 0.46.0 – 2026-11-17
 
 ### Neu

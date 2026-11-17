@@ -556,7 +556,7 @@ def test_tablet_ohne_scrollen(tablet):
         assert p.js("document.scrollingElement.scrollHeight <= innerHeight + 1"), f"{view}: Seite scrollt"
         main = p.js(f"(() => {{ const m = {EL}.shadowRoot.getElementById('main'); return [m.scrollHeight, m.clientHeight]; }})()")
         assert main[0] <= main[1] + 1, f"{view}: Inhalt scrollt {main}"
-        assert p.js(f"{EL}._tPages") <= 2, f"{view}: {p.js(f'{EL}._tPages')} Seiten"
+        assert p.js(f"{EL}._tPages") <= (1 if view in ("shutset", "house") else 2), f"{view}: {p.js(f'{EL}._tPages')} Seiten"
         # Modul-Tasten oben, nur die Unterleiste (Räume · Bericht · Einstellungen) unten
         r = p.js(f"""(() => {{ const r = {EL}.shadowRoot; const m = r.querySelector('.mtabs').getBoundingClientRect();
             const sub = r.querySelector('#chips nav'); return [m.height, m.bottom, r.getElementById('main').getBoundingClientRect().top,
@@ -566,19 +566,22 @@ def test_tablet_ohne_scrollen(tablet):
         if view not in ("start", "house"):
             assert r[4] is not None and r[4] >= r[3], f"{view}: Unterleiste nicht unten {r}"
         p.ok(f"Tablet {view}")
-    # Heizwerk-Einstellungen: zwei Seiten, Punkte und Wischen
-    p.view("settings")
+    # Einstellungen immer auf einer Seite
+    for view in ("settings", "shutset", "kwset", "house"):
+        p.view(view)
+        p.wait(300)
+        assert p.js(f"{EL}._tPages") == 1, f"{view}: mehr als eine Seite"
+    # Bericht: zwei Seiten, Punkte und Wischen (wechselt schon während der Bewegung)
+    p.view("report")
     p.wait(300)
-    if p.js(f"{EL}._tPages") > 1:
-        p.click('#tdots button[data-i="1"]')
-        p.wait(500)
-        assert p.js(f"{EL}._tPage.settings") == 1
-        p.page.mouse.move(600, 400)
-        p.page.mouse.down()
-        p.page.mouse.move(900, 410, steps=5)
-        p.page.mouse.up()
-        p.wait(500)
-        assert p.js(f"{EL}._tPage.settings") == 0
+    assert p.js(f"{EL}._tPages") == 2
+    p.click('#tdots button[data-i="1"]')
+    assert p.js(f"{EL}._tPage.report") == 1
+    p.page.mouse.move(600, 400)
+    p.page.mouse.down()
+    p.page.mouse.move(660, 402, steps=2)
+    assert p.js(f"{EL}._tPage.report") == 0, "Wischen reagiert erst beim Loslassen"
+    p.page.mouse.up()
 
 
 def test_tablet_bildschirmschoner(tablet):
@@ -671,9 +674,11 @@ def test_tablet_sperren_und_groesse(tablet):
     p.js("localStorage.setItem('hauswerk.tablet.lock', '0')")
     # Größe „Groß“ macht im Tablet größer
     p.view("overview")
-    z = p.js(f"{EL}._tFit.overview.z")
+    h = lambda: p.js(f"{EL}.shadowRoot.querySelector('.shead.outer h3').getBoundingClientRect().height")
+    before = h()
     p.js(f"() => {{ localStorage.setItem('hauswerk.groesse', 'l'); {EL}._renderMain(); }}")
-    assert p.js(f"{EL}._tFit.overview.z") > z
+    p.wait(200)
+    assert h() > before * 1.05, "„Groß“ wirkt im Tablet nicht"
     p.js("localStorage.setItem('hauswerk.groesse', 'm')")
 
 
