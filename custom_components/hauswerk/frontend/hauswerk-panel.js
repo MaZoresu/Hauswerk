@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.44.2";
+const VERSION = "0.45.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -135,6 +135,8 @@ const PICKERS = {
   schedule_entity: { scope: "room", multi: false, domains: ["schedule", "calendar", "input_boolean", "binary_sensor"] },
   vacation_calendar: { scope: "settings", multi: false, domains: ["calendar"] },
   weather_entity: { scope: "settings", multi: false, domains: ["weather"] },
+  tablet_wake: { scope: "settings", multi: true, domains: ["binary_sensor", "input_boolean", "switch"] },
+  tablet_calendars: { scope: "settings", multi: true, domains: ["calendar"] },
   import_calendar: { scope: "pop", multi: false, domains: ["calendar"] },
   w_weather: { scope: "pop", multi: false, domains: ["weather"] },
   w_entities: { scope: "pop", multi: true, domains: ["sensor", "binary_sensor", "input_number", "input_select", "counter", "switch", "light", "input_boolean", "script", "scene", "button", "input_button", "fan", "cover", "lock", "media_player"] },
@@ -396,6 +398,8 @@ class HauswerkPanel extends HTMLElement {
     this._hass = hass;
     // Design, Akzentfarbe, Hintergrund und Größe (Hauswerk › Einstellungen › Darstellung)
     this._applyLook(this._pop?.id === "look" ? this._settings : null);
+    // Tablet: Bewegungsmelder weckt den Bildschirmschoner
+    if (!first && this._tablet && this._data) this._wakeCheck(hass);
     if (first) this._init();
     // Kraftwerk: Energiefluss live (Zahlen und Linien austauschen, höchstens jede Sekunde)
     else if (this._tab === "kwflow" && this._data && Date.now() - (this._kwAt || 0) > 1000) {
@@ -625,7 +629,12 @@ class HauswerkPanel extends HTMLElement {
   }
 
   get _admin() {
-    return !!this._data?.is_admin;
+    return !!this._data?.is_admin && !this._tabletLocked();
+  }
+
+  /** Tablet gesperrt: nur bedienen, nichts einstellen (lange auf das Logo drücken entsperrt für 10 Minuten). */
+  _tabletLocked() {
+    return !!this._tablet && this._tabletOpt("lock", "0") === "1" && !(this._unlockUntil > Date.now());
   }
 
   _rooms() {
@@ -690,6 +699,7 @@ class HauswerkPanel extends HTMLElement {
       root.addEventListener("pointerdown", (e) => this._wDragStart(e));
       root.addEventListener("pointerdown", (e) => this._rwWinDrag(e));
       root.addEventListener("pointerdown", (e) => this._tSwipeStart(e));
+      root.addEventListener("pointerdown", (e) => this._unlockPress(e));
       if (!this._keyBound) {
         this._keyBound = true;
         window.addEventListener("keydown", (e) => {
@@ -1010,6 +1020,16 @@ class HauswerkPanel extends HTMLElement {
     }
     this._keepAwake();
     this._saverTimer = setInterval(() => this._saverTick(), 10000);
+    // Fully Kiosk: eigene Bewegungserkennung (Kamera) weckt ebenfalls
+    try {
+      window.__hauswerkWake = () => this._wake();
+      if (window.fully && !this._fullyBound) {
+        this._fullyBound = true;
+        window.fully.bind("onMotion", "window.__hauswerkWake && window.__hauswerkWake()");
+      }
+    } catch (e) {
+      /* Fully ohne JavaScript-Schnittstelle */
+    }
   }
 
   /** Seitenleiste von Home Assistant ausblenden (Einstellung „immer ausblenden“ dieses Browsers) – beim Ausschalten wie vorher. */
@@ -1060,7 +1080,16 @@ class HauswerkPanel extends HTMLElement {
         <ha-icon class="xc-ic" icon="mdi:tablet"></ha-icon></button>
       ${on ? `
       <div class="field"><span>Bildschirmschoner nach</span><div class="segs small">${[["0", "Aus"], ["1", "1 Min."], ["2", "2 Min."], ["5", "5 Min."], ["10", "10 Min."]].map(([v, l]) => opt("saver", v, l, saver)).join("")}</div></div>
-      <p class="muted small">Abgedunkelt mit großer Uhr, Datum, Wetter, kurzem Hausstand und Hinweisen – nachts (22–6 Uhr) noch dunkler; der Inhalt wandert jede Minute ein Stück gegen Einbrennen. Dabei geht es zurück zur Startseite. Antippen weckt auf, ohne etwas zu schalten.</p>
+      <p class="muted small">Abgedunkelt mit großer Uhr, Datum, Wetter mit Vorhersage, Hausstand, nächsten Rollladen-Fahrten, Terminen und Hinweisen; Warnungen erscheinen groß. Der Inhalt wandert jede Minute ein Stück gegen Einbrennen. Dabei geht es zurück zur Startseite. Antippen weckt auf, ohne etwas zu schalten.</p>
+      <div class="field"><span>Nachts</span><div class="segs small">${[["dim", "Abgedunkelt"], ["black", "Schwarz, kleine Uhr"], ["off", "Display aus"]].map(([v, l]) => opt("night", v, l, this._tabletOpt("night", "dim"))).join("")}</div></div>
+      <div class="field"><span>Nacht von … bis</span><div class="segs small">${["20", "21", "22", "23", "0"].map((v) => opt("night_from", v, `${v} Uhr`, this._tabletOpt("night_from", "22"))).join("")}</div>
+        <div class="segs small" style="margin-top:6px">${["5", "6", "7", "8"].map((v) => opt("night_to", v, `${v} Uhr`, this._tabletOpt("night_to", "6"))).join("")}</div></div>
+      ${this._tabletOpt("night", "dim") === "off" && !window.fully ? `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>„Display aus“ geht nur in Fully mit JavaScript-Schnittstelle – sonst wie „Schwarz“.</p>` : ""}
+      <div class="field"><span><ha-icon icon="mdi:motion-sensor"></ha-icon> Aufwecken bei Bewegung (z. B. Bewegungsmelder im Flur)</span>${this._picker("tablet_wake", this._settings?.tablet_wake || [])}</div>
+      <p class="muted small">Gilt für alle Tablets; Bewegung hält den Bildschirm außerdem wach. In Fully kann zusätzlich die Bewegungserkennung der Kamera wecken (Fully › Bewegungserkennung).</p>
+      <div class="field"><span><ha-icon icon="mdi:calendar"></ha-icon> Termine im Bildschirmschoner (z. B. Müllabfuhr)</span>${this._picker("tablet_calendars", this._settings?.tablet_calendars || [])}</div>
+      <label class="check"><span><b>Tablet sperren</b><small>Nur bedienen – Temperatur, Rollläden, Anwesenheit –, nichts einstellen. Entsperren: 3 Sekunden auf das Hauswerk-Logo oben links drücken (10 Minuten).</small></span>
+        <button class="seg ${this._tabletOpt("lock", "0") === "1" ? "on" : ""}" data-action="tablet-opt" data-k="lock" data-v="${this._tabletOpt("lock", "0") === "1" ? "0" : "1"}">${this._tabletOpt("lock", "0") === "1" ? "An" : "Aus"}</button></label>
       <label class="check"><span><b>Seitenleiste von Home Assistant ausblenden</b><small>Mehr Platz für Hauswerk. Über ☰ oben links lässt sie sich jederzeit kurz öffnen; ohne Tabletmodus kommt sie wie vorher zurück.</small></span>
         <button class="seg ${this._tabletOpt("sidebar", "1") === "1" ? "on" : ""}" data-action="tablet-opt" data-k="sidebar" data-v="${this._tabletOpt("sidebar", "1") === "1" ? "0" : "1"}">${this._tabletOpt("sidebar", "1") === "1" ? "An" : "Aus"}</button></label>
       ${window.fully ? `<label class="check"><span><b>Fully: Display mit abdunkeln</b><small>Senkt die Helligkeit über Fully, solange der Bildschirmschoner läuft.</small></span>
@@ -1077,9 +1106,11 @@ class HauswerkPanel extends HTMLElement {
     const W = main.clientWidth, H = main.clientHeight;
     if (!W || !H) return;
     const GAP = 40;
-    const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66];
+    // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
+    const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
+    const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66].map((z) => Math.round(z * f * 100) / 100);
     // so groß wie die Breite erlaubt (mindestens ~820 px Inhaltsbreite), höchstens 140 %
-    const maxZ = Math.max(1, Math.min(1.4, W / 820));
+    const maxZ = Math.max(f, Math.min(1.4 * f, (W / 820) * f));
     const zs = ZOOMS.filter((z) => z <= maxZ + 0.001);
     const tab = this._tab;
     // Listen-Seiten dürfen zweispaltig werden (breites Tablet); Kachel-Seiten bleiben einspaltig
@@ -1095,7 +1126,7 @@ class HauswerkPanel extends HTMLElement {
       const cols = Math.max(1, Math.round((box.scrollWidth + GAP / z) / (colW + GAP / z)));
       return Math.ceil(cols / k);
     };
-    const key = `${W}x${H}`;
+    const key = `${W}x${H}x${f}`;
     const prev = this._tFit?.[tab];
     let best = null;
     // schneller Weg: letzte Wahl gilt noch (gleiche Größe, nicht mehr Seiten als vorher)
@@ -1144,6 +1175,21 @@ class HauswerkPanel extends HTMLElement {
     this.shadowRoot.querySelectorAll("#tdots button").forEach((b, k) => b.classList.toggle("on", k === page));
   }
 
+  /** Gesperrtes Tablet: 3 Sekunden auf das Hauswerk-Logo drücken entsperrt für 10 Minuten. */
+  _unlockPress(e) {
+    if (!this._tablet || this._tabletOpt("lock", "0") !== "1") return;
+    if (!e.composedPath().some((n) => n.classList?.contains("brand"))) return;
+    const timer = setTimeout(() => {
+      this._unlockUntil = Date.now() + 10 * 60000;
+      this._toast("Für 10 Minuten entsperrt");
+      this._renderMain();
+      setTimeout(() => this._renderMain(), 10 * 60000 + 500);
+    }, 3000);
+    const stop = () => { clearTimeout(timer); window.removeEventListener("pointerup", stop); window.removeEventListener("pointercancel", stop); };
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+  }
+
   /** Wischen zwischen den Seiten (nicht beim Ziehen von Widgets oder Rollläden). */
   _tSwipeStart(e) {
     if (!this._tablet || (this._tPages || 1) < 2) return;
@@ -1165,6 +1211,24 @@ class HauswerkPanel extends HTMLElement {
   }
 
   // ------------------------------------------------------------ Bildschirmschoner
+  /** Bewegung (Melder aus Home Assistant oder Fully): aufwecken bzw. wach halten. */
+  _wake() {
+    this._lastAct = Date.now();
+    const el = this.shadowRoot?.getElementById("saver");
+    if (el && !el.hidden) this._saverHide();
+  }
+
+  _wakeCheck(hass) {
+    const ids = this._data.settings.tablet_wake || [];
+    if (!ids.length) return;
+    const on = ids.filter((id) => ["on", "detected", "home", "open", "true"].includes(String(hass.states[id]?.state).toLowerCase()));
+    const sig = on.join(",");
+    if (sig === this._wakeSig) return;
+    const fresh = on.some((id) => !(this._wakeSig || "").split(",").includes(id));
+    this._wakeSig = sig;
+    if (fresh) this._wake();
+  }
+
   _saverTick() {
     const min = Number(this._tabletOpt("saver", "2"));
     const el = this.shadowRoot.getElementById("saver");
@@ -1182,18 +1246,39 @@ class HauswerkPanel extends HTMLElement {
     this._wEdit = false;
     if (this._tab !== "start" && !(this._tab === "plans" && this._plan?.dirty)) this._setView("start");
     this._tPage.start = 0;
-    this._saverSeen = new Set(this._hints().map((h) => `${h.text}|${h.sub}`));
+    this._saverSeen = new Set([...this._hints(), ...this._urgent()].map((h) => `${h.text}|${h.sub}`));
     this._saverNew = {};
+    this._saverAlert = false;
     el.hidden = false;
+    this._calLoad();
     this._saverRender();
-    // Fully Kiosk: Display zusätzlich abdunkeln (JavaScript-Schnittstelle in Fully einschalten)
     try {
-      if (window.fully && this._tabletOpt("fully", "1") === "1") {
-        this._fullyBright = Number(window.fully.getScreenBrightness());
-        if (this._fullyBright > 0) window.fully.setScreenBrightness(Math.max(1, Math.round(this._fullyBright * (this._saverNight() ? 0.05 : 0.15))));
-      }
+      if (window.fully) this._fullyBright = Number(window.fully.getScreenBrightness());
     } catch (e) {
       this._fullyBright = null;
+    }
+    this._saverLight();
+  }
+
+  /** Display über Fully: abdunkeln, nachts ggf. aus, bei neuem wichtigem Hinweis hell. */
+  _saverLight() {
+    const f = window.fully;
+    if (!f) return;
+    try {
+      const night = this._saverNight();
+      const mode = this._tabletOpt("night", "dim");
+      if (this._saverAlert) {
+        if (this._screenOff) { f.turnScreenOn(); this._screenOff = false; }
+        if (this._fullyBright > 0) f.setScreenBrightness(this._fullyBright);
+      } else if (night && mode === "off") {
+        if (!this._screenOff) { f.turnScreenOff(true); this._screenOff = true; }
+      } else {
+        if (this._screenOff) { f.turnScreenOn(); this._screenOff = false; }
+        if (this._tabletOpt("fully", "1") === "1" && this._fullyBright > 0)
+          f.setScreenBrightness(Math.max(1, Math.round(this._fullyBright * (night ? 0.05 : 0.15))));
+      }
+    } catch (e) {
+      /* Fully nicht erreichbar */
     }
   }
 
@@ -1202,47 +1287,75 @@ class HauswerkPanel extends HTMLElement {
     if (el) el.hidden = true;
     this._lastAct = Date.now();
     try {
+      if (window.fully && this._screenOff) window.fully.turnScreenOn();
       if (window.fully && this._fullyBright > 0) window.fully.setScreenBrightness(this._fullyBright);
     } catch (e) {
       /* Fully nicht erreichbar */
     }
+    this._screenOff = false;
     this._fullyBright = null;
   }
 
   _saverNight() {
     const h = new Date().getHours();
-    return h >= 22 || h < 6;
+    const from = Number(this._tabletOpt("night_from", "22")), to = Number(this._tabletOpt("night_to", "6"));
+    return from > to ? h >= from || h < to : h >= from && h < to;
+  }
+
+  /** Wichtiges für den Bildschirmschoner: Warnungen, Sturm, offenes Fenster bei Regen. */
+  _urgent() {
+    const out = this._hints().filter((h) => h.lvl === "warn").map((h) => ({ ...h }));
+    if (this._rwStatus?.storm) out.unshift({ lvl: "warn", live: true, icon: "mdi:weather-windy-variant", text: "Sturm", sub: "Rollläden fahren hoch" });
+    const wid = this._data.settings.weather_entity || Object.keys(this._hass.states).find((e) => e.startsWith("weather."));
+    const rain = ["rainy", "pouring", "lightning-rainy", "snowy-rainy", "hail", "snowy"].includes(this._hass.states[wid]?.state);
+    if (rain) for (const o of this._openWindows()) out.unshift({ lvl: "warn", live: true, icon: "mdi:weather-pouring", text: "Fenster offen – es regnet", sub: `${o.room.name} · ${this._entityName(o.id)}` });
+    return out;
+  }
+
+  /** Kalender-Termine für den Bildschirmschoner (heute und morgen), höchstens alle 15 Minuten neu. */
+  async _calLoad(force = false) {
+    const ids = this._data?.settings?.tablet_calendars || [];
+    if (!ids.length || !this._hass?.callApi) { this._cal = []; return; }
+    if (!force && this._calAt && Date.now() - this._calAt < 15 * 60000) return;
+    this._calAt = Date.now();
+    const start = new Date(), end = new Date();
+    end.setDate(end.getDate() + 2);
+    end.setHours(0, 0, 0, 0);
+    const list = [];
+    for (const id of ids) {
+      try {
+        const ev = await this._hass.callApi("GET", `calendars/${id}?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`);
+        for (const e of ev || []) list.push({ title: e.summary || "Termin", start: e.start?.dateTime || e.start?.date || e.start, allDay: !e.start?.dateTime && !!e.start?.date });
+      } catch (err) {
+        /* Kalender nicht lesbar */
+      }
+    }
+    this._cal = list.sort((a, b) => String(a.start).localeCompare(String(b.start))).slice(0, 4);
+    this._saverRender();
   }
 
   _saverRender() {
     const el = this.shadowRoot.getElementById("saver");
     if (!el || el.hidden || !this._data) return;
+    this._calLoad();
     const now = new Date();
+    const t = Date.now();
     const time = now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
     const date = now.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
+    const night = this._saverNight();
+    const mode = this._tabletOpt("night", "dim");
     const w = this._weather();
-    const f = this._facts();
-    const parts = [];
-    if (f.heating) parts.push(["mdi:fire", `${f.heating} ${f.heating === 1 ? "Raum heizt" : "Räume heizen"}`]);
-    if (f.open) parts.push(["mdi:window-open-variant", `${f.open} Fenster offen`]);
-    const covers = this._data.rollwerk ? this._rwCovers() : [];
-    if (covers.length) {
-      const pos = covers.map((c) => this._rwPos(c.st)).filter((x) => x != null);
-      parts.push(["mdi:window-shutter", `Rollläden: ${pos.filter((x) => x >= 95).length} offen · ${pos.filter((x) => x <= 5).length} zu`]);
-    }
-    const set = this._data.settings || {};
-    if ((set.kw_solar || []).length && this._kwFlow) {
-      const fl = this._kwFlow();
-      if (fl.solar != null) parts.push(["mdi:solar-power-variant", `Solar ${this._kwFmt(fl.solar)}`]);
-    }
-    if (this._status?.away) parts.push(["mdi:home-export-outline", "Niemand zu Hause"]);
-    const hints = this._hints();
-    const t = Date.now();
-    for (const h of hints) {
+    // neue Hinweise merken (5 Minuten hervorgehoben)
+    const urgent = this._urgent();
+    const hints = this._hints().filter((h) => h.lvl !== "warn");
+    for (const h of [...urgent, ...hints]) {
       const k = `${h.text}|${h.sub}`;
       if (!this._saverSeen.has(k)) { this._saverSeen.add(k); this._saverNew[k] = t; }
     }
-    const shown = hints.slice(0, 3);
+    const fresh = (h) => { const x = this._saverNew[`${h.text}|${h.sub}`]; return x && t - x < 5 * 60000; };
+    const alert = urgent.some(fresh);
+    if (alert !== this._saverAlert) { this._saverAlert = alert; this._saverLight(); }
+    else if (window.fully) this._saverLight();
     // gegen Einbrennen: Inhalt jede Minute ein wenig verschieben
     const minute = Math.floor(t / 60000);
     if (minute !== this._saverMin) {
@@ -1250,21 +1363,71 @@ class HauswerkPanel extends HTMLElement {
       this._saverShift = [Math.round((Math.random() - 0.5) * 8), Math.round((Math.random() - 0.5) * 8)];
     }
     const [dx, dy] = this._saverShift || [0, 0];
-    el.classList.toggle("night", this._saverNight());
+    el.classList.toggle("night", night);
+    el.classList.toggle("black", night && mode !== "dim");
+    el.classList.toggle("alert", alert);
+    const dark = night && mode !== "dim";
+    // nachts nur Akutes (Sturm, Regen bei offenem Fenster) und Neues
+    const shownUrgent = dark ? urgent.filter((h) => h.live || fresh(h)) : urgent;
+    const more = (n, one, many) => `<small class="sv-more">und ${n} ${n === 1 ? one : many}</small>`;
+    const urgentHtml = shownUrgent.length ? `<div class="sv-urgent">${shownUrgent.slice(0, 2).map((h) => `<div class="sv-u ${fresh(h) ? "new" : ""}"><ha-icon icon="${h.icon}"></ha-icon><span><b>${esc(h.text)}</b>${h.sub ? `<small>${esc(h.sub)}</small>` : ""}</span></div>`).join("")}${shownUrgent.length > 2 ? more(shownUrgent.length - 2, "weitere Warnung", "weitere Warnungen") : ""}</div>` : "";
+    // Nacht „schwarz“ bzw. „Display aus“: nur kleine Uhr und Warnungen
+    if (dark) {
+      el.innerHTML = `<div class="sv-in" style="transform:translate(${dx}vw, ${dy}vh)"><div class="sv-time small">${time}</div>${urgentHtml}</div>`;
+      return;
+    }
+    const facts = [];
+    const f = this._facts();
+    if (f.heating) facts.push(["mdi:fire", `${f.heating} ${f.heating === 1 ? "Raum heizt" : "Räume heizen"}`]);
+    if (f.open) facts.push(["mdi:window-open-variant", `${f.open} Fenster offen`]);
+    const covers = this._data.rollwerk ? this._rwCovers() : [];
+    if (covers.length) {
+      const pos = covers.map((c) => this._rwPos(c.st)).filter((x) => x != null);
+      facts.push(["mdi:window-shutter", `Rollläden: ${pos.filter((x) => x >= 95).length} offen · ${pos.filter((x) => x <= 5).length} zu`]);
+    }
+    const set = this._data.settings || {};
+    if ((set.kw_solar || []).length) {
+      const fl = this._kwFlow();
+      if (fl.solar != null) facts.push(["mdi:solar-power-variant", `Solar ${this._kwFmt(fl.solar)}`]);
+    }
+    if (this._status?.away) facts.push(["mdi:home-export-outline", "Niemand zu Hause"]);
+    // Vorhersage der nächsten Stunden
+    let fcHtml = "";
+    const wid = set.weather_entity || Object.keys(this._hass.states).find((e) => e.startsWith("weather."));
+    if (wid && Number(this._hass.states[wid]?.attributes?.supported_features || 0) & 2) {
+      const fc = this._forecast(wid, "hourly");
+      const items = (fc?.list || []).filter((x) => new Date(x.datetime) > now - 30 * 60000).slice(0, 6);
+      if (items.length) fcHtml = `<div class="sv-fc">${items.map((x) => `<span><small>${new Date(x.datetime).toLocaleTimeString("de-DE", { hour: "2-digit" })}</small><ha-icon icon="${(WEATHER[x.condition] || ["mdi:weather-partly-cloudy"])[0]}"></ha-icon><b>${fmt(x.temperature, 0)}°</b></span>`).join("")}</div>`;
+    }
+    // Nächste Rollladen-Fahrten (gleiche Zeit zusammengefasst)
+    const moves = new Map();
+    for (const c of covers) {
+      const n = c.rs?.next;
+      if (!n) continue;
+      if (!moves.has(n)) moves.set(n, []);
+      moves.get(n).push(this._entityName(c.id));
+    }
+    const moveList = [...moves.entries()].sort((a, b) => a[0].replace("ca. ", "").localeCompare(b[0].replace("ca. ", ""))).slice(0, 2);
+    const day = (d) => { const x = new Date(d); const td = new Date(); td.setHours(0, 0, 0, 0); const diff = Math.round((new Date(x.getFullYear(), x.getMonth(), x.getDate()) - td) / 86400000); return diff <= 0 ? "Heute" : diff === 1 ? "Morgen" : x.toLocaleDateString("de-DE", { weekday: "short" }); };
+    const cal = (this._cal || []).filter((e) => e.allDay || new Date(e.start) > now - 30 * 60000);
+    const side = [
+      ...moveList.map(([n, names]) => `<div class="sv-row"><ha-icon icon="mdi:window-shutter"></ha-icon><span><b>${esc(n)}</b><small>${esc(names.slice(0, 3).join(", "))}${names.length > 3 ? ` +${names.length - 3}` : ""}</small></span></div>`),
+      ...cal.slice(0, 3).map((e) => `<div class="sv-row"><ha-icon icon="mdi:calendar"></ha-icon><span><b>${day(e.start)}${e.allDay ? "" : ` ${new Date(e.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</b><small>${esc(e.title)}</small></span></div>`),
+    ];
+    const smallHints = hints.slice(0, urgent.length ? 1 : 2);
     el.innerHTML = `
       <div class="sv-in" style="transform:translate(${dx}vw, ${dy}vh)">
         <div class="sv-time">${time}</div>
         <div class="sv-date">${esc(date)}</div>
-        ${w ? `<div class="sv-wx"><ha-icon icon="${w.icon}"></ha-icon><b>${fmt(w.temp)}°</b><span>${esc(w.label)}${w.extra ? ` · ${esc(w.extra)}` : ""}</span></div>` : ""}
-        ${parts.length ? `<div class="sv-facts">${parts.map(([i, l]) => `<span><ha-icon icon="${i}"></ha-icon>${esc(l)}</span>`).join("")}</div>` : ""}
-        ${shown.length ? `<div class="sv-hints">${shown.map((h) => {
-          const k = `${h.text}|${h.sub}`;
-          const fresh = this._saverNew[k] && t - this._saverNew[k] < 5 * 60000;
-          return `<div class="sv-h ${h.lvl} ${fresh ? "new" : ""}"><ha-icon icon="${h.icon}"></ha-icon><span><b>${esc(h.text)}</b>${h.sub ? `<small>${esc(h.sub)}</small>` : ""}</span></div>`;
-        }).join("")}${hints.length > shown.length ? `<small class="sv-more">und ${hints.length - shown.length} weitere</small>` : ""}</div>` : ""}
+        ${w ? `<div class="sv-wx"><ha-icon icon="${w.icon}"></ha-icon><b>${fmt(w.temp)}°</b><span>${esc(w.label)}</span>${fcHtml}</div>` : ""}
+        ${facts.length ? `<div class="sv-facts">${facts.map(([i, l]) => `<span><ha-icon icon="${i}"></ha-icon>${esc(l)}</span>`).join("")}</div>` : ""}
+        ${urgentHtml}
+        ${side.length ? `<div class="sv-side">${side.join("")}</div>` : ""}
+        ${smallHints.length ? `<div class="sv-hints">${smallHints.map((h) => `<div class="sv-h ${fresh(h) ? "new" : ""}"><ha-icon icon="${h.icon}"></ha-icon><span><b>${esc(h.text)}</b>${h.sub ? `<small>${esc(h.sub)}</small>` : ""}</span></div>`).join("")}${hints.length > smallHints.length ? more(hints.length - smallHints.length, "weiterer Hinweis", "weitere Hinweise") : ""}</div>` : ""}
         <div class="sv-tap">Antippen zum Aufwecken</div>
       </div>`;
   }
+
 
   // ------------------------------------------------------------ Bausteine
   _chip(mode, label) {
@@ -1324,7 +1487,8 @@ class HauswerkPanel extends HTMLElement {
           <button class="link" data-action="w-edit"><ha-icon icon="${edit ? "mdi:check" : "mdi:pencil-outline"}"></ha-icon>${edit ? "Fertig" : "Anpassen"}</button>` : ""}
       </div>
       ${list.length
-        ? `${edit ? `<p class="muted small whint"><ha-icon icon="mdi:drag"></ha-icon>Am Griff ziehen, um Widgets zu verschieben.</p>` : ""}<div class="wgrid">${list.map((w, i) => this._widget(w, i, edit, list.length)).join("")}</div>`
+        ? `${edit && this._tablet ? `<div class="tstart"><ha-icon icon="mdi:tablet-dashboard"></ha-icon><span class="grow"><b>Startseite im Tabletmodus</b><small>${this._tabletOwn() ? "Eigene Auswahl fürs Tablet – Handy und PC bleiben unverändert." : "Wie auf Handy und PC – Änderungen gelten überall."}</small></span>
+          <div class="segs small"><button class="seg ${this._tabletOwn() ? "" : "on"}" data-action="tstart" data-v="same">Wie am Handy</button><button class="seg ${this._tabletOwn() ? "on" : ""}" data-action="tstart" data-v="own">Eigene</button></div></div>` : ""}${edit ? `<p class="muted small whint"><ha-icon icon="mdi:drag"></ha-icon>Am Griff ziehen, um Widgets zu verschieben.</p>` : ""}<div class="wgrid">${list.map((w, i) => this._widget(w, i, edit, list.length)).join("")}</div>`
         : `<section class="card empty small"><p>Keine Widgets.${this._admin ? ` <button class="link inline" data-action="w-add-open">Widget hinzufügen</button>` : ""}</p></section>`}
       ${n ? "" : `
       <section class="card empty">
@@ -1336,8 +1500,13 @@ class HauswerkPanel extends HTMLElement {
 
   // ------------------------------------------------------------ Widgets der Startseite
   /** Widgets aus den Einstellungen (für alle Benutzer gleich), sonst eine Grundauswahl. */
+  /** Hat das Tablet eine eigene Startseite? */
+  _tabletOwn() {
+    return !!this._tablet && Array.isArray(this._data?.settings?.start_widgets_tablet);
+  }
+
   _widgets() {
-    const list = this._data.settings.start_widgets;
+    const list = this._tabletOwn() ? this._data.settings.start_widgets_tablet : this._data.settings.start_widgets;
     return Array.isArray(list) ? list : DEFAULT_WIDGETS.map((w, i) => ({ id: `d${i}`, title: null, entities: [], ...w }));
   }
 
@@ -1398,7 +1567,8 @@ class HauswerkPanel extends HTMLElement {
   }
 
   async _saveWidgets(list) {
-    this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { start_widgets: list } });
+    const key = this._tabletOwn() ? "start_widgets_tablet" : "start_widgets";
+    this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { [key]: list } });
     this._renderMain();
   }
 
@@ -7487,6 +7657,14 @@ class HauswerkPanel extends HTMLElement {
         this._renderPop();
         this._renderMain();
         break;
+      case "tstart": {
+        const own = el.dataset.v === "own";
+        const cur = this._widgets();
+        this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { start_widgets_tablet: own ? cur.map((w) => ({ ...w })) : null } });
+        this._tFit = {};
+        this._renderMain();
+        break;
+      }
       case "tablet-opt":
         this._tabletSet(el.dataset.k, el.dataset.v);
         if (el.dataset.k === "sidebar") this._tabletSidebar(el.dataset.v === "1");
@@ -9336,7 +9514,7 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .saver[hidden] { display:none; }
 .saver .sv-in { display:flex; flex-direction:column; align-items:center; gap:min(1.6vh, 14px); max-height:94vh; text-align:center; opacity:.62; transition:transform 2s ease; max-width:92vw; }
 .saver.night .sv-in { opacity:.32; }
-.sv-time { font-size:min(22vw, 30vh); line-height:.95; font-weight:200; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+.sv-time { font-size:min(18vw, 24vh); line-height:.95; font-weight:200; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
 .sv-date { font-size:min(3.4vw, 5vh); font-weight:500; text-transform:capitalize; color:#cbd5e1; }
 .sv-wx { display:flex; align-items:center; gap:12px; font-size:min(2.8vw, 4vh); color:#cbd5e1; }
 .sv-wx ha-icon { --mdc-icon-size:min(5vw, 7vh); }
@@ -9354,6 +9532,28 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 @keyframes svpulse { 50% { box-shadow:0 0 0 6px rgba(251,191,36,.15); } }
 .saver .sv-more { color:#64748b; }
 .sv-tap { margin-top:8px; font-size:13px; color:#475569; }
+.sv-time.small { font-size:min(9vw, 12vh); font-weight:300; }
+.saver.black .sv-in { opacity:.3; }
+.saver.alert .sv-in { opacity:.92; }
+.sv-fc { display:flex; gap:14px; margin-left:18px; padding-left:18px; border-left:1px solid rgba(255,255,255,.15); }
+.sv-fc span { display:flex; flex-direction:column; align-items:center; gap:2px; font-size:min(1.8vw, 2.6vh); }
+.sv-fc small { color:#64748b; font-size:.8em; }
+.sv-fc ha-icon { --mdc-icon-size:min(2.6vw, 3.6vh); color:#94a3b8; }
+.sv-fc b { font-size:1em !important; }
+.sv-urgent { display:flex; flex-direction:column; gap:8px; min-width:min(70vw, 820px); }
+.sv-u { display:flex; align-items:center; gap:14px; padding:min(1.4vh, 14px) 20px; border-radius:16px; background:rgba(251,146,60,.16); border:1px solid rgba(251,146,60,.45); text-align:left; font-size:min(2.4vw, 3.4vh); color:#fed7aa; }
+.sv-u ha-icon { --mdc-icon-size:min(3.6vw, 5vh); color:#fb923c; }
+.sv-u b { display:block; }
+.sv-u small { display:block; color:#fdba74; font-size:.72em; }
+.sv-u.new { animation:svpulse 2s ease-in-out infinite; box-shadow:0 0 0 2px rgba(251,146,60,.7); }
+.sv-side { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px 26px; min-width:min(70vw, 820px); }
+.sv-row { display:flex; align-items:center; gap:10px; text-align:left; font-size:min(1.9vw, 2.7vh); color:#cbd5e1; }
+.sv-row ha-icon { --mdc-icon-size:min(2.6vw, 3.6vh); color:#64748b; }
+.sv-row b { display:block; font-weight:600; }
+.sv-row small { display:block; color:#94a3b8; font-size:.85em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tstart { display:flex; align-items:center; gap:12px; padding:12px 14px; margin:0 0 10px; border-radius:14px; border:1px dashed color-mix(in srgb, var(--accent) 50%, var(--line)); background:color-mix(in srgb, var(--accent) 6%, var(--card)); }
+.tstart b { display:block; }
+.tstart small { display:block; color:var(--muted); }
 
 `;
 

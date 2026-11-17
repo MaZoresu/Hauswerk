@@ -90,6 +90,10 @@ Unter *Einstellungen › Darstellung › Tabletmodus* je Gerät einschalten – 
 - **Kein Scrollen:** Jede Seite passt sich der Auflösung an – so groß wie gut lesbar, bei Listen zwei Spalten. Passt es nicht auf eine Seite, gibt es eine zweite zum Wischen (Punkte unten).
 - **Bildschirmschoner** nach 1–10 Minuten ohne Berührung: abgedunkelt mit großer Uhr, Datum, Wetter, Hausstand und Hinweisen; nachts noch dunkler, der Inhalt wandert gegen Einbrennen; neue Hinweise leuchten auf. Dabei geht es zurück zur Startseite. Antippen weckt auf, ohne etwas zu schalten.
 - **Seitenleiste:** Die Seitenleiste von Home Assistant wird im Tabletmodus ausgeblendet (☰ öffnet sie kurz); ohne Tabletmodus kommt sie wie vorher zurück.
+- **Eigene Startseite:** Im Anpassen-Modus am Tablet „Eigene“ wählen – Handy und PC bleiben unverändert.
+- **Aufwecken bei Bewegung** über Bewegungsmelder aus Home Assistant oder die Kamera in Fully; **nachts** abgedunkelt, schwarz mit kleiner Uhr oder Display aus (Fully).
+- **Im Bildschirmschoner** zusätzlich: Vorhersage, nächste Rollladen-Fahrten, Termine (z. B. Müllabfuhr); Warnungen groß, neue machen den Schoner hell.
+- **Tablet sperren:** nur bedienen, nichts einstellen – 3 Sekunden auf das Logo drücken entsperrt für 10 Minuten.
 - **Fully Kiosk:** „Bildschirm anlassen“ einschalten; mit eingeschalteter JavaScript-Schnittstelle dunkelt Hauswerk das Display im Bildschirmschoner zusätzlich ab.
 
 ## Heizkörper oder Flächenheizung

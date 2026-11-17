@@ -44,7 +44,8 @@ SETTING_LABELS = {
     "frost_temp": "Frostschutz", "boost_minutes": "Boost-Dauer", "liming": "Entkalken", "liming_day": "Entkalken",
     "liming_time": "Entkalken", "liming_minutes": "Entkalken", "liming_winter": "Entkalken",
     "preheat_mode": "Vorheizen", "lead_radiator": "Vorheizen", "lead_floor": "Vorheizen",
-    "calibration_interval": "Kalibrierung", "allow_users": "Berechtigungen", "start_widgets": "Widgets",
+    "calibration_interval": "Kalibrierung", "allow_users": "Berechtigungen", "start_widgets": "Widgets", "start_widgets_tablet": "Widgets (Tablet)",
+    "tablet_wake": "Tablet aufwecken", "tablet_calendars": "Tablet-Kalender",
     "look_theme": "Darstellung", "look_accent": "Darstellung", "look_background": "Darstellung",
     "look_header_weather": "Darstellung", "look_header_clock": "Darstellung",
     "notify_targets": "Benachrichtigungen an", "notify_window": "Benachrichtigungen", "notify_window_min": "Benachrichtigungen",
@@ -103,6 +104,9 @@ HOUSE_DEFAULTS = {
     "wind_sensor": None,          # eigener Böen-/Windsensor (leer = Wetterdienst), z. B. für den Sturmschutz von Rollwerk
     # Startseite, Darstellung, Berechtigungen
     "start_widgets": None,        # Widgets der Startseite (None = Grundauswahl im Panel)
+    "start_widgets_tablet": None, # eigene Startseite im Tabletmodus (None = wie Handy/PC)
+    "tablet_wake": [],            # Bewegungsmelder o. Ä.: weckt den Bildschirmschoner der Tablets
+    "tablet_calendars": [],       # Kalender (z. B. Müllabfuhr) für den Bildschirmschoner
     "look_theme": "auto",         # auto = wie Home Assistant | light | dark
     "look_accent": None,          # "#rrggbb" oder None = Türkis
     "look_background": "pattern", # pattern = Muster | daytime = Kopfzeile nach Tageszeit | plain = schlicht

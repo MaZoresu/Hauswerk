@@ -178,6 +178,9 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("allow_users"): bool,
         vol.Optional("weather_entity"): _opt(ENTITY),
         vol.Optional("start_widgets"): _opt(vol.All([WIDGET_SCHEMA], vol.Length(max=24))),
+        vol.Optional("start_widgets_tablet"): _opt(vol.All([WIDGET_SCHEMA], vol.Length(max=24))),
+        vol.Optional("tablet_wake"): ENTITY_LIST,
+        vol.Optional("tablet_calendars"): ENTITY_LIST,
         # Darstellung
         vol.Optional("look_theme"): vol.In(["auto", "light", "dark"]),
         vol.Optional("look_accent"): _opt(vol.Match(r"^#[0-9a-fA-F]{6}$")),

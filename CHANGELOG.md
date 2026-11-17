@@ -2,6 +2,17 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.45.0 – 2026-11-17
+
+### Neu (Tabletmodus)
+- **Eigene Startseite fürs Tablet:** Im Anpassen-Modus am Tablet „Eigene“ wählen – dann gelten dort eigene Widgets, Handy und PC bleiben unverändert. „Wie am Handy“ schaltet zurück.
+- **Aufwecken bei Bewegung:** Unter Darstellung › Tabletmodus Bewegungsmelder (oder andere Schalter) wählen – sie wecken den Bildschirmschoner und halten den Bildschirm wach. In Fully weckt zusätzlich die Bewegungserkennung der Kamera.
+- **Nachts:** abgedunkelt, schwarz mit kleiner Uhr oder Display aus (Fully); Nachtzeit einstellbar (Standard 22–6 Uhr). Nachts erscheinen nur Akutes und Neues.
+- **Wichtiges groß im Bildschirmschoner:** Warnungen, Sturm und „Fenster offen – es regnet“ als große orangefarbene Hinweise. Ist eine neu, wird der Schoner hell – in Fully auch das Display, sogar wenn es nachts aus ist.
+- **Mehr im Bildschirmschoner:** Wettervorhersage der nächsten Stunden, die nächsten Rollladen-Fahrten (gleiche Zeit zusammengefasst) und Termine von heute und morgen aus gewählten Kalendern (z. B. Müllabfuhr).
+- **Tablet sperren:** Nur bedienen – Temperatur, Rollläden, Anwesenheit –, nichts einstellen. 3 Sekunden auf das Hauswerk-Logo drücken entsperrt für 10 Minuten.
+- **Größe wirkt im Tablet:** „Kompakt · Normal · Groß“ unter Darstellung macht die Seiten im Tabletmodus spürbar kleiner bzw. größer.
+
 ## 0.44.2 – 2026-11-17
 
 ### Neu

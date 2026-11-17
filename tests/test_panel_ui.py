@@ -626,3 +626,78 @@ def test_tablet_seitenleiste(tablet):
     p.click('#pop [data-action="tablet-toggle"]')
     assert p.js("window.hwDock") == ["always_hidden", "docked"]
     assert p.js("localStorage.getItem('hauswerk.tablet.sidebar_prev')") is None
+
+
+def test_tablet_eigene_startseite(tablet):
+    """Im Anpassen-Modus am Tablet: „Eigene“ legt eine Tablet-Startseite an, Handy/PC bleiben unverändert."""
+    p = tablet
+    p.view("start")
+    p.click('[data-action="w-edit"]')
+    assert p.has(".tstart")
+    phone = p.js(f"JSON.stringify({EL}._data.settings.start_widgets)")
+    p.click('.tstart [data-action="tstart"][data-v="own"]')
+    p.wait(300)
+    assert p.js(f"Array.isArray({EL}._data.settings.start_widgets_tablet)")
+    n = len(p.js(f"{EL}._widgets()"))
+    p.click('[data-action="w-add-open"]')
+    p.wait()
+    p.click('#pop [data-action="w-pick"]')
+    p.click('#pop [data-action="w-add"]')
+    p.wait(300)
+    assert len(p.js(f"{EL}._data.settings.start_widgets_tablet")) == n + 1
+    assert p.js(f"JSON.stringify({EL}._data.settings.start_widgets)") == phone, "Handy-Startseite verändert"
+    p.click('[data-action="w-edit"]') if not p.has(".tstart") else None
+    p.click('.tstart [data-action="tstart"][data-v="same"]')
+    p.wait(300)
+    assert p.js(f"{EL}._data.settings.start_widgets_tablet") is None
+    p.ok("Tablet-Startseite")
+
+
+def test_tablet_sperren_und_groesse(tablet):
+    p = tablet
+    p.view("start")
+    assert p.has('[data-action="w-edit"]')
+    p.js("localStorage.setItem('hauswerk.tablet.lock', '1')")
+    p.view("start")
+    assert not p.has('[data-action="w-edit"]'), "gesperrt: kein Anpassen"
+    # 3 Sekunden auf das Logo: entsperrt
+    box = p.js(f"(() => {{ const r = {EL}.shadowRoot.querySelector('.brand').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; }})()")
+    p.page.mouse.move(*box)
+    p.page.mouse.down()
+    p.wait(3200)
+    p.page.mouse.up()
+    p.wait(200)
+    assert p.has('[data-action="w-edit"]'), "nicht entsperrt"
+    p.js("localStorage.setItem('hauswerk.tablet.lock', '0')")
+    # Größe „Groß“ macht im Tablet größer
+    p.view("overview")
+    z = p.js(f"{EL}._tFit.overview.z")
+    p.js(f"() => {{ localStorage.setItem('hauswerk.groesse', 'l'); {EL}._renderMain(); }}")
+    assert p.js(f"{EL}._tFit.overview.z") > z
+    p.js("localStorage.setItem('hauswerk.groesse', 'm')")
+
+
+def test_tablet_schoner_wecken_und_nacht(tablet):
+    p = tablet
+    p.js(f"() => {{ {EL}._data.settings.tablet_wake = ['binary_sensor.flur_bewegung']; }}")
+    hass = lambda st: p.js(f"""(st) => {{ const h = {EL}.hass; {EL}.hass = {{ ...h, states: {{ ...h.states,
+        'binary_sensor.flur_bewegung': {{ entity_id: 'binary_sensor.flur_bewegung', state: st, attributes: {{}} }} }} }}; }}""", st)
+    hass("off")
+    p.js(f"{EL}._saverShow()")
+    assert not p.js(f"{EL}.shadowRoot.getElementById('saver').hidden")
+    hass("on")
+    p.wait(100)
+    assert p.js(f"{EL}.shadowRoot.getElementById('saver').hidden"), "Bewegung weckt nicht"
+    # Nacht „schwarz“: nur kleine Uhr
+    p.js("() => { localStorage.setItem('hauswerk.tablet.night', 'black'); localStorage.setItem('hauswerk.tablet.night_from', '0'); localStorage.setItem('hauswerk.tablet.night_to', '0'); }")
+    p.js("() => { const h = new Date().getHours(); localStorage.setItem('hauswerk.tablet.night_from', String(h)); localStorage.setItem('hauswerk.tablet.night_to', String((h + 1) % 24)); }")
+    p.js(f"{EL}._saverShow()")
+    assert p.js(f"{EL}.shadowRoot.getElementById('saver').classList.contains('black')")
+    assert p.has("#saver .sv-time.small") and not p.has("#saver .sv-date")
+    # Termine aus dem Kalender
+    p.js("() => localStorage.setItem('hauswerk.tablet.night', 'dim')")
+    p.js(f"""() => {{ {EL}._hass.callApi = async () => [{{ summary: 'Restmüll', start: {{ date: '2099-01-01' }} }}];
+        {EL}._data.settings.tablet_calendars = ['calendar.muell']; {EL}._calAt = 0; {EL}._saverHide(); {EL}._saverShow(); }}""")
+    p.wait(300)
+    assert "Restmüll" in p.js(f"{EL}.shadowRoot.getElementById('saver').innerText")
+    p.ok("Schoner wecken und Nacht")
