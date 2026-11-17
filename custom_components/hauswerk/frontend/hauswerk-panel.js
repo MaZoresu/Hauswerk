@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.45.0";
+const VERSION = "0.46.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2116,51 +2116,11 @@ class HauswerkPanel extends HTMLElement {
     });
     const rep = this._report(14);
     const today = rep ? this._sumDay(rep, 13) : null;
-    const date = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
     const w = this._weather();
-    // Kurzurteil: das Wichtigste zuerst
-    const verdict = !n
-      ? { i: "mdi:home-plus-outline", c: "#94a3b8", t: "Noch keine Räume angelegt" }
-      : s.summer
-        ? { i: "mdi:weather-sunny", c: "#facc15", t: "Sommerpause – die Thermostate ruhen" }
-        : f.open
-          ? { i: "mdi:window-open-variant", c: "#22d3ee", t: `${f.open} ${f.open > 1 ? "Räume lüften" : "Raum lüftet"} – dort pausiert die Heizung` }
-          : s.vacation
-            ? { i: "mdi:palm-tree", c: "#34d399", t: `Urlaub – alle Räume auf ${fmt(set.vacation_temp)} °C` }
-            : s.away
-              ? { i: "mdi:home-export-outline", c: "#94a3b8", t: "Niemand zu Hause – abgesenkt" }
-              : s.approaching
-                ? { i: "mdi:home-import-outline", c: "#34d399", t: "Jemand kommt heim – es wird schon geheizt" }
-                : below.length
-                  ? { i: "mdi:thermometer-chevron-up", c: "#fb923c", t: `${below.length} ${below.length > 1 ? "Räume" : "Raum"} unter Soll – ${f.heating ? "wird aufgeheizt" : "Heizung prüfen"}` }
-                  : { i: "mdi:check-circle-outline", c: "#34d399", t: "Alle Räume im Soll" };
-    const presence = s.vacation ? ["mdi:palm-tree", "Urlaub"] : s.away ? ["mdi:home-export-outline", "Abwesend"] : set.party ? ["mdi:party-popper", "Party"] : set.guest ? ["mdi:account-group-outline", "Gäste"] : ["mdi:home-heart", "Zu Hause"];
-    const stat = (icon, label, value, sub = "", c = "") =>
-      `<div class="hstat" ${c ? `style="--c:${c}"` : ""}><ha-icon icon="${icon}"></ha-icon><span><small>${label}</small><b>${value}</b>${sub ? `<em>${sub}</em>` : ""}</span></div>`;
     const compact = this._roomView() === "compact";
 
     return `
-      <section class="hero">
-        <div class="hero-row">
-          <div class="hero-text">
-            <div class="hero-label"><ha-icon icon="mdi:home-thermometer-outline"></ha-icon>Im Haus · ${date}</div>
-            <div class="hero-line"><div class="hero-big">${fmt(avg)}<span>°C</span></div>
-            <div class="verdict" style="--c:${verdict.c}"><ha-icon icon="${verdict.i}"></ha-icon>${verdict.t}</div></div>
-          </div>
-          ${w ? `
-          <div class="wx" title="${esc(w.name)}">
-            <ha-icon icon="${w.icon}"></ha-icon>
-            <div><b>${fmt(w.temp)} °C</b><small>${esc(w.label)}</small>${w.extra ? `<small>${w.extra}</small>` : ""}</div>
-          </div>` : ""}
-        </div>
-        <div class="hstats">
-          ${stat(f.heating ? "mdi:fire" : "mdi:fire-off", "Heizen", `${f.heating} von ${n}`, "Räumen", f.heating ? "#fb923c" : "")}
-          ${stat(f.open ? "mdi:window-open-variant" : "mdi:window-closed-variant", "Fenster", f.open ? `${f.open} offen` : "alle zu", "", f.open ? "#22d3ee" : "")}
-          ${stat(w ? w.icon : "mdi:thermometer", "Außen", s.outside_temp != null || w ? `${fmt(s.outside_temp ?? w?.temp)} °C` : "–", w ? esc(w.label) : "")}
-          ${hum != null ? stat(humidityInfo(hum).i, "Luftfeuchte Ø", `${fmt(hum, 0)} %`, humidityInfo(hum).t) : ""}
-          ${stat("mdi:timer-outline", "Heute geheizt", today ? `${fmt(today.heat / 60)} h` : "–", presence[1])}
-        </div>
-      </section>
+      ${this._heatBrief({ rooms, st, s, set, f, avg, below, today, hum, w })}
 
       <div class="shead outer">
         <ha-icon icon="mdi:floor-plan"></ha-icon><h3>Räume</h3><span class="count">${n}</span><span class="grow"></span>
@@ -2180,6 +2140,119 @@ class HauswerkPanel extends HTMLElement {
               ${this._admin ? `<button class="primary" data-action="room-new"><ha-icon icon="mdi:plus"></ha-icon>Raum anlegen</button>` : ""}
             </section>`
       }`;
+  }
+
+  // ------------------------------------------------------------ Lage-Kachel (Kopf jedes Moduls)
+  /** Kopfkachel: ein Satz zum Stand (Farbe = Zustand), darunter was gerade zählt, dazu passende Werte. */
+  _brief({ cls = "", tone = "ok", icon, label, big = "", title, act = "", side = "", lines = [], chips = [] }) {
+    const TONE = { ok: "#22c55e", active: "#fb923c", info: "#22d3ee", warn: "#ef4444", calm: "#94a3b8", hand: "#8b5cf6" };
+    const line = (l) => {
+      const tag = l.act ? "button" : "div";
+      return `<${tag} class="br-l" ${l.act || ""} style="--c:${l.c || "var(--muted)"}"><ha-icon icon="${l.icon}"></ha-icon><span class="grow">${l.html ?? esc(l.text)}</span>${l.act ? `<ha-icon class="br-go" icon="mdi:chevron-right"></ha-icon>` : ""}</${tag}>`;
+    };
+    return `
+      <section class="brief ${cls}" style="--tone:${TONE[tone] || tone}" data-tone="${tone}">
+        <div class="br-top">
+          <div class="br-main">
+            ${label ? `<div class="br-label">${label}</div>` : ""}
+            <div class="br-line">${big ? `<div class="br-big">${big}</div>` : ""}
+              <${act ? "button" : "div"} class="br-h" ${act}><ha-icon icon="${icon}"></ha-icon><span>${esc(title)}</span></${act ? "button" : "div"}></div>
+          </div>
+          ${side}
+        </div>
+        ${lines.length ? `<div class="br-lines">${lines.slice(0, 3).map(line).join("")}</div>` : ""}
+        ${chips.length ? `<div class="br-chips">${chips.map(([i, v, l, c]) => `<span class="br-c" ${c ? `style="--c:${c}"` : ""}><ha-icon icon="${i}"></ha-icon><b>${v}</b><small>${l}</small></span>`).join("")}</div>` : ""}
+      </section>`;
+  }
+
+  /** Uhrzeit „16:50“, „morgen 05:30“ oder „Mi 06:00“ in so vielen Minuten. */
+  _whenIn(mins) {
+    const now = new Date();
+    const at = new Date(now.getTime() + mins * 60000);
+    const tomorrow = new Date(now.getTime() + 864e5).toDateString() === at.toDateString();
+    const hm = at.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    return at.toDateString() === now.toDateString() ? hm : tomorrow ? `morgen ${hm}` : `${at.toLocaleDateString("de-DE", { weekday: "short" })} ${hm}`;
+  }
+
+  _inMin(mins) {
+    return mins < 60 ? `in ${Math.max(1, Math.round(mins))} Min.` : mins < 24 * 60 ? `in ${fmt(mins / 60, mins < 600 ? 1 : 0)} h` : "";
+  }
+
+  /** Heizwerk-Lage: Stand, Gründe, Nächstes. */
+  _heatBrief(ctx) {
+    const { rooms, st, s, set, f, avg, below, today, hum, w } = ctx;
+    const n = rooms.length;
+    const roomAct = (r) => `data-action="room-page" data-id="${esc(r.id)}"`;
+    const diffTxt = (r) => fmt((st[r.id].target - st[r.id].room_temp));
+    // Kopfsatz und Zustand
+    let tone = "ok", icon = "mdi:check-circle-outline", title;
+    let act = "";
+    const comfortNow = rooms.filter((r) => ["komfort", "vorheizen"].includes(st[r.id]?.mode)).length;
+    if (!n) { tone = "calm"; icon = "mdi:home-plus-outline"; title = "Noch keine Räume angelegt"; }
+    else if (s.summer) { tone = "calm"; icon = "mdi:weather-sunny"; title = "Sommerpause – die Thermostate ruhen"; }
+    else if (f.open) { tone = "info"; icon = "mdi:window-open-variant"; title = `${f.open} ${f.open > 1 ? "Räume lüften" : "Raum lüftet"} – dort pausiert die Heizung`; }
+    else if (s.vacation) { tone = "calm"; icon = "mdi:palm-tree"; title = `Urlaub – alle Räume auf ${fmt(set.vacation_temp)} °C`; }
+    else if (s.away) { tone = "calm"; icon = "mdi:home-export-outline"; title = this._awayInfo(rooms[0] || {})?.text?.replace("Niemand da", "Niemand zu Hause") || "Niemand zu Hause – abgesenkt"; }
+    else if (s.approaching) { tone = "active"; icon = "mdi:home-import-outline"; title = "Jemand kommt heim – es wird schon geheizt"; }
+    else if (below.length === 1) {
+      const r = below[0];
+      tone = st[r.id].heating ? "active" : "warn"; icon = "mdi:thermometer-chevron-up";
+      title = `${r.name} ${diffTxt(r)} °C unter Soll – ${st[r.id].heating ? "wird aufgeheizt" : "Heizung prüfen"}`;
+      act = roomAct(r);
+    } else if (below.length) {
+      const heating = below.filter((r) => st[r.id].heating).length;
+      tone = heating ? "active" : "warn"; icon = "mdi:thermometer-chevron-up";
+      title = `${below.length} Räume unter Soll – ${heating === below.length ? "werden aufgeheizt" : heating ? `${heating} heizen` : "Heizung prüfen"}`;
+    } else title = comfortNow ? `Alles im Plan – ${comfortNow} ${comfortNow > 1 ? "Räume" : "Raum"} auf Komfort` : "Alles im Plan";
+    // Was gerade zählt
+    const lines = [];
+    const now = Date.now();
+    for (const o of this._openWindows().slice(0, 2)) {
+      const m = o.s.last_changed ? Math.round((now - new Date(o.s.last_changed)) / 60000) : null;
+      lines.push({ icon: "mdi:window-open-variant", c: "#22d3ee", text: `Fenster ${this._entityName(o.id)} offen${m != null ? ` – Pause seit ${m < 90 ? `${m} Min.` : `${fmt(m / 60)} h`}` : ""}`, act: roomAct(o.room) });
+    }
+    for (const r of rooms) {
+      const x = st[r.id] || {};
+      if (!["manuell", "boost"].includes(x.mode)) continue;
+      const until = x.override_until ? new Date(x.override_until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) : null;
+      lines.push({ icon: x.mode === "boost" ? "mdi:rocket-launch-outline" : "mdi:hand-back-right-outline", c: "#8b5cf6",
+        text: x.mode === "boost" ? `${r.name}: Boost${until ? ` bis ${until}` : ""}` : `${r.name} von Hand auf ${fmt(x.target)} °C${until ? ` bis ${until}` : ""}`, act: roomAct(r) });
+    }
+    if (below.length > 1) for (const r of below.slice(0, 2))
+      lines.push({ icon: "mdi:thermometer-chevron-up", c: "#fb923c", text: `${r.name}: ${diffTxt(r)} °C unter Soll${st[r.id].heating ? " – heizt" : ""}`, act: roomAct(r) });
+    const wx = this._wxAlerts()[0];
+    if (wx) lines.push({ icon: wx.icon, c: "#38bdf8", text: `${wx.text} – ${wx.sub}` });
+    // Nächster Wechsel (gleiche Zeit zusammengefasst)
+    if (!s.summer && !s.vacation) {
+      const next = new Map();
+      for (const r of rooms) {
+        if (r.enabled === false) continue;
+        const info = this._schedInfo(r, st[r.id] || {});
+        const mins = info.blocks && info.blocks.length ? this._nextSwitch(info.blocks, r, info.comfort) : st[r.id]?.next_change;
+        if (mins == null || mins > 36 * 60) continue;
+        const key = `${Math.round(mins)}|${info.comfort ? "eco" : "komfort"}`;
+        if (!next.has(key)) next.set(key, { mins, comfort: info.comfort, names: [], lead: 0 });
+        const e = next.get(key);
+        e.names.push(r.name);
+        if (!info.comfort) e.lead = Math.max(e.lead, this._preLead(r, st[r.id] || {}) || 0);
+      }
+      const first = [...next.values()].sort((a, b) => a.mins - b.mins)[0];
+      if (first) {
+        const names = first.names.length > 2 ? `${first.names.length} Räumen` : first.names.join(" und ");
+        const pre = !first.comfort && first.lead && !s.away ? ` (Vorheizen ab ${this._whenIn(first.mins - first.lead).replace("morgen ", "")})` : "";
+        lines.push({ icon: first.comfort ? "mdi:leaf" : "mdi:sofa-outline", c: first.comfort ? "#60a5fa" : "#facc15",
+          text: `${this._whenIn(first.mins).replace(/^(\d)/, "Um $1")} ${first.comfort ? "Eco" : "Komfort"} in ${names}${pre}` });
+      }
+    }
+    const chips = [
+      [f.heating ? "mdi:fire" : "mdi:fire-off", `${f.heating} von ${n}`, "heizen", f.heating ? "#fb923c" : ""],
+      ...(hum != null && (hum >= 65 || hum <= 35) ? [[humidityInfo(hum).i, `${fmt(hum, 0)} %`, `Luftfeuchte · ${humidityInfo(hum).t}`, "#38bdf8"]] : []),
+      ["mdi:timer-outline", today ? `${fmt(today.heat / 60)} h` : "–", "heute geheizt", ""],
+    ];
+    const date = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
+    const side = w ? `<div class="wx" title="${esc(w.name)}"><ha-icon icon="${w.icon}"></ha-icon><div><b>${fmt(w.temp)} °C</b><small>${esc(w.label)}</small>${w.extra ? `<small>${w.extra}</small>` : ""}</div></div>` : "";
+    return this._brief({ cls: "hero", tone, icon, act, label: `<ha-icon icon="mdi:home-thermometer-outline"></ha-icon>Im Haus · ${date}`,
+      big: `${fmt(avg)}<span>°C</span>`, title, side, lines, chips });
   }
 
   /** Raumkacheln: detailliert oder kompakt (je Gerät gemerkt). */
@@ -3248,6 +3321,8 @@ class HauswerkPanel extends HTMLElement {
     root.querySelectorAll(".kn-grid").forEach((el) => { el.classList.toggle("imp", v.cls.grid === "imp"); el.classList.toggle("exp", v.cls.grid === "exp"); });
     const cons = root.getElementById("kw-cons");
     if (cons) cons.innerHTML = this._kwConsHtml(fl);
+    const brief = root.getElementById("kw-brief");
+    if (brief) brief.innerHTML = this._kwBrief(fl, this._kwPrefs()?.ok ? this._kwStats("today") : null);
   }
 
   _kwConsHtml(fl) {
@@ -3412,12 +3487,39 @@ class HauswerkPanel extends HTMLElement {
     const today = !P ? `<div class="chart-empty"><div class="spinner"></div></div>`
       : !P.ok ? "" : st?.total ? this._kwKpis(st.total, P) : `<div class="chart-empty"><div class="spinner"></div></div>`;
     return `
+      <div id="kw-brief">${this._kwBrief(fl, st)}</div>
       <section class="card kw-flow">
         ${this._sectionHead("mdi:flash-outline", "Jetzt", `<span class="kw-live"><i></i>live</span>`)}
         ${this._kwDiagram(fl)}
       </section>
       ${fl.cons.length ? `<section class="card">${this._sectionHead("mdi:power-plug-outline", "Verbraucher jetzt")}<div id="kw-cons" class="kc">${this._kwConsHtml(fl)}</div></section>` : ""}
       ${P && !P.ok ? this._kwEnergyHint() : `<section class="card">${this._sectionHead("mdi:calendar-today", "Heute", `<button class="link tiny" data-action="tab" data-tab="kwrep"><span>Verlauf</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`)}${today}</section>`}`;
+  }
+
+  /** Kraftwerk-Lage: was der Strom gerade bedeutet. */
+  _kwBrief(fl, st) {
+    const W = (x) => this._kwFmt(Math.abs(x));
+    const solar = fl.solar ?? 0, grid = fl.grid, batt = fl.batt ?? 0, home = fl.home;
+    let tone = "calm", icon = "mdi:flash-outline", title;
+    const top = (fl.cons || []).find((c) => (c.w ?? 0) > 200);
+    if (grid != null && grid < -100) { tone = "ok"; icon = "mdi:solar-power-variant"; title = `${W(grid)} Überschuss – gute Zeit für Waschmaschine & Co.`; }
+    else if (fl.has.solar && solar > 50 && (grid == null || Math.abs(grid) <= 100)) { tone = "ok"; icon = "mdi:solar-power-variant"; title = `Solar deckt den Verbrauch${home != null ? ` (${W(home)})` : ""}`; }
+    else if (fl.has.batt && batt > 50 && (grid == null || grid <= 100)) { tone = "ok"; icon = "mdi:home-battery-outline"; title = `Akku versorgt das Haus – ${W(batt)}`; }
+    else if (grid != null && grid > 2500) { tone = "active"; icon = "mdi:transmission-tower-import"; title = `Hoher Netzbezug – ${W(grid)}${top ? `, vor allem ${top.name}` : ""}`; }
+    else if (grid != null && grid > 0) { icon = "mdi:transmission-tower-import"; title = `Bezug ${W(grid)}${home != null && home < 400 ? " – nur Grundlast" : ""}`; }
+    else title = home != null ? `Verbrauch ${W(home)}` : "Keine Leistungswerte";
+    const lines = [];
+    if (top && !title.includes(top.name)) lines.push({ icon: top.icon, c: "#0ea5e9", text: `Größter Verbraucher: ${top.name} ${W(top.w)}` });
+    if (fl.has.batt && fl.soc != null)
+      lines.push({ icon: "mdi:home-battery-outline", c: fl.soc < 15 ? "#ef4444" : "#ec4899", text: `Akku ${fmt(fl.soc, 0)} %${batt > 5 ? ` – entlädt ${W(batt)}` : batt < -5 ? ` – lädt ${W(batt)}` : ""}${fl.soc < 15 ? " – fast leer" : ""}` });
+    const t = st?.total;
+    if (t && (t.autark != null || t.exp)) lines.push({ icon: "mdi:calendar-today", c: "#22c55e", text: `Heute ${t.autark != null ? `${fmt(t.autark, 0)} % selbst gedeckt` : ""}${t.autark != null && t.exp ? ", " : ""}${t.exp ? `${this._kwKwh(t.exp)} eingespeist` : ""}`, act: `data-action="tab" data-tab="kwrep"` });
+    const chips = [
+      ...(fl.has.solar ? [["mdi:solar-power-variant", W(solar), "Solar", "#f59e0b"]] : []),
+      ...(home != null ? [["mdi:home-lightning-bolt-outline", W(home), "Haus", "#0ea5e9"]] : []),
+      ...(grid != null ? [[grid > 0 ? "mdi:transmission-tower-import" : "mdi:transmission-tower-export", W(grid), grid > 0 ? "Bezug" : "Einspeisung", grid > 0 ? "#8b5cf6" : "#10b981"]] : []),
+    ];
+    return this._brief({ cls: "card", tone, icon, label: "Kraftwerk · jetzt", title, lines, chips });
   }
 
   _viewKwRep() {
@@ -3742,20 +3844,7 @@ class HauswerkPanel extends HTMLElement {
     const fact = (icon, val, cap, c = "") => `<div class="kv2" ${c ? `style="--c:${c}"` : ""}><ha-icon icon="${icon}"></ha-icon><span><b>${esc(val)}</b><small>${esc(cap)}</small></span></div>`;
     const all = covers.map((c) => c.id).join(",");
     const first = (covers.find((c) => (c.cfg.profile || "standard") === "standard") || covers[0])?.rs || {};
-    const head = `
-      <section class="card rw-sum">
-        <div class="rw-sum-h">
-          <div><small class="muted">Rollwerk · heute</small><h2>${nOpen} offen · ${nClosed} zu${pos.length - nOpen - nClosed ? ` · ${pos.length - nOpen - nClosed} halb` : ""}</h2></div>
-          <div class="rw-all">${this._admin ? `<button class="secondary small" data-action="cwiz-open" title="Rollladen hinzufügen"><ha-icon icon="mdi:plus"></ha-icon></button>` : ""}<button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="open"><ha-icon icon="mdi:arrow-up"></ha-icon>Alle hoch</button><button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="close"><ha-icon icon="mdi:arrow-down"></ha-icon>Alle runter</button></div>
-        </div>
-        <div class="kv2s">
-          ${fact("mdi:weather-sunset-up", first.up ? first.up.join("–") : "–", "öffnen · frühestens–spätestens")}
-          ${fact("mdi:weather-sunset-down", first.down ? first.down.join("–") : "–", "schließen · frühestens–spätestens")}
-          ${fact("mdi:white-balance-sunny", sun.elevation != null ? `${fmt(sun.elevation, 0)}° hoch` : "–", sun.azimuth != null ? `Richtung ${fmt(sun.azimuth, 0)}°` : "Sonne")}
-          ${fact(s.storm ? "mdi:weather-windy-variant" : "mdi:weather-windy", s.gust != null ? `${fmt(s.gust, 0)} km/h` : "–", s.storm ? "Sturm – alle hoch" : `Böen · Sturm ab ${fmt(s.storm_kmh, 0)}`, s.storm ? "#ef4444" : "")}
-        </div>
-        ${s.free_day ? `<p class="muted small"><ha-icon icon="mdi:calendar-star"></ha-icon>Heute gilt der Wochenend-Zeitplan.</p>` : ""}
-      </section>`;
+    const head = this._rwBrief({ covers, s, all, first, nOpen, nClosed, pos });
     const groups = new Map();
     for (const c of covers) {
       const area = c.rs.area || "Ohne Raum";
@@ -3799,6 +3888,64 @@ class HauswerkPanel extends HTMLElement {
     };
     return head + [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"))
       .map(([area, list]) => `<div class="rw-area"><h3>${esc(area)}</h3><div class="rw-grid">${list.map(tile).join("")}</div></div>`).join("");
+  }
+
+  /** Rollwerk-Lage: Sturm, nächste Fahrt, was abweicht. */
+  _rwBrief({ covers, s, all, first, nOpen, nClosed, pos }) {
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const name = (c) => this._entityName(c.id);
+    const list = (cs) => (cs.length > 2 ? `${cs.length} Rollläden` : cs.map(name).join(" und "));
+    const coverAct = (c) => `data-action="pop-open" data-pop="rwpos:${esc(c.id)}"`;
+    let tone = "ok", icon = "mdi:check-circle-outline", title;
+    // nächste Fahrt: „16:50 schließt“ je Rollladen, gleiche zusammengefasst
+    const nexts = new Map();
+    for (const c of covers) {
+      const m = /(\d{1,2}):(\d{2}) (.+)$/.exec(c.rs?.next || "");
+      if (!m) continue;
+      const at = Number(m[1]) * 60 + Number(m[2]);
+      const key = `${at}|${m[3]}`;
+      if (!nexts.has(key)) nexts.set(key, { at, what: m[3], approx: (c.rs.next || "").startsWith("ca."), covers: [] });
+      nexts.get(key).covers.push(c);
+    }
+    const nx = [...nexts.values()].filter((x) => x.at > nowMin).sort((a, b) => a.at - b.at)[0];
+    const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    const shading = covers.filter((c) => c.rs.cat === "shading");
+    const manual = covers.filter((c) => c.rs.manual);
+    if (s.storm) { tone = "warn"; icon = "mdi:weather-windy-variant"; title = `Sturm – alle Rollläden oben${s.gust != null ? ` (Böen ${fmt(s.gust, 0)} km/h)` : ""}`; }
+    else if (nx) {
+      tone = shading.length ? "active" : manual.length ? "hand" : "ok";
+      icon = /schließt|Stufe/.test(nx.what) ? "mdi:arrow-down-circle-outline" : /öffnet/.test(nx.what) ? "mdi:arrow-up-circle-outline" : "mdi:sun-thermometer-outline";
+      title = `${nx.approx ? "Ca. " : ""}${nx.approx ? "um" : "Um"} ${hm(nx.at)} ${nx.what} – ${list(nx.covers)} (${this._inMin(nx.at - nowMin)})`;
+    } else {
+      tone = shading.length ? "active" : manual.length ? "hand" : "calm";
+      icon = "mdi:weather-night";
+      title = `Heute keine Fahrten mehr${first.up ? ` – morgen öffnet ab ${first.up[0]}` : ""}`;
+    }
+    const lines = [];
+    if (shading.length) {
+      const sun = s.sun || {};
+      lines.push({ icon: "mdi:sun-thermometer-outline", c: "#f97316", text: `Beschattung: ${list(shading)}${sun.elevation != null ? ` – Sonne ${fmt(sun.elevation, 0)}° hoch, Richtung ${fmt(sun.azimuth, 0)}°` : ""}`, act: coverAct(shading[0]) });
+    }
+    for (const c of manual.slice(0, 2)) {
+      const p = this._rwPos(c.st);
+      const until = /(\d{1,2}:\d{2})/.exec(c.rs.next || "")?.[1];
+      lines.push({ icon: "mdi:hand-back-right-outline", c: "#8b5cf6", text: `${name(c)} von Hand${p != null ? ` auf ${fmt(p, 0)} %` : ""} – Automatik wartet${until ? ` bis ${until}` : ""}`, act: coverAct(c) });
+    }
+    for (const c of covers.filter((x) => x.rs.contact_open).slice(0, 1))
+      lines.push({ icon: "mdi:door-open", c: "#f59e0b", text: `${name(c)}: Tür offen – bleibt oben`, act: coverAct(c) });
+    if (!s.storm && s.gust != null && s.storm_kmh && s.gust >= 0.6 * s.storm_kmh)
+      lines.push({ icon: "mdi:weather-windy", c: "#ef4444", text: `Böen ${fmt(s.gust, 0)} km/h – Sturmschutz ab ${fmt(s.storm_kmh, 0)}` });
+    if (s.free_day) lines.push({ icon: "mdi:calendar-star", text: "Heute gilt der Wochenend-Zeitplan" });
+    const half = pos.length - nOpen - nClosed;
+    const chips = [
+      ["mdi:window-shutter-open", String(nOpen), "offen", ""],
+      ["mdi:window-shutter", String(nClosed), "zu", ""],
+      ...(half ? [["mdi:window-shutter-settings", String(half), "halb", ""]] : []),
+      ...(shading.length ? [["mdi:sun-thermometer-outline", String(shading.length), "beschattet", "#f97316"]] : []),
+    ];
+    const side = `<div class="rw-all">${this._admin ? `<button class="secondary small" data-action="cwiz-open" title="Rollladen hinzufügen"><ha-icon icon="mdi:plus"></ha-icon></button>` : ""}<button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="open"><ha-icon icon="mdi:arrow-up"></ha-icon>Alle hoch</button><button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="close"><ha-icon icon="mdi:arrow-down"></ha-icon>Alle runter</button></div>`;
+    return this._brief({ cls: "card", tone, icon, label: "Rollwerk · jetzt", title, side, lines, chips });
   }
 
   _rwProfiles() {
@@ -9554,6 +9701,40 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .tstart { display:flex; align-items:center; gap:12px; padding:12px 14px; margin:0 0 10px; border-radius:14px; border:1px dashed color-mix(in srgb, var(--accent) 50%, var(--line)); background:color-mix(in srgb, var(--accent) 6%, var(--card)); }
 .tstart b { display:block; }
 .tstart small { display:block; color:var(--muted); }
+
+/* ---------- Lage-Kachel (Kopf der Module) ---------- */
+.brief { position:relative; margin-bottom:14px; border-left:4px solid var(--tone) !important; }
+.brief.card { padding:16px 18px; }
+.br-top { display:flex; align-items:flex-start; gap:16px; position:relative; z-index:1; }
+.br-main { flex:1; min-width:0; }
+.br-label { display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); margin-bottom:6px; }
+.hero .br-label { color:inherit; opacity:.75; }
+.br-line { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.br-big { font-size:44px; font-weight:700; line-height:1; letter-spacing:-.02em; }
+.br-big span { font-size:16px; font-weight:500; margin-left:3px; opacity:.7; }
+.br-h { all:unset; display:inline-flex; align-items:center; gap:10px; font-size:18px; font-weight:700; line-height:1.3; }
+button.br-h { cursor:pointer; }
+.br-h ha-icon { --mdc-icon-size:24px; color:var(--tone); flex:none; }
+.br-lines { display:flex; flex-direction:column; gap:2px; margin-top:12px; position:relative; z-index:1; }
+.br-l { all:unset; box-sizing:border-box; display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:10px; font-size:14px; line-height:1.35; }
+button.br-l { cursor:pointer; }
+button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); }
+.br-l > ha-icon:first-child { --mdc-icon-size:19px; color:var(--c); }
+.br-l .br-go { --mdc-icon-size:18px; opacity:.45; }
+.br-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; position:relative; z-index:1; }
+.br-c { display:inline-flex; align-items:baseline; gap:6px; padding:7px 12px; border-radius:12px; background:color-mix(in srgb, var(--text) 6%, transparent); font-size:13px; }
+.br-c ha-icon { --mdc-icon-size:16px; align-self:center; color:var(--c, var(--muted)); }
+.br-c b { font-size:15px; }
+.br-c small { color:var(--muted); }
+.hero .br-c { background:rgba(255,255,255,.12); }
+.hero .br-c small { color:inherit; opacity:.75; }
+.brief .rw-all { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+@media (max-width:600px) {
+  .br-top { flex-direction:column; }
+  .br-big { font-size:36px; }
+  .br-h { font-size:16px; }
+  .brief .rw-all { justify-content:flex-start; }
+}
 
 `;
 

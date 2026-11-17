@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.46.0 – 2026-11-17
+
+### Neu
+- **Kopfkacheln der Module sagen, was gerade los ist.** Oben steht ein Satz zum Stand, der linke Rand zeigt den Zustand (grün = alles gut, orange = aktiv, türkis = lüftet, violett = von Hand, rot = Achtung, grau = Ruhe). Darunter bis zu drei Zeilen mit dem, was gerade zählt – antippen führt an die passende Stelle –, und nur die Werte, die dazu passen.
+  - **Heizwerk:** z. B. „Küche 1,5 °C unter Soll – wird aufgeheizt“, „Alles im Plan – 2 Räume auf Komfort“, „Niemand zu Hause – höchstens 17 °C“. Zeilen: offene Fenster mit Pausendauer, Räume von Hand oder im Boost (bis wann), Kälteeinbruch, und der nächste Wechsel („Um 22:00 Eco in Wohnzimmer“, „morgen 05:30 Komfort in Bad (Vorheizen ab 05:00)“). Luftfeuchte erscheint nur, wenn sie auffällt.
+  - **Rollwerk:** z. B. „Um 16:50 schließt – 3 Rollläden (in 25 Min.)“ oder „Sturm – alle Rollläden oben“. Zeilen: Beschattung mit Sonnenstand, von Hand verstellte Rollläden („Automatik wartet bis …“), offene Tür, Böen nahe der Sturmgrenze, Wochenend-Zeitplan.
+  - **Kraftwerk (neu):** z. B. „1,7 kW Überschuss – gute Zeit für Waschmaschine & Co.“, „Solar deckt den Verbrauch“, „Bezug 380 W – nur Grundlast“. Zeilen: größter Verbraucher, Akku mit Laden/Entladen, „Heute 72 % selbst gedeckt, 13 kWh eingespeist“. Aktualisiert sich live.
+
 ## 0.45.0 – 2026-11-17
 
 ### Neu (Tabletmodus)

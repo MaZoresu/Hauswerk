@@ -701,3 +701,19 @@ def test_tablet_schoner_wecken_und_nacht(tablet):
     p.wait(300)
     assert "Restmüll" in p.js(f"{EL}.shadowRoot.getElementById('saver').innerText")
     p.ok("Schoner wecken und Nacht")
+
+
+def test_lage_kacheln(panel):
+    """Kopfkachel jedes Moduls: ein Satz zum Stand mit Zustandsfarbe, darunter was gerade zählt."""
+    panel.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    for view, want in (("overview", "unter Soll"), ("shutters", "Rollwerk · jetzt"), ("kwflow", "Kraftwerk · jetzt")):
+        panel.view(view)
+        b = panel.js(f"(() => {{ const b = {EL}.shadowRoot.querySelector('.brief'); return b && [b.dataset.tone, b.innerText, b.querySelectorAll('.br-l').length]; }})()")
+        assert b, f"{view}: keine Kopfkachel"
+        assert b[0] in ("ok", "active", "info", "warn", "calm", "hand") and want in b[1], b
+        panel.ok(f"Lage {view}")
+    # Kraftwerk: Überschuss wird als Empfehlung genannt, Zeilen führen weiter
+    assert "Überschuss" in panel.js(f"{EL}.shadowRoot.querySelector('.brief').innerText")
+    panel.view("shutters")
+    panel.click(".brief button.br-l")
+    assert panel.js(f"{EL}._pop?.id || ''").startswith("rwpos:")
