@@ -64,7 +64,7 @@ class Kraftwerk:
         changed = [k for k, v in settings.items() if self.settings.get(k) != v]
         if not changed:
             return
-        log_settings(self.log, settings, changed, by, module="kraftwerk")
+        log_settings(self.log, settings, changed, by, module="kraftwerk", old=self.settings)
         self.settings.update(settings)
         self._save()
 

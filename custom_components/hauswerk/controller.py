@@ -617,7 +617,7 @@ class Heizen:
         changed = [k for k, v in settings.items() if self.settings.get(k) != v]
         if not changed:
             return
-        log_settings(self.log, settings, changed, by)
+        log_settings(self.log, settings, changed, by, old=self.settings)
         self.settings.update(settings)
         self._save()
         self._track_entities()

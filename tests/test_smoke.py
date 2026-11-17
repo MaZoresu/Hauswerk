@@ -817,6 +817,16 @@ def test_rollwerk_protokoll(hw):
         await rw.async_start()
         await rw.async_save_profile("standard", dict(rw.profiles["standard"], down_early="21:00", down_late="21:00", delay_random=0), by="Jens")
         await rw.async_save_settings({"rw_covers": ["cover.wz"]}, by="Jens")
+        hass.set("sensor.lux", "500", {}, "Lux Terrasse")
+        prof = dict(rw.profiles["standard"])
+        await rw.async_save_profile("standard", dict(prof, features=[f for f in prof["features"] if f != "ventilate"] + ["shading"],
+                                                     brightness_sensor="sensor.lux"), by="Jens")
+        n = len(log.entries)
+        await rw.async_save_profile("standard", dict(rw.profiles["standard"]), by="Jens")
+        await rw.async_save_cover("cover.wz", dict(rw.covers["cover.wz"]), by="Jens")
+        assert len(log.entries) == n, "Speichern ohne Änderung erzeugt keinen Eintrag"
+        await rw.async_save_cover("cover.wz", dict(rw.covers["cover.wz"], storm=False), by="Jens")
+        await rw.async_save_settings({"rw_recovery": "always"}, by="Jens")
         return log
 
     log = asyncio.run(run())
@@ -825,6 +835,13 @@ def test_rollwerk_protokoll(hw):
     assert "Profil „Standard“ geändert" in titles and "Wohnzimmer zu" in titles
     prof = next(e for e in rw_entries if e["title"] == "Profil „Standard“ geändert")
     assert "Schließen frühestens 16:00 → 21:00" in prof["why"] and "von Jens" in prof["why"]
+    feat = [e for e in rw_entries if e["title"] == "Profil „Standard“ geändert"][-1]["why"]
+    assert "Funktionen: + Beschattung, − Lüften" in feat and "Helligkeitssensor – → Lux Terrasse" in feat
+    assert "für Wohnzimmer" in feat and "gewählt" not in feat
+    assert not any("ohne Änderung" in (e.get("why") or "") for e in rw_entries)
+    storm = [e for e in rw_entries if e["title"] == "Rollladen Wohnzimmer geändert"]
+    assert len(storm) == 1 and storm[0]["why"].startswith("Sturmschutz an → aus")
+    assert any(e["why"].startswith("Nach Neustart nachholen nie → immer") or "→ immer" in e["why"] for e in rw_entries if e["cat"] == "settings")
     move = next(e for e in rw_entries if e["title"] == "Wohnzimmer zu")
     assert move["cat"] == "shutter" and "vorher 100 %" in move["why"]
 

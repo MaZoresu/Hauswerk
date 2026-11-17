@@ -15,16 +15,64 @@ from .const import LOG_DAYS, LOG_MAX, LOG_STORAGE_KEY, SETTING_LABELS
 CATEGORIES = ("presence", "season", "target", "window", "manual", "health", "command", "settings", "shutter")
 
 
-def log_settings(log: "Protokoll", settings: dict[str, Any], changed: list[str], by: str | None, module: str | None = None) -> None:
-    """Geänderte Einstellungen ins Protokoll: „Urlaub an“ bzw. „Einstellungen geändert“ mit Quelle."""
+VALUE_LABEL = {"never": "nie", "outage": "nur nach Ausfall", "always": "immer", "auto": "automatisch", "home": "Zuhause"}
+
+
+def _short(text: str, n: int = 40) -> str:
+    return text if len(text) <= n else text[: n - 1] + "…"
+
+
+def _value(hass: HomeAssistant | None, value: Any) -> str:
+    """Einstellungswert lesbar: Entitäten mit Namen, an/aus, Zahlen ohne „.0“."""
+    if value is None or value == "" or value == [] or value == {}:
+        return "–"
+    if isinstance(value, bool):
+        return "an" if value else "aus"
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, str):
+        state = hass.states.get(value) if hass is not None and "." in value else None
+        return _short(state.name if state is not None and state.name else VALUE_LABEL.get(value, value))
+    if isinstance(value, (int, float)):
+        return f"{value:g}"
+    return "geändert"
+
+
+def describe_change(hass: HomeAssistant | None, label: str, old: Any, new: Any) -> str:
+    """„Eco-Temperatur 17 → 18“ bzw. bei Listen „Personen: + Anna, − Ben“."""
+    if isinstance(old, list) or isinstance(new, list):
+        a, b = list(old or []), list(new or [])
+        if all(not isinstance(x, (dict, list)) for x in a + b):
+            parts = [f"+ {_value(hass, x)}" for x in b if x not in a] + [f"− {_value(hass, x)}" for x in a if x not in b]
+            return f"{label}: {', '.join(parts[:5]) + (f' (+{len(parts) - 5})' if len(parts) > 5 else '') if parts else 'Reihenfolge'}"
+        return f"{label} geändert"
+    if isinstance(old, dict) or isinstance(new, dict):
+        return f"{label} geändert"
+    return f"{label} {_value(hass, old)} → {_value(hass, new)}"
+
+
+def log_settings(log: "Protokoll", settings: dict[str, Any], changed: list[str], by: str | None, module: str | None = None,
+                 old: dict[str, Any] | None = None) -> None:
+    """Geänderte Einstellungen ins Protokoll: „Urlaub an“ bzw. „Einstellungen geändert“ mit alt → neu und Quelle."""
     labels = list(dict.fromkeys(SETTING_LABELS.get(k, k) for k in changed))
     only = changed[0]
     if len(changed) == 1 and isinstance(settings[only], bool):
         title = f"{labels[0]} {'an' if settings[only] else 'aus'}"
+        details = []
     else:
-        title = "Einstellungen geändert"
+        title = f"{labels[0]} geändert" if len(labels) == 1 else "Einstellungen geändert"
+        hass = getattr(log, "hass", None)
+        seen, details = set(), []
+        for key in changed:
+            label = SETTING_LABELS.get(key, key)
+            if old is None:
+                if label not in seen:
+                    details.append(label)
+            else:
+                details.append(describe_change(hass, label, old.get(key), settings[key]))
+            seen.add(label)
     source = f"Panel · von {by}" if by else "Home Assistant (Schalter oder Automation)"
-    log.add("settings", title, f"{', '.join(labels)} · {source}", module=module)
+    log.add("settings", title, f"{', '.join(details)} · {source}" if details else source, module=module)
 
 
 class Protokoll:

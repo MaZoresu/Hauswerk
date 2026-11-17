@@ -136,11 +136,45 @@ PROFILE_LABELS: dict[str, tuple[str, str]] = {
     "window_dir": ("Fensterrichtung", "°"), "azimuth_start": ("Sonne von", "°"), "azimuth_end": ("Sonne bis", "°"),
     "elevation_min": ("Sonnenhöhe mind.", "°"), "elevation_max": ("Sonnenhöhe höchstens", "°"), "temp2_min": ("Beschatten ab außen", " °C"),
     "temp1_min": ("Beschatten ab innen", " °C"), "shade_wait_start": ("Warten vor Beschattung", " s"), "shade_wait_end": ("Warten vor Ende", " s"),
-    "away_mode": ("Niemand zu Hause", ""), "vacation_random": ("Urlaub verschieben", " Min."), "manual_block": ("Von Hand hält", ""),
+    "away_mode": ("Niemand zu Hause", ""), "vacation_random": ("Urlaub verschieben", " Min."), "manual_block": ("Hand-Stellung bleibt bei", ""),
     "resident_sensor": ("Schlaf-Schalter", ""), "delay_random": ("Verzögerung zufällig", " s"),
+    "bs_operator": ("Helligkeit/Sonne verknüpft mit", ""), "behavior": ("Verhalten", ""), "shading_alt_entity": ("Schalter andere Beschattung", ""),
+    "tolerance": ("Toleranz", " %"), "drive_time": ("Fahrzeit", " s"), "workday_tomorrow": ("Arbeitstag-Sensor", ""),
+    "calendar": ("Kalender", ""), "cal_open": ("Kalender-Termin öffnen", ""), "cal_close": ("Kalender-Termin schließen", ""),
+    "brightness_sensor": ("Helligkeitssensor", ""), "brightness_up": ("Öffnen ab Helligkeit", " lx"), "brightness_down": ("Schließen unter Helligkeit", " lx"),
+    "brightness_hyst": ("Helligkeit Abstand", " lx"), "brightness_duration": ("Helligkeit Dauer", " s"), "sun_duration": ("Sonnenhöhe Dauer", " s"),
+    "vent_options": ("Lüften", ""), "lockout_tilted": ("Aussperrschutz gekippt", ""),
+    "shade_start_and": ("Beschattung beginnt (alle)", ""), "shade_start_or": ("Beschattung beginnt (eins)", ""),
+    "shade_end_and": ("Beschattung endet (alle)", ""), "shade_end_or": ("Beschattung endet (eins)", ""),
+    "shade_brightness_sensor": ("Beschattung Helligkeitssensor", ""), "shade_bright_start": ("Beschatten ab Helligkeit", " lx"),
+    "shade_bright_end": ("Beschattung endet unter", " lx"), "temp1_sensor": ("Temperatur innen", ""), "temp1_hyst": ("Temp. innen Abstand", " °C"),
+    "temp2_sensor": ("Temperatur außen", ""), "temp2_hyst": ("Temp. außen Abstand", " °C"), "forecast_entity": ("Wettervorhersage", ""),
+    "forecast_temp": ("Beschatten ab Vorhersage", " °C"), "weather_conditions": ("Wetterlage", ""), "shade_custom": ("Eigene Bedingung", ""),
+    "shade_end_immediate": ("Beschattung sofort beenden", ""), "resident_config": ("Bewohner", ""), "manual_reset": ("Zurücksetzen", ""),
+    "manual_recover": ("Nach Hand-Stellung nachholen", ""), "reset_time": ("Zurücksetzen um", ""), "reset_timeout": ("Zurücksetzen nach", " Std."),
+    "reset_position": ("Zurücksetzen in Stellung", " %"), "delay_fix": ("Verzögerung fest", " s"),
+    "force_pause": ("Pause-Schalter", ""), "force_up": ("Öffnen erzwingen", ""), "force_down": ("Schließen erzwingen", ""),
+    "force_ventilate": ("Lüften erzwingen", ""), "force_shading": ("Beschattung erzwingen", ""),
+}
+# Einträge in Listen-Einstellungen (Kurzform fürs Protokoll)
+LIST_ITEM_LABEL: dict[str, str] = {
+    "up": "Morgens öffnen", "down": "Abends schließen", "time": "Zeitsteuerung", "brightness": "Helligkeit", "sun": "Sonnenhöhe",
+    "ventilate": "Lüften", "shading": "Beschattung",
+    "azimuth": "Richtung", "elevation": "Sonnenhöhe", "temp1": "Temp. innen", "temp2": "Temp. außen", "forecast_temp": "Vorhersage",
+    "forecast_weather": "Wetterlage", "custom": "Eigene",
+    "sunny": "Sonnig", "partlycloudy": "Teils bewölkt", "cloudy": "Bewölkt", "fog": "Nebel", "rainy": "Regen", "windy": "Windig", "exceptional": "Extrem",
+    "ventilation_start_no_delay": "ohne Verzögerung beim Kippen", "ventilation_if_lower_enabled": "auch herunter auf Lüftungsstellung",
+    "ventilation_after_shading_end": "nach Beschattung auf Lüftungsstellung", "shading_over_ventilation": "Beschattung vor Lüften",
+    "lockout_tilted_closing": "beim Schließen", "lockout_tilted_shading_start": "bei Beschattungsbeginn", "lockout_tilted_shading_end": "bei Beschattungsende",
+    "closing": "Schließen", "opening": "Öffnen", "allow_shading": "Beschattung im Schlaf", "allow_opening": "Öffnen im Schlaf", "ventilation": "Lüften",
+    "fixed": "feste Uhrzeit", "timeout": "nach einiger Zeit", "in_position": "in Stellung",
+    "prevent_higher_position_closing": "abends nicht höher fahren", "prevent_lowering_when_closing_if_shaded": "abends in Beschattungsstellung bleiben",
+    "prevent_shading_end_if_closed": "Beschattung nicht beenden, wenn zu", "prevent_opening_after_shading_end": "nach Beschattung nicht öffnen",
+    "prevent_opening_after_ventilation_end": "nach Lüften nicht öffnen", "prevent_opening_multiple_times": "nur einmal am Tag öffnen",
+    "prevent_closing_multiple_times": "nur einmal am Tag schließen", "prevent_shading_multiple_times": "nur einmal am Tag beschatten",
 }
 CHOICE_LABEL = {"azimuth": "Sonnenrichtung", "elevation": "Sonnenhöhe", "time": "Uhrzeit", "times": "Uhrzeiten", "calendar": "Kalender",
-                "normal": "wie immer", "closed": "tagsüber zu", "shade": "beschattet"}
+                "normal": "wie immer", "closed": "tagsüber zu", "shade": "beschattet", "or": "oder", "and": "und"}
 
 
 def _fmt_value(value: Any, unit: str) -> str:
@@ -157,21 +191,30 @@ def _fmt_value(value: Any, unit: str) -> str:
     return f"{value:g}{unit}" if isinstance(value, float) else f"{value}{unit}"
 
 
-def profile_changes(old: dict, new: dict) -> str:
-    """Kurzer Text, was sich geändert hat: „Beschatten ab außen 22 → 24 °C, Stufe 1 50 %“."""
-    parts, other = [], 0
-    for key in PROFILE_SPEC:
+def list_changes(label: str, old: Any, new: Any) -> str:
+    """„Funktionen: + Beschattung, − Lüften“ statt nur der Anzahl."""
+    a, b = list(old or []), list(new or [])
+    added = [LIST_ITEM_LABEL.get(x, str(x)) for x in b if x not in a]
+    removed = [LIST_ITEM_LABEL.get(x, str(x)) for x in a if x not in b]
+    parts = [f"+ {x}" for x in added] + [f"− {x}" for x in removed]
+    return f"{label}: {', '.join(parts) if parts else 'Reihenfolge'}"
+
+
+def profile_changes(old: dict, new: dict, name: Callable[[str], str] | None = None) -> str:
+    """Kurzer Text, was sich geändert hat: „Beschatten ab außen 22 → 24 °C, Funktionen: − Lüften“."""
+    parts = []
+    for key, (_default, kind) in PROFILE_SPEC.items():
         a, b = old.get(key, PROFILE_DEFAULTS.get(key)), new.get(key, PROFILE_DEFAULTS.get(key))
         if a == b or (isinstance(a, (int, float)) and isinstance(b, (int, float)) and float(a) == float(b)):
             continue
-        if key in PROFILE_LABELS:
-            label, unit = PROFILE_LABELS[key]
-            parts.append(f"{label} {_fmt_value(a, unit)} → {_fmt_value(b, unit)}")
+        label, unit = PROFILE_LABELS.get(key, (key, ""))
+        if kind == "list" or isinstance(a, list) or isinstance(b, list):
+            parts.append(list_changes(label, a, b))
+        elif kind == "entity" and name:
+            parts.append(f"{label} {name(a) if a else '–'} → {name(b) if b else '–'}")
         else:
-            other += 1
-    if other:
-        parts.append(f"{other} weitere Einstellung{'en' if other > 1 else ''}")
-    return ", ".join(parts[:6]) + (f" (+{len(parts) - 6})" if len(parts) > 6 else "")
+            parts.append(f"{label} {_fmt_value(a, unit)} → {_fmt_value(b, unit)}")
+    return ", ".join(parts[:8]) + (f" (+{len(parts) - 8} weitere)" if len(parts) > 8 else "")
 
 
 CATEGORY_LABEL = {"open": "Öffnen", "close": "Schließen", "shading": "Beschattung", "ventilation": "Lüften",
@@ -381,7 +424,7 @@ class Rollwerk:
         changed = [k for k, v in settings.items() if self.settings.get(k) != v]
         if not changed:
             return
-        log_settings(self.log, settings, changed, by, module="rollwerk")
+        log_settings(self.log, settings, changed, by, module="rollwerk", old=self.settings)
         self.settings.update(settings)
         for entity_id in self.settings.get("rw_covers") or []:
             self.covers.setdefault(entity_id, {"profile": "standard"})
@@ -401,6 +444,10 @@ class Rollwerk:
             a, b = old.get(key), cfg.get(key)
             if a == b or (key in ("auto", "storm") and (a is None or a is True) and (b is None or b is True)):
                 continue
+            if key in ("auto", "storm"):
+                a, b = a is not False, b is not False
+            elif key == "room":
+                a, b = (self._room_label(a) if a else "automatisch"), (self._room_label(b) if b else "automatisch")
             if key == "profile":
                 a, b = (self.profiles.get(a or "standard") or {}).get("name", a), (self.profiles.get(b or "standard") or {}).get("name", b)
             elif key.startswith("contact_"):
@@ -408,8 +455,9 @@ class Rollwerk:
             elif key == "contacts":
                 a, b = ("keine" if a == "none" else "aus Heizwerk"), ("keine" if b == "none" else "aus Heizwerk")
             diff.append(f"{label} {_fmt_value(a, '')} → {_fmt_value(b, '')}")
-        self._log("settings", f"Rollladen {self._name(entity_id)} geändert",
-                  f"{', '.join(diff) or 'ohne Änderung'} · Panel{f' · von {by}' if by else ''}", entity_id)
+        if diff:
+            self._log("settings", f"Rollladen {self._name(entity_id)} geändert",
+                      f"{', '.join(diff)} · Panel{f' · von {by}' if by else ''}", entity_id)
         await self.async_evaluate()
 
     async def async_save_profile(self, pid: str | None, profile: dict[str, Any], by: str | None = None) -> str:
@@ -424,9 +472,12 @@ class Rollwerk:
         self._save()
         self._track()
         users = [e for e, c in self.covers.items() if (c.get("profile") or "standard") == pid and e in (self.settings.get("rw_covers") or [])]
-        what = "angelegt" if new else profile_changes(old, self.profiles[pid]) or "ohne Änderung"
-        self._log("settings", f"Profil „{profile.get('name')}“ {'angelegt' if new else 'geändert'}",
-                  f"{'' if new else what + ' · '}{len(users)} Rollläden · Panel{f' · von {by}' if by else ''}")
+        what = "" if new else profile_changes(old, self.profiles[pid], self._name)
+        if new or what:
+            where = ("für " + ", ".join(self._name(e) for e in users[:3]) + (f" und {len(users) - 3} weitere" if len(users) > 3 else "")
+                     if users else "noch kein Rollladen")
+            self._log("settings", f"Profil „{profile.get('name')}“ {'angelegt' if new else 'geändert'}",
+                      f"{what + ' · ' if what else ''}{where} · Panel{f' · von {by}' if by else ''}")
         await self.async_evaluate()
         return pid
 
@@ -481,6 +532,12 @@ class Rollwerk:
             room_id, room, _auto = self.room_of(entity_id)
             room_name = (room or {}).get("name") or self._area(entity_id)
         self.log.add(cat, title, why, room=room_id, room_name=room_name, module="rollwerk")
+
+    def _room_label(self, room_id: str) -> str:
+        """Name eines Heizwerk-Raums für das Protokoll."""
+        ctl = (self.hass.data.get(DOMAIN) or {}).get(MODULE_HEATING)
+        room = (getattr(ctl, "rooms", None) or {}).get(room_id) or {}
+        return room.get("name") or room_id
 
     def _name(self, entity_id: str | None) -> str:
         state = self.hass.states.get(entity_id) if entity_id else None

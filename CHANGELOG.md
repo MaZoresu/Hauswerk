@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.40.0 – 2026-11-17
+
+### Verbessert
+- **Protokoll sagt genau, was geändert wurde:**
+  - Listen zeigen, was dazukam und was wegfiel – z. B. „Funktionen: + Beschattung, − Lüften“ statt „6 gewählt → 5 gewählt“.
+  - Sensoren und Schalter erscheinen mit ihrem Namen statt der Entitäts-ID.
+  - Jede Profil-Einstellung hat eine Bezeichnung; „N weitere Einstellungen“ gibt es nicht mehr.
+  - Profil-Einträge nennen die betroffenen Rollläden („für Küche Tür“) statt „1 Rollläden“.
+  - Allgemeine Einstellungen (Haus, Heizwerk, Rollwerk, Kraftwerk) zeigen alt → neu, z. B. „Rollwerk: Nach Neustart nie → immer“.
+  - Sturmschutz und Automatik am Rollladen zeigen „an → aus“ statt „– → aus“.
+- Speichern ohne Änderung erzeugt keinen Protokoll-Eintrag mehr („ohne Änderung“).
+
 ## 0.39.1 – 2026-11-17
 
 ### Behoben
