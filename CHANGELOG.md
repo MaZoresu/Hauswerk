@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.46.2 – 2026-11-17
+
+### Geändert
+- **Bildschirmschoner: Module als Symbole mit Zahlen.** Statt Sätzen („1 Raum heizt“, „Rollläden: 1 offen · 0 zu“, „Solar 0 W“) steht je Modul das Logo, dahinter Symbol + Zahl: Heizwerk (heizt, Fenster offen, niemand da), Rollwerk (offen, zu, beschattet, nächste Fahrt mit Uhrzeit, Richtung und Anzahl), Kraftwerk (Solar, Bezug/Einspeisung, Akku).
+
 ## 0.46.1 – 2026-11-17
 
 ### Geändert (Tabletmodus)

@@ -722,3 +722,14 @@ def test_lage_kacheln(panel):
     panel.view("shutters")
     panel.click(".brief button.br-l")
     assert panel.js(f"{EL}._pop?.id || ''").startswith("rwpos:")
+
+
+def test_schoner_module_als_symbole(tablet):
+    """Bildschirmschoner: je Modul Logo + Symbole mit Zahlen statt Sätzen."""
+    p = tablet
+    p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    p.js(f"{EL}._saverShow()")
+    mods = p.js(f"[...{EL}.shadowRoot.querySelectorAll('#saver .sv-mod')].map((m) => [m.querySelector('.sv-logo svg') != null, m.querySelectorAll('.sv-i').length, m.innerText])")
+    assert len(mods) == 3 and all(m[0] and m[1] >= 1 for m in mods), mods
+    text = p.js(f"{EL}.shadowRoot.getElementById('saver').innerText")
+    assert "Raum heizt" not in text and "Rollläden:" not in text and "Solar " not in text

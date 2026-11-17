@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.46.1";
+const VERSION = "0.46.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1391,21 +1391,42 @@ class HauswerkPanel extends HTMLElement {
       el.innerHTML = `<div class="sv-in" style="transform:translate(${dx}vw, ${dy}vh)"><div class="sv-time small">${time}</div>${urgentHtml}</div>`;
       return;
     }
-    const facts = [];
+    // Module als Symbole mit Zahlen: Logo, dann je Wert Symbol + Zahl
     const f = this._facts();
-    if (f.heating) facts.push(["mdi:fire", `${f.heating} ${f.heating === 1 ? "Raum heizt" : "Räume heizen"}`]);
-    if (f.open) facts.push(["mdi:window-open-variant", `${f.open} Fenster offen`]);
-    const covers = this._data.rollwerk ? this._rwCovers() : [];
-    if (covers.length) {
-      const pos = covers.map((c) => this._rwPos(c.st)).filter((x) => x != null);
-      facts.push(["mdi:window-shutter", `Rollläden: ${pos.filter((x) => x >= 95).length} offen · ${pos.filter((x) => x <= 5).length} zu`]);
-    }
     const set = this._data.settings || {};
-    if ((set.kw_solar || []).length) {
-      const fl = this._kwFlow();
-      if (fl.solar != null) facts.push(["mdi:solar-power-variant", `Solar ${this._kwFmt(fl.solar)}`]);
+    const covers = this._data.rollwerk ? this._rwCovers() : [];
+    const mods = [];
+    const it = (icon, val, title) => `<span class="sv-i" title="${esc(title)}"><ha-icon icon="${icon}"></ha-icon>${val != null ? `<b>${esc(String(val))}</b>` : ""}</span>`;
+    if (f.rooms.length) {
+      const x = [it("mdi:fire", f.heating, "heizen")];
+      if (f.open) x.push(it("mdi:window-open-variant", f.open, "Fenster offen"));
+      if (this._status?.away) x.push(it("mdi:home-export-outline", null, "niemand zu Hause"));
+      mods.push(["heizen", x]);
     }
-    if (this._status?.away) facts.push(["mdi:home-export-outline", "Niemand zu Hause"]);
+    if (covers.length) {
+      const pos = covers.map((c) => this._rwPos(c.st)).filter((v) => v != null);
+      const x = [it("mdi:window-shutter-open", pos.filter((v) => v >= 95).length, "offen"), it("mdi:window-shutter", pos.filter((v) => v <= 5).length, "zu")];
+      const sh = covers.filter((c) => c.rs?.cat === "shading").length;
+      if (sh) x.push(it("mdi:sun-thermometer-outline", sh, "beschattet"));
+      // nächste Fahrt: Uhrzeit, Richtung, Anzahl
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      const nx = covers.map((c) => /(\d{1,2}):(\d{2}) (.+)$/.exec(c.rs?.next || "")).filter(Boolean)
+        .map((m) => ({ at: Number(m[1]) * 60 + Number(m[2]), hm: `${m[1].padStart(2, "0")}:${m[2]}`, what: m[3] })).filter((m) => m.at > nowMin).sort((a2, b2) => a2.at - b2.at);
+      if (nx.length) {
+        const first = nx.filter((m) => m.at === nx[0].at && m.what === nx[0].what);
+        const dir = /schließt|Stufe/.test(nx[0].what) ? "mdi:arrow-down-bold" : /öffnet/.test(nx[0].what) ? "mdi:arrow-up-bold" : "mdi:sun-thermometer-outline";
+        x.push(`<span class="sv-i sv-next" title="${esc(nx[0].what)}"><ha-icon icon="mdi:clock-outline"></ha-icon><b>${nx[0].hm}</b><ha-icon icon="${dir}"></ha-icon><b>${first.length}</b></span>`);
+      }
+      mods.push(["rollwerk", x]);
+    }
+    if ((set.kw_solar || []).length || set.kw_grid) {
+      const fl = this._kwFlow();
+      const x = [];
+      if (fl.solar != null) x.push(it("mdi:solar-power-variant", this._kwFmt(fl.solar), "Solar"));
+      if (fl.grid != null) x.push(it(fl.grid > 0 ? "mdi:transmission-tower-import" : "mdi:transmission-tower-export", this._kwFmt(Math.abs(fl.grid)), fl.grid > 0 ? "Bezug" : "Einspeisung"));
+      if (fl.soc != null) x.push(it("mdi:home-battery-outline", `${fmt(fl.soc, 0)} %`, "Akku"));
+      if (x.length) mods.push(["kraftwerk", x]);
+    }
     // Vorhersage der nächsten Stunden
     let fcHtml = "";
     const wid = set.weather_entity || Object.keys(this._hass.states).find((e) => e.startsWith("weather."));
@@ -1414,19 +1435,9 @@ class HauswerkPanel extends HTMLElement {
       const items = (fc?.list || []).filter((x) => new Date(x.datetime) > now - 30 * 60000).slice(0, 6);
       if (items.length) fcHtml = `<div class="sv-fc">${items.map((x) => `<span><small>${new Date(x.datetime).toLocaleTimeString("de-DE", { hour: "2-digit" })}</small><ha-icon icon="${(WEATHER[x.condition] || ["mdi:weather-partly-cloudy"])[0]}"></ha-icon><b>${fmt(x.temperature, 0)}°</b></span>`).join("")}</div>`;
     }
-    // Nächste Rollladen-Fahrten (gleiche Zeit zusammengefasst)
-    const moves = new Map();
-    for (const c of covers) {
-      const n = c.rs?.next;
-      if (!n) continue;
-      if (!moves.has(n)) moves.set(n, []);
-      moves.get(n).push(this._entityName(c.id));
-    }
-    const moveList = [...moves.entries()].sort((a, b) => a[0].replace("ca. ", "").localeCompare(b[0].replace("ca. ", ""))).slice(0, 2);
     const day = (d) => { const x = new Date(d); const td = new Date(); td.setHours(0, 0, 0, 0); const diff = Math.round((new Date(x.getFullYear(), x.getMonth(), x.getDate()) - td) / 86400000); return diff <= 0 ? "Heute" : diff === 1 ? "Morgen" : x.toLocaleDateString("de-DE", { weekday: "short" }); };
     const cal = (this._cal || []).filter((e) => e.allDay || new Date(e.start) > now - 30 * 60000);
     const side = [
-      ...moveList.map(([n, names]) => `<div class="sv-row"><ha-icon icon="mdi:window-shutter"></ha-icon><span><b>${esc(n)}</b><small>${esc(names.slice(0, 3).join(", "))}${names.length > 3 ? ` +${names.length - 3}` : ""}</small></span></div>`),
       ...cal.slice(0, 3).map((e) => `<div class="sv-row"><ha-icon icon="mdi:calendar"></ha-icon><span><b>${day(e.start)}${e.allDay ? "" : ` ${new Date(e.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</b><small>${esc(e.title)}</small></span></div>`),
     ];
     const smallHints = hints.slice(0, urgent.length ? 1 : 2);
@@ -1435,7 +1446,7 @@ class HauswerkPanel extends HTMLElement {
         <div class="sv-time">${time}</div>
         <div class="sv-date">${esc(date)}</div>
         ${w ? `<div class="sv-wx"><ha-icon icon="${w.icon}"></ha-icon><b>${fmt(w.temp)}°</b><span>${esc(w.label)}</span>${fcHtml}</div>` : ""}
-        ${facts.length ? `<div class="sv-facts">${facts.map(([i, l]) => `<span><ha-icon icon="${i}"></ha-icon>${esc(l)}</span>`).join("")}</div>` : ""}
+        ${mods.length ? `<div class="sv-mods">${mods.map(([m, x]) => `<div class="sv-mod"><span class="sv-logo">${MODULE_LOGOS[m] || ""}</span>${x.join("")}</div>`).join("")}</div>` : ""}
         ${urgentHtml}
         ${side.length ? `<div class="sv-side">${side.join("")}</div>` : ""}
         ${smallHints.length ? `<div class="sv-hints">${smallHints.map((h) => `<div class="sv-h ${fresh(h) ? "new" : ""}"><ha-icon icon="${h.icon}"></ha-icon><span><b>${esc(h.text)}</b>${h.sub ? `<small>${esc(h.sub)}</small>` : ""}</span></div>`).join("")}${hints.length > smallHints.length ? more(hints.length - smallHints.length, "weiterer Hinweis", "weitere Hinweise") : ""}</div>` : ""}
@@ -9683,6 +9694,14 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .sv-wx { display:flex; align-items:center; gap:12px; font-size:min(2.8vw, 4vh); color:#cbd5e1; }
 .sv-wx ha-icon { --mdc-icon-size:min(5vw, 7vh); }
 .sv-wx b { font-size:min(4.2vw, 6vh); font-weight:500; color:#e5e7eb; }
+.sv-mods { display:flex; flex-wrap:wrap; justify-content:center; gap:12px 34px; }
+.sv-mod { display:flex; align-items:center; gap:16px; font-size:min(2.6vw, 3.6vh); color:#cbd5e1; }
+.sv-logo { display:inline-flex; width:min(3.6vw, 5vh); height:min(3.6vw, 5vh); }
+.sv-logo .mlogo, .sv-logo svg { width:100%; height:100%; border-radius:22%; filter:saturate(.7); }
+.sv-i { display:inline-flex; align-items:center; gap:5px; }
+.sv-i ha-icon { --mdc-icon-size:min(2.8vw, 3.9vh); color:#94a3b8; }
+.sv-i b { font-weight:600; font-variant-numeric:tabular-nums; }
+.sv-next ha-icon:nth-of-type(2) { margin-left:4px; }
 .sv-facts { display:flex; flex-wrap:wrap; justify-content:center; gap:10px 26px; font-size:min(2.2vw, 3.2vh); color:#94a3b8; }
 .sv-facts span { display:flex; align-items:center; gap:8px; }
 .sv-facts ha-icon { --mdc-icon-size:min(2.8vw, 4vh); }
