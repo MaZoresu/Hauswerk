@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.38.0";
+const VERSION = "0.39.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2181,7 +2181,8 @@ class HauswerkPanel extends HTMLElement {
     return `
       <div class="rsched ${mini ? "mini" : ""} ${info.comfort ? "on" : ""}">
         <div class="rs-top"><ha-icon icon="${info.icon}"></ha-icon><span class="rs-src">${esc(info.src)}</span><span class="grow"></span><b>${esc(info.text)}</b></div>
-        ${info.blocks ? this._dayBar(info.blocks, room, day, true) : ""}
+        ${info.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s)) : ""}
+        ${info.blocks && this._preLead(room, s) && !mini ? `<div class="rs-pre"><i></i>Vorheizen ${this._preLead(room, s)} Min. vorher${s?.preheat_mode === "smart" ? " (gelernt)" : ""}</div>` : ""}
       </div>`;
   }
 
@@ -2219,7 +2220,7 @@ class HauswerkPanel extends HTMLElement {
           <span class="rm-tgt"><small>Soll</small><b style="color:${tint(tempColor(s.target))}">${fmt(s.target)} °C</b></span>
         </div>
         <div class="rm-mode"><ha-icon icon="${m.i}"></ha-icon>${esc(s.mode_label || "Automatik aus")}${info ? `<span class="grow"></span><small>${esc(info.text)}</small>` : ""}</div>
-        ${info?.blocks ? this._dayBar(info.blocks, room, day, true) : ""}
+        ${info?.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s)) : ""}
       </article>`;
   }
 
@@ -2489,20 +2490,34 @@ class HauswerkPanel extends HTMLElement {
     return segs;
   }
 
-  _dayBar(blocks, room, day, mini = false) {
+  /** Vorlaufzeit fürs Vorheizen in Minuten (wie Heizwerk sie gerade rechnet), 0 = kein Vorheizen. */
+  _preLead(room, s) {
+    const mode = room.preheat_mode || this._data.settings.preheat_mode || "fixed";
+    if (mode === "off" || room.enabled === false) return 0;
+    if (s?.preheat_lead) return Number(s.preheat_lead);
+    return mode === "fixed" ? Number(room.lead_min ?? this._leadFor(room.type) ?? 0) : 0;
+  }
+
+  _dayBar(blocks, room, day, mini = false, lead = 0) {
     const segs = this._daySegments(blocks, room, day);
     const now = new Date();
     const today = (now.getDay() + 6) % 7;
     const nowPct = ((now.getHours() * 60 + now.getMinutes()) / 1440) * 100;
+    const t2 = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    // Vorheizen: vor jedem Komfort-Beginn, der auf Eco folgt (bei Mitternacht ohne Vortag)
+    const pre = lead > 0
+      ? segs.map(([st, , t, comfort], i) => (comfort && i > 0 && !segs[i - 1][3] ? [Math.max(segs[i - 1][0], st - lead), st, t] : null)).filter(Boolean)
+          .map(([a, b, t]) => `<div class="dseg dpre" style="left:${(a / 1440) * 100}%;width:${((b - a) / 1440) * 100}%;--pc:${tempColor(t)}" title="Vorheizen ab ${t2(a)} (${b - a} Min.) für ${fmt(t)} °C um ${t2(b)}"></div>`).join("")
+      : "";
     const bar = segs
       .map(
         ([s, e, t, comfort]) =>
           `<div class="dseg ${comfort ? "" : "eco"}" style="left:${(s / 1440) * 100}%;width:${((e - s) / 1440) * 100}%;background:${tempColor(t)}" title="${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}–${String(Math.floor(e / 60)).padStart(2, "0")}:${String(e % 60).padStart(2, "0")} · ${fmt(t)} °C"></div>`
       )
       .join("");
-    if (mini) return `<div class="dbar mini">${bar}${day === today ? `<div class="now" style="left:${nowPct}%"></div>` : ""}</div>`;
+    if (mini) return `<div class="dbar mini">${bar}${pre}${day === today ? `<div class="now" style="left:${nowPct}%"></div>` : ""}</div>`;
     return `
-      <div class="dbar">${bar}${day === today ? `<div class="now" style="left:${nowPct}%"></div>` : ""}</div>
+      <div class="dbar">${bar}${pre}${day === today ? `<div class="now" style="left:${nowPct}%"></div>` : ""}</div>
       <div class="dscale">${[0, 6, 12, 18, 24].map((h) => `<span>${h}</span>`).join("")}</div>`;
   }
 
@@ -7958,6 +7973,9 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .wic ha-icon { --mdc-icon-size:18px; }
 .wtools { display:inline-flex; gap:2px; }
 .wdrag { cursor:grab; touch-action:none; }
+.dbar .dpre { background:repeating-linear-gradient(135deg, color-mix(in srgb, var(--pc) 85%, transparent) 0 3px, color-mix(in srgb, var(--pc) 30%, transparent) 3px 6px) !important; opacity:1; }
+.rs-pre { display:flex; align-items:center; gap:6px; margin-top:5px; font-size:11.5px; color:var(--muted); }
+.rs-pre i { width:14px; height:8px; border-radius:2px; background:repeating-linear-gradient(135deg, #fb923c 0 3px, color-mix(in srgb, #fb923c 30%, transparent) 3px 6px); }
 .gs-in { margin-bottom:12px; }
 .pchips.left { justify-content:flex-start; }
 .wiz-lead { margin:0 0 12px; }

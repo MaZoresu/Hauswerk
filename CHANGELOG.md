@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.39.0 – 2026-11-17
+
+### Neu
+- **Vorheizen im Tagesplan der Raumkachel:** Vor jedem Komfort-Beginn zeigt der Streifen die Vorheizzeit gestreift in der Farbe der Zieltemperatur – in der detaillierten und der kompakten Kachel. Die Länge ist die, mit der Heizwerk gerade rechnet: feste Zeit (mit Wetter-Faktor) oder gelernt aus der Aufheizgeschwindigkeit. Antippen bzw. Darüberfahren zeigt „Vorheizen ab 05:25 (35 Min.) für 21 °C um 06:00“; die detaillierte Kachel nennt darunter „Vorheizen … Min. vorher“.
+
 ## 0.38.0 – 2026-11-17
 
 ### Neu

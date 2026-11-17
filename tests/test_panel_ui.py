@@ -423,3 +423,13 @@ def test_einrichtung(panel):
     panel.wait(200)
     assert panel.js(f"[{EL}._pop?.id, {EL}._pop?.draft?.step]") == ["setup", 3]
     panel.ok("Einrichtung mit Raum-Assistent")
+
+
+def test_vorheizen_im_tagesplan(panel):
+    """Raumkacheln zeigen vor jedem Komfort-Beginn die Vorheizzeit (gestreift) – detailliert und kompakt."""
+    for view in ("detail", "compact"):
+        panel.js(f"(v) => {{ {EL}._view = v; }}", view)
+        panel.view("overview")
+        titles = panel.js(f"[...{EL}.shadowRoot.querySelectorAll('.dbar .dpre')].map((x) => x.title)")
+        assert titles and all(t.startswith("Vorheizen ab") for t in titles), (view, titles)
+        panel.ok(f"Vorheizen in der Ansicht {view}")
