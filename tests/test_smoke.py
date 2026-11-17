@@ -247,6 +247,55 @@ def test_uebernahme_aus_heizwerk(hw):
     assert STORES[hw.const.HOUSE_STORAGE_KEY]["settings"]["home_zone"] == "zone.home"
 
 
+def test_heimweg_nur_wer_naeher_kommt(hw):
+    """Steht jemand in der Nähe (Arbeit um die Ecke), greift die Abwesenheit trotzdem; nur wer näher kommt, zählt."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 17, 7, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("person.julia", "not_home", name="Julia")
+        hass.set("sensor.home_2_entfernung_von_julia", "322", {"unit_of_measurement": "m"}, "Entfernung Julia")
+        hass.set("sensor.home_entfernung_von_jens", "60806", {"unit_of_measurement": "m"}, "Entfernung Jens")
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"persons": ["person.julia"], "away_delay": 0, "proximity_m": 1000,
+                                        "proximity_sensors": ["sensor.home_2_entfernung_von_julia", "sensor.home_entfernung_von_jens"]})
+        out = {}
+        # 1) ohne Bewegungs-Sensor: Abstand bleibt gleich -> abwesend
+        NOW[0] += timedelta(minutes=1)
+        haus.update()
+        haus.update()
+        out["steht"] = (haus.away, haus.approaching)
+        # 2) Abstand wird kleiner -> auf dem Heimweg, nach 15 Minuten ohne Annäherung wieder abwesend
+        hass.set("sensor.home_2_entfernung_von_julia", "200", {"unit_of_measurement": "m"}, "Entfernung Julia")
+        haus.update()
+        out["kommt"] = (haus.away, haus.approaching)
+        NOW[0] += timedelta(minutes=16)
+        haus.update()
+        out["steht_wieder"] = (haus.away, haus.approaching)
+        # 3) mit Bewegungs-Sensor der Integration „Nähe“ (gleiches Gerät)
+        REG["sensor.home_2_entfernung_von_julia"] = types.SimpleNamespace(
+            entity_id="sensor.home_2_entfernung_von_julia", device_id="prox2", unique_id="abc_person.julia_dist_to_zone")
+        REG["sensor.home_2_bewegung_von_julia"] = types.SimpleNamespace(
+            entity_id="sensor.home_2_bewegung_von_julia", device_id="prox2", unique_id="abc_person.julia_dir_of_travel")
+        haus._dir_ids.clear()
+        hass.set("sensor.home_2_bewegung_von_julia", "stationary")
+        hass.set("sensor.home_2_entfernung_von_julia", "150", {"unit_of_measurement": "m"}, "Entfernung Julia")
+        haus.update()
+        out["richtung_steht"] = (haus.away, haus.approaching)
+        hass.set("sensor.home_2_bewegung_von_julia", "towards")
+        haus.update()
+        out["richtung_kommt"] = (haus.away, haus.approaching)
+        return out
+
+    out = asyncio.run(run())
+    assert out["steht"] == (True, False)
+    assert out["kommt"] == (False, True)
+    assert out["steht_wieder"] == (True, False)
+    assert out["richtung_steht"] == (True, False), "näher geworden, aber Nähe sagt „stationär“"
+    assert out["richtung_kommt"] == (False, True)
+
+
 def test_einstellungen_getrennt(hw):
     assert not set(hw.const.HOUSE_DEFAULTS) & set(hw.const.HEAT_DEFAULTS)
     assert hw.const.DEFAULT_SETTINGS == {**hw.const.HOUSE_DEFAULTS, **hw.const.HEAT_DEFAULTS}

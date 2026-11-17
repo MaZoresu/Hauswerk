@@ -234,8 +234,8 @@ def compute_target(
             away_temp = target - float(settings.get("away_offset", 2) or 0)
         else:
             away_temp = float(settings.get("away_temp", 17))
-        if away_temp < target:
-            target, mode = away_temp, "abwesend"
+        # Niemand da: immer „abwesend“ – höchstens die Abwesend-Temperatur, nie wärmer als der Plan
+        target, mode = min(away_temp, target), "abwesend"
     elif occupied is not None:
         if occupied and room.get("presence_mode") == "always" and target < comfort:
             target, mode = comfort, "belegt"

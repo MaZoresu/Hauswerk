@@ -435,6 +435,25 @@ def test_vorheizen_im_tagesplan(panel):
         panel.ok(f"Vorheizen in der Ansicht {view}")
 
 
+def test_abwesend_im_tagesplan(panel):
+    """Ist niemand da, zeigt die Raumkachel ab jetzt die Absenkung im Tagesplan und darunter die Abwesend-Einstellung."""
+    panel.js(f"() => {{ {EL}._view = 'detail'; {EL}._status = {{ ...{EL}._status, away: true }}; }}")
+    panel.view("overview")
+    legend = panel.js(f"[...{EL}.shadowRoot.querySelectorAll('.rs-abs')].map((x) => x.textContent.trim())")
+    assert legend and all(t == "Niemand da – höchstens 17,0 °C" for t in legend), legend
+    titles = panel.js(f"[...{EL}.shadowRoot.querySelectorAll('.dbar .dabs')].map((x) => x.title)")
+    assert all("Abwesend:" in t and "statt" in t for t in titles), titles
+    # Thermostate aus statt absenken
+    panel.js(f"() => {{ {EL}._data.settings = {{ ...{EL}._data.settings, away_action: 'off' }}; }}")
+    panel.view("overview")
+    legend = panel.js(f"[...{EL}.shadowRoot.querySelectorAll('.rs-abs')].map((x) => x.textContent.trim())")
+    assert legend and all(t == "Niemand da – Thermostate aus" for t in legend), legend
+    panel.js(f"() => {{ {EL}._data.settings = {{ ...{EL}._data.settings, away_action: 'lower' }}; {EL}._status = {{ ...{EL}._status, away: false }}; }}")
+    panel.view("overview")
+    assert panel.js(f"{EL}.shadowRoot.querySelectorAll('.rs-abs, .dabs').length") == 0
+    panel.ok("Abwesend im Tagesplan")
+
+
 def test_modul_logos_passen_in_ihren_platz(panel):
     """Modul-Logos (z. B. im Protokoll-Filter) dürfen nicht über ihren Platz hinausragen und den Text überdecken."""
     for view in ("log", "house", "start"):

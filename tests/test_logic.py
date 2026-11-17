@@ -98,7 +98,9 @@ def test_away_only_lowers():
     res = target(room(), wm(23), away=True)  # Eco 18 > ? nein: 17 < 18 -> abgesenkt
     assert res["target"] == 17.0
     r = room(eco=16.0)
-    assert target(r, wm(23), away=True)["mode"] == "eco"  # 17 würde anheben
+    res = target(r, wm(23), away=True)  # 17 würde anheben: bleibt 16, heißt aber „abwesend“
+    assert res["mode"] == "abwesend" and res["target"] == 16.0
+    assert target(room(), wm(12), away=True)["mode"] == "abwesend"  # nie „Komfort“, solange niemand da ist
 
 
 def test_away_offset_and_off():

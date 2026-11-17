@@ -19,6 +19,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
 )
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -37,6 +38,7 @@ from .logic import distance_km, in_quiet_hours, is_vacation, keyword_match, keyw
 _LOGGER = logging.getLogger(__name__)
 
 BAD_STATES = {STATE_UNAVAILABLE, STATE_UNKNOWN, None}
+PROXIMITY_TREND = 15 * 60  # Sekunden: so lange gilt „kommt näher“ nach der letzten Annäherung
 VACATION_KEYS = ("vacation_source", "vacation_calendar", "vacation_keywords")
 
 
@@ -90,6 +92,8 @@ class Haus:
         self.away = False
         self.approaching = False
         self.away_for = 0.0  # Sekunden, seit die letzte Person gegangen ist
+        self._prox: dict[str, tuple[float, float]] = {}  # Entfernungs-Sensor -> (letzter Abstand km, Zeit der letzten Annäherung)
+        self._dir_ids: dict[str, str | None] = {}         # Entfernungs-Sensor -> Bewegungs-Sensor der Integration „Nähe“
         self.vacation = False
         # Urlaub aus dem Kalender
         self._cal_vacation = False
@@ -281,17 +285,59 @@ class Haus:
         return away
 
     def _near_home(self) -> bool:
+        """Auf dem Heimweg: näher als die Grenze UND unterwegs zur Wohnung.
+
+        Wer in der Nähe ist, aber steht (z. B. Arbeit oder Einkauf um die Ecke), zählt nicht –
+        sonst würde die Abwesenheit nie greifen. Die Richtung kommt aus dem Bewegungs-Sensor der
+        Integration „Nähe“ (gleiches Gerät), sonst daraus, ob der Abstand in den letzten 15 Minuten kleiner wurde.
+        """
         limit_km = float(self.settings.get("proximity_m") or 0) / 1000
         if limit_km <= 0:
             return False
+        now = dt_util.utcnow().timestamp()
+        near = False
         for entity_id in self.settings.get("proximity_sensors") or []:
             state = self.hass.states.get(entity_id)
             if state is None or state.state in BAD_STATES:
                 continue
             km = distance_km(_float(state.state), state.attributes.get("unit_of_measurement"))
-            if km is not None and km <= limit_km:
-                return True
-        return False
+            if km is None:
+                continue
+            last = self._prox.get(entity_id)
+            if last is None or km < last[0] - 0.05:
+                drop = now if last is not None else 0.0
+            else:
+                drop = last[1]
+            self._prox[entity_id] = (km, drop)
+            if km > limit_km:
+                continue
+            direction = self._direction(entity_id)
+            if direction is not None:
+                near = near or direction == "towards"
+            else:
+                near = near or (drop and now - drop <= PROXIMITY_TREND)
+        return bool(near)
+
+    def _direction(self, entity_id: str) -> str | None:
+        """Bewegungsrichtung zum Entfernungs-Sensor („towards“, „away_from“, „stationary“, „arrived“) oder None."""
+        if entity_id not in self._dir_ids:
+            found = None
+            try:
+                reg = er.async_get(self.hass)
+                entry = reg.async_get(entity_id)
+                uid = getattr(entry, "unique_id", None) or ""
+                if entry is not None and entry.device_id and "dist_to_zone" in uid:
+                    want = uid.replace("dist_to_zone", "dir_of_travel")
+                    found = next((e.entity_id for e in er.async_entries_for_device(reg, entry.device_id)
+                                  if getattr(e, "unique_id", None) == want), None)
+            except Exception:  # noqa: BLE001 - Register nicht verfügbar: Abstand-Trend nutzen
+                found = None
+            self._dir_ids[entity_id] = found
+        dir_id = self._dir_ids[entity_id]
+        state = self.hass.states.get(dir_id) if dir_id else None
+        if state is None or state.state not in ("towards", "away_from", "stationary", "arrived"):
+            return None
+        return state.state
 
     def _flip(self, key: str, value: Any, on: str | None, off: str | None, why: str | None = None) -> None:
         """Wechsel protokollieren (nicht beim ersten Durchlauf nach dem Start)."""

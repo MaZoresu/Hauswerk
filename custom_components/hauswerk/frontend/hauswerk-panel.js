@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.40.0";
+const VERSION = "0.41.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2181,8 +2181,8 @@ class HauswerkPanel extends HTMLElement {
     return `
       <div class="rsched ${mini ? "mini" : ""} ${info.comfort ? "on" : ""}">
         <div class="rs-top"><ha-icon icon="${info.icon}"></ha-icon><span class="rs-src">${esc(info.src)}</span><span class="grow"></span><b>${esc(info.text)}</b></div>
-        ${info.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s)) : ""}
-        ${info.blocks && this._preLead(room, s) && !mini ? `<div class="rs-pre"><i></i>Vorheizen ${this._preLead(room, s)} Min. vorher${s?.preheat_mode === "smart" ? " (gelernt)" : ""}</div>` : ""}
+        ${info.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s), this._awayInfo(room)) : ""}
+        ${info.blocks && !mini && (this._preLead(room, s) || this._awayInfo(room)) ? `<div class="rs-legend">${this._preLead(room, s) && !this._awayInfo(room) ? `<span class="rs-pre"><i></i>Vorheizen ${this._preLead(room, s)} Min. vorher${s?.preheat_mode === "smart" ? " (gelernt)" : ""}</span>` : ""}${this._awayInfo(room) ? `<span class="rs-abs"><i></i>${esc(this._awayInfo(room).text)}</span>` : ""}</div>` : ""}
       </div>`;
   }
 
@@ -2220,7 +2220,7 @@ class HauswerkPanel extends HTMLElement {
           <span class="rm-tgt"><small>Soll</small><b style="color:${tint(tempColor(s.target))}">${fmt(s.target)} °C</b></span>
         </div>
         <div class="rm-mode"><ha-icon icon="${m.i}"></ha-icon>${esc(s.mode_label || "Automatik aus")}${info ? `<span class="grow"></span><small>${esc(info.text)}</small>` : ""}</div>
-        ${info?.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s)) : ""}
+        ${info?.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s), this._awayInfo(room)) : ""}
       </article>`;
   }
 
@@ -2498,16 +2498,48 @@ class HauswerkPanel extends HTMLElement {
     return mode === "fixed" ? Number(room.lead_min ?? this._leadFor(room.type) ?? 0) : 0;
   }
 
-  _dayBar(blocks, room, day, mini = false, lead = 0) {
+  /** Abwesenheit, wie Heizwerk sie gerade anwendet (nur solange niemand da ist), sonst null. */
+  _awayInfo(room) {
+    const st = this._status || {};
+    if (!st.away || st.vacation || room.enabled === false) return null;
+    const set = this._data.settings || {};
+    if ((set.away_action || "lower") === "off") return { off: true, text: "Niemand da – Thermostate aus" };
+    if ((set.away_mode || "temp") === "offset") {
+      const d = Number(set.away_offset ?? 2);
+      return { offset: d, text: `Niemand da – ${fmt(d)} °C kühler als geplant` };
+    }
+    const t = Number(set.away_temp ?? 17);
+    return { temp: t, text: `Niemand da – höchstens ${fmt(t)} °C` };
+  }
+
+  /** Soll laut Abwesenheit für eine geplante Temperatur (null = Thermostate aus). */
+  _awayTemp(away, t) {
+    if (away.off) return null;
+    return away.offset != null ? t - away.offset : Math.min(away.temp, t);
+  }
+
+  _dayBar(blocks, room, day, mini = false, lead = 0, away = null) {
     const segs = this._daySegments(blocks, room, day);
     const now = new Date();
     const today = (now.getDay() + 6) % 7;
     const nowPct = ((now.getHours() * 60 + now.getMinutes()) / 1440) * 100;
     const t2 = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+    const nowMinPre = now.getHours() * 60 + now.getMinutes();
     // Vorheizen: vor jedem Komfort-Beginn, der auf Eco folgt (bei Mitternacht ohne Vortag)
     const pre = lead > 0
       ? segs.map(([st, , t, comfort], i) => (comfort && i > 0 && !segs[i - 1][3] ? [Math.max(segs[i - 1][0], st - lead), st, t] : null)).filter(Boolean)
+          .filter(([a]) => !(away && day === today && a >= nowMinPre))
           .map(([a, b, t]) => `<div class="dseg dpre" style="left:${(a / 1440) * 100}%;width:${((b - a) / 1440) * 100}%;--pc:${tempColor(t)}" title="Vorheizen ab ${t2(a)} (${b - a} Min.) für ${fmt(t)} °C um ${t2(b)}"></div>`).join("")
+      : "";
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    // Abwesend: ab jetzt bis Tagesende, wo der Plan wärmer ist als erlaubt (gestreift grau)
+    const awayOn = away && day === today;
+    const abs = awayOn
+      ? segs.map(([st, e, t]) => [Math.max(st, nowMin), e, t]).filter(([a, e, t]) => e > a && (away.off || this._awayTemp(away, t) < t))
+          .map(([a, e, t]) => {
+            const at = this._awayTemp(away, t);
+            return `<div class="dseg dabs" style="left:${(a / 1440) * 100}%;width:${((e - a) / 1440) * 100}%" title="${t2(a)}–${t2(e)} · Abwesend: ${at == null ? "Thermostate aus" : `${fmt(at)} °C statt ${fmt(t)} °C`} (solange niemand da ist)"></div>`;
+          }).join("")
       : "";
     const bar = segs
       .map(
@@ -2515,9 +2547,9 @@ class HauswerkPanel extends HTMLElement {
           `<div class="dseg ${comfort ? "" : "eco"}" style="left:${(s / 1440) * 100}%;width:${((e - s) / 1440) * 100}%;background:${tempColor(t)}" title="${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}–${String(Math.floor(e / 60)).padStart(2, "0")}:${String(e % 60).padStart(2, "0")} · ${fmt(t)} °C"></div>`
       )
       .join("");
-    if (mini) return `<div class="dbar mini">${bar}${pre}${day === today ? `<div class="now" style="left:${nowPct}%"></div>` : ""}</div>`;
+    if (mini) return `<div class="dbar mini">${bar}${pre}${abs}${day === today ? `<div class="now" style="left:${nowPct}%"></div>` : ""}</div>`;
     return `
-      <div class="dbar">${bar}${pre}${day === today ? `<div class="now" style="left:${nowPct}%"></div>` : ""}</div>
+      <div class="dbar">${bar}${pre}${abs}${day === today ? `<div class="now" style="left:${nowPct}%"></div>` : ""}</div>
       <div class="dscale">${[0, 6, 12, 18, 24].map((h) => `<span>${h}</span>`).join("")}</div>`;
   }
 
@@ -4578,8 +4610,8 @@ class HauswerkPanel extends HTMLElement {
             </div>
             ${head("mdi:map-marker-radius-outline", "Auf dem Heimweg")}
             <div class="wxrows">
-              ${row("near", "Näher als", "gilt schon als zu Hause (0 = aus)", `<div class="unit"><input type="number" step="50" min="0" max="50000" data-set="proximity_m" value="${Math.round(p.proximity_m ?? 0)}" ${dis}><i>m</i></div>`,
-                "Ist eine Person näher als dieser Abstand zur Wohnung, gilt das Haus schon als bewohnt – Heizwerk heizt dann zum Beispiel schon vor. Der Abstand kommt aus der Ortung der Person oder aus einem Entfernungs-Sensor.", true)}
+              ${row("near", "Näher als", "und auf dem Weg nach Hause = schon zu Hause (0 = aus)", `<div class="unit"><input type="number" step="50" min="0" max="50000" data-set="proximity_m" value="${Math.round(p.proximity_m ?? 0)}" ${dis}><i>m</i></div>`,
+                "Kommt eine Person näher und ist schon näher als dieser Abstand, gilt das Haus als bewohnt – Heizwerk heizt dann schon vor. Wer in der Nähe ist, aber nicht näher kommt (z. B. Arbeit oder Einkauf um die Ecke), zählt nicht: Sonst würde die Abwesenheit nie greifen. Die Richtung kommt aus dem Bewegungs-Sensor der Integration „Nähe“; ohne ihn zählt, ob der Abstand in den letzten 15 Minuten kleiner wurde.", true)}
             </div>
             <div class="field"><span>Entfernungs-Sensoren (optional, z. B. aus der Integration „Nähe“)</span>${this._picker("proximity_sensors", p.proximity_sensors || [])}</div>
             <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Party und Eco schaltest du in der Hausmodus-Leiste auf der Startseite. Präsenzmelder einzelner Räume stehen am Raum unter „Geräte“.</p>`,
@@ -7974,7 +8006,10 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .wtools { display:inline-flex; gap:2px; }
 .wdrag { cursor:grab; touch-action:none; }
 .dbar .dpre { background:repeating-linear-gradient(135deg, color-mix(in srgb, var(--pc) 85%, transparent) 0 3px, color-mix(in srgb, var(--pc) 30%, transparent) 3px 6px) !important; opacity:1; }
-.rs-pre { display:flex; align-items:center; gap:6px; margin-top:5px; font-size:11.5px; color:var(--muted); }
+.rs-legend { display:flex; flex-wrap:wrap; gap:4px 12px; margin-top:5px; }
+.rs-pre, .rs-abs { display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted); }
+.rs-abs i { width:14px; height:8px; border-radius:2px; flex:none; background:repeating-linear-gradient(135deg, #64748b 0 3px, color-mix(in srgb, #64748b 30%, transparent) 3px 6px); }
+.dbar .dabs { background:repeating-linear-gradient(135deg, color-mix(in srgb, #64748b 92%, transparent) 0 3px, color-mix(in srgb, #94a3b8 45%, transparent) 3px 6px) !important; opacity:1; }
 .rs-pre i { width:14px; height:8px; border-radius:2px; background:repeating-linear-gradient(135deg, #fb923c 0 3px, color-mix(in srgb, #fb923c 30%, transparent) 3px 6px); }
 .gs-in { margin-bottom:12px; }
 .pchips.left { justify-content:flex-start; }

@@ -2,6 +2,17 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.41.0 – 2026-11-17
+
+### Neu
+- **Abwesend im Tagesplan der Raumkachel:** Ist niemand zu Hause, zeigt der Streifen ab jetzt grau gestreift, wo der Plan abgesenkt wird – Antippen bzw. Darüberfahren nennt „Abwesend: 17 °C statt 23 °C“. Darunter steht die Einstellung, z. B. „Niemand da – höchstens 17 °C“, „… 2 °C kühler als geplant“ oder „… Thermostate aus“. Vorheizen entfällt, solange niemand da ist.
+
+### Behoben
+- **Abwesenheit griff nicht, wenn jemand in der Nähe war:** Wer näher als die Heimweg-Grenze war, galt als „auf dem Heimweg“ und damit als zu Hause – auch wenn er dort stand (z. B. Arbeit oder Einkauf um die Ecke). Heizwerk blieb dann auf Komfort. Jetzt zählt nur, wer **näher kommt**: laut Bewegungs-Sensor der Integration „Nähe“ („kommt näher“) oder, ohne ihn, wenn der Abstand in den letzten 15 Minuten kleiner wurde.
+
+### Geändert
+- **Heizwerk zeigt bei Abwesenheit immer „Abwesend“** statt Komfort oder Eco. Die Temperatur ist höchstens die Abwesend-Temperatur, aber nie wärmer als der Heizplan.
+
 ## 0.40.0 – 2026-11-17
 
 ### Verbessert
