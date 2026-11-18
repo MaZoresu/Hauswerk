@@ -2,6 +2,17 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.49.0 – 2026-11-18
+
+### Verbessert
+- **Panel lädt schneller:** Home Assistant liefert das Panel jetzt komprimiert aus (≈ 180 statt 715 KB) und der Browser behält es bis zum nächsten Update im Zwischenspeicher – besonders spürbar auf dem Tablet.
+- **Nur ändern, was sich ändert:** Neue Werte (Temperaturen, Stellungen, Leistungen …) ändern nur die betroffenen Zahlen und Symbole, statt die ganze Seite neu aufzubauen. Bleibt alles gleich, passiert gar nichts. Weniger Ruckeln auf langsamen Tablets; Scrollstand, geöffnete Bereiche und Eingaben bleiben erhalten.
+- **Umbenannte Entitäten werden übernommen:** Wird in Home Assistant die ID eines Thermostats, Sensors, Rollladens o. Ä. geändert, ersetzt Hauswerk sie überall – Räume, Heizpläne, Rollläden und Profile, Kraftwerk, Anwesenheit, Widgets – und lädt sich kurz neu. Im Protokoll steht „Entität umbenannt – übernommen“.
+- **Sommerpause nach Tagesmittel:** Bei Saison „Nach Außentemperatur“ entscheidet jetzt standardmäßig das Mittel der letzten 24 Stunden (wählbar: Temperatur jetzt · Tagesmittel · Mittel 3 Tage). Einzelne warme Nachmittage oder kalte Morgen kippen die Saison nicht mehr – damit wird auch das Entkalken im Sommer verlässlich. Die Werte überstehen Neustarts; bis genug gesammelt sind (ca. 6 Stunden), gilt die Temperatur jetzt.
+
+### Sicherheit
+- **Einstellungen auch im Backend geschützt, Bedienen für alle:** Anwesenheit, Urlaub, Gäste, Party und Eco darf jetzt jeder angemeldete Benutzer schalten – alle anderen Einstellungen prüft der Server weiterhin auf Admin bzw. die Freigabe „Alle Benutzer dürfen ändern“. Damit ist ein eigener Tablet-Benutzer ohne Admin-Rechte sinnvoll: Er kann bedienen, aber nichts einstellen – auch nicht an Hauswerk vorbei. Unter Darstellung › Tabletmodus steht, ob das Tablet so angemeldet ist.
+
 ## 0.48.0 – 2026-11-18
 
 ### Neue Widgets

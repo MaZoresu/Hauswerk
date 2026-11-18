@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.48.0";
+const VERSION = "0.49.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -638,6 +638,11 @@ class HauswerkPanel extends HTMLElement {
     return !!this._data?.is_admin && !this._tabletLocked();
   }
 
+  /** Bedienen (Anwesenheit, Urlaub, Gäste, Party, Eco) dürfen alle angemeldeten Benutzer – auch am gesperrten Tablet. */
+  get _operate() {
+    return !!this._data;
+  }
+
   /** Tablet gesperrt: nur bedienen, nichts einstellen (lange auf das Logo drücken entsperrt für 10 Minuten). */
   _tabletLocked() {
     return !!this._tablet && this._tabletOpt("lock", "0") === "1" && !(this._unlockUntil > Date.now());
@@ -951,6 +956,7 @@ class HauswerkPanel extends HTMLElement {
     if (!main) return;
     if (this._error) {
       main.innerHTML = `<section class="card empty"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><h2>Hauswerk antwortet nicht</h2><p>${esc(this._error)}</p></section>`;
+      main.dataset.sig = "";
       return;
     }
     this._applyLook(this._pop?.id === "look" ? this._settings : null);
@@ -968,6 +974,20 @@ class HauswerkPanel extends HTMLElement {
       const name = SUB_VIEWS.find((v) => v.id === this._tab)?.name || { start: "Startseite", house: "Einstellungen", log: "Protokoll" }[this._tab] || this._tab;
       html = this._failCard(`Die Seite „${name}“`, err);
     }
+    // Nur ändern, was sich ändert: gleiche Seite → unverändert lassen bzw. Knoten abgleichen statt neu aufbauen
+    // (schneller, Scrollstand und Eingaben bleiben, langsame Tablets ruckeln weniger)
+    const sig = `${this._tab}|${this._tablet ? 1 : 0}`;
+    const last = this._lastMain;
+    const target = this._tablet ? main.querySelector(".tpages > .tin") : main;
+    if (last && last.sig === sig && target && main.dataset.sig === sig) {
+      if (last.html === html) return;
+      morph(target, html);
+      this._lastMain = { sig, html };
+      if (this._tablet) this._tabletFit();
+      return;
+    }
+    this._lastMain = { sig, html };
+    main.dataset.sig = sig;
     if (this._tablet) {
       main.innerHTML = `<div class="tpages"><div class="tin">${html}</div></div>`;
       this._tabletFit();
@@ -1094,6 +1114,8 @@ class HauswerkPanel extends HTMLElement {
       <div class="field"><span><ha-icon icon="mdi:motion-sensor"></ha-icon> Aufwecken bei Bewegung (z. B. Bewegungsmelder im Flur)</span>${this._picker("tablet_wake", this._settings?.tablet_wake || [])}</div>
       <p class="muted small">Gilt für alle Tablets; Bewegung hält den Bildschirm außerdem wach. In Fully kann zusätzlich die Bewegungserkennung der Kamera wecken (Fully › Bewegungserkennung).</p>
       <div class="field"><span><ha-icon icon="mdi:calendar"></ha-icon> Termine im Bildschirmschoner (z. B. Müllabfuhr)</span>${this._picker("tablet_calendars", this._settings?.tablet_calendars || [])}</div>
+      ${this._data?.user_admin ? `<p class="muted small warnline"><ha-icon icon="mdi:shield-alert-outline"></ha-icon>Angemeldet als Administrator${this._data.user_name ? ` (${esc(this._data.user_name)})` : ""}: Die Sperre gilt nur in diesem Panel. Wirklich sicher ist ein eigener Benutzer ohne Admin-Rechte fürs Tablet – Home Assistant lässt ihn dann auch über andere Wege nichts einstellen; bedienen darf er weiterhin.</p>`
+        : `<p class="muted small okline"><ha-icon icon="mdi:shield-check-outline"></ha-icon>Angemeldet als ${esc(this._data?.user_name || "Benutzer")} ohne Admin-Rechte: Einstellungen sind auch auf dem Server gesperrt${this._data?.is_admin ? " – außer, „Alle Benutzer dürfen ändern“ ist eingeschaltet" : ""}. Bedienen geht weiterhin.</p>`}
       <label class="check"><span><b>Tablet sperren</b><small>Nur bedienen – Temperatur, Rollläden, Anwesenheit –, nichts einstellen. Entsperren: 3 Sekunden auf das Hauswerk-Logo oben links drücken (10 Minuten).</small></span>
         <button class="seg ${this._tabletOpt("lock", "0") === "1" ? "on" : ""}" data-action="tablet-opt" data-k="lock" data-v="${this._tabletOpt("lock", "0") === "1" ? "0" : "1"}">${this._tabletOpt("lock", "0") === "1" ? "An" : "Aus"}</button></label>
       <label class="check"><span><b>Seitenleiste von Home Assistant ausblenden</b><small>Mehr Platz für Hauswerk. Über ☰ oben links lässt sie sich jederzeit kurz öffnen; ohne Tabletmodus kommt sie wie vorher zurück.</small></span>
@@ -2033,7 +2055,7 @@ class HauswerkPanel extends HTMLElement {
     const s = this._status || {};
     const set = this._data.settings;
     const mode = s.vacation ? "urlaub" : s.away ? "abwesend" : "home";
-    const dis = this._admin ? "" : "disabled";
+    const dis = this._operate ? "" : "disabled";
     const modes = [["home", "mdi:home-heart", "Zu Hause"], ["abwesend", "mdi:home-export-outline", "Abwesend"], ["urlaub", "mdi:palm-tree", "Urlaub"]];
     const tgs = [["guest", "mdi:account-group-outline", "Gäste", "Gäste: nie auf Abwesend absenken"], ["party", "mdi:party-popper", "Party", "Party: alle Räume auf Komfort"], ["eco_force", "mdi:leaf", "Eco", "Eco erzwingen: alle Räume auf Eco"]];
     // Stand: der Satz aus der großen Karte, hier in einer Zeile
@@ -2074,7 +2096,7 @@ class HauswerkPanel extends HTMLElement {
     // klein: nur der aktuelle Zustand und drei Knöpfe
     const s = this._status || {};
     const mode = s.vacation ? "urlaub" : s.away ? "abwesend" : "home";
-    const dis = this._admin ? "" : "disabled";
+    const dis = this._operate ? "" : "disabled";
     const b = (id, icon, label) => `<button class="pq ${mode === id ? "on" : ""}" data-action="presence" data-mode="${id}" title="${label}" ${dis}><ha-icon icon="${icon}"></ha-icon></button>`;
     const label = { home: "Zu Hause", abwesend: "Abwesend", urlaub: "Urlaub" }[mode];
     return `<div class="wstate">${label}${this._data.settings.guest ? " · Gäste" : ""}${this._data.settings.party ? " · Party" : ""}</div>
@@ -2738,7 +2760,7 @@ class HauswerkPanel extends HTMLElement {
         return `Alle Räume auf ${fmt(settings.vacation_temp)} °C${end ? ` bis ${end.toLocaleDateString("de-DE")}` : ""}${ev && !settings.vacation ? ` · laut Kalender: ${esc(ev.summary || "Termin")}` : ""}`;
       })(),
     }[mode];
-    const dis = this._admin ? "" : "disabled";
+    const dis = this._operate ? "" : "disabled";
     const seg = (id, icon, label) =>
       `<button class="pseg ${mode === id ? "on" : ""}" data-action="presence" data-mode="${id}" ${dis}><ha-icon icon="${icon}"></ha-icon><span>${label}</span></button>`;
     const toggle = (key, icon, label, title) =>
@@ -5896,7 +5918,11 @@ class HauswerkPanel extends HTMLElement {
             <div class="row2">
               <div class="field"><span>Außentemperatur</span>${this._picker("outside_sensor", p.outside_sensor ? [p.outside_sensor] : [])}</div>
               <div class="field"><span>Sommerpause ab</span>${this._stepper("set", "summer_temp", p.summer_temp ?? 16)}</div>
-            </div>` : ""}
+            </div>
+            <div class="field"><span>Entscheiden nach</span>${segs("summer_basis", [["now", "Temperatur jetzt", "mdi:thermometer"], ["day", "Tagesmittel (24 h)", "mdi:calendar-today"], ["days3", "Mittel 3 Tage", "mdi:calendar-range"]], "day")}</div>
+            <p class="muted small">${(p.summer_basis || "day") === "now"
+              ? "Zählt der Wert genau in diesem Moment, kann die Saison an milden Nachmittagen kurz wechseln – und das wöchentliche Entkalken hängt am Zufall."
+              : `Ein ${(p.summer_basis || "day") === "days3" ? "Mittel über 3 Tage" : "Tagesmittel"} ist ruhiger: einzelne warme Stunden oder kalte Morgen ändern die Saison nicht.${this._status?.outside_mean != null ? ` Gerade: <b>${fmt(this._status.outside_mean)} °C</b> im Mittel.` : " Bis genug Werte gesammelt sind (ca. 6 Stunden), gilt die Temperatur jetzt."}`} Danach richtet sich auch das Entkalken im Sommer.</p>` : ""}
             ${p.summer_mode === "entity" ? `
             <div class="field"><span>Heizperiode (an = heizen, aus = Sommerpause)</span>${this._picker("season_entity", p.season_entity ? [p.season_entity] : [])}</div>` : ""}
             ${["auto", "entity"].includes(p.summer_mode) ? `
@@ -8517,6 +8543,34 @@ class HauswerkPanel extends HTMLElement {
 // Symbole der Module – gleiche Hausform wie das Hauswerk-Logo, eigene Farbe und eigenes Innenleben
 // Behanghöhen im Pop-up „Höhe einstellen“ (fest, nicht aus den Profilen)
 const RW_HEIGHTS = [["Offen", 100, "mdi:window-shutter-open"], ["Halb offen", 50, "mdi:window-shutter-settings"], ["Viertel offen", 25, "mdi:window-shutter-settings"], ["Geschlossen", 0, "mdi:window-shutter"]];
+/** DOM abgleichen statt neu aufbauen: nur geänderte Knoten, Texte und Attribute anfassen. */
+function morph(target, html) {
+  const tpl = document.createElement("template");
+  tpl.innerHTML = html;
+  const active = target.getRootNode()?.activeElement;
+  const attrs = (a, b) => {
+    for (const { name } of [...a.attributes]) if (!b.hasAttribute(name) && !(name === "open" && a.tagName === "DETAILS")) a.removeAttribute(name);
+    for (const { name, value } of [...b.attributes]) if (a.getAttribute(name) !== value) a.setAttribute(name, value);
+  };
+  const same = (a, b) => a.nodeType === b.nodeType && a.nodeName === b.nodeName && (a.nodeType !== 1 || (a.id === b.id && a.getAttribute("data-key") === b.getAttribute("data-key")));
+  const kids = (a, b) => {
+    const an = [...a.childNodes], bn = [...b.childNodes];
+    bn.forEach((y, i) => {
+      const x = an[i];
+      if (!x) { a.appendChild(y); return; }
+      if (!same(x, y)) { a.replaceChild(y, x); return; }
+      if (x.nodeType !== 1) { if (x.data !== y.data) x.data = y.data; return; }
+      if (x === active && ["INPUT", "TEXTAREA", "SELECT"].includes(x.tagName)) return;  // Eingabe nicht stören
+      attrs(x, y);
+      if (x.tagName === "INPUT") { if (x.value !== y.value) x.value = y.value; x.checked = y.checked; }
+      if (x.tagName === "TEXTAREA" && x.value !== y.value) x.value = y.value;
+      kids(x, y);
+    });
+    while (a.childNodes.length > bn.length) a.removeChild(a.lastChild);
+  };
+  kids(target, tpl.content);
+}
+
 const EXPERT_MOD = { house: "haus", heat: "heizen", rw: "rollwerk", kw: "kraftwerk" };
 const MODULE_LOGOS = {
   heizen: `<svg viewBox="0 0 48 48" aria-hidden="true">
@@ -10193,6 +10247,9 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .sv-row ha-icon { --mdc-icon-size:min(2.6vw, 3.6vh); color:#64748b; }
 .sv-row b { display:block; font-weight:600; }
 .sv-row small { display:block; color:#94a3b8; font-size:.85em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.warnline, .okline { display:flex; gap:8px; align-items:flex-start; }
+.warnline ha-icon { color:#f59e0b; --mdc-icon-size:18px; flex:none; }
+.okline ha-icon { color:#22c55e; --mdc-icon-size:18px; flex:none; }
 .tstart { display:flex; align-items:center; gap:12px; padding:12px 14px; margin:0 0 10px; border-radius:14px; border:1px dashed color-mix(in srgb, var(--accent) 50%, var(--line)); background:color-mix(in srgb, var(--accent) 6%, var(--card)); }
 .tstart b { display:block; }
 .tstart small { display:block; color:var(--muted); }

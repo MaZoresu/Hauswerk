@@ -408,6 +408,13 @@ def summer_state(
     return was
 
 
+def hourly_mean(buckets: dict, now_ts: float, hours: int) -> float | None:
+    """Mittel der Stundenwerte der letzten `hours` Stunden; None, wenn zu wenig Werte (unter einem Viertel, mindestens 3)."""
+    cur = int(now_ts // 3600)
+    vals = [s / n for h, (s, n) in ((int(k), v) for k, v in buckets.items()) if cur - hours < h <= cur and n]
+    return sum(vals) / len(vals) if len(vals) >= max(3, hours // 4) else None
+
+
 def liming_active(settings: dict, week_min: int) -> bool:
     """Liegt die Minute im wöchentlichen Entkalkungsfenster?"""
     if not settings.get("liming"):

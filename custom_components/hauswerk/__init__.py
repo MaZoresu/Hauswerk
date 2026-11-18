@@ -37,6 +37,7 @@ from .controller import Heizen
 from .core import Haus
 from .kraftwerk import Kraftwerk
 from .log import Protokoll
+from .rename import async_track_renames
 from .rollwerk import Rollwerk
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,7 +50,9 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     key = f"{DOMAIN}_static_registered"
     if not hass.data.get(key):
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(STATIC_URL, FRONTEND_DIR, cache_headers=False)]
+            # Zwischenspeichern erlaubt: die Adresse enthält die Version (?v=…), ein Update lädt also neu.
+            # Liegt hauswerk-panel.js.gz daneben, liefert Home Assistant die komprimierte Datei (≈ 1/5 der Größe).
+            [StaticPathConfig(STATIC_URL, FRONTEND_DIR, cache_headers=True)]
         )
         hass.data[key] = True
 
@@ -85,6 +88,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HOUSE: haus, MODULE_HEATING: heating, MODULE_SHUTTER: shutters, MODULE_POWER: power}
 
     api.async_register(hass)
+    entry.async_on_unload(async_track_renames(hass, entry))
     await _async_register_panel(hass)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await haus.async_start()

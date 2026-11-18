@@ -70,6 +70,7 @@ from .logic import (
     room_setting,
     snap,
     summer_state,
+    hourly_mean,
     thermostat_kind,
     valve_opening,
     ventilate_advice,
@@ -136,6 +137,7 @@ class Heizen:
         self._subscribers: set[Callable[[dict], None]] = set()
         self._summer = False
         self._liming = False
+        self._outside_mean: float | None = None
         self._lead_factor = 1.0
         # Batterie-Entitäten je Raum (an den Geräten der Thermostate, Fenster und Sensoren)
         self._batteries: dict[str, list[str]] = {}
@@ -178,6 +180,8 @@ class Heizen:
         self.heat_rates = stored.get("heat_rates") or {}
         self.plans = stored.get("plans") or {}
         self.demand = stored.get("demand") or {}
+        # Außentemperatur je Stunde (Summe, Anzahl) für die Sommerpause nach Tagesmittel – übersteht Neustarts
+        self.outside_hours: dict[str, list] = stored.get("outside_hours") or {}
 
     def _data(self) -> dict[str, Any]:
         return {
@@ -188,7 +192,23 @@ class Heizen:
             "turned_off": self.turned_off,
             "heat_rates": self.heat_rates,
             "demand": self.demand,
+            "outside_hours": self.outside_hours,
         }
+
+    def _note_outside(self, outside: float | None) -> None:
+        """Außentemperatur in den Stundenwert einrechnen (für das Tagesmittel), höchstens 4 Tage aufheben."""
+        if outside is None:
+            return
+        hour = int(dt_util.utcnow().timestamp() // 3600)
+        cur = self.outside_hours.get(str(hour))
+        if cur is None:
+            for key in [k for k in self.outside_hours if int(k) <= hour - 96]:
+                del self.outside_hours[key]
+            self.outside_hours[str(hour)] = [round(outside, 2), 1]
+            self._save(60)
+        else:
+            cur[0] = round(cur[0] + outside, 2)
+            cur[1] += 1
 
     def _save(self, delay: float = 2) -> None:
         self._store.async_delay_save(self._data, delay)
@@ -776,6 +796,7 @@ class Heizen:
         return {
             **self.haus.status(),
             "rooms": out,
+            "outside_mean": None if self._outside_mean is None else round(self._outside_mean, 1),
             "plan_events": {
                 pid: [
                     {"summary": e["summary"], "start": dt_util.utc_from_timestamp(e["start"]).isoformat(), "end": dt_util.utc_from_timestamp(e["end"]).isoformat()}
@@ -1132,6 +1153,7 @@ class Heizen:
         away = self.haus.away
         vacation = self.haus.vacation
         outside = self.haus.outside_temp()
+        self._note_outside(outside)
         out_temp, out_rh = self.haus.outside_air()
         self._lead_factor = weather_lead_factor(out_temp) if self.settings.get("preheat_weather") else 1.0
         # Feiertag laut Sensor „Arbeitstag“: Heizpläne wie am Wochenende
@@ -1148,8 +1170,12 @@ class Heizen:
         if summer_mode == "on":
             self._summer = True
         elif summer_mode == "auto":
+            # Nach Tages- oder 3-Tage-Mittel statt nach dem Wert genau jetzt (sonst kippt die Saison an milden Nachmittagen)
+            basis = self.settings.get("summer_basis") or "day"
+            mean = None if basis == "now" else hourly_mean(self.outside_hours, dt_util.utcnow().timestamp(), 72 if basis == "days3" else 24)
+            self._outside_mean = mean
             self._summer = summer_state(
-                outside,
+                outside if mean is None else mean,
                 float(self.settings.get("summer_temp") or 16),
                 self._summer,
                 fallback=self.settings.get("summer_fallback") or "keep",

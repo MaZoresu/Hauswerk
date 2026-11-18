@@ -825,3 +825,22 @@ def test_neue_widgets_lage_ereignisse_termine(panel):
     panel.click('.wl[data-tab="shutters"]')
     assert panel.js(f"{EL}._tab") == "shutters"
     panel.ok("neue Widgets")
+
+
+def test_teil_update_statt_neu_zeichnen(panel):
+    """Neue Werte: die Raumkachel bleibt dasselbe Element, nur die Zahl ändert sich; ohne Änderung passiert nichts."""
+    panel.view("overview")
+    panel.js(f"() => {{ window.hwCard = {EL}.shadowRoot.querySelector('.rooms > article'); }}")
+    rid = panel.js("window.hwCard.id.replace('room-', '')")
+    panel.js(f"(id) => {{ {EL}._status.rooms[id] = {{ ...{EL}._status.rooms[id], room_temp: 23.7 }}; {EL}._renderMain(); }}", rid)
+    assert panel.js("window.hwCard.isConnected"), "Kachel wurde neu aufgebaut"
+    assert "23,7" in panel.js("window.hwCard.innerText")
+    # ohne Änderung: nichts anfassen
+    panel.js(f"() => {{ window.hwMut = 0; new MutationObserver((m) => (window.hwMut += m.length)).observe({EL}.shadowRoot.getElementById('main'), {{ subtree: true, childList: true, attributes: true, characterData: true }}); {EL}._renderMain(); }}")
+    panel.wait(50)
+    assert panel.js("window.hwMut") == 0
+    # Eingabe behält Fokus und Text
+    panel.view("settings")
+    panel.page.locator("hauswerk-panel").locator(".setsearch input").first.fill("vor")
+    panel.js(f"{EL}._renderMain()")
+    assert panel.js(f"{EL}.shadowRoot.activeElement?.value") == "vor"

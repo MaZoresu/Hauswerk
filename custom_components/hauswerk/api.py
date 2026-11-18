@@ -153,6 +153,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("summer_mode"): vol.In(["off", "auto", "on", "entity"]),
         vol.Optional("season_entity"): _opt(ENTITY),
         vol.Optional("summer_fallback"): vol.In(["keep", "heat", "summer"]),
+        vol.Optional("summer_basis"): vol.In(["now", "day", "days3"]),
         vol.Optional("away_mode"): vol.In(["temp", "offset"]),
         vol.Optional("away_offset"): vol.All(vol.Coerce(float), vol.Range(min=0, max=10)),
         vol.Optional("away_action"): vol.In(["lower", "off"]),
@@ -290,6 +291,11 @@ def _may_edit(hass: HomeAssistant, connection) -> bool:
     return bool(haus and haus.settings.get("allow_users"))
 
 
+# Bedienen dürfen alle angemeldeten Benutzer (z. B. ein Tablet-Benutzer ohne Admin-Rechte):
+# Anwesenheit, Urlaub, Gäste, Party, Eco – alles andere nur Admins bzw. mit Freigabe.
+OPERATE_KEYS = {"vacation", "presence_force", "guest", "party", "eco_force"}
+
+
 def require_editor(func):
     """Wie require_admin, aber mit der Freigabe „Alle Benutzer dürfen ändern“."""
 
@@ -334,6 +340,7 @@ def ws_get(hass: HomeAssistant, connection, msg) -> None:
             "modes": MODES,
             "is_admin": _may_edit(hass, connection),
             "user_admin": connection.user.is_admin,
+            "user_name": getattr(connection.user, "name", None),
         },
     )
 
@@ -390,12 +397,19 @@ async def ws_room_delete(hass: HomeAssistant, connection, msg) -> None:
 @websocket_api.websocket_command(
     {vol.Required("type"): "hauswerk/heizen/settings/save", vol.Required("settings"): dict}
 )
-@require_editor
 @websocket_api.async_response
 async def ws_settings_save(hass: HomeAssistant, connection, msg) -> None:
     ctl = _ctl(hass)
     if ctl is None:
         return _not_ready(connection, msg)
+    # Einstellungen nur mit Recht zum Ändern; Bedienen (Anwesenheit & Co.) dürfen alle
+    if not _may_edit(hass, connection) and not set(msg["settings"]) <= OPERATE_KEYS:
+        connection.send_error(
+            msg["id"],
+            "unauthorized",
+            "Nur Administratoren dürfen das ändern. Ein Admin kann es unter Einstellungen › Berechtigungen für alle freigeben.",
+        )
+        return
     try:
         settings = SETTINGS_SCHEMA(msg["settings"])
     except vol.MultipleInvalid as err:

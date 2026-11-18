@@ -422,3 +422,15 @@ def test_room_analysis():
     assert L.room_analysis([_day(valve=15)] * 7, None)["verdict"] == "reserve"
     frost = L.room_analysis([_day(out=0.0, under=200)] * 3 + [_day(out=8.0)] * 4, None)
     assert any(f["title"] == "Reicht bei Frost nicht" for f in frost["findings"])
+
+
+def test_tagesmittel_fuer_sommerpause():
+    hourly_mean = L.hourly_mean
+    now = 1000 * 3600 + 1800
+    b = {str(1000 - i): [20.0 * 2, 2] for i in range(24)}  # 24 Stunden je 20 °C
+    assert hourly_mean(b, now, 24) == 20.0
+    b[str(1000)] = [30.0, 1]  # eine warme Stunde ändert das Mittel kaum
+    assert 20 < hourly_mean(b, now, 24) < 21
+    assert hourly_mean({str(1000): [25.0, 1]}, now, 24) is None  # zu wenig Werte
+    old = {str(1000 - 30 - i): [10.0, 1] for i in range(10)}  # älter als 24 h zählt nicht
+    assert hourly_mean({**b, **old}, now, 24) == hourly_mean(b, now, 24)

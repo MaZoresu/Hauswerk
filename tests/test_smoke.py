@@ -64,7 +64,7 @@ def _stub_homeassistant():
     helpers.device_registry = _mod("homeassistant.helpers.device_registry",
                                    async_get=lambda hass: types.SimpleNamespace(async_get=DEVS.get))
     helpers.entity_registry = _mod("homeassistant.helpers.entity_registry",
-         async_get=lambda hass: types.SimpleNamespace(async_get=REG.get),
+         async_get=lambda hass: types.SimpleNamespace(async_get=REG.get), EVENT_ENTITY_REGISTRY_UPDATED="entity_registry_updated",
          async_entries_for_device=lambda r, d: [e for e in REG.values() if e.device_id == d])
     helpers.area_registry = _mod("homeassistant.helpers.area_registry",
                                  async_get=lambda hass: types.SimpleNamespace(async_get_area=lambda a: None))
@@ -94,7 +94,8 @@ def hw(tmp_path_factory):
     root = tmp_path_factory.mktemp("pkg")
     pkg = root / "hw"
     pkg.mkdir()
-    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py"):
+    _mod("homeassistant.config_entries", ConfigEntry=object)
+    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py"):
         shutil.copy(SRC / name, pkg / name)
     (pkg / "__init__.py").write_text("")
     sys.path.insert(0, str(root))
@@ -103,6 +104,7 @@ def hw(tmp_path_factory):
         Haus=importlib.import_module("hw.core").Haus,
         Protokoll=importlib.import_module("hw.log").Protokoll,
         Rollwerk=importlib.import_module("hw.rollwerk").Rollwerk,
+        rename=importlib.import_module("hw.rename"),
         Kraftwerk=importlib.import_module("hw.kraftwerk").Kraftwerk,
         const=importlib.import_module("hw.const"),
     )
@@ -1009,3 +1011,57 @@ def test_rollwerk_fenster_in_jedem_fall(hw):
     assert not any(c[2].get("position", 100) < 30 for c in calls), calls
     assert "nicht herunterfahren" in st["reason"] and "Erzwingen" in st["reason"]
     assert out["closed"] == 0
+
+
+def test_entitaet_umbenannt(hw):
+    """Umbenannte Entität: überall ersetzt (Werte und Schlüssel), sofort gespeichert, im Protokoll."""
+    async def run():
+        STORES.clear()
+        NOW[0] = datetime(2026, 11, 18, 7, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("climate.wz", "heat", {"current_temperature": 20.0, "temperature": 21.0}, "Thermostat")
+        hass.set("cover.wz", "open", {"current_position": 100}, "Rollladen")
+        log, haus, ctl = await _setup(hw, hass)
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        await ctl.async_save_room({"id": "wz", "name": "Wohnzimmer", "type": "heizkoerper", "comfort": 21, "eco": 18,
+                                   "climates": ["climate.wz"], "windows": [], "enabled": True,
+                                   "schedule": [{"days": [0, 1, 2, 3, 4, 5, 6], "start": "08:00", "end": "22:00"}]}, by="Jens")
+        await rw.async_save_settings({"rw_covers": ["cover.wz"]}, by="Jens")
+        await haus.async_save_settings({"start_widgets": [{"id": "a", "type": "values", "size": "m", "entities": ["climate.wz"]}]}, by="Jens")
+        hass.data = {"hauswerk": {"log": log, "haus": haus, "heizen": ctl, "rollwerk": rw}}
+        touched = await hw.rename.async_rename_entity(hass, None, "climate.wz", "climate.wohnzimmer")
+        touched2 = await hw.rename.async_rename_entity(hass, None, "cover.wz", "cover.wohnzimmer")
+        nothing = await hw.rename.async_rename_entity(hass, None, "sensor.gibtsnicht", "sensor.x")
+        return ctl, haus, rw, log, touched, touched2, nothing
+
+    ctl, haus, rw, log, touched, touched2, nothing = asyncio.run(run())
+    assert ctl.rooms["wz"]["climates"] == ["climate.wohnzimmer"]
+    assert haus.settings["start_widgets"][0]["entities"] == ["climate.wohnzimmer"]
+    assert set(touched) == {"heizen", "haus"} and touched2 == ["rollwerk"] and nothing == []
+    assert rw.settings["rw_covers"] == ["cover.wohnzimmer"] and "cover.wohnzimmer" in rw.covers and "cover.wz" not in rw.covers
+    assert any(e["title"] == "Entität umbenannt – übernommen" and "climate.wz → climate.wohnzimmer" in e["why"] for e in log.entries)
+
+
+def test_sommerpause_nach_tagesmittel(hw):
+    """Kalter Morgen mitten im warmen Zeitraum: nach Tagesmittel bleibt Sommerpause, nach „jetzt“ nicht."""
+    async def run():
+        STORES.clear()
+        NOW[0] = datetime(2026, 6, 10, 6, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("sensor.aussen", "10.0", {"unit_of_measurement": "°C"}, "Außen")
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"outside_sensor": "sensor.aussen"}, by="Jens")
+        hour = int(NOW[0].timestamp() // 3600)
+        ctl.outside_hours = {str(hour - i): [22.0, 1] for i in range(1, 24)}
+        await ctl.async_save_settings({"summer_mode": "auto", "summer_temp": 16, "summer_basis": "day"}, by="Jens")
+        await ctl.async_evaluate()
+        day = (ctl._summer, ctl.status()["outside_mean"])
+        await ctl.async_save_settings({"summer_basis": "now"}, by="Jens")
+        await ctl.async_evaluate()
+        return day, ctl._summer, ctl.outside_hours.get(str(hour))
+
+    day, now_summer, cur = asyncio.run(run())
+    assert day[0] is True and day[1] is not None and day[1] > 16
+    assert now_summer is False
+    assert cur is not None and cur[1] >= 1  # aktueller Wert wurde mitgezählt

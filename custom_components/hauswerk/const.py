@@ -38,7 +38,7 @@ SETTING_LABELS = {
     "away_temp": "Abwesend-Temperatur", "away_mode": "Abwesend-Art", "away_offset": "Abwesend-Absenkung",
     "away_action": "Abwesend-Verhalten", "long_away_days": "Lange Abwesenheit",
     "summer_mode": "Sommerpause", "summer_temp": "Heizgrenze", "summer_action": "Sommerpause-Verhalten",
-    "summer_fallback": "Ersatz bei Sensorausfall", "season_entity": "Heizperiode-Entität",
+    "summer_fallback": "Ersatz bei Sensorausfall", "summer_basis": "Sommerpause nach", "season_entity": "Heizperiode-Entität",
     "outside_sensor": "Außentemperatur", "wind_sensor": "Böen-Sensor", "weather_entity": "Wetterquelle",
     "cold_snap_temp": "Kälteeinbruch", "storm_kmh": "Sturm",
     "frost_temp": "Frostschutz", "boost_minutes": "Boost-Dauer", "liming": "Entkalken", "liming_day": "Entkalken",
@@ -150,6 +150,7 @@ HEAT_DEFAULTS = {
     "summer_temp": 16.0,       # Heizgrenze: ab dieser Außentemperatur Sommerpause
     "summer_action": "off",    # off = Thermostate aus | frost = Frostschutz
     "summer_fallback": "keep", # Außensensor fehlt: keep | heat | summer
+    "summer_basis": "day",     # Sommerpause nach: now = Temperatur jetzt | day = Mittel 24 h | days3 = Mittel 3 Tage
     "season_entity": None,     # Heizperiode aus einer Entität (an = heizen) bei summer_mode "entity"
     "liming": False,           # Entkalkungsschutz einmal pro Woche
     "liming_day": 0,           # 0 = Montag

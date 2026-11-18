@@ -237,6 +237,8 @@ dev/vorschau.html               Panel mit simuliertem Home Assistant im Browser 
 CHANGELOG.md                    Änderungen je Version – erscheinen als Update-Notizen in Home Assistant (HACS)
 ```
 
+Nach jeder Änderung am Panel `python3 dev/pack.py` ausführen – das legt die komprimierte `hauswerk-panel.js.gz` daneben (ein Test prüft, dass sie passt).
+
 Tests: `pip install pytest`, dann im Projektordner `python -m pytest tests` (Home Assistant wird nicht gebraucht). Für die Klicktests zusätzlich `pip install playwright voluptuous` und `python -m playwright install chromium`.
 
 Vorschau: `dev/vorschau.html` direkt im Browser öffnen. Alle Daten sind erfunden, Speichern wirkt nur bis zum Neuladen.
