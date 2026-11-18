@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.47.0";
+const VERSION = "0.47.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1821,6 +1821,29 @@ class HauswerkPanel extends HTMLElement {
       .sort((a, b) => (b.home - a.home) || (a.dist ?? 1e9) - (b.dist ?? 1e9));
   }
 
+  /** Anwesenheit kompakt: alle sechs Schalter in einer Zeile, Stand in einer Zeile, Personen als Chips. */
+  _presenceCompact(z) {
+    const s = this._status || {};
+    const set = this._data.settings;
+    const mode = s.vacation ? "urlaub" : s.away ? "abwesend" : "home";
+    const dis = this._admin ? "" : "disabled";
+    const modes = [["home", "mdi:home-heart", "Zu Hause"], ["abwesend", "mdi:home-export-outline", "Abwesend"], ["urlaub", "mdi:palm-tree", "Urlaub"]];
+    const tgs = [["guest", "mdi:account-group-outline", "Gäste", "Gäste: nie auf Abwesend absenken"], ["party", "mdi:party-popper", "Party", "Party: alle Räume auf Komfort"], ["eco_force", "mdi:leaf", "Eco", "Eco erzwingen: alle Räume auf Eco"]];
+    // Stand: der Satz aus der großen Karte, hier in einer Zeile
+    const full = this._presenceCard(true).match(/<p class="ptext">[\s\S]*?<span>([\s\S]*?)<\/span><\/p>/)?.[1] || "";
+    const plain = full.replace(/<[^>]+>/g, "");
+    const people = this._people();
+    const av = (p) => (p.pic ? `<img src="${esc(p.pic)}" alt="">` : `<span>${esc(p.name.trim().slice(0, 1).toUpperCase())}</span>`);
+    return `
+      <div class="pc-row">
+        <div class="pc-seg">${modes.map(([id, icon, l]) => `<button class="${mode === id ? "on" : ""}" data-action="presence" data-mode="${id}" title="${l}" ${dis}><ha-icon icon="${icon}"></ha-icon><span>${l}</span></button>`).join("")}</div>
+        <div class="pc-tg">${tgs.map(([k, icon, l, t]) => `<label class="${set[k] ? "on" : ""}" title="${t}"><input type="checkbox" data-action="hmode" data-key="${k}" ${set[k] ? "checked" : ""} ${dis}><ha-icon icon="${icon}"></ha-icon><span>${l}</span></label>`).join("")}</div>
+      </div>
+      <p class="pc-st" title="${esc(plain)}"><ha-icon icon="mdi:information-outline"></ha-icon><span>${full}</span></p>
+      ${people.length ? `<div class="pc-ppl">${people.map((p) => `<span class="pc-p ${p.home ? "home" : ""}" title="${esc(p.name)}: ${esc(p.where)}${p.distTxt ? ` · ${p.distTxt}` : ""}"><span class="pav">${av(p)}</span><b>${esc(p.name)}</b><small>${p.home ? `<ha-icon icon="mdi:home"></ha-icon>` : esc(p.distTxt || p.where)}</small></span>`).join("")}</div>`
+        : `<p class="muted small" style="margin:8px 0 0">Keine Personen bekannt – unter Einstellungen › Anwesenheit wählen.</p>`}`;
+  }
+
   _peopleHtml(z) {
     const people = this._people();
     if (!people.length) return z === "s" ? "" : `<p class="muted small" style="margin-top:10px">Keine Personen bekannt – unter Einstellungen › Anwesenheit wählen.</p>`;
@@ -1840,7 +1863,7 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _w_presence(w, z) {
-    if (z !== "s") return this._presenceCard(true) + this._peopleHtml(z);
+    if (z !== "s") return this._presenceCompact(z);
     // klein: nur der aktuelle Zustand und drei Knöpfe
     const s = this._status || {};
     const mode = s.vacation ? "urlaub" : s.away ? "abwesend" : "home";
@@ -9987,6 +10010,32 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .rwm-ctl .sbtn { flex:1; }
 :host([tablet]) .tpages .rw-area.compact .rw-grid { display:flex; flex-wrap:wrap; }
 :host([tablet]) .tpages .rw-area.compact .rw-m { width:190px; }
+
+/* ---------- Anwesenheit kompakt (Widget) ---------- */
+.pc-row { display:flex; gap:8px; flex-wrap:wrap; }
+.pc-seg, .pc-tg { display:flex; gap:4px; padding:3px; border-radius:12px; background:color-mix(in srgb, var(--text) 5%, transparent); }
+.pc-seg { flex:3 1 220px; }
+.pc-tg { flex:2 1 150px; }
+.pc-seg button, .pc-tg label { all:unset; box-sizing:border-box; flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; gap:1px; padding:6px 4px; border-radius:9px; cursor:pointer; color:var(--muted); font-size:11px; font-weight:600; text-align:center; }
+.pc-seg button span, .pc-tg label span { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-seg ha-icon, .pc-tg ha-icon { --mdc-icon-size:20px; }
+.pc-tg input { position:absolute; opacity:0; pointer-events:none; }
+.pc-seg button.on { background:var(--card); color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.12); }
+.pc-seg button.on ha-icon { color:var(--wacc, var(--accent)); }
+.pc-tg label.on { background:color-mix(in srgb, var(--accent) 16%, var(--card)); color:var(--text); }
+.pc-tg label.on ha-icon { color:var(--accent); }
+.pc-seg button[disabled], .pc-tg label:has(input[disabled]) { cursor:default; }
+.pc-st { display:flex; align-items:center; gap:6px; margin:8px 2px 0; font-size:12px; color:var(--muted); }
+.pc-st ha-icon { --mdc-icon-size:15px; flex:none; }
+.pc-st span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-ppl { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.pc-p { display:inline-flex; align-items:center; gap:6px; padding:3px 10px 3px 3px; border-radius:99px; background:color-mix(in srgb, var(--text) 5%, transparent); font-size:13px; }
+.pc-p .pav { width:26px; height:26px; flex:none; border-radius:99px; overflow:hidden; display:grid; place-items:center; background:var(--card2, #e2e8f0); font-size:12px; font-weight:700; box-shadow:0 0 0 2px var(--line); }
+.pc-p.home .pav { box-shadow:0 0 0 2px #22c55e; }
+.pc-p .pav img { width:100%; height:100%; object-fit:cover; }
+.pc-p small { color:var(--muted); font-size:12px; display:inline-flex; }
+.pc-p.home small { color:#16a34a; }
+.pc-p small ha-icon { --mdc-icon-size:14px; }
 
 `;
 

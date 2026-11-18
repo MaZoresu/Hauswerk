@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.47.1 – 2026-11-18
+
+### Geändert
+- **Widget Anwesenheit kompakter** (mittel und groß): Zu Hause · Abwesend · Urlaub und Gäste · Party · Eco stehen als kleine Symbol-Knöpfe in einer Zeile (am Handy in zwei), der Stand in einer Zeile (ganzer Text beim Antippen bzw. Darüberfahren), die Personen als Chips mit Bild, Name und „zu Hause“ bzw. Entfernung nebeneinander.
+
 ## 0.47.0 – 2026-11-18
 
 ### Geändert (Tabletmodus)
