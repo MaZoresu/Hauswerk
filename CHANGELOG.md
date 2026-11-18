@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.49.1 – 2026-11-18
+
+### Geändert
+- **Kopfkacheln überall gleich groß** – auch in der normalen Ansicht (PC und Handy) haben Heizwerk, Rollwerk und Kraftwerk denselben Aufbau und dieselbe Höhe: oben Beschriftung und rechts kompakt Wetter, ↑/↓ „Alle“ bzw. „live“; darunter eine große Zahl (Ø-Temperatur, offene Rollläden, Hausverbrauch) mit dem Satz zum Stand; zwei Hinweiszeilen; eine Zeile mit Werten.
+
 ## 0.49.0 – 2026-11-18
 
 ### Verbessert

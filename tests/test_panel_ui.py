@@ -844,3 +844,12 @@ def test_teil_update_statt_neu_zeichnen(panel):
     panel.page.locator("hauswerk-panel").locator(".setsearch input").first.fill("vor")
     panel.js(f"{EL}._renderMain()")
     assert panel.js(f"{EL}.shadowRoot.activeElement?.value") == "vor"
+
+
+def test_kopfkacheln_gleich_gross(panel):
+    panel.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    hs = []
+    for view in ("overview", "shutters", "kwflow"):
+        panel.view(view)
+        hs.append(panel.js(f"Math.round({EL}.shadowRoot.querySelector('.brief').getBoundingClientRect().height)"))
+    assert len(set(hs)) == 1, hs

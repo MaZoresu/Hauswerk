@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.49.0";
+const VERSION = "0.49.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2542,17 +2542,13 @@ class HauswerkPanel extends HTMLElement {
       const tag = l.act ? "button" : "div";
       return `<${tag} class="br-l" ${l.act || ""} style="--c:${l.c || "var(--muted)"}"><ha-icon icon="${l.icon}"></ha-icon><span class="grow">${l.html ?? esc(l.text)}</span>${l.act ? `<ha-icon class="br-go" icon="mdi:chevron-right"></ha-icon>` : ""}</${tag}>`;
     };
+    // Gleicher Aufbau in allen Modulen: Kopfzeile (Beschriftung, rechts kompakt), große Zahl + Satz, 2 Zeilen, Werte
     return `
       <section class="brief ${cls}" style="--tone:${TONE[tone] || tone}" data-tone="${tone}">
-        <div class="br-top">
-          <div class="br-main">
-            ${label ? `<div class="br-label">${label}</div>` : ""}
-            <div class="br-line">${big ? `<div class="br-big">${big}</div>` : ""}
-              <${act ? "button" : "div"} class="br-h" ${act}><ha-icon icon="${icon}"></ha-icon><span>${esc(title)}</span></${act ? "button" : "div"}></div>
-          </div>
-          ${side}
-        </div>
-        ${lines.length ? `<div class="br-lines">${lines.slice(0, 3).map(line).join("")}</div>` : ""}
+        <div class="br-head">${label ? `<div class="br-label">${label}</div>` : ""}<span class="grow"></span>${side}</div>
+        <div class="br-line">${big ? `<div class="br-big">${big}</div>` : ""}
+          <${act ? "button" : "div"} class="br-h" ${act}><ha-icon icon="${icon}"></ha-icon><span>${esc(title)}</span></${act ? "button" : "div"}></div>
+        <div class="br-lines">${lines.slice(0, 2).map(line).join("")}</div>
         ${chips.length ? `<div class="br-chips">${chips.map(([i, v, l, c]) => `<span class="br-c" ${c ? `style="--c:${c}"` : ""}><ha-icon icon="${i}"></ha-icon><b>${v}</b><small>${l}</small></span>`).join("")}</div>` : ""}
       </section>`;
   }
@@ -2682,8 +2678,8 @@ class HauswerkPanel extends HTMLElement {
       ["mdi:timer-outline", today ? `${fmt(today.heat / 60)} h` : "–", "heute geheizt", ""],
     ];
     const date = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
-    const side = w ? `<div class="wx" title="${esc(w.name)}"><ha-icon icon="${w.icon}"></ha-icon><div><b>${fmt(w.temp)} °C</b><small>${esc(w.label)}</small>${w.extra ? `<small>${w.extra}</small>` : ""}</div></div>` : "";
-    return this._brief({ cls: "hero", tone, icon, act, label: `<ha-icon icon="mdi:home-thermometer-outline"></ha-icon>Im Haus · ${date}`,
+    const side = w ? `<span class="br-wx" title="${esc(w.name)}${w.extra ? ` · ${String(w.extra).replace(/<[^>]+>/g, "")}` : ""}"><ha-icon icon="${w.icon}"></ha-icon><b>${fmt(w.temp)} °C</b><small>${esc(w.label)}</small></span>` : "";
+    return this._brief({ cls: "card br-heat", tone, icon, act, label: `<ha-icon icon="mdi:home-thermometer-outline"></ha-icon>Im Haus · ${date}`,
       big: `${fmt(avg)}<span>°C</span>`, title, side, lines, chips });
   }
 
@@ -3962,7 +3958,9 @@ class HauswerkPanel extends HTMLElement {
       ...(home != null ? [["mdi:home-lightning-bolt-outline", W(home), "Haus", "#0ea5e9"]] : []),
       ...(grid != null ? [[grid > 0 ? "mdi:transmission-tower-import" : "mdi:transmission-tower-export", W(grid), grid > 0 ? "Bezug" : "Einspeisung", grid > 0 ? "#8b5cf6" : "#10b981"]] : []),
     ];
-    return this._brief({ cls: "card", tone, icon, label: "Kraftwerk · jetzt", title, lines, chips });
+    const hv = home != null ? W(home).split(" ") : null;
+    return this._brief({ cls: "card", tone, icon, label: `<ha-icon icon="mdi:flash-outline"></ha-icon>Kraftwerk · jetzt`, big: hv ? `${hv[0]}<span>${hv[1] || ""} Haus</span>` : "",
+      side: `<span class="kw-live"><i></i>live</span>`, title, lines, chips });
   }
 
   _viewKwRep() {
@@ -4428,8 +4426,8 @@ class HauswerkPanel extends HTMLElement {
       ...(half ? [["mdi:window-shutter-settings", String(half), "halb", ""]] : []),
       ...(shading.length ? [["mdi:sun-thermometer-outline", String(shading.length), "beschattet", "#f97316"]] : []),
     ];
-    const side = `<div class="rw-all">${this._admin ? `<button class="secondary small" data-action="cwiz-open" title="Rollladen hinzufügen"><ha-icon icon="mdi:plus"></ha-icon></button>` : ""}<button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="open"><ha-icon icon="mdi:arrow-up"></ha-icon>Alle hoch</button><button class="secondary small" data-action="rw-cmd" data-ids="${all}" data-a="close"><ha-icon icon="mdi:arrow-down"></ha-icon>Alle runter</button></div>`;
-    return this._brief({ cls: "card", tone, icon, label: "Rollwerk · jetzt", title, side, lines, chips });
+    const side = `<span class="br-acts">${this._admin ? `<button class="br-act" data-action="cwiz-open" title="Rollladen hinzufügen"><ha-icon icon="mdi:plus"></ha-icon></button>` : ""}<button class="br-act" data-action="rw-cmd" data-ids="${all}" data-a="open" title="Alle hoch"><ha-icon icon="mdi:arrow-up"></ha-icon><span>Alle</span></button><button class="br-act" data-action="rw-cmd" data-ids="${all}" data-a="close" title="Alle runter"><ha-icon icon="mdi:arrow-down"></ha-icon><span>Alle</span></button></span>`;
+    return this._brief({ cls: "card", tone, icon, label: `<ha-icon icon="mdi:window-shutter"></ha-icon>Rollwerk · jetzt`, big: `${nOpen}<span>/${covers.length} offen</span>`, title, side, lines, chips });
   }
 
   _rwProfiles() {
@@ -10257,7 +10255,11 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 /* ---------- Lage-Kachel (Kopf der Module) ---------- */
 /* Tabletmodus: alle Kopfleisten gleich schmal (Höhe wie Kraftwerk) */
 :host([tablet]) .brief { height:66px; box-sizing:border-box; overflow:hidden; display:flex; flex-direction:column; justify-content:center; }
-:host([tablet]) .brief .br-main { display:flex; align-items:center; gap:12px; min-width:0; }
+:host([tablet]) .brief .br-head { position:absolute; right:14px; top:50%; transform:translateY(-50%); min-height:0; z-index:2; }
+:host([tablet]) .brief .br-line { min-height:0; margin-top:0; padding-right:220px; }
+:host([tablet]) .brief .br-lines { flex:none; padding-right:220px; }
+:host([tablet]) .brief.card { padding:8px 14px !important; }
+:host([tablet]) .brief .br-l { margin:0; }
 :host([tablet]) .brief .br-line { flex-wrap:nowrap; min-width:0; gap:10px; }
 :host([tablet]) .brief .br-h { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
 :host([tablet]) .brief .br-h span { overflow:hidden; text-overflow:ellipsis; }
@@ -10298,36 +10300,44 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 :host([tablet]) .brief .wx small:last-child { display:none; }
 :host([tablet]) .brief .rw-all .secondary { padding:6px 10px; }
 .brief { position:relative; margin-bottom:14px; border-left:4px solid var(--tone) !important; }
-.brief.card { padding:16px 18px; }
-.br-top { display:flex; align-items:flex-start; gap:16px; position:relative; z-index:1; }
-.br-main { flex:1; min-width:0; }
-.br-label { display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); margin-bottom:6px; }
-.hero .br-label { color:inherit; opacity:.75; }
-.br-line { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
-.br-big { font-size:44px; font-weight:700; line-height:1; letter-spacing:-.02em; }
-.br-big span { font-size:16px; font-weight:500; margin-left:3px; opacity:.7; }
-.br-h { all:unset; display:inline-flex; align-items:center; gap:10px; font-size:18px; font-weight:700; line-height:1.3; }
+/* gleiche Größe in allen Modulen */
+.brief.card { padding:14px 18px; height:204px; box-sizing:border-box; display:flex; flex-direction:column; overflow:hidden; }
+.br-head { display:flex; align-items:center; gap:10px; min-height:30px; }
+.br-label { display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); }
+.br-label ha-icon { --mdc-icon-size:16px; }
+.br-line { display:flex; align-items:center; gap:14px; min-height:52px; min-width:0; margin-top:2px; }
+.br-big { font-size:40px; font-weight:700; line-height:1; letter-spacing:-.02em; white-space:nowrap; flex:none; }
+.br-big span { font-size:15px; font-weight:500; margin-left:4px; color:var(--muted); letter-spacing:0; }
+.br-h { all:unset; display:flex; align-items:center; gap:10px; min-width:0; font-size:17px; font-weight:700; line-height:1.3; }
+.br-h span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 button.br-h { cursor:pointer; }
 .br-h ha-icon { --mdc-icon-size:24px; color:var(--tone); flex:none; }
-.br-lines { display:flex; flex-direction:column; gap:2px; margin-top:12px; position:relative; z-index:1; }
-.br-l { all:unset; box-sizing:border-box; display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:10px; font-size:14px; line-height:1.35; }
+.br-lines { flex:1; min-height:0; display:flex; flex-direction:column; gap:0; margin-top:6px; overflow:hidden; }
+.br-l { all:unset; box-sizing:border-box; display:flex; align-items:center; gap:10px; padding:4px 8px; margin:0 -8px; border-radius:10px; font-size:13.5px; line-height:1.35; min-width:0; }
+.br-l .grow { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 button.br-l { cursor:pointer; }
 button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); }
-.br-l > ha-icon:first-child { --mdc-icon-size:19px; color:var(--c); }
-.br-l .br-go { --mdc-icon-size:18px; opacity:.45; }
-.br-chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; position:relative; z-index:1; }
-.br-c { display:inline-flex; align-items:baseline; gap:6px; padding:7px 12px; border-radius:12px; background:color-mix(in srgb, var(--text) 6%, transparent); font-size:13px; }
+.br-l > ha-icon:first-child { --mdc-icon-size:18px; color:var(--c); flex:none; }
+.br-l .br-go { --mdc-icon-size:18px; opacity:.45; flex:none; }
+.br-chips { display:flex; flex-wrap:nowrap; gap:8px; margin-top:8px; overflow:hidden; flex:none; }
+.br-c { display:inline-flex; align-items:baseline; gap:6px; padding:6px 11px; border-radius:12px; background:color-mix(in srgb, var(--text) 6%, transparent); font-size:13px; flex:none; white-space:nowrap; }
 .br-c ha-icon { --mdc-icon-size:16px; align-self:center; color:var(--c, var(--muted)); }
-.br-c b { font-size:15px; }
+.br-c b { font-size:14.5px; }
 .br-c small { color:var(--muted); }
-.hero .br-c { background:rgba(255,255,255,.12); }
-.hero .br-c small { color:inherit; opacity:.75; }
-.brief .rw-all { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.br-wx { display:inline-flex; align-items:center; gap:6px; font-size:13px; }
+.br-wx ha-icon { --mdc-icon-size:22px; color:#f59e0b; }
+.br-wx small { color:var(--muted); }
+.br-acts { display:inline-flex; gap:6px; }
+.br-act { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:4px; height:30px; padding:0 10px; border-radius:9px; border:1px solid var(--line); background:var(--card2, transparent); font-size:12.5px; font-weight:600; }
+.br-act ha-icon { --mdc-icon-size:17px; }
+.br-act:hover { border-color:var(--accent); }
 @media (max-width:600px) {
-  .br-top { flex-direction:column; }
-  .br-big { font-size:36px; }
-  .br-h { font-size:16px; }
-  .brief .rw-all { justify-content:flex-start; }
+  .brief.card { height:232px; padding:12px 14px; }
+  .br-big { font-size:32px; }
+  .br-h { font-size:15.5px; }
+  .br-line { gap:10px; }
+  .br-wx small { display:none; }
+  .br-chips { -webkit-mask-image:linear-gradient(90deg, #000 85%, transparent); mask-image:linear-gradient(90deg, #000 85%, transparent); }
 }
 
 /* ---------- Rollläden kompakt ---------- */
