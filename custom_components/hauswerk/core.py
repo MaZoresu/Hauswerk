@@ -8,7 +8,7 @@ Widgets der Startseite und Berechtigungen. Module (z. B. Heizwerk) lesen
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import date, timedelta
 import logging
 from typing import Any
 
@@ -95,6 +95,11 @@ class Haus:
         self._prox: dict[str, tuple[float, float]] = {}  # Entfernungs-Sensor -> (letzter Abstand km, Zeit der letzten Annäherung)
         self._dir_ids: dict[str, str | None] = {}         # Entfernungs-Sensor -> Bewegungs-Sensor der Integration „Nähe“
         self.vacation = False
+        # Arbeitstage aus dem Kalender der Integration „Arbeitstag“ (ISO-Daten, von/bis gelesen)
+        self._workdays: set[str] = set()
+        self._wd_range: tuple[str, str] | None = None
+        self._wd_at = 0.0
+        self._wd_error: str | None = None
         # Urlaub aus dem Kalender
         self._cal_vacation = False
         self._cal_events: list[dict[str, Any]] = []
@@ -138,6 +143,10 @@ class Haus:
         old_km = self.settings.pop("proximity_km", None)
         if old_km and not self.settings.get("proximity_m"):
             self.settings["proximity_m"] = float(old_km) * 1000
+        # Termin-Kalender früher nur für den Bildschirmschoner, jetzt zentral
+        old_cals = self.settings.pop("tablet_calendars", None)
+        if old_cals and not self.settings.get("calendars"):
+            self.settings["calendars"] = list(old_cals)
         self.settings = {k: v for k, v in self.settings.items() if k in HOUSE_KEYS}
         await self._store.async_save({"settings": self.settings})
 
@@ -148,7 +157,9 @@ class Haus:
     async def async_start(self) -> None:
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
         self._track()
+        self._find_workday_calendar()
         await self._async_refresh_calendar(force=True)
+        await self._async_refresh_workdays(force=True)
         await self._async_refresh_forecast(force=True)
         self.update()
 
@@ -188,6 +199,7 @@ class Haus:
     async def _async_tick(self, _now=None) -> None:
         before = (self.away, self.approaching, self.vacation)
         await self._async_refresh_calendar()
+        await self._async_refresh_workdays()
         await self._async_refresh_forecast()
         self._flush_queue()
         self.update_radio()
@@ -226,6 +238,8 @@ class Haus:
         self._track()
         if any(k in settings for k in VACATION_KEYS):
             await self._async_refresh_calendar(force=True)
+        if "workday_calendar" in settings:
+            await self._async_refresh_workdays(force=True)
         self._notify()
 
     # ------------------------------------------------------------ Anwesenheit
@@ -393,6 +407,86 @@ class Haus:
             upcoming.append({"summary": ev.get("summary"), "start": start.isoformat(), "end": end.isoformat()})
         upcoming.sort(key=lambda e: e["start"])
         self._cal_vacation, self._cal_events, self._cal_error = active, upcoming[:5], None
+
+    # ------------------------------------------------------------ Arbeitstage
+    def _find_workday_calendar(self) -> None:
+        """Ist nur der Arbeitstag-Sensor gewählt, den Kalender derselben Integration übernehmen (gibt es seit HA 2025)."""
+        sensor = self.settings.get("workday_entity")
+        if self.settings.get("workday_calendar") or not sensor:
+            return
+        reg = er.async_get(self.hass)
+        entry = reg.async_get(sensor)
+        if entry is None or not entry.config_entry_id:
+            return
+        cal = next((e.entity_id for e in er.async_entries_for_config_entry(reg, entry.config_entry_id)
+                    if e.domain == "calendar" and not e.disabled_by), None)
+        if cal:
+            self.settings["workday_calendar"] = cal
+            self._save()
+            self.log.add("settings", "Arbeitstage-Kalender übernommen", f"{self._name(cal)} – gehört zu {self._name(sensor)}")
+
+    async def _async_refresh_workdays(self, force: bool = False) -> None:
+        """Arbeitstage der nächsten zwei Wochen aus dem Kalender (jeder Arbeitstag ist ein ganztägiger Termin)."""
+        now_ts = dt_util.utcnow().timestamp()
+        cal = self.settings.get("workday_calendar")
+        today = dt_util.now().date()
+        stale = self._wd_range is None or self._wd_range[0] != today.isoformat()
+        if not force and not stale and now_ts - self._wd_at < 3600:
+            return
+        self._wd_at = now_ts
+        if not cal:
+            self._workdays, self._wd_range, self._wd_error = set(), None, None
+            return
+        start = dt_util.start_of_local_day(today)
+        end = start + timedelta(days=15)
+        try:
+            events = await async_calendar_events(self.hass, cal, start, end)
+        except Exception as err:  # noqa: BLE001 - Kalender weg/defekt: Sensor gilt weiter
+            self._wd_error = str(err) or type(err).__name__
+            _LOGGER.warning("Arbeitstage-Kalender %s nicht lesbar: %s", cal, err)
+            return
+        days: set[str] = set()
+        for ev in events:
+            begin, _ = parse_when(ev.get("start"))
+            finish, _ = parse_when(ev.get("end"))
+            if begin is None:
+                continue
+            day = begin.date()
+            last = (finish - timedelta(seconds=1)).date() if finish is not None and finish > begin else day
+            while day <= last:
+                days.add(day.isoformat())
+                day += timedelta(days=1)
+        self._workdays = days
+        self._wd_range = (today.isoformat(), (today + timedelta(days=14)).isoformat())
+        self._wd_error = None
+
+    def is_workday(self, day: date | None = None) -> bool | None:
+        """Ist der Tag ein Arbeitstag? Aus dem Kalender (auch künftige Tage), heute sonst aus dem Sensor; None = unbekannt."""
+        today = dt_util.now().date()
+        day = day or today
+        if self._wd_range and self._wd_range[0] <= day.isoformat() <= self._wd_range[1]:
+            return day.isoformat() in self._workdays
+        if day == today:
+            state = self.hass.states.get(self.settings.get("workday_entity") or "")
+            if state is not None and state.state in ("on", "off"):
+                return state.state == "on"
+        return None
+
+    def workday_source(self) -> str | None:
+        """Woher Hauswerk die Arbeitstage kennt (für Protokoll und Anzeige)."""
+        if self._wd_range and self.settings.get("workday_calendar"):
+            return self._name(self.settings["workday_calendar"])
+        return self._name(self.settings["workday_entity"]) if self.settings.get("workday_entity") else None
+
+    def free_days(self, days: int = 14) -> list[str]:
+        """Freie Werktage (Feiertage, Brückentage …) der nächsten Tage – Mo–Fr, aber kein Arbeitstag."""
+        today = dt_util.now().date()
+        out = []
+        for k in range(days):
+            day = today + timedelta(days=k)
+            if day.weekday() < 5 and self.is_workday(day) is False:
+                out.append(day.isoformat())
+        return out
 
     # ------------------------------------------------------------ Benachrichtigungen
     def _quiet(self) -> bool:
@@ -616,6 +710,9 @@ class Haus:
             "vacation": self.vacation,
             "vacation_events": self._cal_events,
             "vacation_calendar_error": self._cal_error,
+            "free_days": self.free_days(),
+            "workday_source": self.workday_source(),
+            "workday_calendar_error": self._wd_error,
             "guest": bool(self.settings.get("guest")),
             "outside_temp": self.outside_temp(),
             "frost_low": self.frost_low,

@@ -2,6 +2,19 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.51.0 – 2026-11-18
+
+### Neu
+- **Kalender zentral** unter Hauswerk › Einstellungen › **Kalender** – für alle Module:
+  - **Arbeitstage-Kalender** der Integration „Arbeitstag“ (Workday): Jeder Arbeitstag ist dort ein Termin. Fehlt er an einem Werktag (Feiertag, Brückentag), gelten die Zeiten von Samstag bzw. Sonntag. Anders als der Sensor kennt der Kalender auch die **nächsten Tage**. Ist bisher nur der Arbeitstag-Sensor gewählt, übernimmt Hauswerk den Kalender derselben Integration automatisch (steht im Protokoll). Das Fenster zeigt die freien Werktage der nächsten zwei Wochen.
+  - **Urlaub**: Verweis auf die Urlaub-Einstellungen (Zeitraum oder Kalender).
+  - **Termine** (z. B. Müllabfuhr, Familie): für den Bildschirmschoner und die Widgets „Termine“ und „Nächste Ereignisse“. Die bisherigen Bildschirmschoner-Kalender werden übernommen.
+- **Heizwerk** richtet sich nach dem Arbeitstage-Kalender: an freien Werktagen Heizpläne wie am Wochenende. Auch die Vorschau („Komfort ab morgen 09:00“), der Tagesplan-Streifen und die Kopfkachel wissen vorher Bescheid; am freien Tag steht „heute frei, wie Sonntag“ am Plan.
+- **Rollwerk** nimmt ihn fürs Öffnen (heute frei?) und abends fürs Schließen (morgen frei?) – ohne eigenen Sensor „Arbeitstag morgen“ im Profil. Ein eigener Sensor im Profil hat weiter Vorrang.
+
+### Geändert
+- Feiertage stehen nicht mehr unter Anwesenheit, sondern unter Kalender. Der Arbeitstag-Sensor bleibt als Ersatz, wenn kein Kalender gewählt oder er nicht lesbar ist.
+
 ## 0.50.1 – 2026-11-18
 
 ### Verbessert

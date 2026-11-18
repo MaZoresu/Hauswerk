@@ -702,7 +702,7 @@ def test_tablet_schoner_wecken_und_nacht(tablet):
     # Termine aus dem Kalender
     p.js("() => localStorage.setItem('hauswerk.tablet.night', 'dim')")
     p.js(f"""() => {{ {EL}._hass.callApi = async () => [{{ summary: 'Restmüll', start: {{ date: '2099-01-01' }} }}];
-        {EL}._data.settings.tablet_calendars = ['calendar.muell']; {EL}._calAt = 0; {EL}._saverHide(); {EL}._saverShow(); }}""")
+        {EL}._data.settings.calendars = ['calendar.muell']; {EL}._calAt = 0; {EL}._saverHide(); {EL}._saverShow(); }}""")
     p.wait(300)
     assert "Restmüll" in p.js(f"{EL}.shadowRoot.getElementById('saver').innerText")
     p.ok("Schoner wecken und Nacht")
@@ -804,7 +804,7 @@ def test_tablet_gleiche_leisten_und_kacheln(browser, server):
 
 
 def test_neue_widgets_lage_ereignisse_termine(panel):
-    panel.js(f"""(kw) => {{ Object.assign({EL}._data.settings, kw, {{ tablet_calendars: ['calendar.muell'] }});
+    panel.js(f"""(kw) => {{ Object.assign({EL}._data.settings, kw, {{ calendars: ['calendar.muell'] }});
         {EL}._hass.callApi = async () => [{{ summary: 'Restmüll', start: {{ date: new Date().toISOString().slice(0, 10) }} }},
                                            {{ summary: 'Papier', start: {{ date: new Date(Date.now() + 864e5).toISOString().slice(0, 10) }} }}];
         {EL}._data.settings.start_widgets = [{{ id: 'a', type: 'lage', size: 'm' }}, {{ id: 'b', type: 'events', size: 'm' }},
@@ -872,3 +872,28 @@ def test_tablet_hell_dunkel_nach_sonne(tablet):
     assert dark() and p.js("localStorage.getItem('hauswerk.tablet.theme')") == "dark"
     p.click('#pop [data-action="tablet-opt"][data-k="theme"][data-v="sun"]')
     assert not dark()
+
+
+def test_kalender_zentral(panel):
+    """Hauswerk › Kalender: Arbeitstage-Kalender, freie Werktage, Termine; Heizpläne nehmen freie Werktage wie Sonntag."""
+    p = panel
+    p.js(f"() => {{ {EL}._openPop('calendars'); }}")
+    p.wait()
+    body = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    assert "Arbeitstage-Kalender" in body and "Freie Werktage" in body and "Termine" in body
+    assert p.has('#pop [data-action="settings-go"][data-sub="vacation"]')
+    # Anwesenheit verweist nur noch auf den Kalender
+    p.js(f"() => {{ {EL}._openPop('presence'); }}")
+    p.wait()
+    assert p.has('#pop [data-sub="calendars"]') and "Arbeitstag-Sensor" not in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    # Heizplan: der freie Werktag läuft wie Sonntag (6), andere Tage normal
+    free = p.js(f"{EL}._status.free_days[0]")
+    k = p.js(f"(iso) => {{ const t = new Date(); t.setHours(0,0,0,0); return Math.round((new Date(iso + 'T00:00') - t) / 864e5); }}", free)
+    assert p.js(f"(k) => {EL}._planDay(k)", k) == 6
+    assert p.js(f"(k) => {EL}._planDay(k)", k + 1) == 3  # Donnerstag
+    p.js(f"() => {{ {EL}._status.free_days = [new Date().toLocaleDateString('sv-SE')]; }}")
+    wd = p.js("(new Date().getDay() + 6) % 7")
+    if wd < 5:
+        assert p.js(f"{EL}._planDay(0)") == 6
+        p.view("overview")
+        assert "heute frei, wie Sonntag" in p.js(f"{EL}.shadowRoot.textContent")

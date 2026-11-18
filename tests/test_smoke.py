@@ -7,7 +7,7 @@ Urlaub) und die Übernahme alter Einstellungen in den Hauswerk-Kern.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import importlib
 from pathlib import Path
 import shutil
@@ -65,7 +65,8 @@ def _stub_homeassistant():
                                    async_get=lambda hass: types.SimpleNamespace(async_get=DEVS.get))
     helpers.entity_registry = _mod("homeassistant.helpers.entity_registry",
          async_get=lambda hass: types.SimpleNamespace(async_get=REG.get), EVENT_ENTITY_REGISTRY_UPDATED="entity_registry_updated",
-         async_entries_for_device=lambda r, d: [e for e in REG.values() if e.device_id == d])
+         async_entries_for_device=lambda r, d: [e for e in REG.values() if e.device_id == d],
+         async_entries_for_config_entry=lambda r, c: [e for e in REG.values() if getattr(e, "config_entry_id", None) == c])
     helpers.area_registry = _mod("homeassistant.helpers.area_registry",
                                  async_get=lambda hass: types.SimpleNamespace(async_get_area=lambda a: None))
     _mod("homeassistant.helpers.dispatcher", async_dispatcher_send=lambda *a: None)
@@ -81,7 +82,7 @@ def _stub_homeassistant():
         utc_from_timestamp=lambda ts: datetime.fromtimestamp(ts, timezone.utc),
         parse_datetime=lambda s: datetime.fromisoformat(s),
         parse_date=lambda s: datetime.fromisoformat(s).date(),
-        start_of_local_day=lambda d=None: NOW[0].astimezone(TZ).replace(hour=0, minute=0, second=0, microsecond=0),
+        start_of_local_day=lambda d=None: (datetime(d.year, d.month, d.day, tzinfo=TZ) if d else NOW[0].astimezone(TZ).replace(hour=0, minute=0, second=0, microsecond=0)),
         get_default_time_zone=lambda: TZ,
     )
     sys.modules["homeassistant.util"].dt = dt
@@ -136,6 +137,8 @@ class Hass:
         ctx = kw.get("context") or Context()
         for cb in self.listeners:
             cb(types.SimpleNamespace(data={"domain": domain, "service": service, "service_data": data}, context=ctx))
+        if (domain, service) == ("calendar", "get_events"):
+            return {data["entity_id"]: {"events": getattr(self, "events", {}).get(data["entity_id"], [])}}
         if (domain, service) == ("weather", "get_forecasts"):
             return {data["entity_id"]: {"forecast": self.forecast or []}}
         return None
@@ -1065,3 +1068,48 @@ def test_sommerpause_nach_tagesmittel(hw):
     assert day[0] is True and day[1] is not None and day[1] > 16
     assert now_summer is False
     assert cur is not None and cur[1] >= 1  # aktueller Wert wurde mitgezählt
+
+
+def test_arbeitstage_aus_dem_kalender(hw):
+    """Zentraler Arbeitstage-Kalender: übernommen vom Sensor derselben Integration, kennt auch künftige Feiertage;
+    Heizwerk fährt an einem freien Werktag den Wochenend-Plan, Rollwerk schließt am Vorabend wie vor einem freien Tag."""
+    async def run():
+        STORES.clear()
+        NOW[0] = datetime(2026, 11, 16, 7, 0, tzinfo=timezone.utc)  # Montag
+        hass = Hass()
+        hass.set("binary_sensor.arbeitstag", "on", name="Arbeitstag")
+        hass.set("calendar.arbeitstag", "on", name="Arbeitstag Kalender")
+        REG["binary_sensor.arbeitstag"] = types.SimpleNamespace(entity_id="binary_sensor.arbeitstag", domain="binary_sensor",
+                                                                 config_entry_id="wd", disabled_by=None, device_id=None)
+        REG["calendar.arbeitstag"] = types.SimpleNamespace(entity_id="calendar.arbeitstag", domain="calendar",
+                                                            config_entry_id="wd", disabled_by=None, device_id=None)
+        # Arbeitstage Mo–Fr, aber Mittwoch 18.11. (Buß- und Bettag) frei
+        days = [date(2026, 11, 16) + timedelta(days=k) for k in range(15)]
+        hass.events = {"calendar.arbeitstag": [
+            {"summary": "Arbeitstag", "start": d.isoformat(), "end": (d + timedelta(days=1)).isoformat()}
+            for d in days if d.weekday() < 5 and d != date(2026, 11, 18)]}
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"workday_entity": "binary_sensor.arbeitstag", "workday_as": 6})
+        await haus.async_start()
+        assert haus.settings["workday_calendar"] == "calendar.arbeitstag", "Kalender nicht übernommen"
+        assert haus.is_workday(date(2026, 11, 16)) is True
+        assert haus.is_workday(date(2026, 11, 18)) is False
+        assert haus.free_days()[0] == "2026-11-18" and haus.status()["workday_source"] == "Arbeitstag Kalender"
+        # Mittwoch: Sensor sagt noch „Arbeitstag“, der Kalender weiß es besser – Plan wie Sonntag
+        NOW[0] = datetime(2026, 11, 18, 6, 0, tzinfo=timezone.utc)
+        await ctl.async_save_room({"id": "bad", "name": "Bad", "type": "heizkoerper", "comfort": 22, "eco": 18,
+                                   "climates": [], "windows": [], "enabled": True,
+                                   "schedule": [{"days": [0, 1, 2, 3, 4], "start": "05:30", "end": "08:00"},
+                                                {"days": [5, 6], "start": "09:00", "end": "22:00"}]})
+        hass.set("climate.bad", "heat", {"current_temperature": 20.0, "temperature": 18.0}, "Thermostat Bad")
+        await ctl.async_save_room({**ctl.rooms["bad"], "climates": ["climate.bad"]})
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["bad"]
+        assert res["holiday"] is True and res["mode"] == "eco", res  # 07:00: werktags Komfort, sonntags noch nicht
+        # Donnerstag wieder Arbeitstag
+        NOW[0] = datetime(2026, 11, 19, 6, 0, tzinfo=timezone.utc)
+        await ctl.async_evaluate()
+        assert ctl.status()["rooms"]["bad"]["holiday"] is False
+        return haus
+
+    asyncio.run(run())

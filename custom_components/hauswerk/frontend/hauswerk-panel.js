@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.50.1";
+const VERSION = "0.51.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -141,7 +141,8 @@ const PICKERS = {
   vacation_calendar: { scope: "settings", multi: false, domains: ["calendar"] },
   weather_entity: { scope: "settings", multi: false, domains: ["weather"] },
   tablet_wake: { scope: "settings", multi: true, domains: ["binary_sensor", "input_boolean", "switch"] },
-  tablet_calendars: { scope: "settings", multi: true, domains: ["calendar"] },
+  calendars: { scope: "settings", multi: true, domains: ["calendar"] },
+  workday_calendar: { scope: "settings", multi: false, domains: ["calendar"] },
   import_calendar: { scope: "pop", multi: false, domains: ["calendar"] },
   w_weather: { scope: "pop", multi: false, domains: ["weather"] },
   w_calendars: { scope: "pop", multi: true, domains: ["calendar"] },
@@ -186,6 +187,8 @@ const PICK_HINTS = {
   schedule_entity: ["heiz", "zeitplan", "schedule"],
   vacation_calendar: ["urlaub", "familie", "ferien"],
   workday_entity: ["arbeitstag", "workday", "werktag", "feiertag"],
+  workday_calendar: ["arbeitstag", "workday", "werktag"],
+  calendars: ["müll", "abfall", "waste", "familie", "termine", "schule"],
   person_add: ["person", "handy", "phone", "iphone", "pixel", "galaxy"],
   show_entities: ["ventil", "valve", "stellantrieb", "stellung", "position", "demand", "heizkörper", "heizkoerper", "fußboden", "fussboden", "fbh", "heizkreis", "thermostat"],
 };
@@ -334,7 +337,7 @@ const RW_BEHAVIOR = [["prevent_higher_position_closing", "Abends nicht höher fa
   ["prevent_closing_multiple_times", "Nur einmal am Tag schließen"], ["prevent_shading_multiple_times", "Nur einmal am Tag beschatten"]];
 const FACADE_NAMES = { N: "Nord", NO: "Nordost", O: "Ost", SO: "Südost", S: "Süd", SW: "Südwest", W: "West", NW: "Nordwest" };
 // Pop-ups, die zu den zentralen Hauswerk-Einstellungen gehören (alle anderen gehören zu Heizwerk)
-const HOUSE_POPS = ["presence", "vacation", "weather", "notify", "radio", "access", "look"];
+const HOUSE_POPS = ["presence", "vacation", "calendars", "weather", "notify", "radio", "access", "look"];
 // Akzentfarben der Darstellung: [gespeicherter Wert (null = Standard), Name, Anzeigefarbe]
 const ACCENTS = [
   [null, "Türkis", "#14b8a6"], ["#0ea5e9", "Himmelblau"], ["#3b82f6", "Blau"], ["#8b5cf6", "Violett"],
@@ -1126,7 +1129,7 @@ class HauswerkPanel extends HTMLElement {
       ${this._tabletOpt("night", "dim") === "off" && !window.fully ? `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>„Display aus“ geht nur in Fully mit JavaScript-Schnittstelle – sonst wie „Schwarz“.</p>` : ""}
       <div class="field"><span><ha-icon icon="mdi:motion-sensor"></ha-icon> Aufwecken bei Bewegung (z. B. Bewegungsmelder im Flur)</span>${this._picker("tablet_wake", this._settings?.tablet_wake || [])}</div>
       <p class="muted small">Gilt für alle Tablets; Bewegung hält den Bildschirm außerdem wach. In Fully kann zusätzlich die Bewegungserkennung der Kamera wecken (Fully › Bewegungserkennung).</p>
-      <div class="field"><span><ha-icon icon="mdi:calendar"></ha-icon> Termine im Bildschirmschoner (z. B. Müllabfuhr)</span>${this._picker("tablet_calendars", this._settings?.tablet_calendars || [])}</div>
+      <p class="muted small"><ha-icon icon="mdi:calendar"></ha-icon>Termine im Bildschirmschoner (z. B. Müllabfuhr) kommen aus <button class="link inline" data-action="settings-go" data-sub="calendars">Hauswerk › Kalender</button>.</p>
       ${this._data?.user_admin ? `<p class="muted small warnline"><ha-icon icon="mdi:shield-alert-outline"></ha-icon>Angemeldet als Administrator${this._data.user_name ? ` (${esc(this._data.user_name)})` : ""}: Die Sperre gilt nur in diesem Panel. Wirklich sicher ist ein eigener Benutzer ohne Admin-Rechte fürs Tablet – Home Assistant lässt ihn dann auch über andere Wege nichts einstellen; bedienen darf er weiterhin.</p>`
         : `<p class="muted small okline"><ha-icon icon="mdi:shield-check-outline"></ha-icon>Angemeldet als ${esc(this._data?.user_name || "Benutzer")} ohne Admin-Rechte: Einstellungen sind auch auf dem Server gesperrt${this._data?.is_admin ? " – außer, „Alle Benutzer dürfen ändern“ ist eingeschaltet" : ""}. Bedienen geht weiterhin.</p>`}
       <label class="check"><span><b>Tablet sperren</b><small>Nur bedienen – Temperatur, Rollläden, Anwesenheit –, nichts einstellen. Entsperren: 3 Sekunden auf das Hauswerk-Logo oben links drücken (10 Minuten).</small></span>
@@ -1599,7 +1602,7 @@ class HauswerkPanel extends HTMLElement {
     }
     out.push(...rw.values());
     // Termine
-    const cals = (w.entities || []).length ? w.entities : this._data.settings.tablet_calendars || [];
+    const cals = (w.entities || []).length ? w.entities : this._data.settings.calendars || [];
     for (const e of this._calFetch(cals, 2)) {
       const at = new Date(e.start);
       if (!e.allDay && at < now - 30 * 60000) continue;
@@ -1626,7 +1629,7 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _w_calendar(w, z) {
-    const cals = (w.entities || []).length ? w.entities : this._data.settings.tablet_calendars || [];
+    const cals = (w.entities || []).length ? w.entities : this._data.settings.calendars || [];
     if (!cals.length) return this._wSetup(w, "Noch kein Kalender gewählt.");
     const days = z === "l" ? 7 : 2;
     const list = this._calFetch(cals, days).filter((e) => e.allDay || new Date(e.start) > Date.now() - 30 * 60000);
@@ -1685,7 +1688,7 @@ class HauswerkPanel extends HTMLElement {
 
   /** Kalender-Termine für den Bildschirmschoner (heute und morgen), höchstens alle 15 Minuten neu. */
   async _calLoad(force = false) {
-    const ids = this._data?.settings?.tablet_calendars || [];
+    const ids = this._data?.settings?.calendars || [];
     if (!ids.length || !this._hass?.callApi) { this._cal = []; return; }
     if (!force && this._calAt && Date.now() - this._calAt < 15 * 60000) return;
     this._calAt = Date.now();
@@ -2208,7 +2211,7 @@ class HauswerkPanel extends HTMLElement {
       return `<div class="wbig"><span>${on}<small>in Komfort</small></span></div>
         ${next ? `<div class="wline" style="--c:#f59e0b"><ha-icon icon="mdi:clock-outline"></ha-icon>${esc(next.r.name)}: ${esc(next.i.text.replace("Komfort ", ""))}</div>` : ""}`;
     }
-    const day = (new Date().getDay() + 6) % 7;
+    const day = this._planDay(0);
     return `<div class="wlist">${rows
       .map(({ r, i }) => `<div class="wrow ${z === "l" ? "tall" : ""}"><ha-icon icon="${esc(roomIcon(r))}"></ha-icon>
         <span class="grow"><b>${esc(r.name)}</b><small>${esc(i.src)}</small>${z === "l" && i.blocks ? this._dayBar(i.blocks, r, day, true) : ""}</span><em class="${i.comfort ? "hot" : ""}">${esc(i.text)}</em></div>`)
@@ -3169,7 +3172,8 @@ class HauswerkPanel extends HTMLElement {
     } else {
       icon = plan ? "mdi:calendar-multiple" : "mdi:calendar-edit";
       src = plan ? plan.name : "Eigener Plan";
-      const day = (now.getDay() + 6) % 7;
+      const day = this._planDay(0);
+      if (day !== (now.getDay() + 6) % 7) src += ` · heute frei, wie ${day === 5 ? "Samstag" : "Sonntag"}`;
       const min = now.getHours() * 60 + now.getMinutes();
       comfort = this._daySegments(blocks, room, day).some(([a, b, , c]) => c && a <= min && min < b);
     }
@@ -3188,13 +3192,21 @@ class HauswerkPanel extends HTMLElement {
     return { src, icon, comfort, text, blocks };
   }
 
+  /** Wochentag (0 = Mo), dessen Heizplan heute + k Tage gilt: freie Werktage laut Arbeitstage-Kalender wie Sa/So. */
+  _planDay(k = 0) {
+    const d = new Date();
+    d.setDate(d.getDate() + k);
+    const wd = (d.getDay() + 6) % 7;
+    const iso = d.toLocaleDateString("sv-SE");
+    return wd < 5 && (this._status?.free_days || []).includes(iso) ? Number(this._data?.settings?.workday_as ?? 6) % 7 : wd;
+  }
+
   /** Minuten bis Komfort beginnt bzw. endet, aus den Zeitfenstern (bis zu 7 Tage voraus). */
   _nextSwitch(blocks, room, comfort) {
     const now = new Date();
-    const today = (now.getDay() + 6) % 7;
     const min = now.getHours() * 60 + now.getMinutes();
     for (let k = 0; k < 8; k++) {
-      const segs = this._daySegments(blocks, room, (today + k) % 7);
+      const segs = this._daySegments(blocks, room, this._planDay(k));
       for (const [a, , , c] of segs) {
         if (k === 0 && a <= min) continue;
         if (c !== comfort && a > 0) return k * 1440 + a - min;
@@ -3208,7 +3220,7 @@ class HauswerkPanel extends HTMLElement {
   _schedStrip(room, s, mini = false) {
     if (room.enabled === false) return "";
     const info = this._schedInfo(room, s);
-    const day = (new Date().getDay() + 6) % 7;
+    const day = this._planDay(0);
     return `
       <div class="rsched ${mini ? "mini" : ""} ${info.comfort ? "on" : ""}">
         <div class="rs-top"><ha-icon icon="${info.icon}"></ha-icon><span class="rs-src">${esc(info.src)}</span><span class="grow"></span><b>${esc(info.text)}</b></div>
@@ -3228,7 +3240,7 @@ class HauswerkPanel extends HTMLElement {
     const mode = s.mode || "aus";
     const m = MODE[mode] || MODE.aus;
     const info = room.enabled === false ? null : this._schedInfo(room, s);
-    const day = (new Date().getDay() + 6) % 7;
+    const day = this._planDay(0);
     return `
       <article class="rmini tap ${mode === "aus" ? "off" : ""}" id="room-${room.id}" style="--rc:${this._roomColor(room.id)}; --c:${m.c}" data-action="room-quick" data-id="${room.id}" title="Tippen für manuelle Änderungen">
         <div class="rm-head">
@@ -3552,7 +3564,7 @@ class HauswerkPanel extends HTMLElement {
   _dayBar(blocks, room, day, mini = false, lead = 0, away = null) {
     const segs = this._daySegments(blocks, room, day);
     const now = new Date();
-    const today = (now.getDay() + 6) % 7;
+    const today = this._planDay(0);
     const nowPct = ((now.getHours() * 60 + now.getMinutes()) / 1440) * 100;
     const t2 = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
     const nowMinPre = now.getHours() * 60 + now.getMinutes();
@@ -5185,8 +5197,12 @@ class HauswerkPanel extends HTMLElement {
         { g: "Haus", act: "setup-open", icon: "mdi:rocket-launch-outline", c: "#2dd4bf", title: "Einrichtung",
           sum: `Assistent für ganz Hauswerk · ${su.filter((x) => x.done).length} von ${su.length} Schritten erledigt`, words: "assistent einrichten ersteinrichtung start schritte" },
         { g: "Haus", id: "presence", icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit",
-          sum: persons ? `${persons} Person${persons > 1 ? "en" : ""} · abwesend nach ${p.away_delay} Min.${p.arrive_delay ? ` · zu Hause nach ${p.arrive_delay} Min.` : ""}${p.workday_entity ? " · Feiertage erkannt" : ""}` : "Noch keine Personen gewählt",
-          warn: !persons, words: "personen abwesend heimweg nähe entfernung gäste feiertag arbeitstag workday wochenende" },
+          sum: persons ? `${persons} Person${persons > 1 ? "en" : ""} · abwesend nach ${p.away_delay} Min.${p.arrive_delay ? ` · zu Hause nach ${p.arrive_delay} Min.` : ""}` : "Noch keine Personen gewählt",
+          warn: !persons, words: "personen abwesend heimweg nähe entfernung gäste" },
+        { g: "Haus", id: "calendars", icon: "mdi:calendar-multiple", c: "#38bdf8", title: "Kalender",
+          sum: [p.workday_calendar || p.workday_entity ? `Arbeitstage: ${this._entityName(p.workday_calendar || p.workday_entity)}${(s.free_days || []).length ? ` · nächster freier Werktag ${new Date(s.free_days[0]).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" })}` : ""}` : "Arbeitstage – keiner gewählt",
+            (p.calendars || []).length ? `${p.calendars.length} Termin-Kalender` : "", p.vacation_source === "calendar" && p.vacation_calendar ? "Urlaub per Kalender" : ""].filter(Boolean).join(" · "),
+          warn: !!s.workday_calendar_error, words: "kalender feiertag arbeitstag workday wochenende brückentag termine müll abfall familie urlaub" },
         { g: "Haus", id: "vacation", icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub", sum: vac, on: s.vacation, words: "kalender zeitraum stichwort ferien reise" },
         { g: "Haus", id: "weather", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter",
           sum: `${p.weather_entity ? this._entityName(p.weather_entity) : "Wetter automatisch"}${p.outside_sensor ? ` · Außen: ${this._entityName(p.outside_sensor)}` : ""} · Kälte < ${fmt(p.cold_snap_temp ?? 0)} °C · Sturm ab ${fmt(p.storm_kmh ?? 70, 0)} km/h`,
@@ -5854,13 +5870,7 @@ class HauswerkPanel extends HTMLElement {
               ${row("guest", "Gäste da", "nicht absenken, auch wenn alle Bewohner weg sind", sw("guest"),
                 "Solange Gäste da sind, gilt das Haus nie als abwesend – auch wenn alle gewählten Personen unterwegs sind.")}
             </div>
-            ${head("mdi:calendar-star", "Feiertage")}
-            <div class="wxsrcs">
-              <div class="wxsrc">${row("holi", "Arbeitstag-Sensor", p.workday_entity ? `Feiertage wie ${Number(p.workday_as ?? 6) === 5 ? "Samstag" : "Sonntag"}${Object.values(st.rooms || {}).some((x) => x.holiday) ? " · heute Feiertag" : ""}` : "aus – Feiertage wie normale Werktage", "",
-                "Mit dem Sensor der Home-Assistant-Integration „Arbeitstag“ (Workday) erkennt Hauswerk Feiertage: Ist er an einem Werktag aus, gelten die Zeiten des Wochenendes – in Heizwerk für alle Heizpläne, später auch für Rollläden und Licht. Zeitpläne und Kalender aus Home Assistant bleiben unverändert. Noch keinen Sensor? Unter Geräte & Dienste die Integration „Arbeitstag“ für dein Bundesland hinzufügen.")}
-              <div class="wxr-pk">${this._picker("workday_entity", p.workday_entity ? [p.workday_entity] : [])}
-                ${p.workday_entity ? `<div class="field"><span>An Feiertagen wie am</span>${segs("workday_as", [["5", "Samstag", "mdi:calendar-weekend"], ["6", "Sonntag", "mdi:calendar-weekend-outline"]], "6")}</div>` : ""}</div></div>
-            </div>
+            <p class="muted small"><ha-icon icon="mdi:calendar-star"></ha-icon>Feiertage und Arbeitstage stehen jetzt unter <button class="link inline" data-action="settings-go" data-sub="calendars">Hauswerk › Kalender</button>.</p>
             ${head("mdi:map-marker-radius-outline", "Auf dem Heimweg")}
             <div class="wxrows">
               ${row("near", "Näher als", "und auf dem Weg nach Hause = schon zu Hause (0 = aus)", `<div class="unit"><input type="number" step="50" min="0" max="50000" data-set="proximity_m" value="${Math.round(p.proximity_m ?? 0)}" ${dis}><i>m</i></div>`,
@@ -5887,6 +5897,42 @@ class HauswerkPanel extends HTMLElement {
             ${head("mdi:palm-tree", "Im Urlaub")}
             <div class="field"><span>Temperatur im Urlaub (alle Räume)</span>${this._stepper("set", "vacation_temp", p.vacation_temp)}</div>`,
         };
+
+      case "calendars": {
+        const st = this._status || {};
+        const saved = this._data.settings;
+        const row = (k, title, sub, value, text, ctl) => this._setRow(k, title, sub, value, text, ctl);
+        const dd = (iso) => new Date(iso).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" });
+        const free = saved.workday_calendar === p.workday_calendar && saved.workday_entity === p.workday_entity ? st.free_days || [] : null;
+        const fc = p.workday_calendar && /forecast|morgen|tomorrow/i.test(`${p.workday_calendar} ${this._entityName(p.workday_calendar)}`);
+        const wdOn = !!(p.workday_calendar || p.workday_entity);
+        const vac = { off: "nur von Hand", period: "per Zeitraum", calendar: p.vacation_calendar ? `aus ${this._entityName(p.vacation_calendar)}` : "per Kalender – keiner gewählt" }[p.vacation_source || "period"];
+        return {
+          icon: "mdi:calendar-multiple", c: "#38bdf8", title: "Kalender", sub: "Hauswerk · gilt für alle Module",
+          body: `
+            ${head("mdi:calendar-check-outline", "Arbeitstage & Feiertage")}
+            <div class="wxsrcs">
+              <div class="wxsrc">${row("wdcal", "Arbeitstage-Kalender", "von der Integration „Arbeitstag“ (Workday)", "",
+                "Der Kalender der Integration „Arbeitstag“ hat für jeden Arbeitstag einen Termin. Fehlt an einem Werktag der Termin (Feiertag, Brückentag …), gelten die Zeiten des Wochenendes: in Heizwerk für alle Heizpläne – auch schon in der Vorschau für morgen –, in Rollwerk fürs Öffnen und abends fürs Schließen (morgen frei?). Anders als der Sensor kennt der Kalender auch die nächsten Tage. Den Kalender ohne Versatz wählen (nicht „Forecast“/„morgen“).", true)}
+              <div class="wxr-pk">${this._picker("workday_calendar", p.workday_calendar ? [p.workday_calendar] : [])}</div></div>
+            </div>
+            ${fc ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>Das scheint der Kalender mit Versatz („Forecast“) zu sein – dann wären alle Tage um einen verschoben. Besser den Kalender ohne Versatz wählen.</p>` : ""}
+            ${st.workday_calendar_error && free ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>Kalender nicht lesbar: ${esc(st.workday_calendar_error)} – bis dahin gilt der Sensor.</p>` : ""}
+            ${wdOn ? `<div class="field"><span>An freien Werktagen wie am</span>${segs("workday_as", [["5", "Samstag", "mdi:calendar-weekend"], ["6", "Sonntag", "mdi:calendar-weekend-outline"]], "6")}</div>` : ""}
+            ${free ? `<div class="lbl">Freie Werktage · nächste 2 Wochen</div>
+            <div class="evlist">${free.length ? free.map((d) => `<div class="ev ${d === new Date().toLocaleDateString("sv-SE") ? "live" : ""}"><ha-icon icon="mdi:calendar-star"></ha-icon><span class="grow"><b>${dd(d)}</b><small>Zeiten wie am ${Number(p.workday_as ?? 6) === 5 ? "Samstag" : "Sonntag"}</small></span>${d === new Date().toLocaleDateString("sv-SE") ? `<em class="badge ok">HEUTE</em>` : ""}</div>`).join("") : `<p class="muted small">${wdOn ? "Keine – alle Werktage sind Arbeitstage." : "Ohne Arbeitstage-Kalender gelten Feiertage wie normale Werktage."}</p>`}</div>`
+              : `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Nach dem Speichern zeigt Hauswerk hier die freien Werktage.</p>`}
+            <details class="role-help" ${p.workday_entity && !p.workday_calendar ? "open" : ""}><summary>Ohne Kalender: Arbeitstag-Sensor (kennt nur heute)</summary>
+              <div class="wxr-pk">${this._picker("workday_entity", p.workday_entity ? [p.workday_entity] : [])}</div>
+              <p class="muted small">Gilt, wenn kein Kalender gewählt oder er nicht lesbar ist. Damit weiß Hauswerk erst am Feiertag selbst, dass frei ist.</p></details>
+            ${head("mdi:palm-tree", "Urlaub")}
+            <button class="srow" data-action="settings-go" data-sub="vacation"><span class="sr-ic" style="--c:#34d399"><ha-icon icon="mdi:palm-tree"></ha-icon></span><span class="sr-t"><b>Urlaub automatisch</b><small>${esc(vac)}</small></span><ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon></button>
+            ${head("mdi:calendar-text-outline", "Termine")}
+            <div class="field"><span>Kalender mit Terminen (z. B. Müllabfuhr, Familie)</span>${this._picker("calendars", p.calendars || [])}</div>
+            <p class="muted small">Erscheinen im Bildschirmschoner des Tablets und in den Widgets „Termine“ und „Nächste Ereignisse“ (dort je Widget auch eigene Kalender wählbar). Müll-Termine bekommen ein eigenes Symbol.</p>
+            <p class="muted small"><ha-icon icon="mdi:window-shutter"></ha-icon>Rollwerk-Profile können weiterhin eigene Kalender für Fahrzeiten und einen eigenen Sensor „Arbeitstag morgen“ haben – ohne gilt dieser Arbeitstage-Kalender.</p>`,
+        };
+      }
 
       case "vacation": {
         const src = p.vacation_source || "period";

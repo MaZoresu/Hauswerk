@@ -690,17 +690,17 @@ class Rollwerk:
             return None
         return round(value * 3.6, 1) if unit == "m/s" else round(value * 1.609, 1) if unit == "mph" else value
 
-    def _free_day(self, tomorrow_entity: str | None = None) -> bool:
-        """Heute frei (Wochenende/Feiertag)? Mit tomorrow_entity: ist morgen frei (fürs Schließen)?"""
+    def _free_day(self, tomorrow_entity: str | None = None, tomorrow: bool = False) -> bool:
+        """Heute (bzw. morgen) frei – Wochenende oder Feiertag? Ein eigener Sensor „Arbeitstag morgen“ hat Vorrang,
+        sonst gilt der zentrale Arbeitstage-Kalender aus Hauswerk (kennt auch morgen), sonst der Sensor (nur heute)."""
         if tomorrow_entity:
             state = self.hass.states.get(tomorrow_entity)
             if state is not None and state.state in ("on", "off"):
                 return state.state == "off"
-        now = dt_util.now()
-        if now.weekday() >= 5:
+        day = dt_util.now().date() + timedelta(days=1 if tomorrow else 0)
+        if day.weekday() >= 5:
             return True
-        workday = self.hass.states.get(self.haus.settings.get("workday_entity") or "")
-        return workday is not None and workday.state == "off"
+        return self.haus.is_workday(day) is False
 
     async def _async_refresh(self, force: bool = False) -> None:
         """Wettervorhersage (Höchstwert, Wetterlage) und Kalender-Termine alle 30 bzw. 5 Minuten."""
@@ -758,7 +758,9 @@ class Rollwerk:
                 return (min(e["start"] for e in hits), max(e["end"] for e in hits)) if hits else None
             return window(prof.get("cal_open") or ""), window(prof.get("cal_close") or "")
         free = self._free_day()
-        free_tomorrow = self._free_day(prof.get("workday_tomorrow")) if prof.get("workday_tomorrow") else free
+        # Schließen richtet sich nach morgen – wenn bekannt (eigener Sensor oder Arbeitstage-Kalender), sonst wie heute
+        known = prof.get("workday_tomorrow") or self.haus.is_workday(dt_util.now().date() + timedelta(days=1)) is not None
+        free_tomorrow = self._free_day(prof.get("workday_tomorrow"), tomorrow=True) if known else free
         up = (_hm(prof.get("up_early_we" if free else "up_early"), "07:00"), _hm(prof.get("up_late_we" if free else "up_late"), "08:00"))
         down = (_hm(prof.get("down_early_we" if free_tomorrow else "down_early"), "16:00"),
                 _hm(prof.get("down_late_we" if free_tomorrow else "down_late"), "22:00"))
@@ -1163,7 +1165,7 @@ class Rollwerk:
     def timeline(self, pid: str) -> dict[str, Any]:
         """Voraussichtlicher Tag eines Profils: öffnen, Beschattung (möglich), schließen."""
         prof = {**PROFILE_DEFAULTS, **(self.profiles.get(pid) or {})}
-        key = (pid, dt_util.now().date().isoformat(), repr(sorted(prof.items(), key=lambda kv: kv[0])), self._free_day())
+        key = (pid, dt_util.now().date().isoformat(), repr(sorted(prof.items(), key=lambda kv: kv[0])), self._free_day(), self._free_day(tomorrow=True))
         if key in self._tl_cache:
             return self._tl_cache[key]
         feats = set(prof.get("features") or [])

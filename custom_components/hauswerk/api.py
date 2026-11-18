@@ -182,6 +182,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("start_widgets_tablet"): _opt(vol.All([WIDGET_SCHEMA], vol.Length(max=24))),
         vol.Optional("tablet_wake"): ENTITY_LIST,
         vol.Optional("tablet_calendars"): ENTITY_LIST,
+        vol.Optional("calendars"): ENTITY_LIST,
         # Darstellung
         vol.Optional("look_theme"): vol.In(["auto", "sun", "light", "dark"]),
         vol.Optional("look_accent"): _opt(vol.Match(r"^#[0-9a-fA-F]{6}$")),
@@ -234,6 +235,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("preheat_weather"): bool,
         vol.Optional("workday_entity"): _opt(vol.All(str, vol.Match(r"^binary_sensor\.[a-z0-9_]+$"))),
         vol.Optional("workday_as"): vol.All(vol.Coerce(int), vol.In([5, 6])),
+        vol.Optional("workday_calendar"): _opt(vol.All(str, vol.Match(r"^calendar\.[a-z0-9_]+$"))),
         vol.Optional("vent_rh"): vol.All(vol.Coerce(int), vol.Range(min=0, max=95)),
     },
     extra=vol.REMOVE_EXTRA,
