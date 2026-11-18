@@ -1113,3 +1113,46 @@ def test_arbeitstage_aus_dem_kalender(hw):
         return haus
 
     asyncio.run(run())
+
+
+def test_muellabholung(hw):
+    """Müllabholung: Kalender von Waste Collection Schedule wird erkannt (und aus den Terminen genommen),
+    Abholungen ohne ausgeblendete Arten, Hinweis am Vorabend ab der Erinnerungszeit und Nachricht einmal je Abholtag."""
+    async def run():
+        STORES.clear()
+        NOW[0] = datetime(2026, 11, 18, 15, 0, tzinfo=timezone.utc)  # 16:00 Ortszeit
+        hass = Hass()
+        hass.set("calendar.abfall", "off", name="Waste Collection Schedule Landkreis")
+        hass.set("calendar.familie", "off", name="Familie")
+        REG["calendar.abfall"] = types.SimpleNamespace(entity_id="calendar.abfall", domain="calendar", platform="waste_collection_schedule",
+                                                        config_entry_id="w", disabled_by=None, device_id=None)
+        hass.events = {"calendar.abfall": [
+            {"summary": "Restabfall", "start": "2026-11-19", "end": "2026-11-20"},
+            {"summary": "Sperrmüll", "start": "2026-11-19", "end": "2026-11-20"},
+            {"summary": "Papier", "start": "2026-11-24", "end": "2026-11-25"}]}
+        log, haus, ctl = await _setup(hw, hass)
+        haus.settings.pop("waste_calendars", None)
+        haus._waste_new = True
+        haus.settings["calendars"] = ["calendar.familie", "calendar.abfall"]
+        await haus.async_start()
+        assert haus.settings["waste_calendars"] == ["calendar.abfall"] and haus.settings["calendars"] == ["calendar.familie"]
+        await haus.async_save_settings({"waste_hidden": ["Sperrmüll"], "notify_waste": "normal",
+                                        "notify_targets": ["mobile_app_pixel"], "notify_quiet": False})
+        st = haus.status()
+        assert [e["type"] for e in st["waste"]] == ["Restabfall", "Papier"] and "Sperrmüll" in st["waste_types"]
+        assert st["waste_due"] is None  # 16 Uhr: noch nicht
+        NOW[0] = datetime(2026, 11, 18, 17, 5, tzinfo=timezone.utc)  # 18:05
+        await haus._async_tick()
+        assert haus.status()["waste_due"] == {"date": "2026-11-19", "when": "morgen", "types": ["Restabfall"]}
+        await haus._async_tick()
+        await asyncio.sleep(0)
+        sent = [c for c in hass.calls if c[0] == "notify"]
+        assert len(sent) == 1 and "Restabfall" in sent[0][2]["message"], sent
+        NOW[0] = datetime(2026, 11, 19, 7, 0, tzinfo=timezone.utc)  # Abholtag 8 Uhr
+        await haus._async_tick()
+        assert haus.status()["waste_due"]["when"] == "heute"
+        NOW[0] = datetime(2026, 11, 19, 10, 0, tzinfo=timezone.utc)  # 11 Uhr: vorbei
+        await haus._async_tick()
+        assert haus.status()["waste_due"] is None
+
+    asyncio.run(run())

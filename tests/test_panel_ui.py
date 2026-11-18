@@ -897,3 +897,51 @@ def test_kalender_zentral(panel):
         assert p.js(f"{EL}._planDay(0)") == 6
         p.view("overview")
         assert "heute frei, wie Sonntag" in p.js(f"{EL}.shadowRoot.textContent")
+
+
+def test_muellabholung_und_standardkalender(panel):
+    """Kalender › Müllabholung (eigene Kalender, Erinnerung, Abfallarten ausblenden) und Standard-Kalender; Hinweis unter der Glocke."""
+    p = panel
+    assert any("Morgen Müllabfuhr" in h["text"] for h in p.js(f"{EL}._hints()"))
+    assert any("Müllabfuhr" in h["text"] for h in p.js(f"{EL}._urgent()"))
+    assert p.js(f"{EL}._allCals()") == ["calendar.familie", "calendar.muell"]
+    p.js(f"() => {{ {EL}._openPop('calendars'); }}")
+    p.wait()
+    body = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    assert "Müllabholung" in body and "Nächste Abholungen" in body and "Standard-Kalender" in body and "Restabfall" in body
+    assert p.has('#pop [data-action="waste-hide"][data-t="Sperrmüll"][aria-pressed="false"]')
+    p.click('#pop [data-action="waste-hide"][data-t="Papier"]')
+    assert p.js(f"{EL}._settings.waste_hidden") == ["Sperrmüll", "Papier"]
+    p.click('#pop [data-action="set-seg"][data-key="waste_remind"][data-v="19:00"]')
+    p.click('#pop [data-action="set-seg"][data-key="notify_waste"][data-v="important"]')
+    p.click('#pop [data-action="pop-save"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
+    assert saved["waste_remind"] == "19:00" and saved["notify_waste"] == "important" and "Papier" in saved["waste_hidden"]
+    p.js(f"() => {{ {EL}._openPop('calendars'); }}")
+    p.wait()
+    p.click('#pop [data-action="set-seg"][data-key="waste_remind"][data-v="null"]')
+    assert p.js(f"{EL}._settings.waste_remind") is None
+    assert "Nachricht aufs Handy" not in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+
+
+def test_hauswerk_als_startseite(panel):
+    """Darstellung: Hauswerk als Startseite von Home Assistant – für mich, für alle, dieses Gerät."""
+    p = panel
+    p.js(f"() => {{ localStorage.removeItem('defaultPanel'); {EL}._dp = null; {EL}._openPop('look'); }}")
+    p.wait(400)
+    assert "Hauswerk als Startseite" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    p.click('#pop [data-action="dp-set"][data-scope="user"]')
+    p.wait(400)
+    sent = [m for m in p.sent() if m["type"] == "frontend/set_user_data"]
+    assert sent and sent[-1]["value"]["default_panel"] == "hauswerk" and sent[-1]["key"] == "core"
+    assert "Für dich auf allen Geräten" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    p.click('#pop [data-action="dp-set"][data-scope="user"]')  # nochmal = aufheben
+    p.wait(400)
+    assert "default_panel" not in [m for m in p.sent() if m["type"] == "frontend/set_user_data"][-1]["value"]
+    p.click('#pop [data-action="dp-set"][data-scope="device"]')
+    p.wait(400)
+    assert p.js("localStorage.getItem('defaultPanel')") == '"hauswerk"'
+    p.click('#pop [data-action="dp-set"][data-scope="system"]')
+    p.wait(400)
+    assert [m for m in p.sent() if m["type"] == "frontend/set_system_data"][-1]["value"]["default_panel"] == "hauswerk"

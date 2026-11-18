@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.51.0";
+const VERSION = "0.52.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -142,6 +142,8 @@ const PICKERS = {
   weather_entity: { scope: "settings", multi: false, domains: ["weather"] },
   tablet_wake: { scope: "settings", multi: true, domains: ["binary_sensor", "input_boolean", "switch"] },
   calendars: { scope: "settings", multi: true, domains: ["calendar"] },
+  main_calendar: { scope: "settings", multi: false, domains: ["calendar"] },
+  waste_calendars: { scope: "settings", multi: true, domains: ["calendar"] },
   workday_calendar: { scope: "settings", multi: false, domains: ["calendar"] },
   import_calendar: { scope: "pop", multi: false, domains: ["calendar"] },
   w_weather: { scope: "pop", multi: false, domains: ["weather"] },
@@ -188,7 +190,9 @@ const PICK_HINTS = {
   vacation_calendar: ["urlaub", "familie", "ferien"],
   workday_entity: ["arbeitstag", "workday", "werktag", "feiertag"],
   workday_calendar: ["arbeitstag", "workday", "werktag"],
-  calendars: ["müll", "abfall", "waste", "familie", "termine", "schule"],
+  calendars: ["familie", "termine", "schule", "geburtstag"],
+  main_calendar: ["familie", "family", "termine", "privat"],
+  waste_calendars: ["müll", "abfall", "waste", "abfuhr", "tonne", "landkreis"],
   person_add: ["person", "handy", "phone", "iphone", "pixel", "galaxy"],
   show_entities: ["ventil", "valve", "stellantrieb", "stellung", "position", "demand", "heizkörper", "heizkoerper", "fußboden", "fussboden", "fbh", "heizkreis", "thermostat"],
 };
@@ -854,6 +858,7 @@ class HauswerkPanel extends HTMLElement {
     const set = this._data?.settings || {};
     const bad = (id) => !S[id] || ["unavailable", "unknown"].includes(S[id].state);
     const add = (lvl, icon, text, sub, action, data = {}) => out.push({ lvl, icon, text, sub, action, data });
+    if (s.waste_due) add("info", this._calIcon(s.waste_due.types[0])[0], `${s.waste_due.when === "morgen" ? "Morgen" : "Heute"} Müllabfuhr`, s.waste_due.types.join(" · "), "settings-go", { sub: "calendars" });
     for (const r of this._rooms()) {
       const rs = s.rooms?.[r.id] || {};
       const climates = r.climates || [];
@@ -1107,6 +1112,68 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Abschnitt „Tabletmodus“ in Darstellung (gilt sofort, nur auf diesem Gerät). */
+  /** Hauswerk als Startseite von Home Assistant: für mich, für alle oder nur dieses Gerät. */
+  _startBox() {
+    const url = this._panel?.url_path || "hauswerk";
+    const d = this._dp;
+    if (!d || Date.now() - d.at > 60000) this._dpLoad();
+    const is = (v) => v === url;
+    const other = (v) => (v && !is(v) ? this._dpName(v) : "");
+    const state = !d ? "Wird geprüft …"
+      : is(d.u) ? "Für dich auf allen Geräten"
+      : is(d.s) && !d.u ? "Für alle Benutzer"
+      : is(d.dev) && !d.u && !d.s ? "Nur auf diesem Gerät"
+      : `Nein – Start ist ${other(d.u) || other(d.s) || "die Übersicht"}${(is(d.s) || is(d.dev)) && d.u ? " (dein Profil hat Vorrang)" : ""}`;
+    const on = d && (is(d.u) || (is(d.s) && !d.u) || (is(d.dev) && !d.u && !d.s));
+    const btn = (scope, label, icon, active, admin) => (admin && !(this._hass?.user?.is_admin && this._dp?.sysOk !== false) ? "" : `<button class="seg ${active ? "on" : ""}" data-action="dp-set" data-scope="${scope}" data-on="${active ? "0" : "1"}"><ha-icon icon="${icon}"></ha-icon>${label}</button>`);
+    return `
+      <div class="lbl" style="margin-top:18px"><ha-icon icon="mdi:home-import-outline"></ha-icon> Startseite von Home Assistant</div>
+      <div class="xcard ${on ? "on" : ""}" style="cursor:default"><span class="xc-box" aria-hidden="true">${on ? "✓" : ""}</span>
+        <span class="grow"><b>Hauswerk als Startseite</b><small>${esc(state)}</small></span></div>
+      <div class="segs small n3" style="margin-top:8px">
+        ${btn("user", "Für mich", "mdi:account-outline", d && is(d.u))}
+        ${btn("system", "Für alle", "mdi:account-group-outline", d && is(d.s), true)}
+        ${btn("device", "Dieses Gerät", "mdi:tablet-cellphone", d && is(d.dev))}
+      </div>
+      <p class="muted small">Home Assistant bietet unter „Standard-Dashboard“ nur eigene Dashboards an – Hauswerk ist ein eigenes Panel. Hier lässt es sich trotzdem als Startseite festlegen. Reihenfolge: dein Profil, dann „für alle“, dann dieses Gerät. Nochmal tippen hebt es wieder auf.</p>`;
+  }
+
+  _dpName(v) {
+    const p = this._hass?.panels?.[v];
+    return p?.title || (v === "lovelace" ? "Übersicht" : v);
+  }
+
+  async _dpLoad() {
+    if (this._dpBusy || !this._hass?.callWS) return;
+    this._dpBusy = true;
+    const get = (type) => this._hass.callWS({ type, key: "core" }).then((r) => r?.value || {}).catch(() => null);
+    const [u, sys] = await Promise.all([get("frontend/get_user_data"), get("frontend/get_system_data")]);
+    let dev = null;
+    try { dev = JSON.parse(localStorage.getItem("defaultPanel") || "null"); } catch (e) { dev = null; }
+    this._dpRaw = { u: u || {}, s: sys };
+    this._dp = { u: u?.default_panel || null, s: sys?.default_panel || null, dev, at: Date.now(), sysOk: sys !== null };
+    this._dpBusy = false;
+    if (this._pop?.id === "look") this._renderPop();
+  }
+
+  async _dpSet(scope, on) {
+    const url = this._panel?.url_path || "hauswerk";
+    const val = (raw) => { const v = { ...(raw || {}) }; if (on) v.default_panel = url; else delete v.default_panel; return v; };
+    try {
+      if (scope === "device") {
+        if (on) localStorage.setItem("defaultPanel", JSON.stringify(url)); else localStorage.removeItem("defaultPanel");
+      } else {
+        if (!this._dpRaw) await this._dpLoad();
+        await this._hass.callWS({ type: scope === "user" ? "frontend/set_user_data" : "frontend/set_system_data", key: "core", value: val(scope === "user" ? this._dpRaw.u : this._dpRaw.s) });
+      }
+      this._toast(on ? `Hauswerk ist jetzt Startseite ${{ user: "für dich", system: "für alle", device: "auf diesem Gerät" }[scope]}` : "Startseite zurückgesetzt");
+    } catch (err) {
+      this._toast(`Das hat nicht geklappt: ${err?.message || err}`);
+    }
+    this._dp = null;
+    await this._dpLoad();
+  }
+
   _tabletBox() {
     const on = !!this._tablet;
     const saver = this._tabletOpt("saver", "2");
@@ -1469,11 +1536,26 @@ class HauswerkPanel extends HTMLElement {
   /** Wichtiges für den Bildschirmschoner: Warnungen, Sturm, offenes Fenster bei Regen. */
   _urgent() {
     const out = this._hints().filter((h) => h.lvl === "warn").map((h) => ({ ...h }));
+    const wd = this._status?.waste_due;
+    if (wd) out.push({ lvl: "warn", live: true, icon: this._calIcon(wd.types[0])[0], text: `${wd.when === "morgen" ? "Morgen" : "Heute"} Müllabfuhr`, sub: wd.types.join(" · ") });
     if (this._rwStatus?.storm) out.unshift({ lvl: "warn", live: true, icon: "mdi:weather-windy-variant", text: "Sturm", sub: "Rollläden fahren hoch" });
     const wid = this._data.settings.weather_entity || Object.keys(this._hass.states).find((e) => e.startsWith("weather."));
     const rain = ["rainy", "pouring", "lightning-rainy", "snowy-rainy", "hail", "snowy"].includes(this._hass.states[wid]?.state);
     if (rain) for (const o of this._openWindows()) out.unshift({ lvl: "warn", live: true, icon: "mdi:weather-pouring", text: "Fenster offen – es regnet", sub: `${o.room.name} · ${this._entityName(o.id)}` });
     return out;
+  }
+
+  /** Alle Termin-Kalender aus Hauswerk › Kalender: Standard-Kalender zuerst, dann weitere, dann Müllabholung. */
+  _allCals() {
+    const set = this._data?.settings || {};
+    return [...new Set([set.main_calendar, ...(set.calendars || []), ...(set.waste_calendars || [])].filter(Boolean))];
+  }
+
+  /** Ausgeblendete Abfallarten (Hauswerk › Kalender › Müllabholung) nicht zeigen. */
+  _calShown(e) {
+    const set = this._data?.settings || {};
+    if (!(set.waste_calendars || []).includes(e.cal)) return true;
+    return !(set.waste_hidden || []).some((h) => h.toLowerCase() === String(e.title).toLowerCase());
   }
 
   /** Termine aus Kalendern (heute + days), zwischengespeichert; lädt im Hintergrund nach und zeichnet dann neu. */
@@ -1494,7 +1576,10 @@ class HauswerkPanel extends HTMLElement {
         for (const id of ids) {
           try {
             const ev = await this._hass.callApi("GET", `calendars/${id}?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`);
-            for (const e of ev || []) list.push({ title: e.summary || "Termin", start: e.start?.dateTime || e.start?.date || e.start, allDay: !e.start?.dateTime && !!e.start?.date, cal: id });
+            for (const e of ev || []) {
+              const item = { title: e.summary || "Termin", start: e.start?.dateTime || e.start?.date || e.start, allDay: !e.start?.dateTime && !!e.start?.date, cal: id };
+              if (this._calShown(item)) list.push(item);
+            }
           } catch (err) {
             /* Kalender nicht lesbar */
           }
@@ -1602,7 +1687,7 @@ class HauswerkPanel extends HTMLElement {
     }
     out.push(...rw.values());
     // Termine
-    const cals = (w.entities || []).length ? w.entities : this._data.settings.calendars || [];
+    const cals = (w.entities || []).length ? w.entities : this._allCals();
     for (const e of this._calFetch(cals, 2)) {
       const at = new Date(e.start);
       if (!e.allDay && at < now - 30 * 60000) continue;
@@ -1629,7 +1714,7 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _w_calendar(w, z) {
-    const cals = (w.entities || []).length ? w.entities : this._data.settings.calendars || [];
+    const cals = (w.entities || []).length ? w.entities : this._allCals();
     if (!cals.length) return this._wSetup(w, "Noch kein Kalender gewählt.");
     const days = z === "l" ? 7 : 2;
     const list = this._calFetch(cals, days).filter((e) => e.allDay || new Date(e.start) > Date.now() - 30 * 60000);
@@ -1688,7 +1773,7 @@ class HauswerkPanel extends HTMLElement {
 
   /** Kalender-Termine für den Bildschirmschoner (heute und morgen), höchstens alle 15 Minuten neu. */
   async _calLoad(force = false) {
-    const ids = this._data?.settings?.calendars || [];
+    const ids = this._allCals();
     if (!ids.length || !this._hass?.callApi) { this._cal = []; return; }
     if (!force && this._calAt && Date.now() - this._calAt < 15 * 60000) return;
     this._calAt = Date.now();
@@ -1699,7 +1784,10 @@ class HauswerkPanel extends HTMLElement {
     for (const id of ids) {
       try {
         const ev = await this._hass.callApi("GET", `calendars/${id}?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`);
-        for (const e of ev || []) list.push({ title: e.summary || "Termin", start: e.start?.dateTime || e.start?.date || e.start, allDay: !e.start?.dateTime && !!e.start?.date });
+        for (const e of ev || []) {
+          const item = { title: e.summary || "Termin", start: e.start?.dateTime || e.start?.date || e.start, allDay: !e.start?.dateTime && !!e.start?.date, cal: id };
+          if (this._calShown(item)) list.push(item);
+        }
       } catch (err) {
         /* Kalender nicht lesbar */
       }
@@ -5201,7 +5289,8 @@ class HauswerkPanel extends HTMLElement {
           warn: !persons, words: "personen abwesend heimweg nähe entfernung gäste" },
         { g: "Haus", id: "calendars", icon: "mdi:calendar-multiple", c: "#38bdf8", title: "Kalender",
           sum: [p.workday_calendar || p.workday_entity ? `Arbeitstage: ${this._entityName(p.workday_calendar || p.workday_entity)}${(s.free_days || []).length ? ` · nächster freier Werktag ${new Date(s.free_days[0]).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" })}` : ""}` : "Arbeitstage – keiner gewählt",
-            (p.calendars || []).length ? `${p.calendars.length} Termin-Kalender` : "", p.vacation_source === "calendar" && p.vacation_calendar ? "Urlaub per Kalender" : ""].filter(Boolean).join(" · "),
+            (p.waste_calendars || []).length ? (s.waste?.[0] ? `Müll: ${s.waste[0].type} ${new Date(s.waste[0].date).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" })}` : "Müllabholung") : "",
+            p.main_calendar ? `Standard: ${this._entityName(p.main_calendar)}` : (p.calendars || []).length ? `${p.calendars.length} Termin-Kalender` : "", p.vacation_source === "calendar" && p.vacation_calendar ? "Urlaub per Kalender" : ""].filter(Boolean).join(" · "),
           warn: !!s.workday_calendar_error, words: "kalender feiertag arbeitstag workday wochenende brückentag termine müll abfall familie urlaub" },
         { g: "Haus", id: "vacation", icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub", sum: vac, on: s.vacation, words: "kalender zeitraum stichwort ferien reise" },
         { g: "Haus", id: "weather", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter",
@@ -5927,9 +6016,29 @@ class HauswerkPanel extends HTMLElement {
               <p class="muted small">Gilt, wenn kein Kalender gewählt oder er nicht lesbar ist. Damit weiß Hauswerk erst am Feiertag selbst, dass frei ist.</p></details>
             ${head("mdi:palm-tree", "Urlaub")}
             <button class="srow" data-action="settings-go" data-sub="vacation"><span class="sr-ic" style="--c:#34d399"><ha-icon icon="mdi:palm-tree"></ha-icon></span><span class="sr-t"><b>Urlaub automatisch</b><small>${esc(vac)}</small></span><ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon></button>
+            ${head("mdi:trash-can-outline", "Müllabholung")}
+            <div class="wxsrcs">
+              <div class="wxsrc">${row("waste", "Abfuhr-Kalender", "z. B. Waste Collection Schedule", "",
+                "Kalender mit den Abholterminen – je Abfallart ein Termin (Restabfall, Bio, Papier, Gelbe Tonne …). Hauswerk erinnert am Vorabend, zeigt die Abholung im Bildschirmschoner, unter der Glocke und in den Widgets „Termine“ und „Nächste Ereignisse“ – mit eigenem Symbol und eigener Farbe je Abfallart.", true)}
+              <div class="wxr-pk">${this._picker("waste_calendars", p.waste_calendars || [])}</div></div>
+            </div>
+            ${(p.waste_calendars || []).length ? `
+            <div class="field"><span>Erinnern am Vorabend ab</span>${segs("waste_remind", [["null", "Aus"], ["17:00", "17 Uhr"], ["18:00", "18 Uhr"], ["19:00", "19 Uhr"], ["20:00", "20 Uhr"]], "null")}</div>
+            <p class="muted small">Ab dann steht „Morgen Müllabfuhr“ unter der Glocke und groß im Bildschirmschoner – bis zur Abholung am nächsten Vormittag (10 Uhr).</p>
+            ${p.waste_remind ? `<div class="field"><span>Nachricht aufs Handy am Vorabend</span>${segs("notify_waste", [["off", "Aus", "mdi:bell-off-outline"], ["log", "Protokoll", "mdi:text-box-outline"], ["normal", "Normal", "mdi:bell-outline"], ["important", "Wichtig", "mdi:bell-alert-outline"]], "off").replace('class="segs small"', 'class="segs small n4"')}</div>
+            <p class="muted small">An die Geräte unter <button class="link inline" data-action="settings-go" data-sub="notify">Benachrichtigungen</button>, einmal je Abholtag.</p>` : ""}
+            ${(st.waste_types || []).length ? `<div class="field"><span>Anzeigen</span><div class="pchips">${st.waste_types.map((t) => { const on = !(p.waste_hidden || []).some((h) => h.toLowerCase() === t.toLowerCase()); const [ic, c] = this._calIcon(t); return `<button class="pchip ${on ? "on" : ""}" data-action="waste-hide" data-t="${esc(t)}" aria-pressed="${on}" ${dis} style="--c:${c}"><ha-icon icon="${ic}"></ha-icon>${esc(t)}</button>`; }).join("")}</div></div>
+            <p class="muted small">Abgewählte Abfallarten (z. B. Sperrmüll nur auf Anmeldung) zeigt und meldet Hauswerk nicht.</p>` : ""}
+            ${st.waste_error ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>Nicht lesbar: ${esc(st.waste_error)}</p>` : ""}
+            ${(st.waste || []).length ? `<div class="lbl">Nächste Abholungen</div><div class="evlist">${st.waste.slice(0, 6).map((e) => { const [ic, c] = this._calIcon(e.type); const today = e.date === new Date().toLocaleDateString("sv-SE"); return `<div class="ev ${st.waste_due?.date === e.date ? "live" : ""}"><ha-icon icon="${ic}" style="color:${c}"></ha-icon><span class="grow"><b>${esc(e.type)}</b><small>${today ? "heute" : dd(e.date)}</small></span></div>`; }).join("")}</div>` : `<p class="muted small">In den nächsten zwei Wochen keine Abholung${JSON.stringify(saved.waste_calendars || []) === JSON.stringify(p.waste_calendars || []) ? "" : " – nach dem Speichern erscheinen sie hier"}.</p>`}` : ""}
             ${head("mdi:calendar-text-outline", "Termine")}
-            <div class="field"><span>Kalender mit Terminen (z. B. Müllabfuhr, Familie)</span>${this._picker("calendars", p.calendars || [])}</div>
-            <p class="muted small">Erscheinen im Bildschirmschoner des Tablets und in den Widgets „Termine“ und „Nächste Ereignisse“ (dort je Widget auch eigene Kalender wählbar). Müll-Termine bekommen ein eigenes Symbol.</p>
+            <div class="wxsrcs">
+              <div class="wxsrc">${row("maincal", "Standard-Kalender", "z. B. Familie", "",
+                "Der wichtigste Kalender des Haushalts: Seine Termine stehen in Bildschirmschoner und Widgets zuerst.", true)}
+              <div class="wxr-pk">${this._picker("main_calendar", p.main_calendar ? [p.main_calendar] : [])}</div></div>
+            </div>
+            <div class="field"><span>Weitere Kalender (z. B. Schule, Geburtstage)</span>${this._picker("calendars", (p.calendars || []).filter((c) => c !== p.main_calendar))}</div>
+            <p class="muted small">Alle Termine erscheinen im Bildschirmschoner des Tablets und in den Widgets „Termine“ und „Nächste Ereignisse“ (dort je Widget auch eigene Kalender wählbar).</p>
             <p class="muted small"><ha-icon icon="mdi:window-shutter"></ha-icon>Rollwerk-Profile können weiterhin eigene Kalender für Fahrzeiten und einen eigenen Sensor „Arbeitstag morgen“ haben – ohne gilt dieser Arbeitstage-Kalender.</p>`,
         };
       }
@@ -6108,6 +6217,7 @@ class HauswerkPanel extends HTMLElement {
         const row = (k, title, sub, value, text, ctl) => this._setRow(k, title, sub, value, text, ctl);
         const saved = (this._data.settings.notify_targets || []).length || this._data.settings.notify_ha;
         // Art je Anlass (früher an/aus)
+        if (p.notify_waste == null) p.notify_waste = "off";
         for (const k of ["notify_window", "notify_offline", "notify_frost", "notify_battery", "notify_cold"]) {
           if (p[k] === true || p[k] == null) p[k] = "normal";
           else if (p[k] === false) p[k] = "off";
@@ -6139,6 +6249,8 @@ class HauswerkPanel extends HTMLElement {
                 "Hauswerk sucht an Thermostaten, Fensterkontakten und Raumsensoren nach Batterie-Sensoren. Liegt einer unter der Grenze, erscheint ein Hinweis unter der Glocke – und je nach Art eine Nachricht. Die Grenze gilt auch für die Glocke.")}
               ${kind("notify_cold", "Heizkörper bleibt kalt", "Ventil offen, Raum wird nicht wärmer", "",
                 "Steht ein Ventil eine Stunde lang auf 90 % oder mehr, der Raum liegt mindestens 0,5 °C unter Soll und wird trotzdem nicht wärmer, kommt eine Nachricht. Mögliche Ursachen: Luft im Heizkörper, hängender Ventilstift oder die Heizung liefert keine Wärme.")}
+              ${kind("notify_waste", "Müllabfuhr morgen", p.waste_remind ? `am Vorabend ab ${p.waste_remind} · unter Kalender` : "Erinnerung unter Kalender aus", "",
+                "Am Abend vor der Abholung (ab der Uhrzeit unter Hauswerk › Kalender › Müllabholung) kommt eine Nachricht mit den Abfallarten – einmal je Abholtag.")}
             </div>
             ${head("mdi:sleep", "Ruhezeit")}
             <div class="wxrows">
@@ -6402,6 +6514,7 @@ class HauswerkPanel extends HTMLElement {
               .map(([v, l, i]) => `<button class="seg ${size === v ? "on" : ""}" data-action="look-size" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${l}</button>`)
               .join("")}</div></div>
             <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Die Größe gilt nur für dieses Gerät und sofort – z. B. größer auf dem Wand-Tablet, kompakter am Handy. Alles andere gilt nach dem Speichern für alle.</p>
+            ${this._startBox()}
             ${this._tabletBox()}`,
         };
       }
@@ -8527,9 +8640,20 @@ class HauswerkPanel extends HTMLElement {
         break;
       }
       case "set-seg":
-        this._settings[el.dataset.key] = el.dataset.v;
+        this._settings[el.dataset.key] = el.dataset.v === "null" ? null : el.dataset.v;
         this._refreshSettings();
         break;
+      case "dp-set":
+        this._dpSet(el.dataset.scope, el.dataset.on === "1");
+        break;
+      case "waste-hide": {
+        const t = el.dataset.t;
+        const hidden = new Set(this._settings.waste_hidden || []);
+        if (hidden.has(t)) hidden.delete(t); else hidden.add(t);
+        this._settings.waste_hidden = [...hidden];
+        this._refreshSettings();
+        break;
+      }
       case "report-days":
         this._reportDays = Number(el.dataset.days);
         this._renderMain();

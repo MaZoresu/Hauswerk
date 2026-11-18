@@ -183,6 +183,11 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("tablet_wake"): ENTITY_LIST,
         vol.Optional("tablet_calendars"): ENTITY_LIST,
         vol.Optional("calendars"): ENTITY_LIST,
+        vol.Optional("main_calendar"): _opt(vol.All(str, vol.Match(r"^calendar\.[a-z0-9_]+$"))),
+        vol.Optional("waste_calendars"): ENTITY_LIST,
+        vol.Optional("waste_hidden"): vol.All([vol.All(str, vol.Length(max=80))], vol.Length(max=30)),
+        vol.Optional("waste_remind"): vol.Any(None, _hm),
+        vol.Optional("notify_waste"): NOTIFY_MODE,
         # Darstellung
         vol.Optional("look_theme"): vol.In(["auto", "sun", "light", "dark"]),
         vol.Optional("look_accent"): _opt(vol.Match(r"^#[0-9a-fA-F]{6}$")),

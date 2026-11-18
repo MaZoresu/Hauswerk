@@ -100,6 +100,10 @@ class Haus:
         self._wd_range: tuple[str, str] | None = None
         self._wd_at = 0.0
         self._wd_error: str | None = None
+        # Müllabholung der nächsten zwei Wochen: [{"date": ISO, "type": Abfallart, "cal": calendar.*}]
+        self._waste: list[dict] = []
+        self._waste_at = 0.0
+        self._waste_error: str | None = None
         # Urlaub aus dem Kalender
         self._cal_vacation = False
         self._cal_events: list[dict[str, Any]] = []
@@ -147,6 +151,7 @@ class Haus:
         old_cals = self.settings.pop("tablet_calendars", None)
         if old_cals and not self.settings.get("calendars"):
             self.settings["calendars"] = list(old_cals)
+        self._waste_new = "waste_calendars" not in current  # Müllabholung einmalig erkennen (async_start)
         self.settings = {k: v for k, v in self.settings.items() if k in HOUSE_KEYS}
         await self._store.async_save({"settings": self.settings})
 
@@ -158,8 +163,10 @@ class Haus:
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
         self._track()
         self._find_workday_calendar()
+        self._find_waste_calendars()
         await self._async_refresh_calendar(force=True)
         await self._async_refresh_workdays(force=True)
+        await self._async_refresh_waste(force=True)
         await self._async_refresh_forecast(force=True)
         self.update()
 
@@ -200,6 +207,10 @@ class Haus:
         before = (self.away, self.approaching, self.vacation)
         await self._async_refresh_calendar()
         await self._async_refresh_workdays()
+        if getattr(self, "_waste_new", False):
+            self._find_waste_calendars()
+        await self._async_refresh_waste()
+        self._waste_remind()
         await self._async_refresh_forecast()
         self._flush_queue()
         self.update_radio()
@@ -240,6 +251,9 @@ class Haus:
             await self._async_refresh_calendar(force=True)
         if "workday_calendar" in settings:
             await self._async_refresh_workdays(force=True)
+        if any(k in settings for k in ("waste_calendars", "waste_hidden", "waste_remind")):
+            await self._async_refresh_waste(force=True)
+            self._waste_remind()
         self._notify()
 
     # ------------------------------------------------------------ Anwesenheit
@@ -459,6 +473,90 @@ class Haus:
         self._workdays = days
         self._wd_range = (today.isoformat(), (today + timedelta(days=14)).isoformat())
         self._wd_error = None
+
+    # ------------------------------------------------------------ Müllabholung
+    def _find_waste_calendars(self) -> None:
+        """Einmalig: Kalender von Waste Collection Schedule (oder mit Müll/Abfall im Namen) zur Müllabholung nehmen."""
+        if not getattr(self, "_waste_new", False):
+            return
+        reg = er.async_get(self.hass)
+        found = []
+        for state in self.hass.states.async_all("calendar"):
+            entry = reg.async_get(state.entity_id)
+            text = f"{state.entity_id} {state.attributes.get('friendly_name', '')}".lower()
+            if (getattr(entry, "platform", None) == "waste_collection_schedule") or any(
+                    w in text for w in ("waste", "abfall", "müll", "muell", "abfuhr")):
+                found.append(state.entity_id)
+        # Kalender-Integrationen laden nach dem Start: bis zu 15 Minuten weiter suchen, dann „keine“ merken
+        self._waste_tries = getattr(self, "_waste_tries", 0) + 1
+        if not found and self._waste_tries < 15:
+            return
+        self._waste_new = False
+        self.settings["waste_calendars"] = found
+        if found:
+            self.settings["calendars"] = [c for c in self.settings.get("calendars") or [] if c not in found]
+            self.log.add("settings", "Müllabholung erkannt", ", ".join(self._name(c) for c in found))
+        self._save()
+
+    async def _async_refresh_waste(self, force: bool = False) -> None:
+        """Abholtermine der nächsten zwei Wochen aus den Müll-Kalendern (stündlich und bei Tageswechsel)."""
+        now_ts = dt_util.utcnow().timestamp()
+        today = dt_util.now().date().isoformat()
+        stale = not self._waste or self._waste[0]["date"] < today
+        if not force and not stale and now_ts - self._waste_at < 3600:
+            return
+        self._waste_at = now_ts
+        cals = self.settings.get("waste_calendars") or []
+        start = dt_util.start_of_local_day(dt_util.now().date())
+        end = start + timedelta(days=15)
+        out, errors = [], []
+        for cal in cals:
+            try:
+                events = await async_calendar_events(self.hass, cal, start, end)
+            except Exception as err:  # noqa: BLE001 - ein defekter Kalender soll die anderen nicht stören
+                errors.append(f"{self._name(cal)}: {err or type(err).__name__}")
+                continue
+            for ev in events:
+                begin, _ = parse_when(ev.get("start"))
+                kind = str(ev.get("summary") or "Abfall").strip()
+                if begin is None or begin.date().isoformat() < today:
+                    continue
+                out.append({"date": begin.date().isoformat(), "type": kind, "cal": cal})
+        self._waste = sorted(out, key=lambda e: (e["date"], e["type"]))
+        self._waste_error = "; ".join(errors) or None
+
+    def waste(self) -> list[dict]:
+        """Kommende Abholungen ohne ausgeblendete Abfallarten."""
+        hidden = {h.lower() for h in self.settings.get("waste_hidden") or []}
+        return [e for e in self._waste if e["type"].lower() not in hidden]
+
+    def waste_due(self) -> dict | None:
+        """Gerade dran: am Vorabend ab der Erinnerungszeit (morgen) und am Abholtag bis 10 Uhr (heute)."""
+        remind = self.settings.get("waste_remind")
+        if not remind:
+            return None
+        now = dt_util.now()
+        minute = now.hour * 60 + now.minute
+        today = now.date()
+        h, m = (int(x) for x in str(remind).split(":")[:2])
+        if minute >= h * 60 + m:
+            day, when = today + timedelta(days=1), "morgen"
+        elif minute < 600:
+            day, when = today, "heute"
+        else:
+            return None
+        types = [e["type"] for e in self.waste() if e["date"] == day.isoformat()]
+        return {"date": day.isoformat(), "when": when, "types": list(dict.fromkeys(types))} if types else None
+
+    @callback
+    def _waste_remind(self) -> None:
+        """Erinnerung aufs Handy am Vorabend (einmal je Abholtag), erledigt nach der Abholung."""
+        due = self.waste_due()
+        key = f"waste_{due['date']}" if due and due["when"] == "morgen" else None
+        for old in [k for k in self._active if k.startswith("waste_") and k != key]:
+            self.clear(old)
+        if key:
+            self.notify(key, "waste", "Morgen Müllabfuhr", f"{', '.join(due['types'])} – Tonne heute Abend rausstellen.")
 
     def is_workday(self, day: date | None = None) -> bool | None:
         """Ist der Tag ein Arbeitstag? Aus dem Kalender (auch künftige Tage), heute sonst aus dem Sensor; None = unbekannt."""
@@ -713,6 +811,10 @@ class Haus:
             "free_days": self.free_days(),
             "workday_source": self.workday_source(),
             "workday_calendar_error": self._wd_error,
+            "waste": self.waste()[:12],
+            "waste_due": self.waste_due(),
+            "waste_types": sorted({e["type"] for e in self._waste}, key=str.lower),
+            "waste_error": self._waste_error,
             "guest": bool(self.settings.get("guest")),
             "outside_temp": self.outside_temp(),
             "frost_low": self.frost_low,

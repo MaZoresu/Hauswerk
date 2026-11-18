@@ -44,6 +44,7 @@ const states = {
   "binary_sensor.arbeitstag": st("on", { friendly_name: "Arbeitstag" }),
   "calendar.arbeitstag": st("on", { friendly_name: "Arbeitstag Kalender", message: "Arbeitstag" }),
   "calendar.muell": st("off", { friendly_name: "Müllabfuhr", message: "Restabfall" }),
+  "calendar.familie": st("off", { friendly_name: "Familie", message: "Kino" }),
   "climate.bad_heizkoerper": st("heat", { friendly_name: "Heizkörper Bad", current_temperature: 23.5, temperature: 24 }),
   "sensor.bad_heizkoerper_ventil_offnungsgrad": st("35", { friendly_name: "Heizkörper Bad Ventilöffnungsgrad", unit_of_measurement: "%" }),
   "sensor.wohnzimmer_ventil_offnungsgrad": st("100", { friendly_name: "Wohnzimmer Ventilöffnungsgrad", unit_of_measurement: "%" }),
@@ -74,7 +75,7 @@ const settings = {
   look_theme: "auto", look_accent: null, look_background: "pattern", look_header_weather: true, look_header_clock: false, cold_snap_temp: 0, storm_kmh: 70, home_zone: "zone.home", proximity_m: 500,
   notify_targets: ["mobile_app_pixel_8"], notify_window: true, notify_window_min: 30, notify_offline: true, notify_offline_min: 15,
   notify_frost: true, notify_battery: true, notify_quiet: true, notify_quiet_from: "22:00", notify_quiet_to: "07:00", battery_low: 20,
-  preheat_weather: true, workday_entity: "binary_sensor.arbeitstag", workday_calendar: "calendar.arbeitstag", calendars: ["calendar.muell"], workday_as: 6, vent_rh: 65, demand_entity: "climate.vaillant_zone", demand_action: "lower", demand_low: 17, demand_valve: 15, demand_hold: 20, demand_preheat: 1, rw_covers: ["cover.ra_wohnzimmer", "cover.ra_kuche_links", "cover.ra_kuche_rechts", "cover.ma_terasse"], rw_shade: true, rw_shade_temp: 24, rw_shade_pos: 30,
+  preheat_weather: true, workday_entity: "binary_sensor.arbeitstag", workday_calendar: "calendar.arbeitstag", main_calendar: "calendar.familie", calendars: [], waste_calendars: ["calendar.muell"], waste_hidden: ["Sperrmüll"], waste_remind: "18:00", notify_waste: "normal", workday_as: 6, vent_rh: 65, demand_entity: "climate.vaillant_zone", demand_action: "lower", demand_low: 17, demand_valve: 15, demand_hold: 20, demand_preheat: 1, rw_covers: ["cover.ra_wohnzimmer", "cover.ra_kuche_links", "cover.ra_kuche_rechts", "cover.ma_terasse"], rw_shade: true, rw_shade_temp: 24, rw_shade_pos: 30,
 };
 const rooms = {
   a1: { id: "a1", name: "Wohnzimmer", type: "heizkoerper", comfort: 21, eco: 18, climates: ["climate.wohnzimmer", "climate.wohnzimmer_heizkoerper", "climate.wohnzimmer_heizkoerper2"], assist_entities: ["climate.wohnzimmer_heizkoerper2"], windows: [], enabled: true,
@@ -96,6 +97,10 @@ const status = {
   // freie Werktage: der nächste Mittwoch (wie ein Feiertag)
   free_days: [(() => { const d = new Date(); d.setDate(d.getDate() + ((10 - d.getDay()) % 7 || 7)); return d.toLocaleDateString("sv-SE"); })()],
   workday_source: "Arbeitstag Kalender",
+  waste: (() => { const d = (k) => { const x = new Date(); x.setDate(x.getDate() + k); return x.toLocaleDateString("sv-SE"); };
+    return [{ date: d(1), type: "Restabfall", cal: "calendar.muell" }, { date: d(1), type: "Bioabfall", cal: "calendar.muell" }, { date: d(5), type: "Papier", cal: "calendar.muell" }, { date: d(8), type: "Gelbe Tonne", cal: "calendar.muell" }]; })(),
+  waste_due: { date: (() => { const x = new Date(); x.setDate(x.getDate() + 1); return x.toLocaleDateString("sv-SE"); })(), when: "morgen", types: ["Restabfall", "Bioabfall"] },
+  waste_types: ["Bioabfall", "Gelbe Tonne", "Papier", "Restabfall", "Sperrmüll"],
   radio: { level: 22, entity: "sensor.ccu3_duty_cycle_level", busy: false, limit: 70, entities: ["sensor.ccu3_duty_cycle_level", "sensor.hmip_router_duty_cycle_level"] },
   commands_hour: 6,
   demand: { entity: "climate.vaillant_zone", state: "normal", need: ["Wohnzimmer"], orig_temp: 22.5, action: "lower" },
@@ -130,6 +135,8 @@ const hass = {
     wsLog.push(msg.type);
     (window.hwSent = window.hwSent || []).push(JSON.parse(JSON.stringify(msg)));  // für die Klicktests
     if (msg.type === "system_log/write") return null;
+    if (msg.type === "frontend/get_user_data" || msg.type === "frontend/get_system_data") return { value: (window.hwFront = window.hwFront || {})[msg.type.slice(13)] || {} };
+    if (msg.type === "frontend/set_user_data" || msg.type === "frontend/set_system_data") { (window.hwFront = window.hwFront || {})[msg.type.slice(13)] = msg.value; return null; }
     if (msg.type === "hauswerk/heizen/get") return { settings, rooms, plans: {}, target_sensors: {}, status, defaults, modes: {}, is_admin: true, user_admin: true, rollwerk: { covers: rwCovers, profiles: rwProfiles, status: rwStatus } };
     if (msg.type === "hauswerk/rollwerk/command") return null;
     if (msg.type === "hauswerk/rollwerk/cover/save") { rwCovers[msg.entity_id] = msg.cover; return { covers: rwCovers, profiles: rwProfiles }; }

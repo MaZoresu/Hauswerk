@@ -45,7 +45,7 @@ SETTING_LABELS = {
     "liming_time": "Entkalken", "liming_minutes": "Entkalken", "liming_winter": "Entkalken",
     "preheat_mode": "Vorheizen", "lead_radiator": "Vorheizen", "lead_floor": "Vorheizen",
     "calibration_interval": "Kalibrierung", "allow_users": "Berechtigungen", "start_widgets": "Widgets", "start_widgets_tablet": "Widgets (Tablet)",
-    "tablet_wake": "Tablet aufwecken", "calendars": "Termin-Kalender", "workday_calendar": "Arbeitstage-Kalender",
+    "tablet_wake": "Tablet aufwecken", "calendars": "Termin-Kalender", "main_calendar": "Standard-Kalender", "waste_calendars": "Müllabholung", "waste_hidden": "Müllabholung", "waste_remind": "Müllabholung", "notify_waste": "Benachrichtigungen", "workday_calendar": "Arbeitstage-Kalender",
     "look_theme": "Darstellung", "look_accent": "Darstellung", "look_background": "Darstellung",
     "look_header_weather": "Darstellung", "look_header_clock": "Darstellung",
     "notify_targets": "Benachrichtigungen an", "notify_window": "Benachrichtigungen", "notify_window_min": "Benachrichtigungen",
@@ -90,7 +90,13 @@ HOUSE_DEFAULTS = {
     "workday_as": 6,              # 5 = wie Samstag, 6 = wie Sonntag
     # Kalender zentral: Arbeitstage (Kalender der Integration „Arbeitstag“, kennt auch die nächsten Tage) und Termine
     "workday_calendar": None,     # calendar.* der Integration „Arbeitstag“: jeder Arbeitstag ist ein Termin
-    "calendars": [],              # Termine (z. B. Müllabfuhr, Familie) für Bildschirmschoner und Widgets
+    "main_calendar": None,        # Standard-Kalender (z. B. Familie): zuerst angezeigt, neue Termine landen hier
+    "calendars": [],              # weitere Termin-Kalender für Bildschirmschoner und Widgets
+    # Müllabholung: eigene Kalender (z. B. Waste Collection Schedule), Erinnerung am Vorabend
+    "waste_calendars": [],
+    "waste_hidden": [],           # Abfallarten, die Hauswerk nicht anzeigt (z. B. „Sperrmüll“)
+    "waste_remind": "18:00",      # Hinweis ab dieser Uhrzeit am Vorabend (bis zur Abholung am Vormittag); None = aus
+    "notify_waste": "off",        # Erinnerung aufs Handy am Vorabend
     # Urlaub: der Schalter "vacation" gilt immer, dazu automatisch per Zeitraum oder Kalender
     "vacation": False,
     "vacation_source": "period",  # off | period | calendar

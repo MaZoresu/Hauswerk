@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.52.0 – 2026-11-18
+
+### Neu
+- **Hauswerk als Startseite von Home Assistant** (Darstellung › Startseite von Home Assistant): Home Assistant bietet beim Standard-Dashboard nur eigene Dashboards an, Hauswerk ist ein eigenes Panel. Jetzt lässt es sich trotzdem festlegen – **für mich** (alle meine Geräte), **für alle Benutzer** (Admin) oder **nur dieses Gerät**. Nochmal tippen hebt es auf.
+- **Müllabholung** als eigener Bereich unter Hauswerk › Kalender:
+  - eigene Abfuhr-Kalender (z. B. Waste Collection Schedule) – werden beim Update erkannt und aus den Terminen genommen,
+  - **Erinnerung am Vorabend** ab 17, 18, 19 oder 20 Uhr: „Morgen Müllabfuhr: Restabfall“ unter der Glocke und groß im Bildschirmschoner, bis zur Abholung am Vormittag,
+  - **Nachricht aufs Handy** am Vorabend (Aus · Protokoll · Normal · Wichtig), einmal je Abholtag,
+  - **Abfallarten ab- und anwählen** (z. B. Sperrmüll nur auf Anmeldung),
+  - die nächsten Abholungen mit Symbol und Farbe je Abfallart.
+- **Standard-Kalender** (z. B. Familie) unter Termine: steht in Bildschirmschoner und Widgets zuerst; darunter weitere Kalender.
+
 ## 0.51.0 – 2026-11-18
 
 ### Neu
