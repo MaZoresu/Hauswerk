@@ -903,7 +903,6 @@ def test_muellabholung_und_standardkalender(panel):
     """Kalender › Müllabholung (eigene Kalender, Erinnerung, Abfallarten ausblenden) und Standard-Kalender; Hinweis unter der Glocke."""
     p = panel
     assert any("Morgen Müllabfuhr" in h["text"] for h in p.js(f"{EL}._hints()"))
-    assert any("Müllabfuhr" in h["text"] for h in p.js(f"{EL}._urgent()"))
     assert p.js(f"{EL}._allCals()") == ["calendar.familie", "calendar.muell"]
     p.js(f"() => {{ {EL}._openPop('calendars'); }}")
     p.wait()

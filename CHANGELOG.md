@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.52.1 – 2026-11-18
+
+### Geändert
+- **Bildschirmschoner:** Hinweise (z. B. „Fenster offen – es regnet“) und Termine in kleinerer Schrift. Termine zeigen ihr Symbol (Müll je Abfallart in eigener Farbe).
+- Heißen Fensterkontakt und Raum gleich, steht der Name nur einmal da (statt „Großes Bad · Großes Bad“).
+
 ## 0.52.0 – 2026-11-18
 
 ### Neu

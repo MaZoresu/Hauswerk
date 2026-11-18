@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.52.0";
+const VERSION = "0.52.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1536,12 +1536,10 @@ class HauswerkPanel extends HTMLElement {
   /** Wichtiges für den Bildschirmschoner: Warnungen, Sturm, offenes Fenster bei Regen. */
   _urgent() {
     const out = this._hints().filter((h) => h.lvl === "warn").map((h) => ({ ...h }));
-    const wd = this._status?.waste_due;
-    if (wd) out.push({ lvl: "warn", live: true, icon: this._calIcon(wd.types[0])[0], text: `${wd.when === "morgen" ? "Morgen" : "Heute"} Müllabfuhr`, sub: wd.types.join(" · ") });
     if (this._rwStatus?.storm) out.unshift({ lvl: "warn", live: true, icon: "mdi:weather-windy-variant", text: "Sturm", sub: "Rollläden fahren hoch" });
     const wid = this._data.settings.weather_entity || Object.keys(this._hass.states).find((e) => e.startsWith("weather."));
     const rain = ["rainy", "pouring", "lightning-rainy", "snowy-rainy", "hail", "snowy"].includes(this._hass.states[wid]?.state);
-    if (rain) for (const o of this._openWindows()) out.unshift({ lvl: "warn", live: true, icon: "mdi:weather-pouring", text: "Fenster offen – es regnet", sub: `${o.room.name} · ${this._entityName(o.id)}` });
+    if (rain) for (const o of this._openWindows()) out.unshift({ lvl: "warn", live: true, icon: "mdi:weather-pouring", text: "Fenster offen – es regnet", sub: this._entityName(o.id) === o.room.name ? o.room.name : `${o.room.name} · ${this._entityName(o.id)}` });
     return out;
   }
 
@@ -1885,7 +1883,7 @@ class HauswerkPanel extends HTMLElement {
     const day = (d) => { const x = new Date(d); const td = new Date(); td.setHours(0, 0, 0, 0); const diff = Math.round((new Date(x.getFullYear(), x.getMonth(), x.getDate()) - td) / 86400000); return diff <= 0 ? "Heute" : diff === 1 ? "Morgen" : x.toLocaleDateString("de-DE", { weekday: "short" }); };
     const cal = (this._cal || []).filter((e) => e.allDay || new Date(e.start) > now - 30 * 60000);
     const side = [
-      ...cal.slice(0, 3).map((e) => `<div class="sv-row"><ha-icon icon="mdi:calendar"></ha-icon><span><b>${day(e.start)}${e.allDay ? "" : ` ${new Date(e.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</b><small>${esc(e.title)}</small></span></div>`),
+      ...cal.slice(0, 3).map((e) => `<div class="sv-row"><ha-icon icon="${this._calIcon(e.title)[0]}" style="color:${this._calIcon(e.title)[1]}"></ha-icon><span><b>${day(e.start)}${e.allDay ? "" : ` ${new Date(e.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</b><small>${esc(e.title)}</small></span></div>`),
     ];
     const smallHints = hints.slice(0, urgent.length ? 1 : 2);
     el.innerHTML = `
@@ -10401,8 +10399,8 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .sv-facts span { display:flex; align-items:center; gap:8px; }
 .sv-facts ha-icon { --mdc-icon-size:min(2.8vw, 4vh); }
 .sv-hints { display:flex; flex-direction:column; gap:8px; margin-top:6px; min-width:min(60vw, 720px); }
-.sv-h { display:flex; align-items:center; gap:12px; padding:min(1vh, 10px) 16px; border-radius:14px; background:rgba(255,255,255,.06); text-align:left; font-size:min(2vw, 3vh); }
-.sv-h ha-icon { --mdc-icon-size:min(2.8vw, 4vh); color:#94a3b8; }
+.sv-h { display:flex; align-items:center; gap:12px; padding:min(1vh, 10px) 16px; border-radius:14px; background:rgba(255,255,255,.06); text-align:left; font-size:min(1.6vw, 2.3vh); }
+.sv-h ha-icon { --mdc-icon-size:min(2.2vw, 3vh); color:#94a3b8; }
 .sv-h.warn ha-icon { color:#fbbf24; }
 .sv-h b { display:block; font-weight:600; }
 .sv-h small { display:block; color:#94a3b8; font-size:.8em; }
@@ -10419,14 +10417,14 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .sv-fc ha-icon { --mdc-icon-size:min(2.6vw, 3.6vh); color:#94a3b8; }
 .sv-fc b { font-size:1em !important; }
 .sv-urgent { display:flex; flex-direction:column; gap:8px; min-width:min(70vw, 820px); }
-.sv-u { display:flex; align-items:center; gap:14px; padding:min(1.4vh, 14px) 20px; border-radius:16px; background:rgba(251,146,60,.16); border:1px solid rgba(251,146,60,.45); text-align:left; font-size:min(2.4vw, 3.4vh); color:#fed7aa; }
-.sv-u ha-icon { --mdc-icon-size:min(3.6vw, 5vh); color:#fb923c; }
+.sv-u { display:flex; align-items:center; gap:12px; padding:min(1vh, 10px) 16px; border-radius:14px; background:rgba(251,146,60,.16); border:1px solid rgba(251,146,60,.45); text-align:left; font-size:min(1.7vw, 2.4vh); color:#fed7aa; }
+.sv-u ha-icon { --mdc-icon-size:min(2.6vw, 3.6vh); color:#fb923c; }
 .sv-u b { display:block; }
-.sv-u small { display:block; color:#fdba74; font-size:.72em; }
+.sv-u small { display:block; color:#fdba74; font-size:.8em; }
 .sv-u.new { animation:svpulse 2s ease-in-out infinite; box-shadow:0 0 0 2px rgba(251,146,60,.7); }
 .sv-side { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:8px 26px; min-width:min(70vw, 820px); }
-.sv-row { display:flex; align-items:center; gap:10px; text-align:left; font-size:min(1.9vw, 2.7vh); color:#cbd5e1; }
-.sv-row ha-icon { --mdc-icon-size:min(2.6vw, 3.6vh); color:#64748b; }
+.sv-row { display:flex; align-items:center; gap:10px; text-align:left; font-size:min(1.5vw, 2.1vh); color:#cbd5e1; }
+.sv-row ha-icon { --mdc-icon-size:min(2vw, 2.8vh); color:#64748b; }
 .sv-row b { display:block; font-weight:600; }
 .sv-row small { display:block; color:#94a3b8; font-size:.85em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .warnline, .okline { display:flex; gap:8px; align-items:flex-start; }
