@@ -35,3 +35,11 @@ def test_panel_gz_aktuell():
     gz = js.with_suffix(".js.gz")
     assert gz.exists(), "hauswerk-panel.js.gz fehlt – python3 dev/pack.py ausführen"
     assert gzip.decompress(gz.read_bytes()) == js.read_bytes(), "hauswerk-panel.js.gz veraltet – python3 dev/pack.py ausführen"
+
+
+def test_kopfkacheln_im_modulthema():
+    """Die Kopfkacheln tragen die Farbe ihres Moduls (wie das Modul-Logo)."""
+    js = (ROOT / "frontend" / "hauswerk-panel.js").read_text(encoding="utf-8")
+    for mod in ("br-mod-heat", "br-mod-rw", "br-mod-kw"):
+        assert f'cls: "card {mod}' in js or f'br-heat {mod}' in js, mod
+        assert f".brief.{mod} {{ --mc:" in js, mod

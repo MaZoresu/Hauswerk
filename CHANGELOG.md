@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.50.1 – 2026-11-18
+
+### Verbessert
+- **Kopfkacheln im Modulthema** – Heizwerk orange, Rollwerk blau, Kraftwerk gelb wie die Modul-Logos: zarter Farbverlauf, Beschriftung, große Zahl und Werte in der Modulfarbe; der farbige Rand links zeigt weiter den Zustand. In Hell, Dunkel und im Tabletmodus.
+
 ## 0.50.0 – 2026-11-18
 
 ### Behoben
