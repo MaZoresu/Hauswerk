@@ -733,3 +733,48 @@ def test_schoner_module_als_symbole(tablet):
     assert len(mods) == 3 and all(m[0] and m[1] >= 1 for m in mods), mods
     text = p.js(f"{EL}.shadowRoot.getElementById('saver').innerText")
     assert "Raum heizt" not in text and "Rollläden:" not in text and "Solar " not in text
+
+
+def test_tablet_alle_raeume_sichtbar(browser, server):
+    """Fünf Räume im Tabletmodus: jede Raumkachel ist auf einer der Seiten vollständig zu sehen (ohne CSS-Spalten)."""
+    page = browser.new_page(viewport={"width": 1180, "height": 760})
+    page.goto(f"{server}/dev/vorschau.html?tablet")
+    page.wait_for_function(f"{EL} && {EL}._data")
+    p = Panel(page)
+    p.js(f"""() => {{ const el = {EL}; const d = el._data; const ids = Object.keys(d.rooms); let i = 0;
+        while (Object.keys(d.rooms).length < 5) {{ const src = ids[i++ % ids.length]; const id = src + '_k' + i;
+          d.rooms[id] = {{ ...d.rooms[src], id, name: d.rooms[src].name + ' ' + i }};
+          if (el._status?.rooms?.[src]) el._status.rooms[id] = {{ ...el._status.rooms[src] }}; }}
+        el._tFit = {{}}; }}""")
+    p.view("overview")
+    p.wait(300)
+    n = p.js(f"{EL}._tPages")
+    assert n <= 2
+    seen = set()
+    for i in range(n):
+        p.js(f"(i) => {{ {EL}._tPage.overview = -1; {EL}._tabletGo(i); }}", i)
+        p.wait(100)
+        vis = p.js(f"""(() => {{ const m = {EL}.shadowRoot.getElementById('main').getBoundingClientRect();
+            return [...{EL}.shadowRoot.querySelectorAll('.rooms > article')].filter((a) => {{ const r = a.getBoundingClientRect();
+              return r.top >= m.top - 1 && r.bottom <= m.bottom + 1; }}).map((a) => a.id); }})()""")
+        seen.update(vis)
+    assert len(seen) == 5, f"nur {len(seen)} von 5 Räumen sichtbar"
+    assert p.js(f"getComputedStyle({EL}.shadowRoot.querySelector('.tin')).columnWidth") in ("auto", "")
+    page.close()
+
+
+def test_rollwerk_kompakt(panel):
+    panel.view("shutters")
+    panel.click('[data-action="rw-view"][data-v="compact"]')
+    assert panel.has(".rw-m") and not panel.has(".rw-c")
+    assert panel.js("localStorage.getItem('hauswerk.rollansicht')") == "compact"
+    cover = panel.js(f"{EL}._data.settings.rw_covers[0]")
+    n = len(panel.sent())
+    panel.click(f'.rw-m[data-pop="rwpos:{cover}"] [data-a="open"]')
+    assert any(m.get("action") == "open" for m in panel.sent()[n:]) and not panel.js(f"{EL}._pop")
+    panel.click(f'.rw-m[data-pop="rwpos:{cover}"] .rwm-top b')
+    assert panel.js(f"{EL}._pop?.id") == f"rwpos:{cover}"
+    panel.js(f"{EL}._closePop()")
+    panel.click('[data-action="rw-view"][data-v="detail"]')
+    assert panel.has(".rw-c")
+    panel.ok("Rollwerk kompakt")

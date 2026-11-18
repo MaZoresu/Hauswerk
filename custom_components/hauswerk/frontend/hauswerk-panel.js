@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.46.2";
+const VERSION = "0.46.3";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -963,7 +963,7 @@ class HauswerkPanel extends HTMLElement {
       html = this._failCard(`Die Seite „${name}“`, err);
     }
     if (this._tablet) {
-      main.innerHTML = `<div class="tpages">${html}</div>`;
+      main.innerHTML = `<div class="tpages"><div class="tin">${html}</div></div>`;
       this._tabletFit();
     } else main.innerHTML = html;
   }
@@ -1102,30 +1102,77 @@ class HauswerkPanel extends HTMLElement {
   _tabletFit(full = false) {
     const main = this.shadowRoot.getElementById("main");
     const box = main?.querySelector(".tpages");
-    if (!box) return;
+    const tin = box?.firstElementChild;
+    if (!box || !tin) return;
     const W = main.clientWidth, H = main.clientHeight;
     if (!W || !H) return;
     const GAP = 40;
+    const tab = this._tab;
     // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
     const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
-    const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66, ...(["settings", "shutset", "kwset", "house"].includes(this._tab) ? [0.6, 0.55] : [])].map((z) => Math.round(z * f * 100) / 100);
-    // so groß wie die Breite erlaubt (mindestens ~820 px Inhaltsbreite), höchstens 140 %
+    const onePage = ["settings", "shutset", "kwset", "house"].includes(tab);
+    const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66, ...(onePage ? [0.6, 0.55] : [])].map((z) => Math.round(z * f * 100) / 100);
     const maxZ = Math.max(f, Math.min(1.4 * f, (W / 820) * f));
     const zs = ZOOMS.filter((z) => z <= maxZ + 0.001);
-    const tab = this._tab;
-    // Listen-Seiten dürfen zweispaltig werden (breites Tablet); Kachel-Seiten bleiben einspaltig
-    // Einstellungsseiten immer auf eine Seite (bis zu drei Spalten, notfalls kleiner)
-    const onePage = ["settings", "shutset", "kwset", "house"].includes(tab);
-    const ks = ["start", "overview", "shutters", "kwflow"].includes(tab) || W < 900 ? [1] : onePage && W >= 1100 ? [1, 2, 3] : [1, 2];
+    // Kachel-Seiten blättern reihenweise (ohne CSS-Spalten – ältere Tablet-Browser teilen Raster nicht auf),
+    // Listen-Seiten fließen in Spalten (bis zu drei).
+    const rows = ["start", "overview", "shutters", "kwflow"].includes(tab) || W < 900;
+    const ks = rows ? [1] : onePage && W >= 1100 ? [1, 2, 3] : [1, 2];
+    const base = (z) => {
+      tin.style.zoom = z;
+      tin.style.width = `${W / z}px`;
+      tin.style.transform = "";
+      tin.style.clipPath = "";
+    };
+    // Reihen: Kacheln, die nicht geteilt werden dürfen, und die Seitenumbrüche dazwischen
+    const pagesOf = () => {
+      const top0 = tin.getBoundingClientRect().top;
+      const atoms = [];
+      const SOLID = ".card, article, .wdg, .brief, [data-wi], .rw-c, .srow, .hint, .setup-card";
+      const walk = (el) => {
+        for (const c of el.children) {
+          const r = c.getBoundingClientRect();
+          if (!r.height) continue;
+          const cs = getComputedStyle(c);
+          const box2 = !c.matches(SOLID) && c.children.length > 1 && (r.height > H * 0.55 || cs.display.includes("grid") || cs.flexWrap === "wrap" || cs.display === "block");
+          if (box2) walk(c);
+          else atoms.push({ t: r.top - top0, b: r.bottom - top0, head: c.matches(".shead, h3, h4") });
+        }
+      };
+      walk(tin);
+      atoms.sort((x, y) => x.t - y.t || x.b - y.b);
+      const pages = [];
+      let start = 0, end = 0;
+      atoms.forEach((a, i) => {
+        if (a.b - start > H + 1 && a.t > start + 1) {
+          let ns = a.t;
+          const prev = atoms[i - 1];
+          if (prev && prev.head && prev.t > start && a.t - prev.b < 48) ns = prev.t;
+          pages.push([start, Math.min(Math.max(end, start), ns)]);
+          start = ns;
+        }
+        end = Math.max(end, a.b);
+      });
+      pages.push([start, Math.max(end, start)]);
+      return { pages, total: tin.getBoundingClientRect().height };
+    };
     const layout = (z, k) => {
+      base(z);
+      if (rows) {
+        tin.style.height = "auto";
+        tin.style.columnWidth = "auto";
+        tin.classList.remove("two");
+        const r = pagesOf();
+        this._tRows = r;
+        return r.pages.length;
+      }
       const colW = (W / z - ((k - 1) * GAP) / z) / k;
-      box.style.zoom = z;
-      box.style.width = `${W / z}px`;
-      box.style.height = `${H / z}px`;
-      box.style.columnWidth = `${colW}px`;
-      box.style.columnGap = `${GAP / z}px`;
-      box.classList.toggle("two", k >= 2);
-      const cols = Math.max(1, Math.round((box.scrollWidth + GAP / z) / (colW + GAP / z)));
+      tin.style.height = `${H / z}px`;
+      tin.style.columnWidth = `${colW}px`;
+      tin.style.columnGap = `${GAP / z}px`;
+      tin.classList.toggle("two", k >= 2);
+      const colV = (W - (k - 1) * GAP) / k;
+      const cols = Math.max(1, Math.round((box.scrollWidth + GAP) / (colV + GAP)));
       return Math.ceil(cols / k);
     };
     const key = `${W}x${H}x${f}`;
@@ -1156,26 +1203,44 @@ class HauswerkPanel extends HTMLElement {
     }
     this._tFit = { ...(this._tFit || {}), [tab]: best };
     this._tZoom = { ...(this._tZoom || {}), [tab]: best.z };
+    this._tRowMode = rows;
     const n = best.n;
     this._tPages = n;
     const page = Math.min(this._tPage[tab] || 0, n - 1);
     this._tPage[tab] = page;
-    box.scrollLeft = page * (box.clientWidth + GAP / best.z);
+    this._tShow(page);
     const dots = this.shadowRoot.getElementById("tdots");
     if (dots) dots.innerHTML = n > 1 ? Array.from({ length: n }, (_, k) => `<button class="${k === page ? "on" : ""}" data-action="tpage" data-i="${k}" aria-label="Seite ${k + 1}"></button>`).join("") : "";
   }
 
+  /** Seite zeigen: Reihen-Modus verschiebt und schneidet zu, Spalten-Modus scrollt zur Spalte. */
+  _tShow(page) {
+    const box = this.shadowRoot.querySelector("#main .tpages");
+    const tin = box?.firstElementChild;
+    if (!box || !tin) return;
+    const z = this._tZoom?.[this._tab] || 1;
+    if (this._tRowMode) {
+      const r = this._tRows;
+      const [s, e] = r?.pages?.[page] || [0, 0];
+      box.scrollLeft = 0;
+      tin.style.transform = s ? `translateY(${-s / z}px)` : "";
+      tin.style.clipPath = r ? `inset(${s / z}px 0 ${Math.max(0, r.total - e) / z}px 0)` : "";
+    } else {
+      tin.style.transform = "";
+      tin.style.clipPath = "";
+      box.scrollLeft = page * (box.clientWidth + 40);
+    }
+  }
+
   _tabletGo(page) {
-    const main = this.shadowRoot.getElementById("main");
-    const box = main?.querySelector(".tpages");
+    const box = this.shadowRoot.querySelector("#main .tpages");
     if (!box) return;
     const n = this._tPages || 1;
     page = Math.max(0, Math.min(n - 1, page));
-    if (page === (this._tPage[this._tab] || 0) && box.scrollLeft === page * (box.clientWidth + 40 / (this._tZoom?.[this._tab] || 1))) return;
+    if (page === (this._tPage[this._tab] || 0)) return;
     this._tPage[this._tab] = page;
-    const z = this._tZoom?.[this._tab] || 1;
     // sofort springen (langsame Tablets ruckeln bei Animationen), kurz einblenden
-    box.scrollLeft = page * (box.clientWidth + 40 / z);
+    this._tShow(page);
     box.classList.remove("tflip");
     void box.offsetWidth;
     box.classList.add("tflip");
@@ -2282,6 +2347,17 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Raumkacheln: detailliert oder kompakt (je Gerät gemerkt). */
+  /** Rollläden: detailliert oder kompakt (je Gerät gemerkt). */
+  _rwView() {
+    if (this._rwv) return this._rwv;
+    try {
+      this._rwv = localStorage.getItem("hauswerk.rollansicht") || "detail";
+    } catch (e) {
+      this._rwv = "detail";
+    }
+    return this._rwv;
+  }
+
   _roomView() {
     if (this._view) return this._view;
     try {
@@ -3912,8 +3988,31 @@ class HauswerkPanel extends HTMLElement {
           </div>
         </article>`;
     };
-    return head + [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"))
-      .map(([area, list]) => `<div class="rw-area"><h3>${esc(area)}</h3><div class="rw-grid">${list.map(tile).join("")}</div></div>`).join("");
+    // kompakt: Name, Stellung als Balken, ↑ ↓ – Tipp öffnet „Höhe einstellen“
+    const mini = (c) => {
+      const p = this._rwPos(c.st);
+      const bad = !c.st || ["unavailable", "unknown"].includes(c.st.state);
+      const moving = c.st?.state === "opening" ? "fährt hoch" : c.st?.state === "closing" ? "fährt runter" : "";
+      const flag = c.rs.cat === "storm" ? ["mdi:weather-windy-variant", "#ef4444"] : c.rs.contact_open ? ["mdi:door-open", "#f59e0b"] : c.rs.cat === "shading" ? ["mdi:sun-thermometer-outline", "#f97316"]
+        : c.rs.manual ? ["mdi:hand-back-right-outline", "#8b5cf6"] : c.rs.contact_tilted ? ["mdi:window-open-variant", "#22c55e"] : c.cfg.auto === false ? ["mdi:robot-off-outline", "#94a3b8"] : null;
+      return `
+        <article class="card rw-m ${bad ? "bad" : ""}" data-action="pop-open" data-pop="rwpos:${esc(c.id)}" role="button" tabindex="0" title="Höhe einstellen">
+          <div class="rwm-top"><b>${esc(this._entityName(c.id))}</b>${flag ? `<ha-icon icon="${flag[0]}" style="color:${flag[1]}"></ha-icon>` : ""}</div>
+          <div class="rwm-pos"><span class="rwm-win" style="--v:${p ?? 0}"><i></i></span><b>${bad ? "–" : moving || (p == null ? "" : `${fmt(p, 0)} %`)}</b></div>
+          <div class="rwm-ctl">
+            <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="open" title="hoch" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-up"></ha-icon></button>
+            <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="close" title="runter" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-down"></ha-icon></button>
+          </div>
+        </article>`;
+    };
+    const compact = this._rwView() === "compact";
+    const tog = `<div class="shead outer"><ha-icon icon="mdi:window-shutter"></ha-icon><h3>Rollläden</h3><span class="count">${covers.length}</span><span class="grow"></span>
+      <div class="vtog" role="group" aria-label="Ansicht">
+        <button class="${compact ? "" : "on"}" data-action="rw-view" data-v="detail" title="Detailliert"><ha-icon icon="mdi:view-agenda-outline"></ha-icon><span>Detailliert</span></button>
+        <button class="${compact ? "on" : ""}" data-action="rw-view" data-v="compact" title="Kompakt"><ha-icon icon="mdi:view-grid-outline"></ha-icon><span>Kompakt</span></button>
+      </div></div>`;
+    return head + tog + [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"))
+      .map(([area, list]) => `<div class="rw-area ${compact ? "compact" : ""}"><h3>${esc(area)}</h3><div class="rw-grid ${compact ? "compact" : ""}">${list.map(compact ? mini : tile).join("")}</div></div>`).join("");
   }
 
   /** Rollwerk-Lage: Sturm, nächste Fahrt, was abweicht. */
@@ -7352,6 +7451,16 @@ class HauswerkPanel extends HTMLElement {
         setTimeout(() => this._tab === "start" && this._renderMain(), 700);
         break;
       }
+      case "rw-view":
+        this._rwv = el.dataset.v;
+        try {
+          localStorage.setItem("hauswerk.rollansicht", this._rwv);
+        } catch (err) {
+          /* ohne Speicher: gilt bis zum Neuladen */
+        }
+        if (this._tFit) delete this._tFit.shutters;
+        this._renderMain();
+        break;
       case "room-view":
         this._view = el.dataset.v;
         try {
@@ -8325,6 +8434,9 @@ code { background:var(--card2); padding:1px 6px; border-radius:6px; font-size:12
 .icon.auto-off { color:#f87171; background:color-mix(in srgb, #f87171 14%, transparent); }
 .room.off .acts { opacity:1; }
 .room-t { flex:1; min-width:0; }
+/* Raumname nicht mitten im Wort umbrechen: lieber rutscht die Betriebsart in die nächste Zeile */
+.room-head { flex-wrap:wrap; }
+.room-head .room-t { min-width:min(8.5em, 60%); }
 .room-t h4 { margin:0; font-size:16px; line-height:1.25; white-space:normal; overflow-wrap:break-word; hyphens:manual; }
 .room-t small { color:var(--muted); font-size:12px; }
 .mode { display:inline-flex; align-items:center; gap:5px; padding:4px 10px 4px 8px; border-radius:99px; font-size:12px; font-weight:600;
@@ -9664,7 +9776,8 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 :host([tablet]) #main { order:1; flex:1; min-height:0; overflow:hidden; position:relative; }
 :host([tablet]) #tdots { order:2; }
 :host([tablet]) #chips { order:3; flex:none; }
-:host([tablet]) .tpages { overflow:hidden; column-fill:auto; touch-action:pan-y pinch-zoom; }
+:host([tablet]) .tpages { height:100%; overflow:hidden; touch-action:pan-y pinch-zoom; }
+:host([tablet]) .tin { column-fill:auto; }
 :host([tablet]) .tpages.tflip { animation:tflip .18s ease-out; }
 @keyframes tflip { from { opacity:.35; } to { opacity:1; } }
 :host([tablet]) .tpages article, :host([tablet]) .tpages .wdg, :host([tablet]) .tpages .srow, :host([tablet]) .tpages .hero,
@@ -9790,6 +9903,22 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
   .br-h { font-size:16px; }
   .brief .rw-all { justify-content:flex-start; }
 }
+
+/* ---------- Rollläden kompakt ---------- */
+.rw-grid.compact { display:grid; grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); gap:10px; }
+.rw-m { padding:12px 12px 10px; cursor:pointer; display:flex; flex-direction:column; gap:8px; }
+.rw-m.bad { opacity:.6; }
+.rwm-top { display:flex; align-items:center; gap:6px; }
+.rwm-top b { flex:1; min-width:0; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rwm-top ha-icon { --mdc-icon-size:18px; flex:none; }
+.rwm-pos { display:flex; align-items:center; gap:10px; }
+.rwm-pos b { font-size:20px; font-variant-numeric:tabular-nums; }
+.rwm-win { --v:50; position:relative; width:26px; height:32px; flex:none; border-radius:5px; border:2px solid color-mix(in srgb, var(--muted) 50%, transparent); background:linear-gradient(160deg, #e0f2fe, #7dd3fc); overflow:hidden; }
+.rwm-win i { position:absolute; left:0; right:0; top:0; height:calc((100 - var(--v)) * 1%); background:repeating-linear-gradient(180deg, #94a3b8 0 4px, #64748b 4px 5px); }
+.rwm-ctl { display:flex; gap:6px; }
+.rwm-ctl .sbtn { flex:1; }
+:host([tablet]) .tpages .rw-area.compact .rw-grid { display:flex; flex-wrap:wrap; }
+:host([tablet]) .tpages .rw-area.compact .rw-m { width:190px; }
 
 `;
 

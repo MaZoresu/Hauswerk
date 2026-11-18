@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.46.3 – 2026-11-18
+
+### Neu
+- **Rollwerk: Detailliert / Kompakt** wie bei den Heizwerk-Räumen (je Gerät gemerkt). Kompakt: Name, Stellung als kleines Fenster mit Prozent, ein Symbol für Besonderes (Beschattung, von Hand, Tür offen, Sturm …) und ↑ ↓. Tipp auf die Kachel öffnet „Höhe einstellen“.
+
+### Behoben
+- **Tabletmodus: Räume fehlten bzw. wurden abgeschnitten** (z. B. Seite 1 leer, Seite 2 nur 3 von 5 Räumen). Ältere Tablet-Browser (Fully) können ein Kachel-Raster nicht auf zwei Seiten aufteilen. Kachel-Seiten (Start, Räume, Rollläden, Energie) werden jetzt reihenweise von Hauswerk selbst aufgeteilt – jede Kachel steht vollständig auf einer Seite.
+- Raumnamen brachen in schmalen Kacheln mitten im Wort um („Wohnzimme-r“); jetzt rutscht stattdessen die Betriebsart in die nächste Zeile.
+
 ## 0.46.2 – 2026-11-17
 
 ### Geändert
