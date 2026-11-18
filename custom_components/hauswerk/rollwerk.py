@@ -25,7 +25,7 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN, MODULE_HEATING, SHUTTER_STORAGE_KEY, WINDOW_OPEN_STATES
 from .core import Haus, async_calendar_events, parse_when
 from .log import Protokoll, log_settings
-from .logic import FACADES, parse_hm, shade_conditions, shade_wanted
+from .logic import FACADES, _in_azimuth, parse_hm, shade_conditions, shade_wanted
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -515,6 +515,7 @@ class Rollwerk:
             else:
                 target = int(position) if action == "position" and position is not None else 100 if action == "open" else 0
                 await self._move(entity_id, target)
+                self._note_move(entity_id, target, "im Panel", "panel")
                 rt["manual_at"] = now  # Panel = von Hand
                 rt["moved_at"] = None
         names = ", ".join(self._name(e) for e in entity_ids[:4]) + (" …" if len(entity_ids) > 4 else "")
@@ -1052,6 +1053,7 @@ class Rollwerk:
             if last is not None and pos is not None and abs(pos - last) > max(tol, 1) and not ours and not initial:
                 rt["manual_at"] = now
                 rt["manual_pos"] = pos
+                self._note_move(entity_id, pos, "von Hand", "hand")
                 self._log("manual", f"{self._name(entity_id)} von Hand auf {pos:.0f} %",
                           "Taster, App oder Automation – Rollwerk merkt sich das als Übersteuerung", entity_id)
             rt["last_pos"] = pos
@@ -1129,9 +1131,55 @@ class Rollwerk:
                 rt["sent"] = None  # zurück zur aktuellen Sollstellung
             self._log("manual", f"{self._name(entity_id)}: Übersteuerung zurückgesetzt", done, entity_id)
 
+    def _note_move(self, entity_id: str, pos: float | None, why: str, by: str) -> None:
+        """Letzte Fahrt je Rollladen merken (für die Kachel: „07:15 ↑ Morgens öffnen“), übersteht Neustarts."""
+        self._persist.setdefault("last", {})[entity_id] = {
+            "at": dt_util.utcnow().timestamp(), "pos": None if pos is None else round(float(pos)), "why": why, "by": by}
+
+    def _device_health(self, entity_id: str) -> dict[str, Any] | None:
+        """Batterie und Funk am Gerät des Rollladens (nur wenn vorhanden); Sensoren alle 10 Minuten neu suchen."""
+        now = dt_util.utcnow().timestamp()
+        cache = getattr(self, "_dev_cache", None)
+        if cache is None or now - cache[0] > 600:
+            cache = self._dev_cache = (now, {})
+        found = cache[1].get(entity_id)
+        if found is None:
+            reg = er.async_get(self.hass)
+            entry = reg.async_get(entity_id)
+            found = {"battery": None, "signal": None}
+            if entry is not None and entry.device_id:
+                for e in er.async_entries_for_device(reg, entry.device_id):
+                    if e.domain != "sensor" or e.disabled_by is not None:
+                        continue
+                    dc = getattr(e, "device_class", None) or getattr(e, "original_device_class", None)
+                    if dc == "battery" or (dc is None and "battery" in e.entity_id):
+                        found["battery"] = found["battery"] or e.entity_id
+                    elif dc == "signal_strength" or e.entity_id.endswith(("_rssi", "_rssi_device", "_signal_strength", "_linkquality")):
+                        found["signal"] = found["signal"] or e.entity_id
+            cache[1][entity_id] = found
+        out = {}
+        if found["battery"]:
+            st = self.hass.states.get(found["battery"])
+            try:
+                out["battery"] = round(float(st.state)) if st is not None else None
+            except (TypeError, ValueError):
+                out["battery"] = 5 if st is not None and st.state == "on" else None  # binärer Sensor „Batterie schwach“
+        if found["signal"]:
+            st = self.hass.states.get(found["signal"])
+            try:
+                val = float(st.state) if st is not None else None
+            except (TypeError, ValueError):
+                val = None
+            if val is not None:
+                unit = (st.attributes.get("unit_of_measurement") or "").lower()
+                out["signal"] = round(val)
+                out["weak"] = val < -85 if "db" in unit or val < 0 else val < 30  # dBm bzw. Zigbee-Linkqualität
+        return out or None
+
     async def _schedule_move(self, entity_id: str, target: int, reason: str, delay: float) -> None:
         async def go(_now=None) -> None:
             self._rt.setdefault(entity_id, {})["moved_at"] = dt_util.utcnow().timestamp()
+            self._note_move(entity_id, target, reason, "auto")
             await self._move(entity_id, target)
             pos_now = self._pos(entity_id)
             self._log("shutter", f"{self._name(entity_id)} {'auf' if target >= 100 else 'zu' if target == 0 else f'auf {target} %'}",
@@ -1289,6 +1337,13 @@ class Rollwerk:
                 "up": [hm(up[0]), hm(up[1])] if up else None,
                 "down": [hm(down[0]), hm(down[1])] if down else None,
                 "opened_today": rt.get("opened_on") == dt_util.now().date().isoformat(),
+                # Sonne scheint gerade aufs Fenster (Fensterrichtung des Profils, Sonne über dem Horizont)
+                "sun_on": (azimuth is not None and elevation is not None and elevation > 2
+                           and _in_azimuth(float(azimuth), float(prof.get("azimuth_start") if prof.get("azimuth_start") is not None else 95),
+                                           float(prof.get("azimuth_end") if prof.get("azimuth_end") is not None else 265))),
+                "last": (self._persist.get("last") or {}).get(entity_id),
+                "want": rt.get("blocked_target") if rt.get("blocked") else rt.get("target"),
+                "dev": self._device_health(entity_id),
                 "next": self.next_event(timelines.get(cfg.get("profile") or "standard") or {}, now_min) if cfg.get("auto", True) else None,
             }
         return {

@@ -938,6 +938,13 @@ def test_hauswerk_als_startseite(panel):
     p.click('#pop [data-action="dp-set"][data-scope="user"]')  # nochmal = aufheben
     p.wait(400)
     assert "default_panel" not in [m for m in p.sent() if m["type"] == "frontend/set_user_data"][-1]["value"]
+    p.click('#pop button.xcard[data-action="dp-set"]')  # der Haken selbst
+    p.wait(400)
+    assert [m for m in p.sent() if m["type"] == "frontend/set_user_data"][-1]["value"]["default_panel"] == "hauswerk"
+    assert p.has('#pop button.xcard.on[data-action="dp-set"]')
+    p.click('#pop button.xcard[data-action="dp-set"]')
+    p.wait(400)
+    assert "default_panel" not in [m for m in p.sent() if m["type"] == "frontend/set_user_data"][-1]["value"]
     p.click('#pop [data-action="dp-set"][data-scope="device"]')
     p.wait(400)
     assert p.js("localStorage.getItem('defaultPanel')") == '"hauswerk"'
@@ -974,3 +981,17 @@ def test_dashboard_strategie(panel):
     p.page.wait_for_function("document.querySelector('#hwc hauswerk-panel')?._data")
     assert p.js("document.querySelector('#hwc hauswerk-panel').hasAttribute('embedded')")
     assert p.js("location.pathname") == "/hauswerk/start"  # eingebettet ändert die Adresse nicht
+
+
+def test_rollwerk_kachel_infos(panel):
+    """Rollwerk-Kacheln: Info-Zeile (Gerät, Fenster/Raum, Sonne, letzte Fahrt, Profil), Ziel-Marke, kompakt mit nächster Fahrt."""
+    p = panel
+    p.view("shutters")
+    info = p.js(f"() => [...{EL}.shadowRoot.querySelectorAll('.rw-c .rw-info')].map((e) => e.textContent)")
+    joined = " | ".join(info)
+    assert "Batterie 12 %" in joined and "Sonne" in joined and "gekippt" in joined and "Funk schwach" in joined and "von Hand" in joined
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.rw-c .rwm-win em').length") >= 1  # Ziel-Marke
+    assert not p.js(f"[...{EL}.shadowRoot.querySelectorAll('.rw-al')].some((e) => /^\\\\d+$/.test(e.textContent))")
+    p.click('[data-action="rw-view"][data-v="compact"]')
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.rw-m .rwm-nx').length") >= 1
+    p.click('[data-action="rw-view"][data-v="detail"]')

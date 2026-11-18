@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.53.0";
+const VERSION = "0.54.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1128,8 +1128,8 @@ class HauswerkPanel extends HTMLElement {
     const btn = (scope, label, icon, active, admin) => (admin && !(this._hass?.user?.is_admin && this._dp?.sysOk !== false) ? "" : `<button class="seg ${active ? "on" : ""}" data-action="dp-set" data-scope="${scope}" data-on="${active ? "0" : "1"}"><ha-icon icon="${icon}"></ha-icon>${label}</button>`);
     return `
       <div class="lbl" style="margin-top:18px"><ha-icon icon="mdi:home-import-outline"></ha-icon> Startseite von Home Assistant</div>
-      <div class="xcard ${on ? "on" : ""}" style="cursor:default"><span class="xc-box" aria-hidden="true">${on ? "✓" : ""}</span>
-        <span class="grow"><b>Hauswerk als Startseite</b><small>${esc(state)}</small></span></div>
+      <button class="xcard ${on ? "on" : ""}" data-action="dp-set" data-scope="${on ? (is(d?.u) ? "user" : is(d?.s) ? "system" : "device") : "user"}" data-on="${on ? "0" : "1"}" role="switch" aria-checked="${!!on}" ${d ? "" : "disabled"}><span class="xc-box" aria-hidden="true">${on ? "✓" : ""}</span>
+        <span class="grow"><b>Hauswerk als Startseite</b><small>${esc(state)}${on ? "" : " · Tippen: für dich auf allen Geräten"}</small></span></button>
       <div class="segs small n3" style="margin-top:8px">
         ${btn("user", "Für mich", "mdi:account-outline", d && is(d.u))}
         ${btn("system", "Für alle", "mdi:account-group-outline", d && is(d.s), true)}
@@ -4418,6 +4418,71 @@ class HauswerkPanel extends HTMLElement {
     return `<nav class="heatnav">${KW_VIEWS.map((v) => `<button class="hnav ${this._tab === v.id ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span></button>`).join("")}</nav>`;
   }
 
+  /** Mini-Fenster mit Stellung; Marke = wohin die Automatik fahren würde (wenn es abweicht). */
+  _rwWin(c, p, cls = "") {
+    const want = c.rs?.want;
+    const mark = c.cfg?.auto !== false && want != null && p != null && Math.abs(want - p) > 3;
+    return `<span class="rwm-win ${cls}" style="--v:${p ?? 0}${mark ? `;--t:${want}` : ""}" ${mark ? `title="Automatik will ${want >= 100 ? "offen" : want === 0 ? "zu" : `${want} %`}"` : ""}><i></i>${mark ? "<em></em>" : ""}</span>`;
+  }
+
+  /** Zusatz-Infos einer Rollladen-Kachel, wichtigstes zuerst: [icon, Text, Farbe, Titel]. */
+  _rwInfo(c) {
+    const S = this._hass?.states || {};
+    const rs = c.rs || {};
+    const out = [];
+    const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 60 ? `${Math.max(1, m)} Min.` : m < 1440 ? `${Math.floor(m / 60)} Std.` : `${Math.floor(m / 1440)} Tg.`; };
+    // Gerät: nur wenn auffällig
+    const dev = rs.dev || {};
+    const low = Number(this._data?.settings?.battery_low ?? 20);
+    if (dev.battery != null && dev.battery <= low) out.push(["mdi:battery-alert-variant-outline", `Batterie ${dev.battery} %`, "#ef4444", "Batterie am Rollladen schwach"]);
+    if (dev.weak) out.push(["mdi:wifi-strength-1-alert", "Funk schwach", "#f59e0b", `Signal ${dev.signal}`]);
+    // Fenster/Tür und Raum aus Heizwerk
+    const ct = rs.contacts || {};
+    const opened = [...(ct.open || []), ...(ct.tilted || [])].filter((e) => ["on", "open", "opening", "tilted"].includes(S[e]?.state));
+    const temp = rs.room_temp != null ? `${fmt(rs.room_temp)} °C` : "";
+    if (opened.length || rs.contact_open || rs.contact_tilted) {
+      const since = opened.map((e) => S[e]?.last_changed).filter(Boolean).sort()[0];
+      const door = rs.contact_open;
+      out.push([door ? "mdi:door-open" : "mdi:window-open-variant", `${door ? "offen" : "gekippt"}${since ? ` seit ${ago(since)}` : ""}${temp ? ` · ${temp}` : ""}`, door ? "#f59e0b" : "#22c55e", opened.map((e) => this._entityName(e)).join(", ")]);
+    } else if ((ct.open || []).length || (ct.tilted || []).length) out.push(["mdi:window-closed-variant", `Fenster zu${temp ? ` · ${temp}` : ""}`, "", rs.room?.name || ""]);
+    else if (temp) out.push(["mdi:thermometer", temp, "", rs.room?.name ? `Raum ${rs.room.name}` : "Raumtemperatur"]);
+    // Sonne aufs Fenster bzw. Beschattung später
+    const tl = this._rwStatus?.timelines?.[rs.profile || c.cfg?.profile || "standard"] || {};
+    const nowHm = new Date().toTimeString().slice(0, 5);
+    if (rs.sun_on) out.push(["mdi:white-balance-sunny", rs.shading ? "Sonne – beschattet" : "Sonne aufs Fenster", "#f59e0b", "Die Sonne steht gerade in der Fensterrichtung des Profils"]);
+    else {
+      const next = (tl.shade || []).find(([a]) => a && a > nowHm);
+      if (next) out.push(["mdi:weather-sunny", `Beschattung ab ${next[0]}`, "#f97316", `voraussichtlich ${next[0]}–${next[1]}`]);
+    }
+    // letzte Fahrt
+    const last = rs.last;
+    if (last?.at) {
+      const d = new Date(last.at * 1000);
+      const today = d.toDateString() === new Date().toDateString();
+      const t = `${today ? "" : `${d.toLocaleDateString("de-DE", { weekday: "short" })} `}${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`;
+      const dir = last.pos == null ? "" : last.pos >= 95 ? "↑" : last.pos <= 5 ? "↓" : `→ ${last.pos} %`;
+      const why = last.by === "hand" ? "von Hand" : last.by === "panel" ? "im Panel" : String(last.why || "");
+      out.push(["mdi:history", `${t} ${dir} · ${why.length > 26 ? `${why.slice(0, 25)}…` : why}`.replace(/\s+/g, " ").trim(), last.by === "auto" ? "" : "#8b5cf6", `Letzte Fahrt: ${why}`]);
+    }
+    // Lamellen
+    const tilt = c.st?.attributes?.current_tilt_position;
+    if (tilt != null) out.push(["mdi:blinds-horizontal", `Lamellen ${fmt(tilt, 0)} %`, "", "Lamellenstellung"]);
+    // Profil
+    const prof = this._data?.rollwerk?.profiles?.[rs.profile || c.cfg?.profile || "standard"];
+    if (prof?.name) out.push(["mdi:tune-variant", prof.name, "", "Profil"]);
+    return out;
+  }
+
+  /** „16:30 schließt“ → kurze Form mit Pfeil für die kompakte Kachel. */
+  _rwNextShort(next) {
+    if (!next) return "";
+    const m = String(next).match(/(\d{1,2}:\d{2})\s+(.*)$/);
+    if (!m) return "";
+    const what = m[2];
+    const icon = /öffnet/.test(what) ? "mdi:arrow-up" : /schließt|Stufe/.test(what) ? "mdi:arrow-down" : /Beschattung möglich/.test(what) ? "mdi:weather-sunny" : /Beschattung endet/.test(what) ? "mdi:weather-sunny-off" : "mdi:clock-outline";
+    return `${m[1]}<ha-icon icon="${icon}"></ha-icon>`;
+  }
+
   _rwNavHtml() {
     return `<nav class="heatnav">${SHUT_VIEWS.map((v) => `<button class="hnav ${this._tab === v.id ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span></button>`).join("")}</nav>`;
   }
@@ -4461,21 +4526,24 @@ class HauswerkPanel extends HTMLElement {
       if (c.rs.manual) flags.push(["mdi:hand-back-right-outline", c.rs.blocked ? "von Hand – Automatik wartet" : "von Hand", "#8b5cf6"]);
       if (c.cfg.auto === false) flags.push(["mdi:robot-off-outline", "Automatik aus", "#94a3b8"]);
       const icon = bad ? "mdi:window-shutter-alert" : p != null && p >= 95 ? "mdi:window-shutter-open" : "mdi:window-shutter";
+      const info = bad ? [] : this._rwInfo(c);
+      const infoHtml = info.map(([i, t, k, tt]) => `<span ${k ? `style="--c:${k}" class="on"` : ""} title="${esc(tt || t)}"><ha-icon icon="${i}"></ha-icon>${esc(t)}</span>`).join("");
       const why = c.rs.reason && c.cfg.auto !== false ? `Automatik: ${c.rs.reason}${c.rs.target != null ? ` → ${c.rs.target >= 100 ? "offen" : c.rs.target === 0 ? "zu" : `${c.rs.target} %`}` : ""}` : "";
       return `
         <article class="card rw-c ${bad ? "bad" : ""}" data-action="pop-open" data-pop="rwpos:${esc(c.id)}" role="button" tabindex="0" title="Höhe einstellen">
           <div class="rw-top">
-            <span class="sr-ic" style="--c:${p != null && p <= 5 ? "#64748b" : "#0ea5e9"}"><ha-icon icon="${icon}"></ha-icon></span>
+            ${bad ? `<span class="sr-ic" style="--c:#64748b"><ha-icon icon="${icon}"></ha-icon></span>` : this._rwWin(c, p, "big")}
             <span class="grow">${areaLabel ? `<small class="rw-al">${esc(areaLabel)}</small>` : ""}<b>${esc(this._entityName(c.id))}</b><small>${esc(posTxt)}${why ? ` · ${esc(why)}` : ""}</small></span>
             ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="rwc:${esc(c.id)}" title="Einstellungen dieses Rollladens"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
           </div>
           ${c.cfg.auto !== false && this._rwStatus?.timelines?.[c.cfg.profile || "standard"] ? `<div class="rw-next">${this._rwDayBar(this._rwStatus.timelines[c.cfg.profile || "standard"], true)}${c.rs.next ? `<small><ha-icon icon="mdi:clock-outline"></ha-icon>Als Nächstes: ${esc(c.rs.next)}</small>` : ""}</div>` : ""}
           ${flags.length ? `<div class="rw-flags">${flags.map(([i, l, k]) => `<span style="--c:${k}"><ha-icon icon="${i}"></ha-icon>${l}</span>`).join("")}${c.rs.manual ? `<button class="link" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="resume"><ha-icon icon="mdi:robot-outline"></ha-icon>Automatik übernimmt</button>` : ""}</div>` : ""}
+          ${info.length && !this._tablet ? `<div class="rw-info">${infoHtml}</div>` : ""}
           <div class="rw-ctl">
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="open" title="hoch" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-up"></ha-icon></button>
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="stop" title="Stopp" ${bad ? "disabled" : ""}><ha-icon icon="mdi:stop"></ha-icon></button>
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="close" title="runter" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-down"></ha-icon></button>
-            <span class="rw-h" data-rwh="${esc(c.id)}"><ha-icon icon="mdi:arrow-expand-vertical"></ha-icon>Behanghöhe <b>${p != null && !bad ? `${fmt(p, 0)} %` : "–"}</b></span>
+            ${this._tablet && info.length ? `<span class="rw-info in-ctl">${infoHtml}</span>` : `<span class="rw-h" data-rwh="${esc(c.id)}"><ha-icon icon="mdi:arrow-expand-vertical"></ha-icon>Behanghöhe <b>${p != null && !bad ? `${fmt(p, 0)} %` : "–"}</b></span>`}
           </div>
         </article>`;
     };
@@ -4489,7 +4557,7 @@ class HauswerkPanel extends HTMLElement {
       return `
         <article class="card rw-m ${bad ? "bad" : ""}" data-action="pop-open" data-pop="rwpos:${esc(c.id)}" role="button" tabindex="0" title="Höhe einstellen">
           <div class="rwm-top"><b>${esc(this._entityName(c.id))}</b>${flag ? `<ha-icon icon="${flag[0]}" style="color:${flag[1]}"></ha-icon>` : ""}</div>
-          <div class="rwm-pos"><span class="rwm-win" style="--v:${p ?? 0}"><i></i></span><b>${bad ? "–" : moving || (p == null ? "" : `${fmt(p, 0)} %`)}</b></div>
+          <div class="rwm-pos">${this._rwWin(c, p)}<b>${bad ? "–" : moving || (p == null ? "" : `${fmt(p, 0)} %`)}</b>${c.cfg.auto !== false && this._rwNextShort(c.rs.next) ? `<small class="rwm-nx" title="Als Nächstes: ${esc(c.rs.next)}">${this._rwNextShort(c.rs.next)}</small>` : ""}</div>
           <div class="rwm-ctl">
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="open" title="hoch" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-up"></ha-icon></button>
             <button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="close" title="runter" ${bad ? "disabled" : ""}><ha-icon icon="mdi:arrow-down"></ha-icon></button>
@@ -4508,7 +4576,7 @@ class HauswerkPanel extends HTMLElement {
       return head + tog + `<div class="rw-grid tgrid">${sorted.map(([area, list]) => list.map((c) => tile(c, area)).join("")).join("")}</div>`;
     }
     return head + tog + [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"))
-      .map(([area, list]) => `<div class="rw-area ${compact ? "compact" : ""}"><h3>${esc(area)}</h3><div class="rw-grid ${compact ? "compact" : ""}">${list.map(compact ? mini : tile).join("")}</div></div>`).join("");
+      .map(([area, list]) => `<div class="rw-area ${compact ? "compact" : ""}"><h3>${esc(area)}</h3><div class="rw-grid ${compact ? "compact" : ""}">${list.map((c) => (compact ? mini(c) : tile(c))).join("")}</div></div>`).join("");
   }
 
   /** Rollwerk-Lage: Sturm, nächste Fahrt, was abweicht. */
@@ -10581,9 +10649,19 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .rwm-top b { flex:1; min-width:0; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .rwm-top ha-icon { --mdc-icon-size:18px; flex:none; }
 .rwm-pos { display:flex; align-items:center; gap:10px; }
-.rwm-pos b { font-size:20px; font-variant-numeric:tabular-nums; }
+.rwm-pos b { font-size:20px; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .rwm-win { --v:50; position:relative; width:26px; height:32px; flex:none; border-radius:5px; border:2px solid color-mix(in srgb, var(--muted) 50%, transparent); background:linear-gradient(160deg, #e0f2fe, #7dd3fc); overflow:hidden; }
 .rwm-win i { position:absolute; left:0; right:0; top:0; height:calc((100 - var(--v)) * 1%); background:repeating-linear-gradient(180deg, #94a3b8 0 4px, #64748b 4px 5px); }
+.rwm-win em { position:absolute; left:-2px; right:-2px; top:calc((100 - var(--t)) * 1%); height:0; border-top:2px dashed #f97316; }
+.rwm-win.big { width:34px; height:42px; border-radius:7px; }
+.rwm-nx { margin-left:auto; display:inline-flex; align-items:center; gap:3px; font-size:12px; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
+.rwm-nx ha-icon { --mdc-icon-size:13px; }
+.rw-info { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:12px; color:var(--muted); }
+.rw-info span { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; min-width:0; }
+.rw-info span.on { color:var(--c); font-weight:600; }
+.rw-info ha-icon { --mdc-icon-size:14px; flex:none; }
+.rw-info.in-ctl { margin-left:6px; flex:1; min-width:0; flex-wrap:nowrap; overflow:hidden; gap:10px; -webkit-mask-image:linear-gradient(90deg, #000 85%, transparent); mask-image:linear-gradient(90deg, #000 85%, transparent); }
+.rw-info.in-ctl span { flex:none; }
 .rwm-ctl { display:flex; gap:6px; }
 .rwm-ctl .sbtn { flex:1; }
 :host([tablet]) .tpages .rw-area.compact .rw-grid { display:flex; flex-wrap:wrap; }

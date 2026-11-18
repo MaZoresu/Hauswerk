@@ -2,6 +2,24 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.54.0 – 2026-11-18
+
+### Neu (Rollwerk-Kacheln)
+- **Fenster-Grafik mit Ziel:** Die Kachel zeigt die Stellung als kleines Fenster; weicht die Automatik ab (z. B. von Hand verstellt), markiert eine gestrichelte Linie, wohin sie fahren würde.
+- **Info-Zeile**, wichtigstes zuerst:
+  - Gerät – nur wenn auffällig: Batterie schwach, Funk schwach,
+  - Fenster und Raum aus Heizwerk: „gekippt seit 12 Min. · 20,2 °C“, „Fenster zu · 21,4 °C“,
+  - Sonne: „Sonne aufs Fenster“ (Fensterrichtung des Profils) bzw. „Beschattung ab 14:20“,
+  - letzte Fahrt mit Grund: „07:15 ↑ · Morgens öffnen“, „09:40 → 40 % · von Hand“ (übersteht Neustarts),
+  - Lamellen bei Raffstores,
+  - Profil.
+- **Tabletmodus:** Die Info-Zeile steht in der Zeile der Knöpfe statt „Behanghöhe“ – die Kacheln bleiben gleich groß; was nicht passt, blendet aus.
+- **Kompakte Kachel:** zusätzlich die nächste Fahrt („16:50 ↓“) in derselben Zeile.
+
+### Behoben
+- Über Rollladen-Kacheln stand teils eine Zahl („1“, „2“) statt nichts.
+- **„Hauswerk als Startseite“ ließ sich nicht anhaken** – der Haken war nur Anzeige. Jetzt setzt ein Tipp Hauswerk als Startseite für dich (alle deine Geräte), ein weiterer hebt es auf.
+
 ## 0.53.0 – 2026-11-18
 
 ### Neu
