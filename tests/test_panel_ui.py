@@ -944,3 +944,33 @@ def test_hauswerk_als_startseite(panel):
     p.click('#pop [data-action="dp-set"][data-scope="system"]')
     p.wait(400)
     assert [m for m in p.sent() if m["type"] == "frontend/set_system_data"][-1]["value"]["default_panel"] == "hauswerk"
+
+
+def test_hauswerk_als_dashboard(panel):
+    """Darstellung: „Hauswerk-Dashboard anlegen“ legt ein Lovelace-Dashboard mit der Strategie custom:hauswerk an."""
+    p = panel
+    p.js(f"() => {{ {EL}._dp = null; {EL}._openPop('look'); }}")
+    p.wait(400)
+    assert "type: custom:hauswerk" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    p.click('#pop [data-action="dash-create"]')
+    p.wait(500)
+    sent = p.sent()
+    create = [m for m in sent if m["type"] == "lovelace/dashboards/create"][-1]
+    assert create["url_path"] == "dashboard-hauswerk" and "-" in create["url_path"]
+    assert [m for m in sent if m["type"] == "lovelace/config/save"][-1]["config"] == {"strategy": {"type": "custom:hauswerk"}}
+    assert "ist angelegt" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+
+
+def test_dashboard_strategie(panel):
+    """hauswerk-dashboard.js: Strategie custom:hauswerk liefert eine Panel-Ansicht mit der Hauswerk-Karte; die Karte zeigt das Panel."""
+    p = panel
+    p.js("() => import('/custom_components/hauswerk/frontend/hauswerk-dashboard.js?v=1')")
+    p.wait(400)
+    cfg = p.js("() => customElements.get('ll-strategy-dashboard-hauswerk').generate({ type: 'custom:hauswerk' })")
+    view = cfg["views"][0]
+    assert view["type"] == "panel" and view["cards"] == [{"type": "custom:hauswerk-card"}]
+    assert any(s["type"] == "hauswerk" and s["strategyType"] == "dashboard" for s in p.js("window.customStrategies"))
+    p.js(f"""() => {{ const c = document.createElement('hauswerk-card'); c.id = 'hwc'; c.setConfig({{}}); document.body.append(c); c.hass = {EL}.hass; }}""")
+    p.page.wait_for_function("document.querySelector('#hwc hauswerk-panel')?._data")
+    assert p.js("document.querySelector('#hwc hauswerk-panel').hasAttribute('embedded')")
+    assert p.js("location.pathname") == "/hauswerk/start"  # eingebettet ändert die Adresse nicht

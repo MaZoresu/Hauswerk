@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.53.0 – 2026-11-18
+
+### Neu
+- **Hauswerk als Dashboard** – wie andere Integrationen (z. B. Raumklima) mit einem kurzen Code: In einem Dashboard im Rohkonfigurations-Editor
+  ```yaml
+  strategy:
+    type: custom:hauswerk
+  ```
+  eintragen – dann zeigt das Dashboard Hauswerk ganzseitig. So steht Hauswerk unter Einstellungen › Dashboards in der Liste und lässt sich dort wie jedes Dashboard **als Standard festlegen** oder im Profil wählen.
+- **„Hauswerk-Dashboard anlegen“** unter Darstellung › Startseite von Home Assistant erledigt das mit einem Tipp (Admin).
+- Zusätzlich gibt es die Karte `custom:hauswerk-card` für eigene Dashboards (am besten in einer Ansicht vom Typ „Panel“).
+
 ## 0.52.1 – 2026-11-18
 
 ### Geändert

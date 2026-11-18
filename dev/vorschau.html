@@ -135,6 +135,9 @@ const hass = {
     wsLog.push(msg.type);
     (window.hwSent = window.hwSent || []).push(JSON.parse(JSON.stringify(msg)));  // für die Klicktests
     if (msg.type === "system_log/write") return null;
+    if (msg.type === "lovelace/dashboards/list") return window.hwDash || [];
+    if (msg.type === "lovelace/dashboards/create") { window.hwDash = [{ id: "x", url_path: msg.url_path, title: msg.title, mode: "storage" }]; return window.hwDash[0]; }
+    if (msg.type === "lovelace/config/save") { window.hwDashCfg = msg.config; return null; }
     if (msg.type === "frontend/get_user_data" || msg.type === "frontend/get_system_data") return { value: (window.hwFront = window.hwFront || {})[msg.type.slice(13)] || {} };
     if (msg.type === "frontend/set_user_data" || msg.type === "frontend/set_system_data") { (window.hwFront = window.hwFront || {})[msg.type.slice(13)] = msg.value; return null; }
     if (msg.type === "hauswerk/heizen/get") return { settings, rooms, plans: {}, target_sensors: {}, status, defaults, modes: {}, is_admin: true, user_admin: true, rollwerk: { covers: rwCovers, profiles: rwProfiles, status: rwStatus } };

@@ -44,6 +44,7 @@ _LOGGER = logging.getLogger(__name__)
 
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "frontend")
 PANEL_FILE = "hauswerk-panel.js"
+DASHBOARD_FILE = "hauswerk-dashboard.js"
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
@@ -59,6 +60,10 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     mtime = await hass.async_add_executor_job(
         os.path.getmtime, os.path.join(FRONTEND_DIR, PANEL_FILE)
     )
+    # Dashboard-Strategie „custom:hauswerk“ auf jeder Seite verfügbar machen (kleine Datei, lädt das Panel erst bei Bedarf)
+    if not hass.data.get(f"{DOMAIN}_dashboard_js"):
+        frontend.add_extra_js_url(hass, f"{STATIC_URL}/{DASHBOARD_FILE}?v={int(mtime)}")
+        hass.data[f"{DOMAIN}_dashboard_js"] = True
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=PANEL_URL,

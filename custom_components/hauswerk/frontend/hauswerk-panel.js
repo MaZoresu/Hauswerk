@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.52.1";
+const VERSION = "0.53.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1135,7 +1135,14 @@ class HauswerkPanel extends HTMLElement {
         ${btn("system", "Für alle", "mdi:account-group-outline", d && is(d.s), true)}
         ${btn("device", "Dieses Gerät", "mdi:tablet-cellphone", d && is(d.dev))}
       </div>
-      <p class="muted small">Home Assistant bietet unter „Standard-Dashboard“ nur eigene Dashboards an – Hauswerk ist ein eigenes Panel. Hier lässt es sich trotzdem als Startseite festlegen. Reihenfolge: dein Profil, dann „für alle“, dann dieses Gerät. Nochmal tippen hebt es wieder auf.</p>`;
+      <p class="muted small">Hauswerk ist ein eigenes Panel; hier lässt es sich direkt als Startseite festlegen. Reihenfolge: dein Profil, dann „für alle“, dann dieses Gerät. Nochmal tippen hebt es wieder auf.</p>
+      <div class="lbl" style="margin-top:14px"><ha-icon icon="mdi:view-dashboard-outline"></ha-icon> Als Dashboard</div>
+      ${d?.dash ? `<p class="note ok"><ha-icon icon="mdi:check-circle-outline"></ha-icon>Dashboard „${esc(d.dash.title)}“ ist angelegt – unter Einstellungen › Dashboards wie jedes andere als Standard wählbar.</p>`
+        : this._hass?.user?.is_admin ? `<button class="secondary small" data-action="dash-create"><ha-icon icon="mdi:view-dashboard-edit-outline"></ha-icon>Hauswerk-Dashboard anlegen</button>` : ""}
+      <p class="muted small">Oder selbst: Einstellungen › Dashboards › Dashboard hinzufügen › „Neu von Grund auf“ › ⋮ › Rohkonfigurations-Editor, dort eintragen:</p>
+      <pre class="code">strategy:
+  type: custom:hauswerk</pre>
+      <p class="muted small">Dann steht Hauswerk in der Liste der Dashboards – wie Raumklima & Co. – und lässt sich dort als Standard festlegen oder für einzelne Benutzer wählen.</p>`;
   }
 
   _dpName(v) {
@@ -1151,9 +1158,30 @@ class HauswerkPanel extends HTMLElement {
     let dev = null;
     try { dev = JSON.parse(localStorage.getItem("defaultPanel") || "null"); } catch (e) { dev = null; }
     this._dpRaw = { u: u || {}, s: sys };
-    this._dp = { u: u?.default_panel || null, s: sys?.default_panel || null, dev, at: Date.now(), sysOk: sys !== null };
+    let dash = null;
+    if (this._hass?.user?.is_admin) {
+      try {
+        const list = await this._hass.callWS({ type: "lovelace/dashboards/list" });
+        dash = (list || []).find((x) => x.url_path === "dashboard-hauswerk") || null;
+      } catch (e) { dash = null; }
+    }
+    this._dp = { u: u?.default_panel || null, s: sys?.default_panel || null, dev, at: Date.now(), sysOk: sys !== null, dash };
     this._dpBusy = false;
     if (this._pop?.id === "look") this._renderPop();
+  }
+
+  /** Lovelace-Dashboard „Hauswerk“ mit der Strategie custom:hauswerk anlegen (erscheint unter Einstellungen › Dashboards). */
+  async _dashCreate() {
+    try {
+      await this._hass.callWS({ type: "lovelace/dashboards/create", url_path: "dashboard-hauswerk", title: "Hauswerk",
+        icon: "mdi:home-lightning-bolt-outline", require_admin: false, show_in_sidebar: false, mode: "storage" });
+      await this._hass.callWS({ type: "lovelace/config/save", url_path: "dashboard-hauswerk", config: { strategy: { type: "custom:hauswerk" } } });
+      this._toast("Hauswerk-Dashboard angelegt – unter Einstellungen › Dashboards als Standard wählbar");
+    } catch (err) {
+      this._toast(`Das hat nicht geklappt: ${err?.message || err}`);
+    }
+    this._dp = null;
+    await this._dpLoad();
   }
 
   async _dpSet(scope, on) {
@@ -8641,6 +8669,9 @@ class HauswerkPanel extends HTMLElement {
         this._settings[el.dataset.key] = el.dataset.v === "null" ? null : el.dataset.v;
         this._refreshSettings();
         break;
+      case "dash-create":
+        this._dashCreate();
+        break;
       case "dp-set":
         this._dpSet(el.dataset.scope, el.dataset.on === "1");
         break;
@@ -9964,6 +9995,8 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .sheet.pop { height:auto; width:min(580px, calc(100vw - 24px)); z-index:23; }
 #pop .backdrop { z-index:22; }
 .note.warn { --c:#f59e0b; border-radius:12px; display:flex; margin:4px 0 12px; }
+.note.ok { --c:#16a34a; border-radius:12px; display:flex; margin:4px 0 12px; }
+pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:var(--card2, rgba(127,127,127,.12)); font:13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; user-select:all; white-space:pre; overflow:auto; }
 .evlist { display:grid; gap:6px; margin-bottom:12px; }
 .ev { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:12px; background:var(--card2); }
 .ev > ha-icon { color:var(--muted); }
@@ -10349,6 +10382,9 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 }
 /* ---------- Tabletmodus ---------- */
 :host([tablet]) { height:100vh; height:100dvh; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+/* als Dashboard (Strategie custom:hauswerk): unter der Kopfleiste von Home Assistant */
+:host([embedded]) { min-height:calc(100vh - var(--header-height, 56px)); }
+:host([embedded][tablet]) { height:calc(100vh - var(--header-height, 56px)); height:calc(100dvh - var(--header-height, 56px)); }
 :host([tablet]) .top { position:relative; flex:none; padding-left:20px; padding-right:20px; }
 :host([tablet]) .mtabs { display:flex !important; }
 :host([tablet]) .top .ttl span { display:none; }
