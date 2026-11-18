@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.49.1";
+const VERSION = "0.50.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -450,9 +450,12 @@ class HauswerkPanel extends HTMLElement {
   /** Darstellung anwenden: aus den gespeicherten Einstellungen oder (Vorschau) aus dem offenen Pop-up. */
   _applyLook(src) {
     const p = src || this._data?.settings || {};
-    const theme = p.look_theme || "auto";
-    // auto = hell oder dunkel wie in Home Assistant eingestellt (Profil › Design)
-    this.toggleAttribute("dark", theme === "dark" || (theme === "auto" && !!this._hass?.themes?.darkMode));
+    let theme = p.look_theme || "auto";
+    // Tablet: eigenes Design je Gerät (Standard: nach Sonnenstand – Fully meldet den Dunkelmodus oft nicht)
+    if (this._tablet) { const t = this._tabletOpt("theme", "sun"); if (t !== "global") theme = t; }
+    // auto = hell oder dunkel wie in Home Assistant eingestellt (Profil › Design); sun = dunkel nach Sonnenuntergang
+    const dark = theme === "dark" || (theme === "auto" && !!this._hass?.themes?.darkMode) || (theme === "sun" && this._sunDark());
+    this.toggleAttribute("dark", dark);
     const c = /^#[0-9a-f]{6}$/i.test(p.look_accent || "") ? p.look_accent : null;
     if (c) {
       const [r, g, b] = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16) / 255);
@@ -469,6 +472,14 @@ class HauswerkPanel extends HTMLElement {
     if (bg === "daytime") this.setAttribute("sky", this._skyPhase());
     else this.removeAttribute("sky");
     this.setAttribute("size", this._lookSize());
+  }
+
+  /** Dunkel nach Sonnenstand: Sonne unter dem Horizont (sun.sun), ohne Sonne-Entität 19–7 Uhr. */
+  _sunDark() {
+    const s = this._hass?.states?.[this._data?.settings?.sun_entity || "sun.sun"];
+    if (s && ["above_horizon", "below_horizon"].includes(s.state)) return s.state === "below_horizon";
+    const h = new Date().getHours();
+    return h < 7 || h >= 19;
   }
 
   /** Tageszeit für den Himmel in der Kopfzeile: aus sun.sun, sonst aus der Uhrzeit. */
@@ -1105,6 +1116,8 @@ class HauswerkPanel extends HTMLElement {
         <span class="grow"><b>Tabletmodus</b><small>Leisten unten, kein Scrollen – höchstens zwei Seiten zum Wischen –, Bildschirmschoner mit großer Uhr.</small></span>
         <ha-icon class="xc-ic" icon="mdi:tablet"></ha-icon></button>
       ${on ? `
+      <div class="field"><span>Hell / Dunkel auf diesem Tablet</span><div class="segs small">${[["sun", "Nach Sonnenstand"], ["global", "Wie Darstellung"], ["light", "Hell"], ["dark", "Dunkel"]].map(([v, l]) => opt("theme", v, l, this._tabletOpt("theme", "sun"))).join("")}</div></div>
+      <p class="muted small">„Nach Sonnenstand“ wird dunkel, sobald die Sonne untergeht (sun.sun), und morgens wieder hell. „Wie Home Assistant“ klappt in Fully oft nicht, weil das Tablet den Dunkelmodus nicht meldet.</p>
       <div class="field"><span>Bildschirmschoner nach</span><div class="segs small">${[["0", "Aus"], ["1", "1 Min."], ["2", "2 Min."], ["5", "5 Min."], ["10", "10 Min."]].map(([v, l]) => opt("saver", v, l, saver)).join("")}</div></div>
       <p class="muted small">Abgedunkelt mit großer Uhr, Datum, Wetter mit Vorhersage, Hausstand, nächsten Rollladen-Fahrten, Terminen und Hinweisen; Warnungen erscheinen groß. Der Inhalt wandert jede Minute ein Stück gegen Einbrennen. Dabei geht es zurück zur Startseite. Antippen weckt auf, ohne etwas zu schalten.</p>
       <div class="field"><span>Nachts</span><div class="segs small">${[["dim", "Abgedunkelt"], ["black", "Schwarz, kleine Uhr"], ["off", "Display aus"]].map(([v, l]) => opt("night", v, l, this._tabletOpt("night", "dim"))).join("")}</div></div>
@@ -5184,7 +5197,7 @@ class HauswerkPanel extends HTMLElement {
             : "Noch keine App gewählt – Nachrichten nur im Protokoll",
           words: "handy app nachricht push benachrichtigung fenster batterie frost ruhezeit thermostat" },
         { g: "Darstellung", id: "look", icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung",
-          sum: `${{ auto: "Wie Home Assistant", light: "Hell", dark: "Dunkel" }[p.look_theme || "auto"]} · Akzent ${(ACCENTS.find(([v]) => v === (p.look_accent || null)) || [0, "eigene Farbe"])[1]} · Hintergrund ${{ pattern: "Muster", daytime: "Tageszeit", plain: "schlicht" }[p.look_background || "pattern"]}`,
+          sum: `${{ auto: "Wie Home Assistant", sun: "Nach Sonnenstand", light: "Hell", dark: "Dunkel" }[p.look_theme || "auto"]} · Akzent ${(ACCENTS.find(([v]) => v === (p.look_accent || null)) || [0, "eigene Farbe"])[1]} · Hintergrund ${{ pattern: "Muster", daytime: "Tageszeit", plain: "schlicht" }[p.look_background || "pattern"]}`,
           words: "design farbe akzent hell dunkel hintergrund tageszeit himmel uhr uhrzeit wetter kopfzeile größe tablet" },
         { g: "Darstellung", start: true, icon: "mdi:view-dashboard-edit-outline", c: "#2dd4bf", title: "Widgets der Startseite",
           sum: `${n} Widget${n === 1 ? "" : "s"} · für alle Benutzer gleich`, words: "start dashboard widget übersicht anpassen" },
@@ -6324,7 +6337,7 @@ class HauswerkPanel extends HTMLElement {
           icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung", sub: "Hauswerk · für alle Module und Benutzer",
           body: `
             ${head("mdi:theme-light-dark", "Design")}
-            <div class="field">${segs("look_theme", [["auto", "Wie Home Assistant", "mdi:home-assistant"], ["light", "Hell", "mdi:white-balance-sunny"], ["dark", "Dunkel", "mdi:weather-night"]], "auto")}</div>
+            <div class="field">${segs("look_theme", [["auto", "Wie Home Assistant", "mdi:home-assistant"], ["sun", "Nach Sonnenstand", "mdi:weather-sunset"], ["light", "Hell", "mdi:white-balance-sunny"], ["dark", "Dunkel", "mdi:weather-night"]], "auto")}</div>
             ${head("mdi:palette-outline", "Akzentfarbe")}
             <div class="swatches">
               ${ACCENTS.map(([v, name, show]) => `<button class="sw ${acc === v ? "on" : ""}" style="--c:${show || v}" data-action="look-accent" data-v="${v || ""}" title="${name}" aria-label="${name}" ${dis}></button>`).join("")}
@@ -8320,6 +8333,7 @@ class HauswerkPanel extends HTMLElement {
       case "tablet-opt":
         this._tabletSet(el.dataset.k, el.dataset.v);
         if (el.dataset.k === "sidebar") this._tabletSidebar(el.dataset.v === "1");
+        if (el.dataset.k === "theme") this._applyLook(this._pop?.id === "look" ? this._settings : null);
         this._lastAct = Date.now();
         this._renderPop();
         break;

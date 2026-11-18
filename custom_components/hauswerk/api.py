@@ -183,7 +183,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("tablet_wake"): ENTITY_LIST,
         vol.Optional("tablet_calendars"): ENTITY_LIST,
         # Darstellung
-        vol.Optional("look_theme"): vol.In(["auto", "light", "dark"]),
+        vol.Optional("look_theme"): vol.In(["auto", "sun", "light", "dark"]),
         vol.Optional("look_accent"): _opt(vol.Match(r"^#[0-9a-fA-F]{6}$")),
         vol.Optional("look_background"): vol.In(["pattern", "daytime", "plain"]),
         vol.Optional("look_header_weather"): bool,

@@ -107,7 +107,7 @@ HOUSE_DEFAULTS = {
     "start_widgets_tablet": None, # eigene Startseite im Tabletmodus (None = wie Handy/PC)
     "tablet_wake": [],            # Bewegungsmelder o. Ä.: weckt den Bildschirmschoner der Tablets
     "tablet_calendars": [],       # Kalender (z. B. Müllabfuhr) für den Bildschirmschoner
-    "look_theme": "auto",         # auto = wie Home Assistant | light | dark
+    "look_theme": "auto",         # auto = wie Home Assistant | sun = nach Sonnenstand | light | dark
     "look_accent": None,          # "#rrggbb" oder None = Türkis
     "look_background": "pattern", # pattern = Muster | daytime = Kopfzeile nach Tageszeit | plain = schlicht
     "look_header_weather": True,  # Außentemperatur und Wetter oben rechts

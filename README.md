@@ -88,6 +88,7 @@ Unter *Einstellungen › Darstellung › Tabletmodus* je Gerät einschalten – 
 
 - **Unterleiste unten:** Die Modul-Tasten bleiben oben; die Unterleiste des Moduls (z. B. Räume · Bericht · Einstellungen) steht groß am unteren Rand.
 - **Kein Scrollen:** Jede Seite passt sich der Auflösung an – so groß wie gut lesbar, bei Listen zwei Spalten. Passt es nicht auf eine Seite, gibt es eine zweite zum Wischen (Punkte unten).
+- **Hell/Dunkel nach Sonnenstand** (Standard am Tablet, je Gerät umstellbar) – Fully meldet den Dunkelmodus des Geräts meist nicht.
 - **Bildschirmschoner** nach 1–10 Minuten ohne Berührung: abgedunkelt mit großer Uhr, Datum, Wetter, Hausstand und Hinweisen; nachts noch dunkler, der Inhalt wandert gegen Einbrennen; neue Hinweise leuchten auf. Dabei geht es zurück zur Startseite. Antippen weckt auf, ohne etwas zu schalten.
 - **Seitenleiste:** Die Seitenleiste von Home Assistant wird im Tabletmodus ausgeblendet (☰ öffnet sie kurz); ohne Tabletmodus kommt sie wie vorher zurück.
 - **Eigene Startseite:** Im Anpassen-Modus am Tablet „Eigene“ wählen – Handy und PC bleiben unverändert.

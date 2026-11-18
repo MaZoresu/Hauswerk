@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.50.0 – 2026-11-18
+
+### Behoben
+- **Tabletmodus erkennt Hell/Dunkel** – „Wie Home Assistant“ fragt das Gerät nach dem Dunkelmodus, und das meldet Fully meist nicht. Im Tabletmodus folgt Hell/Dunkel jetzt standardmäßig dem **Sonnenstand** (sun.sun: dunkel nach Sonnenuntergang, hell nach Sonnenaufgang); umstellbar je Tablet unter Darstellung › Tabletmodus (Nach Sonnenstand / Wie Darstellung / Hell / Dunkel).
+
+### Neu
+- Design **„Nach Sonnenstand“** auch für PC und Handy (Darstellung › Design).
+
 ## 0.49.1 – 2026-11-18
 
 ### Geändert

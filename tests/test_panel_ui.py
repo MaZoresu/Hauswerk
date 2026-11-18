@@ -853,3 +853,22 @@ def test_kopfkacheln_gleich_gross(panel):
         panel.view(view)
         hs.append(panel.js(f"Math.round({EL}.shadowRoot.querySelector('.brief').getBoundingClientRect().height)"))
     assert len(set(hs)) == 1, hs
+
+
+def test_tablet_hell_dunkel_nach_sonne(tablet):
+    """Tablet: Hell/Dunkel folgt standardmäßig dem Sonnenstand (Fully meldet den Dunkelmodus nicht); je Gerät umstellbar."""
+    p = tablet
+    dark = lambda: p.js(f"{EL}.hasAttribute('dark')")
+    sun = lambda st: p.js(f"""() => {{ const h = {EL}.hass; const s = {{...h.states}};
+        s['sun.sun'] = {{...s['sun.sun'], state: '{st}'}}; {EL}.hass = {{...h, states: s, themes: {{...h.themes, darkMode: false}}}}; }}""")
+    p.js("() => localStorage.removeItem('hauswerk.tablet.theme')")
+    sun("below_horizon")
+    assert dark(), "nachts nicht dunkel"
+    sun("above_horizon")
+    assert not dark(), "tagsüber nicht hell"
+    p.js(f"() => {{ {EL}._openPop('look'); }}")
+    p.wait()
+    p.click('#pop [data-action="tablet-opt"][data-k="theme"][data-v="dark"]')
+    assert dark() and p.js("localStorage.getItem('hauswerk.tablet.theme')") == "dark"
+    p.click('#pop [data-action="tablet-opt"][data-k="theme"][data-v="sun"]')
+    assert not dark()
