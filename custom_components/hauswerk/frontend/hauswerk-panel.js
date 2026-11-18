@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.54.0";
+const VERSION = "0.54.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -463,6 +463,8 @@ class HauswerkPanel extends HTMLElement {
     // auto = hell oder dunkel wie in Home Assistant eingestellt (Profil › Design); sun = dunkel nach Sonnenuntergang
     const dark = theme === "dark" || (theme === "auto" && !!this._hass?.themes?.darkMode) || (theme === "sun" && this._sunDark());
     this.toggleAttribute("dark", dark);
+    // Weicht die Wahl von Home Assistant ab, gelten Hauswerks eigene Farben (sonst bliebe „Hell“ bei dunklem HA dunkel)
+    this.toggleAttribute("own", dark !== !!this._hass?.themes?.darkMode);
     const c = /^#[0-9a-f]{6}$/i.test(p.look_accent || "") ? p.look_accent : null;
     if (c) {
       const [r, g, b] = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16) / 255);
@@ -8918,6 +8920,9 @@ const STYLE = `
   --card2:var(--secondary-background-color, #24272b); --line:var(--divider-color, rgba(255,255,255,.1));
   --accent:#2dd4bf; --ink:#04211d; --shade:0%; --shadow:0 10px 30px rgba(0,0,0,.45);
 }
+/* Hell/Dunkel anders als Home Assistant (z. B. Tablet im Dunkelmodus, Hauswerk auf Hell): eigene Farben statt der von HA */
+:host([own]) { --text:#1f2328; --muted:#5f6670; --bg:#f3f5f7; --card:#fff; --card2:#eceff2; --line:rgba(0,0,0,.1); color-scheme:light; }
+:host([own][dark]) { --text:#f1f3f4; --muted:#9aa0a6; --bg:#111315; --card:#1b1d20; --card2:#24272b; --line:rgba(255,255,255,.1); color-scheme:dark; }
 * { box-sizing:border-box; scrollbar-color:var(--track) transparent; scrollbar-width:thin;
   --ct:color-mix(in srgb, var(--c, currentColor), var(--text) var(--shade));
   --rct:color-mix(in srgb, var(--rc, currentColor), var(--text) var(--shade)); }

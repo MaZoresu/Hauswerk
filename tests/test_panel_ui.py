@@ -995,3 +995,17 @@ def test_rollwerk_kachel_infos(panel):
     p.click('[data-action="rw-view"][data-v="compact"]')
     assert p.js(f"{EL}.shadowRoot.querySelectorAll('.rw-m .rwm-nx').length") >= 1
     p.click('[data-action="rw-view"][data-v="detail"]')
+
+
+def test_hell_obwohl_home_assistant_dunkel(panel):
+    """Darstellung „Hell“ bei dunklem Home Assistant: eigene helle Farben statt der dunklen von HA."""
+    p = panel
+    p.js(f"""() => {{ const h = {EL}.hass; document.body.style.setProperty('--primary-background-color', '#111111');
+        {EL}._data.settings.look_theme = 'light'; {EL}.hass = {{...h, themes: {{...h.themes, darkMode: true}}}}; }}""")
+    p.wait()
+    assert not p.js(f"{EL}.hasAttribute('dark')") and p.js(f"{EL}.hasAttribute('own')")
+    assert p.js(f"getComputedStyle({EL}).getPropertyValue('--bg').trim()") == "#f3f5f7"
+    p.js(f"""() => {{ const h = {EL}.hass; {EL}.hass = {{...h, themes: {{...h.themes, darkMode: false}}}}; }}""")
+    p.wait()
+    assert not p.js(f"{EL}.hasAttribute('own')")  # gleich wie HA: Farben von HA (eigene Themes bleiben)
+    p.js("() => document.body.style.removeProperty('--primary-background-color')")

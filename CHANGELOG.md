@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.54.1 – 2026-11-18
+
+### Behoben
+- **„Hell“ blieb dunkel** (bzw. „Dunkel“ hell), wenn Home Assistant auf dem Gerät anders eingestellt ist – z. B. ein Tablet im Dunkelmodus. Hauswerk nahm die Farben von Home Assistant. Weicht die Wahl unter Darstellung bzw. Tabletmodus von Home Assistant ab, gelten jetzt Hauswerks eigene helle bzw. dunkle Farben.
+
 ## 0.54.0 – 2026-11-18
 
 ### Neu (Rollwerk-Kacheln)
