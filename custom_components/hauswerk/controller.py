@@ -74,6 +74,12 @@ from .logic import (
     thermostat_kind,
     valve_opening,
     ventilate_advice,
+    parse_hm,
+    vent_done,
+    vent_limit,
+    vent_minutes,
+    mold_risk,
+    window_loss_kwh,
     weather_lead_factor,
     week_minute,
     window_paused,
@@ -182,6 +188,8 @@ class Heizen:
         self.demand = stored.get("demand") or {}
         # Außentemperatur je Stunde (Summe, Anzahl) für die Sommerpause nach Tagesmittel – übersteht Neustarts
         self.outside_hours: dict[str, list] = stored.get("outside_hours") or {}
+        # Lüftungen je Raum (14 Tage): Beginn, Dauer, Feuchte und Temperatur vorher/nachher, Wärmeverlust
+        self.vent_log: dict[str, list] = stored.get("vent_log") or {}
 
     def _data(self) -> dict[str, Any]:
         return {
@@ -193,6 +201,7 @@ class Heizen:
             "heat_rates": self.heat_rates,
             "demand": self.demand,
             "outside_hours": self.outside_hours,
+            "vent_log": self.vent_log,
         }
 
     def _note_outside(self, outside: float | None) -> None:
@@ -1307,8 +1316,7 @@ class Heizen:
                 holiday=holiday,
                 window_virtual=virtual,
                 shower=bool(override and override.get("shower")),
-                vent=ventilate_advice(room_temp, humidity, out_temp, out_rh, float(self.settings.get("vent_rh") or 0))
-                if not open_since else None,
+                **self._air(room_id, room, rt, room_temp, humidity, out_temp, out_rh, open_since, now),
                 battery_low=self._battery_low(room_id),
                 followers=sorted(rt["followers"]),
                 pair_broken=sorted(rt.get("pair_broken") or {}),
@@ -1400,6 +1408,118 @@ class Heizen:
         self.log.add("manual", f"Nach dem Duschen: {self._t(rt['override']['temp'])} °C für {minutes} Min.",
                      f"Luftfeuchte um {rise:.0f} Prozentpunkte gestiegen", room_id, room.get("name"))
         return rt["override"]
+
+    def _air(self, room_id: str, room: dict, rt: dict, room_temp: float | None, humidity: float | None,
+             out_temp: float | None, out_rh: float | None, open_since: float | None, now: float) -> dict[str, Any]:
+        """Lüften: Empfehlung mit Dauer und Anlass, Lüft-Timer mit Ende, Schimmel-Ampel, Dauerkippen, Sommer-Kühlen, Bilanz."""
+        name = room.get("name") or room_id
+        base = float(self.settings.get("vent_rh") or 0)
+        limit = vent_limit(room, base) if base else 0.0
+        minutes = vent_minutes(out_temp)
+        mold = mold_risk(room_temp, humidity, out_temp) if humidity is not None else None
+        co2 = None
+        if room.get("co2_sensor"):
+            st = self.hass.states.get(room["co2_sensor"])
+            try:
+                co2 = round(float(st.state)) if st is not None else None
+            except (TypeError, ValueError):
+                co2 = None
+        local = dt_util.now()
+        cool_on = bool(self.settings.get("vent_cool", True)) and self._summer and room_temp is not None and out_temp is not None
+        advice = ventilate_advice(room_temp, humidity, out_temp, out_rh, limit) if limit else None
+        reasons: list[str] = []
+        kind = None
+        if open_since is None:
+            # Anlass: feucht, Schimmelgefahr, Feuchte steigt schnell (Duschen, Kochen), CO₂, morgens, Sommer kühlen
+            if advice:
+                reasons.append(f"Luftfeuchte {advice['rh']} %")
+                kind = "humid"
+            if mold and mold["level"] == "bad" and not advice and out_temp is not None and out_rh is not None and room_temp is not None \
+                    and humidity is not None and ventilate_advice(room_temp, humidity, out_temp, out_rh, 1.0):
+                reasons.append(f"Schimmelgefahr an Außenwänden ({mold['wall_rh']} %)")
+                kind = kind or "mold"
+            rise = rise_within(rt.get("hums") or [], now, 900)
+            if rise >= float(room.get("shower_rise") or 10):
+                rt["rise_at"] = now
+            if now - rt.get("rise_at", 0) < 1800 and humidity is not None:
+                reasons.append("Feuchte steigt schnell (Duschen/Kochen)")
+                kind = kind or "rise"
+            co2_max = float(self.settings.get("vent_co2") or 0)
+            if co2 is not None and co2_max and co2 >= co2_max:
+                reasons.append(f"CO₂ {co2} ppm")
+                kind = kind or "co2"
+            morning = self.settings.get("vent_morning")
+            sleep_room = room.get("vent_morning") if room.get("vent_morning") is not None else (
+                (room.get("use") in ("schlafen", "kind")) or any(w in str(room.get("name") or "").lower() for w in ("schlaf", "kinder")))
+            if morning and sleep_room and not self._summer:
+                start = parse_hm(morning)
+                now_min = local.hour * 60 + local.minute
+                today0 = dt_util.start_of_local_day().timestamp()
+                done_today = any(v["at"] >= today0 + start * 60 for v in self.vent_log.get(room_id) or [])
+                if start <= now_min < start + 90 and not done_today:
+                    reasons.append("morgens lüften")
+                    kind = kind or "morning"
+            if cool_on and room_temp >= 23 and out_temp <= room_temp - 2:
+                reasons.append(f"kühlen – draußen {self._t(out_temp)} °C")
+                kind = kind or "cool"
+        need = bool(reasons)
+        key = f"vent:{room_id}"
+        if need and kind != "cool":
+            self.haus.notify(key, "vent", "Lüften empfohlen", f"{name}: {reasons[0]} – {minutes} Min. stoßlüften", room_id, name)
+        else:
+            self.haus.clear(key)
+        # Lüft-Timer: Fenster offen
+        session = rt.get("vs")
+        info: dict[str, Any] = {}
+        done_key = f"ventdone:{room_id}"
+        if open_since is not None:
+            if not session or session.get("start") != open_since:
+                cooling = cool_on and room_temp is not None and out_temp is not None and out_temp < room_temp
+                session = rt["vs"] = {"start": open_since, "rh0": humidity, "t0": room_temp, "target": minutes,
+                                      "cool": cooling, "done": None}
+            open_min = (now - session["start"]) / 60
+            if not session["done"]:
+                if session["cool"]:
+                    why = "draußen wärmer als drinnen" if out_temp is not None and room_temp is not None and out_temp >= room_temp else None
+                else:
+                    why = vent_done(open_min, session["target"], session["rh0"], humidity, session["t0"], room_temp, limit or 65)
+                if why:
+                    session["done"] = why
+                    self.log.add("window", "Genug gelüftet – Fenster schließen", why, room_id, name)
+                    self.haus.notify(done_key, "vent_done", "Fenster schließen", f"{name}: genug gelüftet ({why})", room_id, name)
+            long_min = float(self.settings.get("vent_long_min") or 30)
+            info["open"] = {"since": dt_util.utc_from_timestamp(session["start"]).isoformat(), "minutes": round(open_min, 1),
+                            "target": session["target"], "done": session["done"], "cool": session["cool"]}
+            if not self._summer and open_min >= long_min:
+                info["long"] = {"minutes": int(open_min), "kwh": window_loss_kwh(open_min, room_temp, out_temp)}
+        elif session:
+            # Fenster zu: Lüftung in die Bilanz
+            open_min = (now - session["start"]) / 60
+            if open_min >= 1:
+                log = self.vent_log.setdefault(room_id, [])
+                log.append({"at": round(session["start"]), "min": round(open_min, 1), "rh0": session["rh0"], "rh1": humidity,
+                            "t0": session["t0"], "t1": room_temp, "kwh": window_loss_kwh(open_min, session["t0"], out_temp)})
+                cutoff = now - 14 * 86400
+                self.vent_log[room_id] = [v for v in log if v["at"] >= cutoff][-200:]
+                self._save(30)
+            rt["vs"] = None
+            self.haus.clear(done_key)
+        week = [v for v in self.vent_log.get(room_id) or [] if v["at"] >= now - 7 * 86400]
+        drops = [v["rh0"] - v["rh1"] for v in week if v.get("rh0") is not None and v.get("rh1") is not None]
+        last = (self.vent_log.get(room_id) or [None])[-1]
+        air = {
+            "limit": limit, "minutes": minutes, "mold": mold, "co2": co2, "reasons": reasons, "kind": kind,
+            "dew_point": advice["dew_point"] if advice else None, **info,
+            "last": {"at": dt_util.utc_from_timestamp(last["at"]).isoformat(), "min": last["min"],
+                     "rh0": last.get("rh0"), "rh1": last.get("rh1")} if last else None,
+            "week": {"count": len(week), "minutes": round(sum(v["min"] for v in week)), "kwh": round(sum(v.get("kwh") or 0 for v in week), 1),
+                     "rh_drop": round(sum(drops) / len(drops)) if drops else None},
+        }
+        vent = None
+        if need:
+            vent = {**(advice or {}), "rh": round(humidity) if humidity is not None else None, "minutes": minutes,
+                    "reasons": reasons, "kind": kind}
+        return {"vent": vent, "air": air}
 
     def _room_notices(self, room_id: str, room: dict, result: dict, open_since: float | None, now: float) -> None:
         """Nachrichten aufs Handy: Fenster lange offen, Thermostat nicht erreichbar, Batterie schwach."""

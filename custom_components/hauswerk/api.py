@@ -105,6 +105,10 @@ ROOM_SCHEMA = vol.Schema(
         vol.Optional("window_detect_min"): _opt(vol.All(vol.Coerce(int), vol.Range(min=5, max=60))),
         # Nach dem Duschen nachheizen (Minuten, 0 = aus) ab einem Feuchte-Anstieg in Prozentpunkten
         vol.Optional("shower_boost"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=120))),
+        vol.Optional("use"): _opt(vol.In(["wohnen", "schlafen", "kind", "bad", "kueche", "buero", "flur"])),
+        vol.Optional("vent_rh"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=95))),
+        vol.Optional("co2_sensor"): _opt(str),
+        vol.Optional("vent_morning"): _opt(bool),
         vol.Optional("shower_rise"): _opt(vol.All(vol.Coerce(float), vol.Range(min=3, max=40))),
         # Weitere Geräte nur zur Anzeige (z. B. Heizkörper-Thermostat oder Stellantrieb neben dem Wandthermostat)
         vol.Optional("show_entities", default=[]): ENTITY_LIST,
@@ -119,7 +123,7 @@ ROOM_SCHEMA = vol.Schema(
     extra=vol.REMOVE_EXTRA,
 )
 
-WIDGET_TYPES = ["heat", "presence", "weather", "rooms", "shortcuts", "windows", "schedule", "report", "values", "forecast",
+WIDGET_TYPES = ["vent", "heat", "presence", "weather", "rooms", "shortcuts", "windows", "schedule", "report", "values", "forecast",
                 "hints", "power", "shutters", "rwnext", "energy", "lage", "events", "calendar"]
 WIDGET_SCHEMA = vol.Schema(
     {
@@ -206,6 +210,8 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_frost"): NOTIFY_MODE,
         vol.Optional("notify_battery"): NOTIFY_MODE,
         vol.Optional("notify_cold"): NOTIFY_MODE,
+        vol.Optional("notify_vent"): NOTIFY_MODE,
+        vol.Optional("notify_vent_done"): NOTIFY_MODE,
         # Rollwerk
         vol.Optional("rw_covers"): vol.All([vol.All(str, vol.Match(r"^cover\.[a-z0-9_]+$"))], vol.Length(max=60)),
         vol.Optional("rw_storm"): bool,
@@ -242,6 +248,10 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("workday_as"): vol.All(vol.Coerce(int), vol.In([5, 6])),
         vol.Optional("workday_calendar"): _opt(vol.All(str, vol.Match(r"^calendar\.[a-z0-9_]+$"))),
         vol.Optional("vent_rh"): vol.All(vol.Coerce(int), vol.Range(min=0, max=95)),
+        vol.Optional("vent_morning"): vol.Any(None, _hm),
+        vol.Optional("vent_co2"): vol.All(vol.Coerce(int), vol.Range(min=0, max=5000)),
+        vol.Optional("vent_cool"): bool,
+        vol.Optional("vent_long_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
     },
     extra=vol.REMOVE_EXTRA,
 )

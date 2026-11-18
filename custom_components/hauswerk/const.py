@@ -53,7 +53,7 @@ SETTING_LABELS = {
     "notify_battery": "Benachrichtigungen", "notify_quiet": "Ruhezeit", "notify_quiet_from": "Ruhezeit", "notify_quiet_to": "Ruhezeit",
     "battery_low": "Batterie-Warnung", "preheat_weather": "Vorheizen nach Wetter", "workday_entity": "Arbeitstag-Sensor",
     "workday_as": "Feiertage wie", "vent_rh": "Lüften-Hinweis", "sun_entity": "Sonne",
-    "notify_ha": "Mitteilung in Home Assistant", "notify_cold": "Benachrichtigungen",
+    "notify_ha": "Mitteilung in Home Assistant", "notify_cold": "Benachrichtigungen", "notify_vent": "Benachrichtigungen", "notify_vent_done": "Benachrichtigungen", "vent_morning": "Lüften", "vent_co2": "Lüften", "vent_cool": "Lüften", "vent_long_min": "Lüften",
     "demand_entity": "Wärmeanforderung", "demand_action": "Wärmeanforderung", "demand_low": "Wärmeanforderung",
     "demand_valve": "Wärmeanforderung", "rw_covers": "Rollwerk: Rollläden", "rw_storm": "Rollwerk: Sturmschutz", "rw_wind_entity": "Rollwerk: Sturmschutz", "rw_recovery": "Rollwerk: Nach Neustart", "demand_hold": "Wärmeanforderung", "demand_preheat": "Wärmeanforderung",
     "kw_solar": "Kraftwerk: Solar", "kw_grid": "Kraftwerk: Netz", "kw_grid_export": "Kraftwerk: Netz", "kw_grid_invert": "Kraftwerk: Netz",
@@ -132,6 +132,8 @@ HOUSE_DEFAULTS = {
     "notify_frost": "normal",     # Frost erwartet (Grenze: cold_snap_temp)
     "notify_battery": "normal",   # Batterie schwach
     "notify_cold": "normal",      # Heizkörper bleibt kalt trotz offenem Ventil
+    "notify_vent": "off",         # Lüften empfohlen
+    "notify_vent_done": "normal", # genug gelüftet – Fenster schließen
     "notify_ha": False,           # zusätzlich als Mitteilung in Home Assistant (Glocke in der Seitenleiste)
     "notify_quiet": True,         # Ruhezeit: Nachrichten erst danach senden
     "notify_quiet_from": "22:00",
@@ -174,6 +176,10 @@ HEAT_DEFAULTS = {
     "preheat_weather": False,     # Vorlaufzeit nach Außentemperatur anpassen (kälter = früher)
     # Lüften: Hinweis, wenn drinnen ab dieser Luftfeuchte und draußen trockenere Luft (0 = aus)
     "vent_rh": 65,
+    "vent_morning": None,         # Erinnerung „morgens lüften“ ab dieser Uhrzeit (Schlaf-/Kinderzimmer), None = aus
+    "vent_co2": 1000,             # CO₂-Grenze in ppm für Räume mit CO₂-Sensor (0 = aus)
+    "vent_cool": True,            # Sommer: „Fenster auf zum Kühlen“, wenn draußen kühler
+    "vent_long_min": 30,          # Fenster in der Heizzeit länger offen: Hinweis „Kippen kostet Wärme“
     # Wärmeanforderung an den Wärmeerzeuger (z. B. Zone der Vaillant-Anlage); leer = aus
     "demand_entity": None,        # climate.* des Wärmeerzeugers
     "demand_action": "lower",     # lower = Soll absenken | off = Zone ausschalten, solange kein Raum Wärme braucht

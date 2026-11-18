@@ -87,12 +87,17 @@ const rooms = {
 const status = {
   rooms: {
     a1: { mode: "komfort", mode_label: "Komfort", target: 21, room_temp: 20.4, heating: true, humidity: 48, next_change: 120, preheat_factor: 1.06,
+      air: { limit: 65, minutes: 10, mold: { wall_temp: 14.9, wall_rh: 66, level: "ok" }, co2: 840, reasons: [], kind: null,
+        open: { since: new Date(Date.now() - 4 * 60e3).toISOString(), minutes: 4.2, target: 10, done: null, cool: false },
+        last: { at: new Date(Date.now() - 20 * 3600e3).toISOString(), min: 12, rh0: 58, rh1: 49 }, week: { count: 6, minutes: 61, kwh: 1.1, rh_drop: 7 } },
       battery_low: [{ id: "sensor.thermostat_wohnzimmer_batterie", name: "Thermostat Wohnzimmer Batterie", level: 14 }],
       valve: 100, valve_all: 100, cold_radiator: { minutes: 74, valve: 100, rise: 0.1 },
       followers: ["climate.wohnzimmer_heizkoerper"], pair_broken: [], duty_blocked: [], assist: { entities: ["climate.wohnzimmer_heizkoerper2"], on: true, diff: 0.5, room_temp: 20.4 },
       conflicts: [{ id: "climate.wohnzimmer", name: "Thermostat Wohnzimmer", by: ["Raumklima Wohnzimmer (raumklima)"], writes: 0 }] },
     b2: { mode: "eco", mode_label: "Eco", target: 20, room_temp: 21.8, heating: false, humidity: 72, next_change: 300, preheat_factor: 1.06,
-      vent: { rh: 72, inside_g: 13.9, outside_g: 5.9, dew_point: 16.5 } },
+      vent: { rh: 72, inside_g: 13.9, outside_g: 5.9, dew_point: 16.5, minutes: 10, reasons: ["Luftfeuchte 72 %"], kind: "humid" },
+      air: { limit: 70, minutes: 10, mold: { wall_temp: 15.6, wall_rh: 83, level: "bad" }, co2: null, reasons: ["Luftfeuchte 72 %"], kind: "humid",
+        last: { at: new Date(Date.now() - 5 * 3600e3).toISOString(), min: 8, rh0: 74, rh1: 61 }, week: { count: 9, minutes: 84, kwh: 1.6, rh_drop: 11 } } },
   },
   // freie Werktage: der nächste Mittwoch (wie ein Feiertag)
   free_days: [(() => { const d = new Date(); d.setDate(d.getDate() + ((10 - d.getDay()) % 7 || 7)); return d.toLocaleDateString("sv-SE"); })()],

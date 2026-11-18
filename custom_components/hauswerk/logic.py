@@ -560,6 +560,67 @@ def ventilate_advice(in_temp: float | None, in_rh: float | None, out_temp: float
             "dew_point": round(dew_point(in_temp, in_rh), 1)}
 
 
+def vent_minutes(out_temp: float | None) -> int:
+    """Empfohlene Dauer fürs Stoßlüften nach Außentemperatur (Richtwerte: kalt = kurz, mild = länger)."""
+    if out_temp is None:
+        return 10
+    if out_temp < 0:
+        return 5
+    if out_temp < 10:
+        return 10
+    if out_temp < 15:
+        return 15
+    return 25
+
+
+def vent_limit(room: dict, default: float = 65.0) -> float:
+    """Feuchte-Grenze des Raums: eigener Wert, sonst nach Raumart bzw. Name (Bad 70 %, Schlafzimmer 60 %)."""
+    if room.get("vent_rh"):
+        return float(room["vent_rh"])
+    use = str(room.get("use") or "").lower()
+    name = str(room.get("name") or "").lower()
+    if use == "bad" or any(w in name for w in ("bad", "dusche", "wc")):
+        return max(default, 70.0)
+    if use in ("schlafen", "kind") or any(w in name for w in ("schlaf", "kinder")):
+        return min(default, 60.0)
+    return float(default)
+
+
+def mold_risk(in_temp: float | None, in_rh: float | None, out_temp: float | None, frsi: float = 0.7) -> dict | None:
+    """Schimmel-Ampel: Feuchte an der kühlsten Stelle der Außenwand (Temperaturfaktor fRsi 0,7 nach DIN 4108-2).
+
+    Wandtemperatur = außen + fRsi × (innen − außen); daraus die relative Feuchte direkt an der Wand.
+    ok unter 70 %, warn 70–80 %, bad ab 80 % (Schimmel kann wachsen).
+    """
+    if None in (in_temp, in_rh, out_temp) or out_temp >= in_temp:
+        return None
+    wall = out_temp + frsi * (in_temp - out_temp)
+    water = abs_humidity(in_temp, in_rh)
+    sat = 216.7 * 6.112 * math.exp(17.62 * wall / (243.12 + wall)) / (273.15 + wall)
+    rh = min(100.0, 100.0 * water / sat)
+    level = "bad" if rh >= 80 else "warn" if rh >= 70 else "ok"
+    return {"wall_temp": round(wall, 1), "wall_rh": round(rh), "level": level}
+
+
+def window_loss_kwh(minutes: float, in_temp: float | None, out_temp: float | None, watt_per_k: float = 20.0) -> float:
+    """Grobe Wärmeverluste durch ein offenes Fenster (ca. 20 W je Kelvin Unterschied) in kWh."""
+    if in_temp is None or out_temp is None or in_temp <= out_temp or minutes <= 0:
+        return 0.0
+    return round(watt_per_k * (in_temp - out_temp) * minutes / 60 / 1000, 2)
+
+
+def vent_done(minutes_open: float, target_min: float, rh_start: float | None, rh_now: float | None,
+              t_start: float | None, t_now: float | None, limit_rh: float) -> str | None:
+    """Genug gelüftet? Zeit erreicht, Feuchte deutlich gesunken oder Raum zu stark abgekühlt – mit Grund."""
+    if minutes_open >= target_min:
+        return f"{int(target_min)} Min. gelüftet"
+    if rh_start is not None and rh_now is not None and minutes_open >= 3 and rh_now <= min(rh_start - 10, limit_rh - 5):
+        return f"Luftfeuchte {rh_start:.0f} → {rh_now:.0f} %"
+    if t_start is not None and t_now is not None and t_start - t_now >= 3:
+        return f"Raum {t_start - t_now:.1f} °C kühler".replace(".", ",")
+    return None
+
+
 # ------------------------------------------------------------ Verläufe (Fenster- und Duscherkennung)
 def drop_within(samples: list[tuple[float, float]], now: float, seconds: float) -> float:
     """Wie stark ist der Wert in den letzten seconds Sekunden gefallen? (höchster Wert minus aktueller)"""

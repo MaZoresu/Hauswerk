@@ -1156,3 +1156,52 @@ def test_muellabholung(hw):
         assert haus.status()["waste_due"] is None
 
     asyncio.run(run())
+
+
+def test_lueften_ausgebaut(hw):
+    """Lüften: Empfehlung mit Dauer nach Außentemperatur und Grenze je Raumart, Schimmel-Ampel, Lüft-Timer mit
+    „Fenster schließen“, Bilanz nach dem Schließen, Dauerkippen mit Wärmeverlust."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 18, 11, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("climate.bad", "heat", {"current_temperature": 21.0, "temperature": 21.0}, "Thermostat Bad")
+        hass.set("sensor.bad_t", "21.0", name="Bad Temperatur")
+        hass.set("sensor.bad_h", "72", name="Bad Feuchte")
+        hass.set("binary_sensor.bad_fenster", "off", name="Bad Fenster")
+        hass.set("weather.home", "cloudy", {"temperature": 2.0, "humidity": 80})
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"weather_entity": "weather.home", "notify_targets": ["mobile_app_pixel"], "notify_quiet": False})
+        await ctl.async_save_settings({"vent_rh": 65})
+        await ctl.async_save_room({"id": "bad", "name": "Bad", "type": "heizkoerper", "comfort": 22, "eco": 18,
+                                   "climates": ["climate.bad"], "windows": ["binary_sensor.bad_fenster"],
+                                   "temp_sensor": "sensor.bad_t", "humidity_sensor": "sensor.bad_h", "enabled": True, "schedule": []})
+        res = ctl.status()["rooms"]["bad"]
+        # Bad: Grenze 70 % (Raumart), 72 % → lüften; draußen 2 °C → 10 Min.
+        assert res["air"]["limit"] == 70 and res["vent"]["minutes"] == 10 and "Luftfeuchte 72 %" in res["vent"]["reasons"]
+        assert res["air"]["mold"]["level"] in ("warn", "bad") and res["air"]["mold"]["wall_temp"] == 15.3
+        # Fenster auf: Timer läuft, nach 10 Min. „Fenster schließen“
+        hass.set("binary_sensor.bad_fenster", "on", name="Bad Fenster")
+        await ctl.async_evaluate()
+        assert ctl.status()["rooms"]["bad"]["vent"] is None and ctl.status()["rooms"]["bad"]["air"]["open"]["target"] == 10
+        NOW[0] += timedelta(minutes=11)
+        hass.set("sensor.bad_h", "60", name="Bad Feuchte")
+        await ctl.async_evaluate()
+        await asyncio.sleep(0)
+        air = ctl.status()["rooms"]["bad"]["air"]
+        assert air["open"]["done"] and "Fenster schließen" in hass.sent()
+        assert any(e["title"].startswith("Genug gelüftet") for e in log.entries)
+        # lange offen in der Heizzeit: Hinweis mit Wärmeverlust
+        NOW[0] += timedelta(minutes=25)
+        await ctl.async_evaluate()
+        long = ctl.status()["rooms"]["bad"]["air"]["long"]
+        assert long["minutes"] >= 30 and long["kwh"] > 0
+        # Fenster zu: Bilanz
+        hass.set("binary_sensor.bad_fenster", "off", name="Bad Fenster")
+        await ctl.async_evaluate()
+        week = ctl.status()["rooms"]["bad"]["air"]["week"]
+        assert week["count"] == 1 and week["minutes"] >= 35 and week["rh_drop"] == 12
+        assert ctl._data()["vent_log"]["bad"][0]["rh0"] == 72
+
+    asyncio.run(run())

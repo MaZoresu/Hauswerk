@@ -1009,3 +1009,25 @@ def test_hell_obwohl_home_assistant_dunkel(panel):
     p.wait()
     assert not p.js(f"{EL}.hasAttribute('own')")  # gleich wie HA: Farben von HA (eigene Themes bleiben)
     p.js("() => document.body.style.removeProperty('--primary-background-color')")
+
+
+def test_lueften_seite_und_kacheln(panel):
+    """Lüften: eigene Seite, Countdown/Dauer in den Raumkacheln, Zeile in der Kopfkachel, Hinweise, Widget, Einstellungen."""
+    p = panel
+    p.view("vent")
+    text = p.js(f"{EL}.shadowRoot.textContent")
+    assert "Jetzt 10 Min. stoßlüften" in text and "Lüftet 4 von 10 Min." in text and "Schimmelgefahr" in text
+    p.view("overview")
+    text = p.js(f"{EL}.shadowRoot.textContent")
+    assert "4/10 Min." in text and "Lüften: " in text
+    hints = [h["text"] for h in p.js(f"{EL}._hints()")]
+    assert "Jetzt 10 Min. lüften" in hints
+    assert "Lüftet" in p.js(f"() => {EL}._w_vent({{}}, 'l')") or "Min." in p.js(f"() => {EL}._w_vent({{}}, 'l')")
+    p.js(f"() => {{ {EL}._openPop('vent'); }}")
+    p.wait()
+    p.click('#pop [data-action="set-seg"][data-key="vent_morning"][data-v="07:00"]')
+    p.click('#pop [data-action="set-seg"][data-key="notify_vent"][data-v="normal"]')
+    p.click('#pop [data-action="pop-save"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
+    assert saved["vent_morning"] == "07:00" and saved["notify_vent"] == "normal"

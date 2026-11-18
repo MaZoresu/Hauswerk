@@ -2,6 +2,20 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.55.0 – 2026-11-18
+
+### Neu – Lüften in Heizwerk
+- **Seite „Lüften“** (Heizwerk › Lüften): je Raum Empfehlung oder laufende Lüftung, Luftfeuchte mit Grenze, Schimmel-Ampel, CO₂, zuletzt gelüftet und die Bilanz der letzten 7 Tage. Oben der Richtwert fürs Stoßlüften bei der aktuellen Außentemperatur.
+- **Lüftdauer nach Wetter:** „Jetzt 10 Min. stoßlüften“ – unter 0 °C 5 Min., bis 10 °C 10 Min., bis 15 °C 15 Min., darüber 25 Min.
+- **Lüft-Timer mit Ende:** Bei offenem Fenster zeigt die Raumkachel einen Countdown („4/10 Min.“). Ist genug gelüftet – Zeit um, Feuchte deutlich gesunken oder Raum 3 °C kühler –, kommt **„Fenster schließen“** unter der Glocke, groß im Bildschirmschoner und auf Wunsch aufs Handy (Standard: an).
+- **Schimmel-Ampel:** schätzt die Feuchte an der kühlsten Stelle der Außenwand (Temperaturfaktor 0,7 nach DIN 4108-2) – ab 70 % gelb, ab 80 % rot mit Hinweis.
+- **Anlässe:** feucht, Schimmelgefahr, Feuchte steigt schnell (Duschen, Kochen), CO₂ über der Grenze (Räume mit CO₂-Sensor, Standard 1000 ppm), **morgens lüften** in Schlaf- und Kinderzimmern (Uhrzeit wählbar, Standard aus).
+- **Dauerkippen erkennen:** In der Heizzeit nach 30 Min. offen: „Kippen kostet Wärme“ mit geschätztem Wärmeverlust in kWh.
+- **Sommer: kühlen** – in der Sommerpause „Fenster auf“, wenn es draußen mindestens 2 °C kühler ist (ab 23 °C drinnen), und „Fenster schließen“, sobald es draußen wärmer ist.
+- **Grenzen je Raumart:** Bad 70 %, Schlaf- und Kinderzimmer 60 %, sonst der allgemeine Wert – je Raum änderbar (Raum › Geräte › Lüften: Raumart, Grenze, morgens lüften, CO₂-Sensor). Der Raum-Assistent merkt sich die Raumart.
+- **Anzeige:** Symbol mit Dauer bzw. Countdown in der Raumkachel (detailliert und kompakt), Zeile in der Kopfkachel, **Bericht › Lüften · 7 Tage** (wie oft, wie lange, Feuchte-Rückgang, Wärme), neues **Widget „Lüften“**.
+- Nachrichten „Lüften empfohlen“ (Standard aus) und „Fenster schließen“ unter Benachrichtigungen bzw. Lüften & Schimmelschutz.
+
 ## 0.54.1 – 2026-11-18
 
 ### Behoben

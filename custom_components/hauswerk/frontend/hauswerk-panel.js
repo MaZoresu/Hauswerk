@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.54.1";
+const VERSION = "0.55.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -110,6 +110,7 @@ Object.assign(WIDGETS, {
   lage: { name: "Lage", icon: "mdi:view-dashboard-outline", c: "#2dd4bf", text: "Der Stand aller Module in je einem Satz – Heizwerk, Rollwerk, Kraftwerk – mit Sprung zum Modul" },
   events: { name: "Nächste Ereignisse", icon: "mdi:timeline-clock-outline", c: "#38bdf8", text: "Zeitleiste: Heizwechsel, Rollladen-Fahrten und Termine (Kalender wählbar)", config: true, cal: true },
   calendar: { name: "Termine", icon: "mdi:calendar-month-outline", c: "#f472b6", text: "Termine heute und morgen, z. B. Müllabfuhr – mit Symbol je Müllart", config: true, cal: true },
+  vent: { name: "Lüften", icon: "mdi:weather-windy", c: "#22d3ee", text: "Wo jetzt gelüftet werden sollte (mit Dauer), laufende Lüftungen mit Countdown, Schimmelgefahr", go: "vent" },
 });
 const DEFAULT_WIDGETS = [{ type: "heat", size: "m" }, { type: "weather", size: "s" }, { type: "windows", size: "s" }, { type: "presence", size: "l" }, { type: "rooms", size: "l" }];
 const SC_ICONS = { light: "mdi:lightbulb-outline", switch: "mdi:toggle-switch-outline", input_boolean: "mdi:toggle-switch-outline", script: "mdi:script-text-play-outline", scene: "mdi:palette-outline", button: "mdi:gesture-tap-button", input_button: "mdi:gesture-tap-button", fan: "mdi:fan", cover: "mdi:window-shutter", lock: "mdi:lock-outline", media_player: "mdi:speaker" };
@@ -119,6 +120,7 @@ const PICKERS = {
   windows: { scope: "room", multi: true, domains: ["binary_sensor", "cover"] },
   temp_sensor: { scope: "room", multi: false, domains: ["sensor"], deviceClass: "temperature" },
   humidity_sensor: { scope: "room", multi: false, domains: ["sensor"], deviceClass: "humidity" },
+  co2_sensor: { scope: "room", multi: false, domains: ["sensor"], deviceClass: "carbon_dioxide" },
   persons: { scope: "settings", multi: true, domains: ["person", "device_tracker"] },
   presence_sensor: { scope: "room", multi: false, domains: ["binary_sensor"] },
   comfort_entity: { scope: "room", multi: false, domains: ["input_number", "number", "sensor"] },
@@ -250,6 +252,7 @@ const PLAN_PRESETS = {
 // Alles rund ums Heizen liegt im Modul „Heizwerk“ mit eigener Unterleiste und eigenen Einstellungen.
 const HEAT_VIEWS = [
   { id: "overview", slug: "raeume", name: "Räume", icon: "mdi:radiator" },
+  { id: "vent", slug: "lueften", name: "Lüften", icon: "mdi:weather-windy" },
   { id: "plans", slug: "heizplaene", name: "Heizpläne", icon: "mdi:calendar-clock", hidden: true }, // über Einstellungen › Heizpläne
   { id: "room", slug: "raum", name: "Raum", icon: "mdi:door", hidden: true }, // Raum-Detailseite
   { id: "report", slug: "bericht", name: "Bericht", icon: "mdi:chart-bar" },
@@ -877,7 +880,11 @@ class HauswerkPanel extends HTMLElement {
       else if (!r.schedule_entity && !this._data.plans?.[r.plan_id] && !(r.schedule || []).length) add("info", "mdi:calendar-blank-outline", "Kein Heizplan – bleibt auf Eco", r.name, "plan-open", { id: r.id });
       for (const b of rs.battery_low || [])
         add("warn", b.level === 0 ? "mdi:battery-alert-variant-outline" : "mdi:battery-10", `Batterie schwach${b.level ? ` · ${fmt(b.level, 0)} %` : ""}`, `${r.name} · ${b.name}`, "room-edit", { id: r.id, rtab: "devices" });
-      if (rs.vent) add("info", "mdi:weather-windy", `Jetzt lüften – ${fmt(rs.vent.rh, 0)} % Luftfeuchte`, `${r.name} · draußen trockenere Luft (${fmt(rs.vent.outside_g)} statt ${fmt(rs.vent.inside_g)} g/m³), Taupunkt ${fmt(rs.vent.dew_point)} °C`, "settings-go", { sub: "vent" });
+      const air = rs.air || {};
+      if (air.open?.done) add("warn", "mdi:window-closed-variant", "Fenster schließen – genug gelüftet", `${r.name} · ${air.open.done}`, "tab", { tab: "vent" });
+      else if (air.long) add("info", "mdi:window-open-variant", "Fenster lange offen – Kippen kostet Wärme", `${r.name} · ${air.long.minutes} Min., ca. ${fmt(air.long.kwh)} kWh – lieber kurz stoßlüften`, "tab", { tab: "vent" });
+      if (rs.vent) add("info", "mdi:weather-windy", `Jetzt ${rs.vent.minutes} Min. lüften`, `${r.name} · ${(rs.vent.reasons || []).join(", ")}${rs.vent.outside_g != null ? ` · draußen ${fmt(rs.vent.outside_g)} statt ${fmt(rs.vent.inside_g)} g/m³` : ""}`, "tab", { tab: "vent" });
+      if (air.mold?.level === "bad" && !rs.vent) add("warn", "mdi:alert-octagon-outline", "Schimmelgefahr", `${r.name} · an Außenwänden ca. ${air.mold.wall_rh} % Luftfeuchte – lüften, Möbel von Außenwänden abrücken`, "tab", { tab: "vent" });
       else if (rs.humidity >= 70) add("info", "mdi:water-alert", `Luftfeuchte ${fmt(rs.humidity, 0)} %`, `${r.name} · Lüften bringt gerade wenig, draußen ist es ähnlich feucht`, "settings-go", { sub: "vent" });
       if (rs.cold_radiator && (s.cold_rooms || []).length < 2)
         add("warn", "mdi:radiator-off", "Heizkörper bleibt kalt", `${r.name} · Ventil ${fmt(rs.cold_radiator.valve, 0)} % seit ${rs.cold_radiator.minutes} Min., nur +${fmt(rs.cold_radiator.rise)} °C – entlüften oder Ventilstift prüfen`, "room-page", { id: r.id });
@@ -985,7 +992,7 @@ class HauswerkPanel extends HTMLElement {
     // Hintergrund passend zum Bereich: Startseite oder Heizen
     this.setAttribute("view", MODULES[0].views.includes(this._tab) ? "heat" : "start");
     if (!this._data) return;
-    const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom,
+    const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, vent: this._viewVent, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom,
       shutters: this._viewShutters, shutset: () => this._settingsPage("rw"),
       kwflow: this._viewKwFlow, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw") }[this._tab] || this._viewStart;
     let html;
@@ -1658,6 +1665,82 @@ class HauswerkPanel extends HTMLElement {
     if (!wet) return null;
     const snow = /snow/.test(wet.condition);
     return `ab ${new Date(wet.datetime).toLocaleTimeString("de-DE", { hour: "2-digit" })} Uhr ${snow ? "Schnee" : "Regen"}`;
+  }
+
+  // ------------------------------------------------------------ Lüften
+  /** Lüften-Zustand eines Raums für Kachel und Listen: [icon, Kurztext, Farbe, Titel] oder null. */
+  _ventChip(s) {
+    const a = s?.air || {};
+    if (a.open?.done) return ["mdi:window-closed-variant", "schließen", "#ef4444", `Genug gelüftet – Fenster schließen (${a.open.done})`];
+    if (a.open && a.open.cool) return ["mdi:snowflake", `kühlt ${Math.floor(a.open.minutes)} Min.`, "#38bdf8", "Fenster offen zum Kühlen – Hinweis, sobald es draußen wärmer ist"];
+    if (a.open && !a.long) return ["mdi:timer-sand", `${Math.floor(a.open.minutes)}/${a.open.target} Min.`, "#22c55e", `Lüften läuft – empfohlen ${a.open.target} Min.`];
+    if (a.long) return ["mdi:window-open-variant", `${a.long.minutes} Min.`, "#f59e0b", `Lange offen – ca. ${fmt(a.long.kwh)} kWh Wärme; lieber kurz stoßlüften`];
+    if (s?.vent) return ["mdi:weather-windy", `${s.vent.minutes} Min.`, "#0891b2", `Jetzt ${s.vent.minutes} Min. stoßlüften – ${(s.vent.reasons || []).join(", ")}`];
+    if (a.mold?.level === "bad") return ["mdi:alert-octagon-outline", `${a.mold.wall_rh} %`, "#ef4444", `Schimmelgefahr: an Außenwänden ca. ${a.mold.wall_rh} % Luftfeuchte`];
+    return null;
+  }
+
+  /** Feuchte-Grenze eines Raums wie im Backend (eigener Wert, sonst Bad 70 %, Schlaf-/Kinderzimmer 60 %). */
+  _ventLimitOf(r) {
+    const base = Number(this._data?.settings?.vent_rh ?? 65) || 65;
+    if (r.vent_rh) return Number(r.vent_rh);
+    const n = String(r.name || "").toLowerCase();
+    if (r.use === "bad" || /bad|dusche|wc/.test(n)) return Math.max(base, 70);
+    if (["schlafen", "kind"].includes(r.use) || /schlaf|kinder/.test(n)) return Math.min(base, 60);
+    return base;
+  }
+
+  _viewVent() {
+    const rooms = this._rooms().filter((r) => r.enabled !== false);
+    const st = this._status?.rooms || {};
+    const set = this._data.settings;
+    const [outT, outRh] = (() => { const w = this._weather(); return [w?.temp ?? null, null]; })();
+    const mins = outT == null ? 10 : outT < 0 ? 5 : outT < 10 ? 10 : outT < 15 ? 15 : 25;
+    const amp = { ok: ["#22c55e", "kein Risiko"], warn: ["#f59e0b", "aufpassen"], bad: ["#ef4444", "Schimmelgefahr"] };
+    const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 60 ? `vor ${Math.max(1, m)} Min.` : m < 1440 ? `vor ${Math.floor(m / 60)} Std.` : `vor ${Math.floor(m / 1440)} Tg.`; };
+    const card = (r) => {
+      const s = st[r.id] || {};
+      const a = s.air || {};
+      const chip = this._ventChip(s);
+      let state;
+      if (a.open) {
+        const pc = a.open.cool ? 100 : Math.min(100, (a.open.minutes / a.open.target) * 100);
+        state = `<div class="vt-run ${a.open.done ? "done" : ""}"><div class="vt-bar"><i style="width:${pc}%"></i></div>
+          <b>${a.open.done ? `Genug gelüftet – Fenster schließen` : a.open.cool ? `Kühlt seit ${Math.floor(a.open.minutes)} Min.` : `Lüftet ${Math.floor(a.open.minutes)} von ${a.open.target} Min.`}</b>
+          <small>${a.open.done ? esc(a.open.done) : a.open.cool ? "Hinweis kommt, sobald es draußen wärmer ist" : "Ende: Zeit um, Feuchte gesunken oder Raum zu kühl"}${a.long ? ` · ca. ${fmt(a.long.kwh)} kWh Wärme` : ""}</small></div>`;
+      } else if (s.vent) state = `<div class="vt-need"><ha-icon icon="mdi:weather-windy"></ha-icon><span><b>Jetzt ${s.vent.minutes} Min. stoßlüften</b><small>${esc((s.vent.reasons || []).join(" · "))}</small></span></div>`;
+      else state = `<div class="vt-ok"><ha-icon icon="mdi:check-circle-outline"></ha-icon><span>${s.humidity == null && a.co2 == null ? "Ohne Feuchtesensor nur Lüft-Timer und Bilanz" : "Kein Lüften nötig"}</span></div>`;
+      const facts = [
+        s.humidity != null ? [`${fmt(s.humidity, 0)} %`, `Luftfeuchte · ab ${fmt(a.limit, 0)} % lüften`, s.humidity >= (a.limit || 99) ? "#f59e0b" : ""] : null,
+        a.mold ? [`${a.mold.wall_rh} %`, `an der Außenwand (${fmt(a.mold.wall_temp)} °C) · ${amp[a.mold.level][1]}`, amp[a.mold.level][0]] : null,
+        a.co2 != null ? [`${a.co2} ppm`, "CO₂", a.co2 >= (set.vent_co2 || 1000) ? "#f59e0b" : ""] : null,
+        a.last ? [ago(a.last.at), `zuletzt gelüftet · ${fmt(a.last.min, 0)} Min.${a.last.rh0 != null && a.last.rh1 != null ? ` · ${fmt(a.last.rh0, 0)} → ${fmt(a.last.rh1, 0)} %` : ""}`, ""] : null,
+        a.week?.count ? [`${a.week.count}×`, `7 Tage · ${a.week.minutes} Min.${a.week.kwh ? ` · ca. ${fmt(a.week.kwh)} kWh` : ""}`, ""] : null,
+      ].filter(Boolean);
+      return `<article class="card vt-c" data-action="room-page" data-id="${esc(r.id)}" role="button" tabindex="0">
+        <div class="vt-h"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><b>${esc(r.name)}</b>${chip ? `<span class="vt-chip" style="--c:${chip[2]}" title="${esc(chip[3])}"><ha-icon icon="${chip[0]}"></ha-icon>${esc(chip[1])}</span>` : ""}</div>
+        ${state}
+        ${facts.length ? `<div class="vt-f">${facts.map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>` : ""}
+      </article>`;
+    };
+    const need = rooms.filter((r) => st[r.id]?.vent || st[r.id]?.air?.open?.done);
+    const head = this._brief({
+      cls: "card br-mod-heat", tone: need.some((r) => st[r.id]?.air?.open?.done) ? "warn" : need.length ? "active" : "ok", icon: "mdi:weather-windy",
+      label: `<ha-icon icon="mdi:weather-windy"></ha-icon>Lüften`,
+      big: `${mins}<span> Min.</span>`,
+      title: need.length ? need.map((r) => `${r.name}: ${st[r.id].air?.open?.done ? "Fenster schließen" : `${st[r.id].vent.minutes} Min. lüften`}`).join(" · ") : "Gerade muss nirgends gelüftet werden",
+      side: `<button class="link" data-action="settings-go" data-sub="vent"><ha-icon icon="mdi:tune-variant"></ha-icon>Einstellen</button>`,
+      lines: [{ icon: "mdi:thermometer", text: `Richtwert Stoßlüften bei ${outT == null ? "–" : fmt(outT)} °C draußen: ${mins} Min. – Fenster ganz auf, Heizung pausiert` },
+        { icon: "mdi:information-outline", text: "Kurz und weit öffnen statt kippen: tauscht die Luft, ohne Wände auszukühlen" }],
+    });
+    return head + `<div class="vt-grid">${rooms.map(card).join("")}</div>`;
+  }
+
+  _w_vent(w, z) {
+    const st = this._status?.rooms || {};
+    const list = this._rooms().map((r) => [r, st[r.id] || {}]).map(([r, s]) => [r, s, this._ventChip(s)]).filter(([, , c]) => c);
+    if (!list.length) return `<div class="wok"><ha-icon icon="mdi:check-circle-outline"></ha-icon>Gerade muss nirgends gelüftet werden</div>`;
+    return `<div class="wlist">${list.slice(0, z === "s" ? 2 : z === "m" ? 4 : 8).map(([r, s, c]) => `<button class="wl-row" data-action="tab" data-tab="vent"><ha-icon icon="${c[0]}" style="color:${c[2]}"></ha-icon><span class="grow"><b>${esc(r.name)}</b>${z !== "s" ? `<small>${esc(c[3])}</small>` : ""}</span><em style="color:${c[2]}">${esc(c[1])}</em></button>`).join("")}</div>`;
   }
 
   // ------------------------------------------------------------ neue Widgets
@@ -2780,6 +2863,10 @@ class HauswerkPanel extends HTMLElement {
     }
     if (below.length > 1) for (const r of below.slice(0, 2))
       lines.push({ icon: "mdi:thermometer-chevron-up", c: "#fb923c", text: `${r.name}: ${diffTxt(r)} °C unter Soll${st[r.id].heating ? " – heizt" : ""}`, act: roomAct(r) });
+    const doneV = rooms.filter((r) => st[r.id]?.air?.open?.done);
+    if (doneV.length) lines.unshift({ icon: "mdi:window-closed-variant", c: "#ef4444", text: `Genug gelüftet – Fenster schließen: ${doneV.map((r) => r.name).join(", ")}`, act: `data-action="tab" data-tab="vent"` });
+    const needV = rooms.filter((r) => st[r.id]?.vent);
+    if (needV.length) lines.push({ icon: "mdi:weather-windy", c: "#0891b2", text: `Lüften: ${needV.map((r) => `${r.name} ${st[r.id].vent.minutes} Min.`).join(", ")}`, act: `data-action="tab" data-tab="vent"` });
     const wx = this._wxAlerts()[0];
     if (wx) lines.push({ icon: wx.icon, c: "#38bdf8", text: `${wx.text} – ${wx.sub}` });
     // Nächster Wechsel (gleiche Zeit zusammengefasst)
@@ -3016,7 +3103,9 @@ class HauswerkPanel extends HTMLElement {
     // Nur was auffällt, als kleines Symbol neben dem Namen (Text im Tooltip)
     const icons = [];
     const si = (icon, c, title, text = "") => `<span class="si" style="--c:${c}" title="${esc(title)}"><ha-icon icon="${icon}"></ha-icon>${text}</span>`;
-    if (s.windows_open) icons.push(si("mdi:window-open-variant", "#22d3ee", s.window_pending ? "Fenster offen – Pause beginnt gleich" : "Fenster offen"));
+    const vc = this._ventChip(s);
+    if (vc) icons.push(si(vc[0], vc[2], vc[3], vc[1]));
+    else if (s.windows_open) icons.push(si("mdi:window-open-variant", "#22d3ee", s.window_pending ? "Fenster offen – Pause beginnt gleich" : "Fenster offen"));
     if (s.occupied === true) icons.push(si("mdi:account-check-outline", "#fbbf24", "Präsenzmelder: jemand im Raum"));
     else if (s.occupied === false) icons.push(si("mdi:account-off-outline", "var(--muted)", "Präsenzmelder: niemand im Raum"));
     const dv = this._devIndicators(room);
@@ -3366,7 +3455,7 @@ class HauswerkPanel extends HTMLElement {
         </div>
         ${this._wrapInd(`
           ${s.heating ? `<ha-icon class="rm-fire" icon="mdi:fire" title="Heizt"></ha-icon>` : ""}
-          ${s.windows_open ? `<ha-icon class="rm-win" icon="mdi:window-open-variant" title="Fenster offen"></ha-icon>` : ""}
+          ${(() => { const vc = this._ventChip(s); return vc ? `<span class="rm-dev on" style="color:${vc[2]}" title="${esc(vc[3])}"><ha-icon icon="${vc[0]}"></ha-icon>${esc(vc[1])}</span>` : s.windows_open ? `<ha-icon class="rm-win" icon="mdi:window-open-variant" title="Fenster offen"></ha-icon>` : ""; })()}
           ${(() => {
             const dv = this._devIndicators(room);
             return (dv.valve != null ? `<span class="rm-dev ${dv.valve > 0 ? "on" : ""}" title="Ventil ${fmt(dv.valve, 0)} % offen"><ha-icon icon="mdi:valve"></ha-icon>${fmt(dv.valve, 0)}%</span>` : "")
@@ -5243,6 +5332,15 @@ class HauswerkPanel extends HTMLElement {
         ${this._sectionHead("mdi:window-open-variant", `Fensterpause pro Tag · ${days} Tage`)}
         ${this._stackChart(rep, days, "pause_min")}
       </section>
+      ${(() => {
+        const st = this._status?.rooms || {};
+        const vr = rooms.filter((r) => st[r.id]?.air?.week?.count);
+        if (!vr.length) return "";
+        return `<section class="card">${this._sectionHead("mdi:weather-windy", "Lüften · 7 Tage", `<button class="link" data-action="tab" data-tab="vent">Lüften</button>`)}
+          <div class="table-wrap"><table><thead><tr><th>Raum</th><th>gelüftet</th><th>Dauer</th><th>Feuchte</th><th>Wärme</th></tr></thead><tbody>
+          ${vr.map((r) => { const wk = st[r.id].air.week; return `<tr><td><span class="rdot" style="background:${this._roomColor(r.id)}"></span>${esc(r.name)}</td><td>${wk.count}×</td><td>${wk.minutes} Min.</td><td>${wk.rh_drop != null ? `−${wk.rh_drop} %-Pkt.` : "–"}</td><td>${wk.kwh ? `ca. ${fmt(wk.kwh)} kWh` : "–"}</td></tr>`; }).join("")}
+          </tbody></table></div><p class="muted small">Feuchte: Ø Rückgang je Lüftung. Wärme: grob geschätzt (ca. 20 W je Grad Unterschied, solange offen).</p></section>`;
+      })()}
       ${this._powerReport(rooms, days)}
       ${this._valveHeat(rooms, rep, days)}
       <section class="card">
@@ -6314,6 +6412,8 @@ class HauswerkPanel extends HTMLElement {
         const saved = (this._data.settings.notify_targets || []).length || this._data.settings.notify_ha;
         // Art je Anlass (früher an/aus)
         if (p.notify_waste == null) p.notify_waste = "off";
+        if (p.notify_vent == null) p.notify_vent = "off";
+        if (p.notify_vent_done == null) p.notify_vent_done = "normal";
         for (const k of ["notify_window", "notify_offline", "notify_frost", "notify_battery", "notify_cold"]) {
           if (p[k] === true || p[k] == null) p[k] = "normal";
           else if (p[k] === false) p[k] = "off";
@@ -6345,6 +6445,8 @@ class HauswerkPanel extends HTMLElement {
                 "Hauswerk sucht an Thermostaten, Fensterkontakten und Raumsensoren nach Batterie-Sensoren. Liegt einer unter der Grenze, erscheint ein Hinweis unter der Glocke – und je nach Art eine Nachricht. Die Grenze gilt auch für die Glocke.")}
               ${kind("notify_cold", "Heizkörper bleibt kalt", "Ventil offen, Raum wird nicht wärmer", "",
                 "Steht ein Ventil eine Stunde lang auf 90 % oder mehr, der Raum liegt mindestens 0,5 °C unter Soll und wird trotzdem nicht wärmer, kommt eine Nachricht. Mögliche Ursachen: Luft im Heizkörper, hängender Ventilstift oder die Heizung liefert keine Wärme.")}
+              ${kind("notify_vent", "Lüften empfohlen", "feucht, Schimmelgefahr, CO₂ oder morgens", "", "Sollte ein Raum gelüftet werden, kommt eine Nachricht mit der empfohlenen Dauer – einmal je Anlass.")}
+              ${kind("notify_vent_done", "Fenster schließen", "genug gelüftet", "", "Ist ein Fenster lange genug offen (Zeit um, Feuchte gesunken oder Raum ausgekühlt), kommt „Fenster schließen“.")}
               ${kind("notify_waste", "Müllabfuhr morgen", p.waste_remind ? `am Vorabend ab ${p.waste_remind} · unter Kalender` : "Erinnerung unter Kalender aus", "",
                 "Am Abend vor der Abholung (ab der Uhrzeit unter Hauswerk › Kalender › Müllabholung) kommt eine Nachricht mit den Abfallarten – einmal je Abholtag.")}
             </div>
@@ -6366,6 +6468,19 @@ class HauswerkPanel extends HTMLElement {
           body: `
             <p class="muted">Ist es drinnen feucht und die Luft draußen trockener, erscheint unter der Glocke „Jetzt lüften“. Verglichen wird die Wassermenge in der Luft (g/m³) – kalte Winterluft ist fast immer trockener, schwüle Sommerluft oft nicht.</p>
             <label class="field narrow"><span><ha-icon icon="mdi:water-percent"></ha-icon> Hinweis ab Luftfeuchte (0 = aus)</span>${minutes("vent_rh", 65, 0, 95, 5, "%")}</label>
+            <p class="muted small">Gilt für Wohnräume. Bäder lüften ab 70 %, Schlaf- und Kinderzimmer ab 60 % – je Raum änderbar (Raum › Geräte › Lüften).</p>
+            <div class="lbl">Dauer & Ende</div>
+            <p class="muted small">Empfohlen wird kurzes Stoßlüften nach Außentemperatur: unter 0 °C 5 Min., bis 10 °C 10 Min., bis 15 °C 15 Min., darüber 25 Min. Ist das Fenster offen, läuft in der Raumkachel ein Countdown; ist genug gelüftet (Zeit um, Feuchte deutlich gesunken oder Raum 3 °C kühler), kommt „Fenster schließen“.</p>
+            <label class="field narrow"><span><ha-icon icon="mdi:window-open-variant"></ha-icon> „Kippen kostet Wärme“ nach</span>${minutes("vent_long_min", 30, 5, 240, 5)}</label>
+            <div class="lbl">Anlässe</div>
+            <div class="field"><span><ha-icon icon="mdi:weather-sunset-up"></ha-icon> Morgens lüften (Schlaf- und Kinderzimmer) ab</span>${segs("vent_morning", [["null", "Aus"], ["06:30", "6:30"], ["07:00", "7:00"], ["07:30", "7:30"], ["08:00", "8:00"]], "null")}</div>
+            <label class="field narrow"><span><ha-icon icon="mdi:molecule-co2"></ha-icon> Lüften ab CO₂ (0 = aus)</span>${minutes("vent_co2", 1000, 0, 5000, 100, "ppm")}</label>
+            <div class="wxrows">${this._setRow("vcool", "Sommer: kühlen", "„Fenster auf“, wenn draußen kühler – „zu“, wenn wärmer", sw("vent_cool"), "In der Sommerpause: Ist es drinnen ab 23 °C und draußen mindestens 2 °C kühler, empfiehlt Heizwerk das Fenster zu öffnen. Wird es draußen wärmer als drinnen, kommt „Fenster schließen“. Zusammen mit dem Sonnenschutz von Rollwerk bleibt es so tagsüber kühler.")}</div>
+            <p class="muted small"><ha-icon icon="mdi:water-alert-outline"></ha-icon>Steigt die Feuchte schnell (Duschen, Kochen), kommt „Jetzt lüften“ für eine halbe Stunde. Die Schimmel-Ampel schätzt die Feuchte an der kühlsten Stelle der Außenwand (Temperaturfaktor 0,7): ab 70 % gelb, ab 80 % rot.</p>
+            <div class="lbl">Nachrichten aufs Handy</div>
+            <div class="field"><span>Lüften empfohlen</span>${segs("notify_vent", [["off", "Aus"], ["log", "Protokoll"], ["normal", "Normal"], ["important", "Wichtig"]], "off")}</div>
+            <div class="field"><span>Genug gelüftet – Fenster schließen</span>${segs("notify_vent_done", [["off", "Aus"], ["log", "Protokoll"], ["normal", "Normal"], ["important", "Wichtig"]], "normal")}</div>
+            <button class="link" data-action="tab" data-tab="vent"><ha-icon icon="mdi:weather-windy"></ha-icon>Zur Seite Lüften</button>
             <div class="lbl">Räume mit Feuchtesensor</div>
             <div class="evlist">${withHum.map((r) => {
               const rs = st[r.id] || {};
@@ -6857,6 +6972,7 @@ class HauswerkPanel extends HTMLElement {
       enabled: true, allow_manual: true, schedule: [] };
     if (d.temp) room.temp_sensor = d.temp;
     if (d.hum) room.humidity_sensor = d.hum;
+    if (d.use) room.use = d.use;
     if (d.show.length) room.show_entities = d.show;
     if (d.type === "misch" && d.assist.length) room.assist_entities = d.assist;
     if (d.plan.startsWith("plan:")) room.plan_id = d.plan.slice(5);
@@ -6983,6 +7099,15 @@ class HauswerkPanel extends HTMLElement {
           <label class="field"><span>wenn die Luftfeuchte steigt um</span><div class="unit"><input type="number" step="1" min="3" max="40" data-room="shower_rise" value="${r.shower_rise ?? ""}" placeholder="10"><i>%-Punkte in 15 Min.</i></div></label>
         </div>
         <p class="muted small">Steigt die Feuchte so schnell (Duschen, Baden), heizt Heizwerk den Raum für diese Zeit auf Komfort – damit Wände und Handtücher trocknen. Höchstens einmal pro Stunde.</p>` : ""}
+        <div class="sub-h"><ha-icon icon="mdi:weather-windy"></ha-icon>Lüften</div>
+        <div class="row2">
+          <label class="field"><span>Raumart</span><select data-room="use">${[["", "– aus dem Namen –"], ...WIZ_USES.map((u) => [u.id, u.label])].map(([v, l]) => `<option value="${v}" ${String(r.use || "") === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
+          <label class="field"><span>Lüften ab Luftfeuchte</span><div class="unit"><input type="number" step="1" min="40" max="90" data-room="vent_rh" value="${r.vent_rh ?? ""}" placeholder="${fmt(this._ventLimitOf(r), 0)}"><i>%</i></div></label>
+        </div>
+        <div class="row2">
+          <label class="field"><span>Morgens lüften</span><select data-room="vent_morning">${[["", "Automatisch (Schlaf-/Kinderzimmer)"], ["1", "Ja"], ["0", "Nein"]].map(([v, l]) => `<option value="${v}" ${(r.vent_morning == null ? "" : r.vent_morning ? "1" : "0") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+          <div class="field"><span><ha-icon icon="mdi:molecule-co2"></ha-icon> CO₂-Sensor <span class="muted small">· optional</span></span>${this._picker("co2_sensor", r.co2_sensor ? [r.co2_sensor] : [])}</div>
+        </div>
         <div class="sub-h"><ha-icon icon="mdi:motion-sensor"></ha-icon>Präsenzmelder im Raum <span class="muted small">· optional</span></div>
         <div class="field">${this._picker("presence_sensor", r.presence_sensor ? [r.presence_sensor] : [])}</div>
         ${r.presence_sensor ? `
@@ -7548,7 +7673,8 @@ class HauswerkPanel extends HTMLElement {
       if (t.type === "checkbox") v = t.checked;
       else if (t.type === "number") v = t.value === "" ? null : Number(t.value);
       else v = t.value;
-      if (key === "plan_id") v = v || null;
+      if (key === "plan_id" || key === "use") v = v || null;
+      if (key === "vent_morning") v = v === "" ? null : v === "1";
       this._dialog.room[key] = v;
       if (["name", "valve_control", "calibration", "window_detect"].includes(key) && isChange) this._renderDialog();
       return;
@@ -9109,7 +9235,7 @@ code { background:var(--card2); padding:1px 6px; border-radius:6px; font-size:12
 .sis { display:flex; align-items:center; gap:4px; min-width:0; overflow:hidden; }
 .room-foot { flex-wrap:nowrap !important; }
 .si .t { white-space:nowrap; }
-.si { display:inline-flex; align-items:center; gap:4px; height:28px; padding:0 7px; border-radius:9px; color:var(--ct); font-size:12px; font-weight:600; background:color-mix(in srgb, var(--c) 10%, transparent); }
+.si { display:inline-flex; align-items:center; gap:4px; height:28px; white-space:nowrap; padding:0 7px; border-radius:9px; color:var(--ct); font-size:12px; font-weight:600; background:color-mix(in srgb, var(--c) 10%, transparent); }
 .si ha-icon { --mdc-icon-size:16px; }
 .acts { display:flex; align-items:center; gap:2px; padding:2px; border-radius:12px; background:var(--card2); }
 .acts .icon { width:32px; height:32px; }
@@ -10661,6 +10787,28 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .rwm-win.big { width:34px; height:42px; border-radius:7px; }
 .rwm-nx { margin-left:auto; display:inline-flex; align-items:center; gap:3px; font-size:12px; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .rwm-nx ha-icon { --mdc-icon-size:13px; }
+.vt-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:14px; }
+.vt-c { padding:14px 16px; display:flex; flex-direction:column; gap:10px; margin:0; cursor:pointer; }
+.vt-h { display:flex; align-items:center; gap:8px; }
+.vt-h b { flex:1; font-size:15.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vt-chip { display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:700; color:var(--c); padding:3px 9px; border-radius:99px; background:color-mix(in srgb, var(--c) 14%, var(--card)); white-space:nowrap; }
+.vt-chip ha-icon { --mdc-icon-size:14px; }
+.vt-need, .vt-ok { display:flex; align-items:center; gap:10px; }
+.vt-need ha-icon { --mdc-icon-size:26px; color:#0891b2; }
+.vt-need span, .vt-run { display:flex; flex-direction:column; }
+.vt-need small, .vt-run small { color:var(--muted); font-size:12.5px; }
+.vt-ok { color:var(--muted); font-size:13px; }
+.vt-ok ha-icon { color:#22c55e; }
+.vt-run { gap:4px; }
+.vt-bar { height:8px; border-radius:99px; background:var(--card2); overflow:hidden; }
+.vt-bar i { display:block; height:100%; border-radius:inherit; background:#22c55e; transition:width .5s; }
+.vt-run.done .vt-bar i { background:#ef4444; }
+.vt-run.done b { color:#ef4444; }
+.vt-f { display:flex; flex-wrap:wrap; gap:8px 16px; }
+.vt-f span { display:flex; flex-direction:column; min-width:0; }
+.vt-f b { font-size:15px; font-variant-numeric:tabular-nums; }
+.vt-f span.on b { color:var(--c); }
+.vt-f small { font-size:11.5px; color:var(--muted); }
 .rw-info { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:12px; color:var(--muted); }
 .rw-info span { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; min-width:0; }
 .rw-info span.on { color:var(--c); font-weight:600; }
