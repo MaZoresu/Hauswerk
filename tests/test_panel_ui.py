@@ -778,3 +778,26 @@ def test_rollwerk_kompakt(panel):
     panel.click('[data-action="rw-view"][data-v="detail"]')
     assert panel.has(".rw-c")
     panel.ok("Rollwerk kompakt")
+
+
+def test_tablet_gleiche_leisten_und_kacheln(browser, server):
+    """Tablet: alle Kopfleisten gleich hoch; Räume und Rollläden im gleichen Raster mit 2 Reihen je Seite."""
+    page = browser.new_page(viewport={"width": 1180, "height": 760})
+    page.goto(f"{server}/dev/vorschau.html?tablet")
+    page.wait_for_function(f"{EL} && {EL}._data")
+    p = Panel(page)
+    p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    heights, tiles = {}, {}
+    for view in ("overview", "shutters", "kwflow"):
+        p.view(view)
+        p.wait(300)
+        heights[view] = p.js(f"Math.round({EL}.shadowRoot.querySelector('.brief').getBoundingClientRect().height)")
+        if view != "kwflow":
+            tiles[view] = p.js(f"""(() => {{ const g = {EL}.shadowRoot.querySelector('.tgrid'); const r = g.firstElementChild.getBoundingClientRect();
+                const m = {EL}.shadowRoot.getElementById('main').getBoundingClientRect();
+                const rows = new Set([...g.children].map((c) => Math.round(c.getBoundingClientRect().top)).filter((t) => t >= m.top - 1 && t < m.bottom));
+                return [Math.round(r.width), Math.round(r.height), rows.size]; }})()""")
+    assert len(set(heights.values())) == 1, heights
+    assert abs(tiles["overview"][0] - tiles["shutters"][0]) <= 2 and abs(tiles["overview"][1] - tiles["shutters"][1]) <= 2, tiles
+    assert all(t[2] <= 2 for t in tiles.values()), tiles
+    page.close()

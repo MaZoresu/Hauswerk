@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.46.4";
+const VERSION = "0.47.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1123,6 +1123,8 @@ class HauswerkPanel extends HTMLElement {
       tin.style.width = `${W / z}px`;
       tin.style.transform = "";
       tin.style.clipPath = "";
+      // Kopfleisten unabhängig von der Seitengröße: überall gleich hoch und gleich groß
+      tin.querySelectorAll(".brief").forEach((b) => { b.style.zoom = 1 / z; });
     };
     // Reihen: Kacheln, die nicht geteilt werden dürfen, und die Seitenumbrüche dazwischen
     const pagesOf = () => {
@@ -1156,6 +1158,44 @@ class HauswerkPanel extends HTMLElement {
       pages.push([start, Math.max(end, start)]);
       return { pages, total: tin.getBoundingClientRect().height };
     };
+    // Kachel-Raster (Räume, Rollläden detailliert): feste Spalten, genau 2 Reihen je Seite, in beiden Modulen gleich
+    const grid = rows && W >= 900 ? tin.querySelector(".rooms:not(.compact), .rw-grid.tgrid") : null;
+    if (grid) {
+      grid.classList.add("tgrid");
+      const cols = Math.max(2, Math.min(4, Math.floor(W / 380)));
+      const gapPx = 12;
+      const fits = (z) => {
+        base(z);
+        tin.style.height = "auto";
+        tin.style.columnWidth = "auto";
+        grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+        grid.style.gridAutoRows = "auto";
+        const top = grid.getBoundingClientRect().top - tin.getBoundingClientRect().top;
+        const maxT = Math.max(0, ...[...grid.children].map((c) => c.getBoundingClientRect().height));
+        return { ok: top + 2 * maxT + gapPx * z <= H + 1, top };
+      };
+      // gleiche Größe für Heizwerk und Rollwerk: die kleinere der beiden passenden Stufen
+      let zFit = zs[zs.length - 1];
+      for (const z of zs) if (fits(z).ok) { zFit = z; break; }
+      this._tTileZ = { ...(this._tTileZ || {}), [tab]: zFit };
+      const z = Math.min(...Object.values(this._tTileZ));
+      const { top } = fits(z);
+      const rowH = (H - top - gapPx * z) / 2;
+      grid.style.gridAutoRows = `${rowH / z}px`;
+      const r = pagesOf();
+      this._tRows = r;
+      this._tFit = { ...(this._tFit || {}), [tab]: { z, k: 1, n: r.pages.length, key: `${W}x${H}x${f}` } };
+      this._tZoom = { ...(this._tZoom || {}), [tab]: z };
+      this._tRowMode = true;
+      const n = r.pages.length;
+      this._tPages = n;
+      const page = Math.min(this._tPage[tab] || 0, n - 1);
+      this._tPage[tab] = page;
+      this._tShow(page);
+      const dots = this.shadowRoot.getElementById("tdots");
+      if (dots) dots.innerHTML = n > 1 ? Array.from({ length: n }, (_, k) => `<button class="${k === page ? "on" : ""}" data-action="tpage" data-i="${k}" aria-label="Seite ${k + 1}"></button>`).join("") : "";
+      return;
+    }
     const layout = (z, k) => {
       base(z);
       if (rows) {
@@ -3953,7 +3993,7 @@ class HauswerkPanel extends HTMLElement {
       if (!groups.has(area)) groups.set(area, []);
       groups.get(area).push(c);
     }
-    const tile = (c) => {
+    const tile = (c, areaLabel = "") => {
       const p = this._rwPos(c.st);
       const bad = !c.st || ["unavailable", "unknown"].includes(c.st.state);
       const moving = c.st?.state === "opening" ? "fährt hoch" : c.st?.state === "closing" ? "fährt runter" : "";
@@ -3975,7 +4015,7 @@ class HauswerkPanel extends HTMLElement {
         <article class="card rw-c ${bad ? "bad" : ""}" data-action="pop-open" data-pop="rwpos:${esc(c.id)}" role="button" tabindex="0" title="Höhe einstellen">
           <div class="rw-top">
             <span class="sr-ic" style="--c:${p != null && p <= 5 ? "#64748b" : "#0ea5e9"}"><ha-icon icon="${icon}"></ha-icon></span>
-            <span class="grow"><b>${esc(this._entityName(c.id))}</b><small>${esc(posTxt)}${why ? ` · ${esc(why)}` : ""}</small></span>
+            <span class="grow">${areaLabel ? `<small class="rw-al">${esc(areaLabel)}</small>` : ""}<b>${esc(this._entityName(c.id))}</b><small>${esc(posTxt)}${why ? ` · ${esc(why)}` : ""}</small></span>
             ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="rwc:${esc(c.id)}" title="Einstellungen dieses Rollladens"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
           </div>
           ${c.cfg.auto !== false && this._rwStatus?.timelines?.[c.cfg.profile || "standard"] ? `<div class="rw-next">${this._rwDayBar(this._rwStatus.timelines[c.cfg.profile || "standard"], true)}${c.rs.next ? `<small><ha-icon icon="mdi:clock-outline"></ha-icon>Als Nächstes: ${esc(c.rs.next)}</small>` : ""}</div>` : ""}
@@ -4011,6 +4051,11 @@ class HauswerkPanel extends HTMLElement {
         <button class="${compact ? "" : "on"}" data-action="rw-view" data-v="detail" title="Detailliert"><ha-icon icon="mdi:view-agenda-outline"></ha-icon><span>Detailliert</span></button>
         <button class="${compact ? "on" : ""}" data-action="rw-view" data-v="compact" title="Kompakt"><ha-icon icon="mdi:view-grid-outline"></ha-icon><span>Kompakt</span></button>
       </div></div>`;
+    // Tabletmodus, detailliert: ein gemeinsames Raster (2 Reihen je Seite, wie die Heizwerk-Räume), Raum steht in der Kachel
+    if (this._tablet && !compact) {
+      const sorted = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"));
+      return head + tog + `<div class="rw-grid tgrid">${sorted.map(([area, list]) => list.map((c) => tile(c, area)).join("")).join("")}</div>`;
+    }
     return head + tog + [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"))
       .map(([area, list]) => `<div class="rw-area ${compact ? "compact" : ""}"><h3>${esc(area)}</h3><div class="rw-grid ${compact ? "compact" : ""}">${list.map(compact ? mini : tile).join("")}</div></div>`).join("");
   }
@@ -9852,6 +9897,29 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .tstart small { display:block; color:var(--muted); }
 
 /* ---------- Lage-Kachel (Kopf der Module) ---------- */
+/* Tabletmodus: alle Kopfleisten gleich schmal (Höhe wie Kraftwerk) */
+:host([tablet]) .brief { height:66px; box-sizing:border-box; overflow:hidden; display:flex; flex-direction:column; justify-content:center; }
+:host([tablet]) .brief .br-main { display:flex; align-items:center; gap:12px; min-width:0; }
+:host([tablet]) .brief .br-line { flex-wrap:nowrap; min-width:0; gap:10px; }
+:host([tablet]) .brief .br-h { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
+:host([tablet]) .brief .br-h span { overflow:hidden; text-overflow:ellipsis; }
+:host([tablet]) .brief .br-big { font-size:19px !important; line-height:1.1; }
+:host([tablet]) .brief .br-big span { font-size:11px !important; }
+:host([tablet]) .brief .br-top { min-height:0; }
+:host([tablet]) .brief .wx b { font-size:15px; }
+:host([tablet]) .brief .wx ha-icon { --mdc-icon-size:20px !important; }
+:host([tablet]) .brief.hero { padding-top:8px !important; padding-bottom:8px !important; }
+:host([tablet]) .brief .br-lines { flex-wrap:nowrap !important; overflow:hidden; margin-top:4px !important; }
+:host([tablet]) .brief .br-l { white-space:nowrap; flex:none; }
+:host([tablet]) .brief .wx { padding:0 !important; }
+:host([tablet]) .brief .wx div { display:flex; align-items:baseline; gap:6px; }
+:host([tablet]) .brief .wx small { display:none; }
+:host([tablet]) .brief .wx small:first-of-type { display:inline; }
+:host([tablet]) .brief .rw-all .secondary { padding:5px 10px !important; font-size:13px; }
+/* Tabletmodus: Kachel-Raster mit 2 Reihen je Seite – Räume und Rollläden gleich proportioniert */
+:host([tablet]) .tgrid { display:grid !important; gap:12px; }
+:host([tablet]) .tgrid > * { height:100%; box-sizing:border-box; overflow:hidden; width:auto !important; margin:0; }
+.rw-al { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
 /* Tabletmodus: dezent – eine Zeile mit Stand, Hinweise als kleine Zeile, ohne Hintergrundbild */
 :host([tablet]) .brief { padding:10px 14px !important; margin-bottom:10px; border-left-width:3px !important; background:var(--card) !important; color:var(--text) !important; box-shadow:none !important; border-radius:14px; }
 :host([tablet]) .brief.hero::before, :host([tablet]) .brief.hero::after { display:none !important; }

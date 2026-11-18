@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.47.0 – 2026-11-18
+
+### Geändert (Tabletmodus)
+- **Kopfleisten schmal und überall gleich hoch** – so schmal wie die von Kraftwerk, unabhängig von der Seitengröße gleich groß beschriftet: Stand in einer Zeile, darunter bis zu zwei kurze Hinweise.
+- **Kacheln in einem festen Raster mit 2 Reihen je Seite.** Räume (Heizwerk) und Rollläden (Rollwerk, detailliert) haben dieselbe Spaltenzahl und dieselben Proportionen; weitere Kacheln stehen auf Seite 2. Rollläden stehen dafür in einem gemeinsamen Raster, der Raum steht klein über dem Namen.
+
 ## 0.46.4 – 2026-11-18
 
 ### Geändert
