@@ -801,3 +801,27 @@ def test_tablet_gleiche_leisten_und_kacheln(browser, server):
     assert abs(tiles["overview"][0] - tiles["shutters"][0]) <= 2 and abs(tiles["overview"][1] - tiles["shutters"][1]) <= 2, tiles
     assert all(t[2] <= 2 for t in tiles.values()), tiles
     page.close()
+
+
+def test_neue_widgets_lage_ereignisse_termine(panel):
+    panel.js(f"""(kw) => {{ Object.assign({EL}._data.settings, kw, {{ tablet_calendars: ['calendar.muell'] }});
+        {EL}._hass.callApi = async () => [{{ summary: 'Restmüll', start: {{ date: new Date().toISOString().slice(0, 10) }} }},
+                                           {{ summary: 'Papier', start: {{ date: new Date(Date.now() + 864e5).toISOString().slice(0, 10) }} }}];
+        {EL}._data.settings.start_widgets = [{{ id: 'a', type: 'lage', size: 'm' }}, {{ id: 'b', type: 'events', size: 'm' }},
+          {{ id: 'c', type: 'calendar', size: 'm' }}, {{ id: 'd', type: 'values', size: 'm' }}]; }}""", KW)
+    panel.view("start")
+    panel.wait(400)
+    panel.js(f"{EL}._renderMain()")
+    lage = panel.js(f"[...{EL}.shadowRoot.querySelectorAll('.wl')].map((x) => x.dataset.tab)")
+    assert lage == ["overview", "shutters", "kwflow"], lage
+    assert "Restmüll" in panel.js(f"{EL}.shadowRoot.querySelector('.wcal').innerText")
+    assert "Papier" in panel.js(f"{EL}.shadowRoot.querySelector('.wcal').innerText")
+    ev = panel.js(f"{EL}.shadowRoot.querySelector('.wev').innerText")
+    assert "Restmüll" in ev and "Rollläden" in ev, ev
+    # Werte leer: Vorschlag übernehmen
+    panel.click('[data-action="w-sugg"]')
+    panel.wait(300)
+    assert len(panel.js(f"{EL}._data.settings.start_widgets.find((w) => w.type === 'values').entities")) >= 1
+    panel.click('.wl[data-tab="shutters"]')
+    assert panel.js(f"{EL}._tab") == "shutters"
+    panel.ok("neue Widgets")

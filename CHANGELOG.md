@@ -2,6 +2,22 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.48.0 – 2026-11-18
+
+### Neue Widgets
+- **Lage:** der Stand jedes Moduls in einem Satz (wie die Kopfkacheln) mit Farbe für den Zustand und dem wichtigsten Hinweis – Tipp öffnet das Modul.
+- **Nächste Ereignisse:** eine Zeitleiste aus Heizwechseln („08:00 Eco – Bad“), Rollladen-Fahrten („16:30 Rollläden: schließt – Küche …“) und Terminen.
+- **Termine:** heute und morgen (groß: 7 Tage) aus gewählten Kalendern, Müll-Termine mit eigenem Symbol und Farbe (Rest, Bio, Papier, Gelb, Glas, Sperrmüll).
+  Kalender je Widget wählbar; leer = die Kalender aus Darstellung › Tabletmodus.
+
+### Verbessert
+- **Werte und Shortcuts leer:** Vorschläge (z. B. Außentemperatur, Strom, Solar, Luftfeuchte bzw. Szenen und Skripte) mit „Übernehmen“, daneben „Selbst wählen“.
+- **Rollläden:** statt drei Zahlenfeldern je Raum kleine Fenster mit Stellung (Rand farbig bei Beschattung, von Hand, Tür offen) und die nächste Fahrt; Tipp auf ein Fenster öffnet „Höhe einstellen“.
+- **Heizwerk:** zeigt den Stand-Satz der Kopfkachel und den nächsten Wechsel statt eines eigenen Kurzurteils.
+- **Energie (mittel):** Mini-Fluss Solar → Haus → Netz mit Pfeilen, darunter Akku und Tageswerte.
+- **Wetter:** Regen-Hinweis aus der Stunden-Vorhersage, z. B. „ab 14 Uhr Regen“ bzw. „Regen bis etwa 16 Uhr“.
+- Leere Widgets zeigen „Einrichten“ statt nur eines Hinweises.
+
 ## 0.47.1 – 2026-11-18
 
 ### Geändert
