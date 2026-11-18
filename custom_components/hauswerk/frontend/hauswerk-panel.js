@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.46.3";
+const VERSION = "0.46.4";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -9807,12 +9807,12 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .sv-wx { display:flex; align-items:center; gap:12px; font-size:min(2.8vw, 4vh); color:#cbd5e1; }
 .sv-wx ha-icon { --mdc-icon-size:min(5vw, 7vh); }
 .sv-wx b { font-size:min(4.2vw, 6vh); font-weight:500; color:#e5e7eb; }
-.sv-mods { display:flex; flex-wrap:wrap; justify-content:center; gap:12px 34px; }
-.sv-mod { display:flex; align-items:center; gap:16px; font-size:min(2.6vw, 3.6vh); color:#cbd5e1; }
-.sv-logo { display:inline-flex; width:min(3.6vw, 5vh); height:min(3.6vw, 5vh); }
+.sv-mods { display:flex; flex-wrap:wrap; justify-content:center; gap:10px 28px; margin-bottom:min(2.4vh, 22px); }
+.sv-mod { display:flex; align-items:center; gap:12px; font-size:min(1.9vw, 2.7vh); color:#cbd5e1; }
+.sv-logo { display:inline-flex; width:min(2.6vw, 3.6vh); height:min(2.6vw, 3.6vh); }
 .sv-logo .mlogo, .sv-logo svg { width:100%; height:100%; border-radius:22%; filter:saturate(.7); }
 .sv-i { display:inline-flex; align-items:center; gap:5px; }
-.sv-i ha-icon { --mdc-icon-size:min(2.8vw, 3.9vh); color:#94a3b8; }
+.sv-i ha-icon { --mdc-icon-size:min(2vw, 2.8vh); color:#94a3b8; }
 .sv-i b { font-weight:600; font-variant-numeric:tabular-nums; }
 .sv-next ha-icon:nth-of-type(2) { margin-left:4px; }
 .sv-facts { display:flex; flex-wrap:wrap; justify-content:center; gap:10px 26px; font-size:min(2.2vw, 3.2vh); color:#94a3b8; }

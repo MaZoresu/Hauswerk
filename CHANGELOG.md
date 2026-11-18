@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.46.4 – 2026-11-18
+
+### Geändert
+- **Bildschirmschoner:** Die Zeile mit den Modulen (Logos, Symbole, Zahlen) ist kleiner, und die Hinweise darunter haben mehr Abstand.
+
 ## 0.46.3 – 2026-11-18
 
 ### Neu
