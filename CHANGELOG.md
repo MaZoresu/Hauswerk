@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.56.1 – 2026-11-20
+
+### Behoben
+- Korrektur-Knöpfe der Fertigerkennung („Gesehen“, „Läuft noch“ …) hätten in Home Assistant einen Fehler gemeldet (Feldname kollidierte mit der Nachrichtennummer).
+- „Aus dem Verlauf lernen“: Recorder als Abhängigkeit eingetragen (hassfest).
+
 ## 0.56.0 – 2026-11-20
 
 ### Neu – Kraftwerk: lernende Fertigerkennung

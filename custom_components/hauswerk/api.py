@@ -580,7 +580,7 @@ async def ws_calendar_import(hass: HomeAssistant, connection, msg) -> None:
 
 @websocket_api.websocket_command({
     vol.Required("type"): "hauswerk/kraftwerk/appliance/action",
-    vol.Required("id"): str,
+    vol.Required("device"): str,
     vol.Required("action"): vol.In(["still_running", "finished", "no_run", "ack", "reset", "learn_history"]),
 })
 @websocket_api.async_response
@@ -592,7 +592,7 @@ async def ws_appliance_action(hass: HomeAssistant, connection, msg) -> None:
     if msg["action"] in ("reset", "learn_history") and not _may_edit(hass, connection):
         connection.send_error(msg["id"], "unauthorized", "Nur mit Berechtigung zum Ändern")
         return
-    result = await kw.appliances.async_action(msg["id"], msg["action"], by=_who(connection))
+    result = await kw.appliances.async_action(msg["device"], msg["action"], by=_who(connection))
     if not result.get("ok"):
         connection.send_error(msg["id"], "not_possible", result.get("error") or "Nicht möglich")
         return

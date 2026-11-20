@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.56.0";
+const VERSION = "0.56.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4361,7 +4361,7 @@ class HauswerkPanel extends HTMLElement {
 
   async _appAct(id, action) {
     try {
-      const res = await this._ws({ type: "hauswerk/kraftwerk/appliance/action", id, action });
+      const res = await this._ws({ type: "hauswerk/kraftwerk/appliance/action", device: id, action });
       const c = (this._data.settings.kw_appliances || []).find((x) => x.id === id);
       this._toast(action === "learn_history" ? `${c?.name}: ${res.runs} Durchläufe aus dem Verlauf gelernt` : `${c?.name}: ${res.text}`);
     } catch (err) {

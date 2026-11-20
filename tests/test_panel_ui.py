@@ -1055,7 +1055,7 @@ def test_kraftwerk_geraete_fertigerkennung(panel):
     p.click('[data-action="app-act"][data-id="trockner"][data-a="ack"]')
     p.wait(300)
     act = [m for m in p.sent() if m["type"] == "hauswerk/kraftwerk/appliance/action"][-1]
-    assert act["id"] == "trockner" and act["action"] == "ack"
+    assert act["device"] == "trockner" and act["action"] == "ack"
     # neues Gerät einrichten
     p.js(f"() => {{ {EL}._openPop('kwapp:new'); }}")
     p.wait()
