@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.68.0";
+const VERSION = "0.68.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4375,10 +4375,13 @@ class HauswerkPanel extends HTMLElement {
       const pct = this._lwPct(l);
       const dim = l.id.startsWith("light.") && (l.ls.modes || []).some((m) => m !== "onoff");
       const f = [];
-      if (l.ls.ccu) f.push(`<ha-icon icon="mdi:link-variant" style="color:#0ea5e9" title="HmIP"></ha-icon>HmIP`);
+      const ccuMot = this._lwLinkPeers(l).some((x) => x.name === l.ls.ccu && x.kind === "motion");
+      if (l.ls.ccu) f.push(`<ha-icon icon="${ccuMot ? "mdi:motion-sensor" : "mdi:link-variant"}" style="color:#0ea5e9" title="HmIP"></ha-icon>HmIP`);
+      else if (o && l.ls.motion) f.push(`<ha-icon icon="mdi:motion-sensor" style="color:${C.ok}" title="Bewegung"></ha-icon>`);
       else if (l.ls.manual && l.cfg.auto !== false) f.push(`<ha-icon icon="mdi:hand-back-right-outline" style="color:${C.hand}" title="von Hand"></ha-icon>`);
       if (o && l.ls.off?.at) f.push(`<ha-icon icon="mdi:timer-outline" style="color:${C.ok}"></ha-icon><span data-lw-until="${esc(l.ls.off.at)}">${this._lwLeft(l.ls.off.at)}</span>`);
-      return `<div class="lwr"><ha-icon icon="${bad(l) ? "mdi:lightbulb-alert-outline" : o ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}" style="color:${bad(l) ? C.alert : this._lwColor(l)}"></ha-icon>
+      const mot = this._lwMotion(l);
+      return `<div class="lwr"><span class="lwr-b"><ha-icon icon="${bad(l) ? "mdi:lightbulb-alert-outline" : o ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}" style="color:${bad(l) ? C.alert : this._lwColor(l)}"></ha-icon>${mot ? `<span class="lw-mot" title="Schaltet über Bewegungsmelder: ${esc(mot.join(", "))}"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</span>
         <button class="lwr-n" data-action="pop-open" data-pop="lwbri:${esc(l.id)}"><b>${esc(this._lwName(l))}</b><small>${bad(l) ? "nicht erreichbar" : o ? `an${dim && pct != null ? ` · ${pct} %` : ""}` : "aus"}</small></button>
         ${f.length ? `<span class="lwr-f">${f.join("")}</span>` : ""}
         <button class="sbtn" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${o ? "off" : "on"}" ${bad(l) ? "disabled" : ""} title="${o ? "Aus" : "An"}"><ha-icon icon="mdi:power"></ha-icon></button></div>`;
@@ -12773,7 +12776,10 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .lw-room .lwr-list { display:flex; flex-direction:column; gap:2px; margin-top:8px; }
 .lw-room .lwr { display:flex; align-items:center; gap:8px; padding:6px 4px; border-top:1px solid var(--line); }
 .lw-room .lwr:first-child { border-top:none; }
-.lw-room .lwr > ha-icon { --mdc-icon-size:20px; flex:none; }
+.lw-room .lwr-b { position:relative; flex:none; display:grid; place-items:center; width:26px; height:26px; }
+.lw-room .lwr-b > ha-icon { --mdc-icon-size:20px; }
+.lw-room .lwr-b .lw-mot { width:15px; height:15px; right:-6px; bottom:-5px; }
+.lw-room .lwr-b .lw-mot ha-icon { --mdc-icon-size:10px !important; }
 .lw-room .lwr .lwr-n { all:unset; cursor:pointer; flex:1; min-width:0; display:flex; flex-direction:column; }
 .lw-room .lwr .lwr-n b { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .lw-room .lwr .lwr-n small { color:var(--muted); font-size:12px; }

@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.68.1 – 2026-11-20
+
+### Behoben (Lichtwerk)
+- **Ansicht „Räume“ ohne Melder-Symbol:** Die Leuchten-Zeilen zeigen jetzt wie die Kacheln das kleine Melder-Symbol an der Lampe. Schaltet ein HmIP-Bewegungsmelder, steht „HmIP“ mit Melder-Symbol statt des Verknüpfungs-Symbols; Bewegung aus dem Profil zeigt ebenfalls das Melder-Symbol.
+
 ## 0.68.0 – 2026-11-20
 
 ### Neu (Lichtwerk)

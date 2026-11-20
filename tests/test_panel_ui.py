@@ -1538,6 +1538,11 @@ def test_lichtwerk_raumansicht(panel):
     p.wait(300)
     m = [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/light/save"][-1]
     assert m["entity_id"] == "light.eingang" and m["light"] == {"profile": "flur", "auto": True}
+    # Melder-Symbol auch in der Raumansicht an der Leuchte, „HmIP“ mit Melder-Symbol
+    assert p.js(f"!!{EL}.shadowRoot.querySelector('#main .lw-room[data-area=\"Flur OG\"] .lwr-b .lw-mot')")
+    p.js(f"() => {{ Object.assign({EL}._lwStatus.lights['light.flur_og'], {{ state: 'on', ccu: 'Bewegung Flur OG' }}); {EL}._renderMain(); }}")
+    p.wait()
+    assert p.js(f"{EL}.shadowRoot.querySelector('#main .lw-room[data-area=\"Flur OG\"] .lwr-f ha-icon').getAttribute('icon')") == "mdi:motion-sensor"
     p.js("localStorage.removeItem('hauswerk_lw_view')")
 
 
