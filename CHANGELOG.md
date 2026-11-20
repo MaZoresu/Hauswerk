@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.57.1 – 2026-11-20
+
+### Geändert
+- **Rollwerk: Beschattung in der Tagesleiste nur, wenn sie heute wirklich zu erwarten ist** – sie läuft gerade, oder Außentemperatur (wie bei „Beschattung ab“) und Wetter passen: Wetterlage der Tagesvorhersage (sonst die aktuelle) sonnig oder teils bewölkt bzw. die Wetter-Bedingung des Profils. Bei Regen oder Bewölkung bleibt der orange Abschnitt weg, ebenso „Beschattung ab“ und „Als Nächstes: Beschattung“. In den Profil-Einstellungen zeigt die Leiste weiter, wann Beschattung möglich wäre.
+
 ## 0.57.0 – 2026-11-20
 
 ### Neu (Rollwerk-Kacheln)

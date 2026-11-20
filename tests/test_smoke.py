@@ -1298,6 +1298,14 @@ def test_rollwerk_zeiten_je_rollladen_und_beschattungstemperatur(hw):
         # Messwert fehlt: keine Beschattungsbereitschaft vortäuschen
         hass.set("sensor.aussen", "unavailable", {}, "Außen")
         assert rw.shade_temp_ok("cover.wz") is False
+        # Beschattung zu erwarten? Nur bei passender Temperatur und sonnigem Wetter
+        hass.set("sensor.aussen", "22", {"unit_of_measurement": "°C"}, "Außen")
+        rw._rt["cover.wz"]["shading"] = False
+        hass.set("weather.home", "rainy", {"temperature": 22}, "Wetter")
+        await haus.async_save_settings({"weather_entity": "weather.home"})
+        assert rw.shade_likely("cover.wz") is False
+        hass.set("weather.home", "sunny", {"temperature": 22}, "Wetter")
+        assert rw.shade_likely("cover.wz") is True
         # das Schließen hängt nicht an der Beschattungstemperatur
         assert rw.status()["covers"]["cover.wz"]["times"]["close"] is not None
         await rw.async_stop()

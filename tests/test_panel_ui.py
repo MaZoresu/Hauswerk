@@ -1090,3 +1090,15 @@ def test_rollwerk_zeiten_und_beschattung_nur_bei_waerme(panel):
     p.js(f"() => {{ for (const c of Object.values({EL}._rwStatus.covers)) c.shade_temp_ok = false; {EL}._renderMain(); }}")
     p.wait()
     assert "Beschattung ab" not in infos()
+
+
+def test_rollwerk_tagesleiste_beschattung_nur_wenn_zu_erwarten(panel):
+    """Tagesleiste in der Kachel: orange Beschattung nur, wenn sie heute wirklich zu erwarten ist."""
+    p = panel
+    p.view("shutters")
+    p.js(f"() => {{ const tl = {EL}._rwStatus.timelines; for (const k in tl) tl[k].shade = [['11:00', '15:00']]; for (const c of Object.values({EL}._rwStatus.covers)) c.shade_likely = false; {EL}._renderMain(); }}")
+    p.wait()
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.rw-c .d-shade').length") == 0
+    p.js(f"() => {{ for (const c of Object.values({EL}._rwStatus.covers)) c.shade_likely = true; {EL}._renderMain(); }}")
+    p.wait()
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.rw-c .d-shade').length") > 0

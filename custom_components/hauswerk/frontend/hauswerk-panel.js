@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.57.0";
+const VERSION = "0.57.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2555,7 +2555,7 @@ class HauswerkPanel extends HTMLElement {
       const [t, what] = split(text);
       return `<div class="wrow"><em class="wtime">${esc(t)}</em><span class="grow"><b>${esc(what)}</b><small>${esc(names.join(", "))}</small></span></div>`;
     }).join("");
-    const bars = (z === "l" ? pids : pids.slice(0, 1)).map((p) => `<div class="wtl">${pids.length > 1 || z === "l" ? `<small>${esc(this._rwProfName(p))}</small>` : ""}${this._rwDayBar(tls[p], z !== "l")}</div>`).join("");
+    const bars = (z === "l" ? pids : pids.slice(0, 1)).map((p) => `<div class="wtl">${pids.length > 1 || z === "l" ? `<small>${esc(this._rwProfName(p))}</small>` : ""}${this._rwDayBar(tls[p], z !== "l", Object.values(this._rwStatus?.covers || {}).some((rs) => (rs.profile || "standard") === p && rs.shade_likely !== false))}</div>`).join("");
     return `${bars}${list.length ? `<div class="wlist">${rows}</div>` : `<div class="wok" style="--c:#94a3b8"><ha-icon icon="mdi:weather-night"></ha-icon>Heute keine Fahrten mehr</div>`}`;
   }
 
@@ -4718,7 +4718,7 @@ class HauswerkPanel extends HTMLElement {
     if (rs.sun_on) out.push(["mdi:white-balance-sunny", rs.shading ? "Sonne – beschattet" : "Sonne aufs Fenster", "#f59e0b", "Die Sonne steht gerade in der Fensterrichtung des Profils"]);
     else {
       // nur, wenn die Außentemperatur-Bedingung der Beschattung gerade erfüllt ist (sonst ganz ausblenden)
-      const next = rs.shade_temp_ok === true ? (tl.shade || []).find(([a]) => a && a > nowHm) : null;
+      const next = rs.shade_temp_ok === true && rs.shade_likely !== false ? (tl.shade || []).find(([a]) => a && a > nowHm) : null;
       if (next) out.push(["mdi:weather-sunny", `Beschattung ab ${next[0]}`, "#f97316", `voraussichtlich ${next[0]}–${next[1]}`]);
     }
     // letzte Fahrt
@@ -4824,7 +4824,7 @@ class HauswerkPanel extends HTMLElement {
             <span class="grow">${areaLabel ? `<small class="rw-al">${esc(areaLabel)}</small>` : ""}<b>${esc(this._entityName(c.id))}</b><small>${esc(posTxt)}${why ? ` · ${esc(why)}` : ""}</small></span>
             ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="rwc:${esc(c.id)}" title="Einstellungen dieses Rollladens"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
           </div>
-          ${c.cfg.auto !== false && this._rwStatus?.timelines?.[c.cfg.profile || "standard"] ? `<div class="rw-next">${this._rwDayBar(this._rwStatus.timelines[c.cfg.profile || "standard"], true)}${this._rwTimes(c)}</div>` : ""}
+          ${c.cfg.auto !== false && this._rwStatus?.timelines?.[c.cfg.profile || "standard"] ? `<div class="rw-next">${this._rwDayBar(this._rwStatus.timelines[c.cfg.profile || "standard"], true, c.rs.shade_likely !== false)}${this._rwTimes(c)}</div>` : ""}
           ${flags.length ? `<div class="rw-flags">${flags.map(([i, l, k]) => `<span style="--c:${k}"><ha-icon icon="${i}"></ha-icon>${l}</span>`).join("")}${c.rs.manual ? `<button class="link" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="resume"><ha-icon icon="mdi:robot-outline"></ha-icon>Automatik übernimmt</button>` : ""}</div>` : ""}
           ${info.length && !this._tablet ? `<div class="rw-info">${infoHtml}</div>` : ""}
           <div class="rw-ctl">
@@ -4944,8 +4944,9 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Tagesleiste: Nacht, offen, Beschattung möglich, jetzt-Strich und Zeiten darunter. */
-  _rwDayBar(tl, small = false) {
+  _rwDayBar(tl, small = false, shade = true) {
     if (!tl) return "";
+    if (!shade) tl = { ...tl, shade: [] };
     const m = (hm) => (hm ? Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5)) : null);
     const pc = (x) => `${((x / 1440) * 100).toFixed(2)}%`;
     const o = m(tl.open), c = m(tl.close);

@@ -1340,6 +1340,30 @@ class Rollwerk:
         hits = [ok(k) for k in need]
         return all(hits) if need & and_l else any(hits)
 
+    SUNNY = ("sunny", "partlycloudy", "clear")
+
+    def shade_likely(self, entity_id: str) -> bool:
+        """Findet heute wirklich Beschattung statt? Läuft sie gerade – oder passen Außentemperatur und Wetter.
+
+        Wetter: Wetterlage der Tagesvorhersage (sonst die aktuelle); mit Wetter-Bedingung im Profil genau diese,
+        sonst sonnig/teils bewölkt. Ohne Wetterangabe keine Beschattung vortäuschen.
+        """
+        prof = self.profile(entity_id)
+        rt = self._rt.get(entity_id) or {}
+        if "shading" not in set(prof.get("features") or []):
+            return False
+        if rt.get("shading"):
+            return True
+        if not self.shade_temp_ok(entity_id):
+            return False
+        ent = prof.get("forecast_entity") or self.haus.weather_entity() or ""
+        weather = self.hass.states.get(ent)
+        cond = (self._fc.get(ent) or {}).get("condition") or (weather.state if weather is not None else None)
+        if not cond or cond in ("unknown", "unavailable"):
+            return False
+        wanted = prof.get("weather_conditions") or []
+        return cond in wanted if wanted else cond in self.SUNNY
+
     def timeline(self, pid: str) -> dict[str, Any]:
         """Voraussichtlicher Tag eines Profils: öffnen, Beschattung (möglich), schließen."""
         prof = {**PROFILE_DEFAULTS, **(self.profiles.get(pid) or {})}
@@ -1440,9 +1464,13 @@ class Rollwerk:
                 "last": (self._persist.get("last") or {}).get(entity_id),
                 "times": self.cover_times(entity_id, now_min),
                 "shade_temp_ok": self.shade_temp_ok(entity_id),
+                "shade_likely": self.shade_likely(entity_id),
                 "want": rt.get("blocked_target") if rt.get("blocked") else rt.get("target"),
                 "dev": self._device_health(entity_id),
-                "next": self.next_event(timelines.get(cfg.get("profile") or "standard") or {}, now_min) if cfg.get("auto", True) else None,
+                # „Als Nächstes“: Beschattung nur, wenn sie heute wirklich zu erwarten ist
+                "next": self.next_event(
+                    (lambda tl: tl if self.shade_likely(entity_id) else {**tl, "shade_min": []})(timelines.get(cfg.get("profile") or "standard") or {}),
+                    now_min) if cfg.get("auto", True) else None,
             }
         return {
             "covers": covers,
