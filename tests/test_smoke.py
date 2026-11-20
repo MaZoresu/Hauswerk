@@ -1451,3 +1451,39 @@ def test_benachrichtigung_ausbau(hw):
         assert res[0]["ok"] and hass.calls[-1][2]["message"] == "Fenster schließen. Bad: genug gelüftet"
 
     asyncio.run(run())
+
+
+def test_heizplan_ueberfuehren_und_ursache(hw):
+    """Alte Pläne mit Überschneidungen werden eindeutig (Protokoll), Ursache und Tagesablauf wie die Steuerung."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 16, 16, 30, tzinfo=timezone.utc)  # Mo 17:30 Ortszeit
+        STORES["hauswerk.heizen"] = {"rooms": {"wz": {"id": "wz", "name": "Wohnzimmer", "type": "heizkoerper", "comfort": 21, "eco": 18,
+                                              "climates": ["climate.wz"], "enabled": True,
+                                              "schedule": [{"start": "06:00", "end": "22:00", "days": [0, 1, 2, 3, 4]},
+                                                           {"start": "17:00", "end": "21:00", "days": [0, 1, 2, 3, 4], "temp": 22.0}]}},
+                            "plans": {}, "settings": {}}
+        hass = Hass()
+        hass.set("climate.wz", "heat", {"current_temperature": 20.0, "temperature": 21.0}, "Thermostat WZ")
+        log, haus, ctl = await _setup(hw, hass)
+        await ctl.async_start()
+        sched = ctl.rooms["wz"]["schedule"]
+        assert any(e["title"] == "Heizpläne bereinigt" for e in log.entries)
+        assert {"start": "17:00", "end": "21:00", "days": [0, 1, 2, 3, 4], "temp": 22.0} in sched
+        res = ctl.status()["rooms"]["wz"]
+        assert res["target"] == 22.0 and res["cause"] == "Heizplan: Komfort 17:00–21:00 (eigene 22,0 °C)"
+        assert res["plan_target"] == 22.0 and res["plan_label"].startswith("Komfort 17:00–21:00")
+        today = [(s["start"], s["end"], s["target"]) for s in res["plan_today"]]
+        assert today == [(0, 360, 18.0), (360, 1020, 21.0), (1020, 1260, 22.0), (1260, 1320, 21.0), (1320, 1440, 18.0)]
+        # Vorrang: niemand zu Hause → Abwesend, Ursache nennt Grenze und Plan
+        haus.settings["presence_force"] = "away"
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["wz"]
+        assert res["mode"] == "abwesend" and res["cause"] == "Niemand zu Hause – höchstens 17,0 °C (Plan: 22,0 °C)"
+        haus.settings["presence_force"] = None
+        await ctl.async_set_override("wz", 23.0, 1)
+        res = ctl.status()["rooms"]["wz"]
+        assert res["mode"] == "manuell" and res["cause"].startswith("Von Hand bis ") and res["plan_target"] == 22.0
+
+    asyncio.run(run())

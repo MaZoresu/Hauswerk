@@ -59,6 +59,10 @@ from .logic import (
     keyword_match,
     keywords,
     learn_rate,
+    block_conflicts,
+    block_value,
+    day_segments,
+    resolve_overlaps,
     extra_heat_rise,
     fireplace_phase,
     room_analysis,
@@ -194,6 +198,50 @@ class Heizen:
         self.vent_log: dict[str, list] = stored.get("vent_log") or {}
         # „Kamin in Betrieb“ von Hand: Raum → gilt bis (Zeitstempel); übersteht Neustarts
         self.fire_manual: dict[str, float] = stored.get("fire_manual") or {}
+        self._plans_fixed = self._fix_schedules()
+
+    @staticmethod
+    def _plan_today(room: dict, plan_min: int) -> list[dict]:
+        """Heutiger Plan-Tagesablauf (wie Zeitleiste und Steuerung rechnen): [{start, end, target, kind, custom}]."""
+        return day_segments(room.get("schedule") or [], (plan_min // 1440) % 7,
+                            float(room.get("comfort", 21)), float(room.get("eco", 18)))
+
+    def _fix_schedules(self) -> list[str]:
+        """Heizpläne ins neue Modell überführen: überschneidungsfreie Zeitfenster.
+        Früher galt bei Überschneidung der höhere Wert – genau so wird aufgelöst (Komfort vor Eco, höhere Temperatur
+        zuerst, bei Gleichstand das obere Fenster). Fenster mit Beginn = Ende (früher 24 Std.) werden bis Mitternacht
+        und ab Mitternacht geteilt. Rückgabe: geänderte Pläne (für das Protokoll)."""
+        changed = []
+
+        def fix(blocks: list[dict], comfort: float) -> list[dict] | None:
+            if not blocks:
+                return None
+            out, split = [], False
+            for b in blocks:
+                if b.get("start") == b.get("end") and b.get("start") not in ("00:00", None):
+                    days = b.get("days") or list(range(7))
+                    out.append({**b, "end": "24:00"})
+                    out.append({**b, "start": "00:00", "end": b["start"], "days": sorted({(d + 1) % 7 for d in days})})
+                    split = True
+                else:
+                    out.append(b)
+            if not split and not block_conflicts(out):
+                return None
+            value = lambda i: (out[i].get("kind") != "eco", block_value(out[i].get("kind") or "comfort", out[i].get("temp"), comfort, 0), -i)  # noqa: E731
+            return resolve_overlaps(out, value)
+
+        for room in self.rooms.values():
+            new = fix(room.get("schedule") or [], float(room.get("comfort") or 21))
+            if new is not None:
+                room["schedule"] = new
+                changed.append(f"Raum „{room.get('name')}“")
+        for plan in self.plans.values():
+            comforts = [float(r.get("comfort") or 21) for r in self.rooms.values() if r.get("plan_id") == plan.get("id")]
+            new = fix(plan.get("schedule") or [], max(comforts) if comforts else 21.0)
+            if new is not None:
+                plan["schedule"] = new
+                changed.append(f"Plan „{plan.get('name')}“")
+        return changed
 
     def _data(self) -> dict[str, Any]:
         return {
@@ -236,6 +284,12 @@ class Heizen:
         self._unsubs.append(self.hass.bus.async_listen(EVENT_CALL_SERVICE, self._on_service_call))
         # Änderungen von Anwesenheit, Urlaub und zentralen Einstellungen
         self._unsubs.append(self.haus.subscribe(self._schedule_eval))
+        if self._plans_fixed:
+            self.log.add("settings", "Heizpläne bereinigt",
+                         f"{', '.join(self._plans_fixed)}: sich überschneidende Zeitfenster aufgeteilt – wie bisher gilt dort der "
+                         "höhere Wert, jetzt eindeutig. Zeiten ohne Zeitfenster sind Eco.")
+            self._plans_fixed = []
+            self._save()
         await self._async_refresh_plan_calendars(force=True)
         await self.async_evaluate()
 
@@ -1336,6 +1390,8 @@ class Heizen:
                     else None
                 ),
                 heating=self._is_heating(room, room_temp, result["target"]),
+                cause=(result.get("cause") or "") + (f" bis {self._hm(override['until'])}" if override and override.get("until") else ""),
+                plan_today=self._plan_today(room, plan_min) if not room.get("schedule_entity") else None,
                 preheat_factor=self._lead_factor,
                 holiday=holiday,
                 window_virtual=virtual,

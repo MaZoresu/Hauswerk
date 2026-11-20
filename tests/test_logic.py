@@ -548,3 +548,50 @@ def test_kamin_zusaetzliche_waerme():
     rows = [{"comfort_n": 300, "under_min": 0, "measured_min": 400, "over_min": 0, "fire_min": 120, "heat_min": 100, "comfort_dev": 0.1, "valve_avg": 40}]
     a = L.room_analysis(rows, None)
     assert a["facts"]["fire_h"] == 2.0 and any(f["title"] == "Zusätzliche Wärme herausgerechnet" for f in a["findings"])
+
+
+def test_heizplan_modell():
+    """Komfort-Fenster (Komfortwert bzw. eigene Temperatur), Eco-Fenster, sonst Eco; Mitternacht; Ursache."""
+    blocks = [{"start": "06:00", "end": "08:00", "days": [0, 1, 2, 3, 4]},
+              {"start": "17:00", "end": "21:00", "days": [0, 1, 2, 3, 4], "temp": 22.0},
+              {"start": "12:00", "end": "13:00", "days": [0], "kind": "eco", "temp": 25}]
+    at = lambda d, h, m=0: L.plan_state(blocks, d * 1440 + h * 60 + m, 21.0, 18.0)  # noqa: E731
+    assert (at(0, 7)["target"], at(0, 7)["kind"], at(0, 7)["custom"]) == (21.0, "komfort", False)
+    assert (at(0, 18)["target"], at(0, 18)["custom"]) == (22.0, True)
+    assert (at(0, 10)["target"], at(0, 10)["kind"]) == (18.0, "eco")          # Lücke = Eco, ohne Eintrag
+    assert (at(0, 12, 30)["target"], at(0, 12, 30)["kind"]) == (18.0, "eco_window")  # Eco-Fenster: Temperatur zählt nicht
+    assert at(0, 8)["kind"] == "eco" and at(0, 21)["kind"] == "eco"           # Ende gehört nicht mehr dazu
+    assert at(5, 7)["kind"] == "eco"                                          # Samstag kein Fenster
+    assert L.plan_label(at(0, 18), 21.0) == "Komfort 17:00–21:00 (eigene 22,0 °C)"
+    assert L.plan_label(at(0, 10), 21.0) == "Eco (kein Zeitfenster)"
+    # Mitternacht: Sa 22:00 – So 02:00, So 23:00 – Mo 01:00 (Wochenwechsel)
+    night = [{"start": "22:00", "end": "02:00", "days": [5]}, {"start": "23:00", "end": "01:00", "days": [6]}]
+    assert L.plan_state(night, 6 * 1440 + 60, 21, 18)["kind"] == "komfort"
+    assert L.plan_state(night, 30, 21, 18)["kind"] == "komfort"               # Montag 00:30
+    assert L.plan_state(night, 90, 21, 18)["kind"] == "eco"
+    assert L.block_conflicts(night) == []
+    segs = L.day_segments(night, 6, 21, 18)
+    assert [(s["start"], s["end"], s["kind"]) for s in segs] == [(0, 120, "komfort"), (120, 1380, "eco"), (1380, 1440, "komfort")]
+    # „24:00“ und ganzer Tag
+    assert L.block_conflicts([{"start": "00:00", "end": "24:00", "days": [0]}]) == []
+    assert L.plan_state([{"start": "18:00", "end": "24:00", "days": [0]}], 23 * 60 + 59, 21, 18)["kind"] == "komfort"
+
+
+def test_heizplan_konflikte_und_aufloesen():
+    b = [{"start": "06:00", "end": "09:00", "days": [0, 1]}, {"start": "08:00", "end": "10:00", "days": [1], "temp": 23}]
+    c = L.block_conflicts(b)
+    assert len(c) == 1 and c[0]["i"] == 0 and c[0]["j"] == 1 and "Di 08:00–09:00" in c[0]["text"]
+    assert "gleich" in L.block_conflicts([{"start": "07:00", "end": "07:00", "days": [0]}])[0]["text"]
+    assert "kein Wochentag" in L.block_conflicts([{"start": "07:00", "end": "08:00", "days": []}])[0]["text"]
+    # über Mitternacht in den nächsten Tag hinein
+    n = [{"start": "22:00", "end": "07:00", "days": [6]}, {"start": "06:00", "end": "08:00", "days": [0]}]
+    assert "Mo 06:00–07:00" in L.block_conflicts(n)[0]["text"]
+    # Auflösen: Fenster 2 (höhere Temperatur) hat Vorrang → Fenster 1 am Di nur bis 08:00, am Mo unverändert
+    r = L.resolve_overlaps(b, lambda i: (b[i].get("temp") or 21, -i))
+    assert L.block_conflicts(r) == []
+    assert {"start": "06:00", "end": "09:00", "days": [0]} in r and {"start": "06:00", "end": "08:00", "days": [1]} in r
+    assert {"start": "08:00", "end": "10:00", "days": [1], "temp": 23} in r
+    # Wirkung wie früher (höherer Wert gewinnt)
+    for m in range(0, 7 * 1440, 15):
+        assert L.plan_state(r, m, 21, 18)["target"] == max(
+            [L.block_value("comfort", x.get("temp"), 21, 18) for x in b if L.plan_state([x], m, 21, 18)["kind"] == "komfort"] or [18])

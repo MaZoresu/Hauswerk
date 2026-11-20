@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
 from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_HEATING, MODULE_HOUSE, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
-from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, parse_hm
+from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, block_conflicts, parse_hm
 
 
 def _hm(value: Any) -> str:
@@ -44,9 +44,20 @@ BLOCK_SCHEMA = vol.Schema(
         vol.Required("end"): _hm,
         vol.Optional("days", default=[0, 1, 2, 3, 4, 5, 6]): [vol.All(vol.Coerce(int), vol.Range(min=0, max=6))],
         vol.Optional("temp"): _opt(TEMP),
+        # Art: comfort (Standard; Komfortwert oder eigene Temperatur) oder eco (ausdrücklich Eco)
+        vol.Optional("kind"): vol.In(["comfort", "eco"]),
     },
     extra=vol.REMOVE_EXTRA,
 )
+
+
+def _schedule_error(connection, msg, blocks: list[dict]) -> bool:
+    """Zeitfenster prüfen: keine Überschneidungen, Beginn ≠ Ende. True = Fehler gemeldet."""
+    problems = block_conflicts(blocks or [])
+    if problems:
+        connection.send_error(msg["id"], "schedule_conflict", "; ".join(p["text"] for p in problems[:3]))
+        return True
+    return False
 
 ROOM_SCHEMA = vol.Schema(
     {
@@ -420,6 +431,8 @@ async def ws_room_save(hass: HomeAssistant, connection, msg) -> None:
         return
     if room.get("id") and room["id"] not in ctl.rooms:
         room["id"] = None
+    if _schedule_error(connection, msg, room.get("schedule")):
+        return
     saved = await ctl.async_save_room(room, by=_who(connection))
     connection.send_result(msg["id"], saved)
 
@@ -569,6 +582,8 @@ async def ws_plan_save(hass: HomeAssistant, connection, msg) -> None:
         return
     if plan.get("id") and plan["id"] not in ctl.plans:
         plan["id"] = None
+    if _schedule_error(connection, msg, plan.get("schedule")):
+        return
     connection.send_result(msg["id"], await ctl.async_save_plan(plan, by=_who(connection)))
 
 

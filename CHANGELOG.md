@@ -2,6 +2,21 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.62.0 – 2026-11-20
+
+### Geändert – Heizpläne: klares Modell
+- **Eco ist der Standard.** Wo kein Zeitfenster steht, gilt der Eco-Wert – Lücken muss niemand mit Eco füllen.
+- **Komfort-Zeitfenster:** Sollwert = Komfortwert des Raums oder – optional – eine **eigene Temperatur nur für dieses Zeitfenster** (Komfort- und Eco-Wert bleiben unverändert). Beispiel: 06:00–08:00 Komfort, 17:00–21:00 Komfort mit 22 °C, sonst automatisch Eco.
+- **Eco-Zeitfenster** (neu, optional): ausdrücklich Eco, z. B. mittags in einem langen Komfort-Tag.
+- Ein Komfort-Zeitfenster legt nur den Sollwert fest – geheizt wird nur, wenn es kälter ist.
+- **Eindeutige Zeiten:** Ende gehört nicht mehr dazu (06:00–08:00 heißt bis 07:59). Endet ein Zeitfenster vor seinem Beginn (22:00–06:00), läuft es bis zum Folgetag – auch von Sonntag auf Montag. „24:00“ = Mitternacht. Beginn = Ende ist nicht erlaubt (außer 00:00–24:00).
+- **Keine Überschneidungen mehr:** Der Editor zeigt sie sofort am Zeitfenster („Zeitfenster 2 und 4 überschneiden sich am Mo 20:00–21:00“) und sperrt Speichern. Mit **„Zeitfenster X hat Vorrang“** wird das andere dort gekürzt bzw. geteilt. Auch Home Assistant lehnt überschneidende Pläne ab. „Zeitfenster hinzufügen“ schlägt eine freie Zeit vor.
+- **Bestehende Pläne werden überführt:** Überschneidende Zeitfenster werden beim Start so aufgeteilt, dass wie bisher der höhere Wert gilt – jetzt eindeutig. Steht im Protokoll („Heizpläne bereinigt“). Pläne ohne Überschneidung bleiben unverändert.
+
+### Neu – ein Sollwert, eine Ursache
+- **Zentrale Vorrang-Logik:** Automatik aus › Fenster offen › Entkalken/Sommerpause › Boost/von Hand › Eco erzwungen/Party/Urlaub/abwesend/Präsenzmelder › Heizplan (mit Vorheizen); danach „höchstens x °C absenken“ und „warm genug“.
+- **Ursache überall gleich:** Kachel („Heizplan: Komfort 17:00–21:00 (eigene 22,0 °C)“, „Niemand zu Hause – höchstens 17,0 °C (Plan: 22,0 °C)“, „Von Hand bis 19:30“), Schnellmenü („Warum 22 °C?“ mit Planwert) und Zeitleiste. Der Tagesbalken der Kachel kommt direkt aus der Steuerung; der Plan-Editor rechnet nach denselben Regeln (per Test abgeglichen).
+
 ## 0.61.0 – 2026-11-20
 
 ### Neu – Benachrichtigungen neu aufgebaut

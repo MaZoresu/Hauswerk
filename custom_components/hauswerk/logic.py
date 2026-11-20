@@ -103,39 +103,198 @@ def room_setting(room: dict, key: str) -> Any:
     return value
 
 
-def _week_blocks(blocks: list[dict]) -> list[tuple[int, int, float | None]]:
-    out: list[tuple[int, int, float | None]] = []
-    for block in blocks or []:
-        start = parse_hm(block["start"])
-        end = parse_hm(block["end"])
-        if end <= start:  # über Mitternacht
-            end += DAY_MIN
+# ---------------------------------------------------------------- Heizplan
+# Ein Heizplan ist eine Liste von Zeitfenstern {start, end, days, kind, temp}:
+#   kind "comfort" (Standard): Sollwert = eigene Temperatur des Fensters, sonst der Komfortwert des Raums
+#   kind "eco": ausdrücklich Eco (Eco-Wert des Raums)
+# Außerhalb aller Fenster gilt immer Eco. end <= start heißt: bis zum Folgetag (über Mitternacht); "24:00" = Mitternacht.
+# Fenster dürfen sich nicht überschneiden (block_conflicts); alte Pläne werden mit resolve_overlaps bereinigt.
+
+def _block_span(block: dict) -> tuple[int, int]:
+    start, end = parse_hm(block["start"]), parse_hm(block["end"])
+    if end <= start:
+        end += DAY_MIN
+    return start, end
+
+
+def _week_blocks(blocks: list[dict]) -> list[tuple[int, int, float | None, int, str]]:
+    """Wochen-Intervalle (Beginn, Ende, Temperatur, Index des Fensters, Art); Ende kann über die Woche hinausgehen."""
+    out: list[tuple[int, int, float | None, int, str]] = []
+    for i, block in enumerate(blocks or []):
+        start, end = _block_span(block)
         days = block.get("days")
         if days is None:
             days = list(range(7))
-        temp = block.get("temp")
-        for day in days:
-            out.append((int(day) * DAY_MIN + start, int(day) * DAY_MIN + end, temp))
+        kind = "eco" if block.get("kind") == "eco" else "comfort"
+        temp = block.get("temp") if kind == "comfort" else None
+        for day in sorted(set(int(d) for d in days)):
+            out.append((day * DAY_MIN + start, day * DAY_MIN + end, temp, i, kind))
     return out
 
 
-def schedule_at(blocks: list[dict], week_min: int, comfort: float, eco: float) -> tuple[float, bool]:
-    """Solltemperatur laut Heizplan und ob gerade ein Komfortblock aktiv ist."""
+def _covers(start: int, end: int, week_min: int) -> bool:
+    return start <= week_min < end or start <= week_min + WEEK_MIN < end
+
+
+def block_value(kind: str, temp: float | None, comfort: float, eco: float) -> float:
+    if kind == "eco":
+        return float(eco)
+    return float(temp) if temp is not None else float(comfort)
+
+
+def plan_state(blocks: list[dict], week_min: int, comfort: float, eco: float) -> dict:
+    """Wirksamer Sollwert laut Heizplan mit Ursache.
+
+    kind: "komfort" (Komfort-Fenster), "eco_window" (ausdrückliches Eco-Fenster) oder "eco" (kein Fenster = Eco).
+    custom: das Fenster hat eine eigene Temperatur. start/end: Wochenminuten des Fensters.
+    Überschneiden sich doch einmal Fenster (alte Daten), gewinnt Komfort vor Eco und der höhere Wert.
+    """
     week_min %= WEEK_MIN
-    best: float | None = None
-    for start, end, temp in _week_blocks(blocks):
-        if start <= week_min < end or start <= week_min + WEEK_MIN < end:
-            value = float(temp) if temp is not None else float(comfort)
-            best = value if best is None else max(best, value)
-    if best is None:
-        return float(eco), False
-    return best, True
+    hits = [(s, e, t, i, k) for s, e, t, i, k in _week_blocks(blocks) if _covers(s, e, week_min)]
+    if not hits:
+        return {"target": float(eco), "kind": "eco", "custom": False, "index": None, "start": None, "end": None}
+    s, e, t, i, k = max(hits, key=lambda h: (h[4] == "comfort", block_value(h[4], h[2], comfort, eco), -h[3]))
+    return {"target": block_value(k, t, comfort, eco), "kind": "komfort" if k == "comfort" else "eco_window",
+            "custom": k == "comfort" and t is not None, "index": i, "start": s % WEEK_MIN, "end": e % WEEK_MIN}
+
+
+def schedule_at(blocks: list[dict], week_min: int, comfort: float, eco: float) -> tuple[float, bool]:
+    """Solltemperatur laut Heizplan und ob gerade ein Komfort-Fenster aktiv ist."""
+    st = plan_state(blocks, week_min, comfort, eco)
+    return st["target"], st["kind"] == "komfort"
+
+
+def _hm_txt(m: int) -> str:
+    m %= DAY_MIN
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+DAY_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+
+def block_conflicts(blocks: list[dict]) -> list[dict]:
+    """Ungültige oder sich überschneidende Zeitfenster: [{i, j, day, text}] (j None = Fenster i selbst ungültig).
+    Beginn = Ende ist nur als 00:00–00:00 bzw. 00:00–24:00 (ganzer Tag) erlaubt."""
+    out: list[dict] = []
+    for i, b in enumerate(blocks or []):
+        try:
+            start, end = parse_hm(b["start"]), parse_hm(b["end"])
+        except (KeyError, TypeError, ValueError):
+            out.append({"i": i, "j": None, "day": None, "text": f"Zeitfenster {i + 1}: ungültige Uhrzeit"})
+            continue
+        if start % DAY_MIN == end % DAY_MIN and not (start == 0 and end in (0, DAY_MIN)):
+            out.append({"i": i, "j": None, "day": None, "text": f"Zeitfenster {i + 1}: Beginn und Ende sind gleich ({b['start']})"})
+        if not b.get("days") and b.get("days") is not None:
+            out.append({"i": i, "j": None, "day": None, "text": f"Zeitfenster {i + 1}: kein Wochentag gewählt"})
+    if out:
+        return out
+    week = _week_blocks(blocks)
+    seen: set[tuple[int, int]] = set()
+    for a in range(len(week)):
+        s1, e1, _, i, _ = week[a]
+        for b in range(a + 1, len(week)):
+            s2, e2, _, j, _ = week[b]
+            if i == j:
+                continue
+            for shift in (0, WEEK_MIN, -WEEK_MIN):
+                lo, hi = max(s1, s2 + shift), min(e1, e2 + shift)
+                if lo < hi and (min(i, j), max(i, j)) not in seen:
+                    seen.add((min(i, j), max(i, j)))
+                    day = (lo // DAY_MIN) % 7
+                    out.append({"i": min(i, j), "j": max(i, j), "day": day,
+                                "text": f"Zeitfenster {min(i, j) + 1} und {max(i, j) + 1} überschneiden sich am {DAY_SHORT[day]} "
+                                        f"{_hm_txt(lo)}–{_hm_txt(hi) if hi % DAY_MIN else '24:00'}"})
+    return out
+
+
+def resolve_overlaps(blocks: list[dict], winner: Callable[[int], tuple] | None = None) -> list[dict]:
+    """Überschneidungen auflösen: Wo sich Fenster überlagern, behält das Fenster mit Vorrang (winner(i) größer)
+    die Zeit, die anderen werden dort gekürzt bzw. geteilt. Fenster ohne Überschneidung bleiben unverändert.
+    Ergebnis: neue, überschneidungsfreie Liste (gleiche Tage werden wieder zusammengefasst)."""
+    if not blocks or not block_conflicts(blocks) or any(c["j"] is None for c in block_conflicts(blocks)):
+        return [dict(b) for b in blocks or []]
+    winner = winner or (lambda i: (0, -i))
+    week = _week_blocks(blocks)
+    order = sorted({i for *_, i, _ in week}, key=winner, reverse=True)
+    taken: list[tuple[int, int]] = []  # vergebene Wochenminuten [s, e) im Bereich 0 … 2·WEEK_MIN
+    pieces: dict[int, list[tuple[int, int]]] = {}
+
+    def free(s: int, e: int) -> list[tuple[int, int]]:
+        parts = [(s, e)]
+        for ts, te in taken:
+            for shift in (0, WEEK_MIN, -WEEK_MIN):
+                a, b = ts + shift, te + shift
+                nxt = []
+                for ps, pe in parts:
+                    if b <= ps or a >= pe:
+                        nxt.append((ps, pe))
+                        continue
+                    if ps < a:
+                        nxt.append((ps, a))
+                    if b < pe:
+                        nxt.append((b, pe))
+                parts = nxt
+        return parts
+
+    for i in order:
+        for s, e, _, j, _ in week:
+            if j != i:
+                continue
+            got = free(s, e)
+            pieces.setdefault(i, []).extend(got)
+            taken.extend(got)
+    out: list[dict] = []
+    for i, b in enumerate(blocks):
+        clean = {k: v for k, v in b.items() if k not in ("start", "end", "days")}
+        groups: dict[tuple[int, int], list[int]] = {}
+        for s, e in pieces.get(i, []):
+            day, start = (s // DAY_MIN) % 7, s % DAY_MIN
+            groups.setdefault((start, start + (e - s)), []).append(day)
+        for (start, end), days in sorted(groups.items(), key=lambda g: (min(g[1]), g[0])):
+            out.append({**clean, "start": _hm_txt(start), "end": "24:00" if end == DAY_MIN else _hm_txt(end), "days": sorted(set(days))})
+    return out
+
+
+def day_segments(blocks: list[dict], day: int, comfort: float, eco: float) -> list[dict]:
+    """Tagesablauf (0 = Mo) wie in Kachel und Zeitleiste: [{start, end, target, kind, custom, index}] in Minuten 0–1440."""
+    cuts = {0, DAY_MIN}
+    base = day * DAY_MIN
+    for s, e, *_ in _week_blocks(blocks):
+        for shift in (0, WEEK_MIN, -WEEK_MIN):
+            for m in (s + shift - base, e + shift - base):
+                if 0 < m < DAY_MIN:
+                    cuts.add(m)
+    pts = sorted(cuts)
+    segs: list[dict] = []
+    for a, b in zip(pts, pts[1:]):
+        st = plan_state(blocks, base + a, comfort, eco)
+        seg = {"start": a, "end": b, "target": st["target"], "kind": st["kind"], "custom": st["custom"], "index": st["index"]}
+        last = segs[-1] if segs else None
+        if last and all(last[k] == seg[k] for k in ("target", "kind", "custom", "index")):
+            last["end"] = b
+        else:
+            segs.append(seg)
+    return segs
+
+
+def plan_label(st: dict, comfort: float) -> str:
+    """Ursache laut Heizplan in Worten, z. B. „Komfort 06:00–08:00“ oder „Eco (kein Zeitfenster)“."""
+    span = f" {_hm_txt(st['start'])}–{_hm_txt(st['end']) if st['end'] % DAY_MIN or st['end'] == st['start'] else '24:00'}" if st.get("start") is not None else ""
+    if st["kind"] == "komfort":
+        return f"Komfort{span}" + (f" (eigene {_de(st['target'])} °C)" if st["custom"] else "")
+    if st["kind"] == "eco_window":
+        return f"Eco-Zeitfenster{span}"
+    return "Eco (kein Zeitfenster)"
+
+
+def _de(v: float) -> str:
+    return f"{v:.1f}".replace(".", ",")
 
 
 def minutes_to_next_change(blocks: list[dict], week_min: int) -> int | None:
     """Minuten bis zur nächsten Blockgrenze im Heizplan."""
     points = set()
-    for start, end, _ in _week_blocks(blocks):
+    for start, end, *_ in _week_blocks(blocks):
         points.add(start % WEEK_MIN)
         points.add(end % WEEK_MIN)
     if not points:
@@ -166,11 +325,19 @@ def compute_target(
     schedule_on: bool | None = None,
     schedule_next_on: int | None = None,
 ) -> dict[str, Any]:
-    """Ermittelt Solltemperatur und Betriebsart eines Raums.
+    """Ermittelt Solltemperatur und Betriebsart eines Raums – die eine, zentrale Vorrang-Logik.
 
-    Vorrang: Automatik aus > Fenster > Entkalken > Sommerpause > Boost/Manuell
-    > Eco erzwungen > Party > Urlaub > Abwesend > Präsenzmelder > Heizplan.
-    Danach kann "Warm genug" den Raum noch abschalten.
+    Vorrang (oben gewinnt):
+      1. Automatik aus            – Heizwerk stellt nichts ein
+      2. Fenster offen            – Fenster-Temperatur bzw. Frostschutz
+      3. Entkalken, Sommerpause   – Schutzfunktionen
+      4. Boost / von Hand         – bis zur angegebenen Zeit
+      5. Eco erzwungen, Party, Urlaub, lange abwesend (Frostschutz), abwesend, Präsenzmelder
+      6. Heizplan                 – Komfort-Fenster (Komfortwert oder eigene Temperatur), Eco-Fenster, sonst Eco;
+                                    Vorheizen vor einem Komfort-Fenster
+    Danach: höchstens x °C absenken (max_setback) und „warm genug“ (Thermostat aus).
+    Ergebnis enthält neben Sollwert und Betriebsart die Ursache (cause) und den Planwert (plan_target, plan_label),
+    damit Kachel, Zeitleiste und Steuerung dasselbe anzeigen.
 
     schedule_on/schedule_next_on: Zustand eines Home-Assistant-Zeitplans (schedule.*),
     falls der Raum statt des eigenen Heizplans einen solchen nutzt.
@@ -183,76 +350,93 @@ def compute_target(
     next_change = schedule_next_on if use_entity else minutes_to_next_change(blocks, week_min)
     window_temp = room.get("window_temp")
 
-    def result(mode: str, target: float | None, hvac_off: bool = False) -> dict[str, Any]:
+    plan: dict[str, Any] = {"plan_target": None, "plan_label": None, "plan_kind": None}
+
+    def result(mode: str, target: float | None, hvac_off: bool = False, cause: str | None = None) -> dict[str, Any]:
         if target is not None:
             target = round(min(MAX_TEMP, max(MIN_TEMP, target)), 1)
-        return {"mode": mode, "target": target, "hvac_off": hvac_off, "next_change": next_change}
+        return {"mode": mode, "target": target, "hvac_off": hvac_off, "next_change": next_change, "cause": cause, **plan}
 
     if not room.get("enabled", True):
-        return result("aus", None)
+        return result("aus", None, cause="Automatik aus – Heizwerk stellt nichts ein")
 
     if window_paused:
         # Eigene Fenster-Temperatur des Raums, sonst der allgemeine Frostschutz
-        return result("fenster", float(window_temp) if window_temp is not None else frost, room_setting(room, "pause_mode") == "off")
+        off = room_setting(room, "pause_mode") == "off"
+        return result("fenster", float(window_temp) if window_temp is not None else frost, off,
+                      "Fenster offen – " + ("Thermostate aus" if off else "Fensterpause"))
 
     if liming:
-        return result("entkalken", MAX_TEMP)
+        return result("entkalken", MAX_TEMP, cause="Entkalkungsschutz – Ventile kurz ganz auf")
 
     if summer:
-        return result("sommer", frost, settings.get("summer_action", "off") == "off")
+        off = settings.get("summer_action", "off") == "off"
+        return result("sommer", frost, off, "Sommerpause" + (" – Thermostate aus" if off else " – Frostschutz"))
 
     lead = int(lead if lead is not None else (room_setting(room, "lead_min") or 0))
     if use_entity:
         in_comfort = bool(schedule_on)
         target = comfort if in_comfort else eco
         mode = "komfort" if in_comfort else "eco"
+        label = "Zeitplan an – Komfort" if in_comfort else "Zeitplan aus – Eco"
+        plan.update(plan_target=target, plan_label=label, plan_kind="komfort" if in_comfort else "eco")
+        cause = f"Heizplan: {label}"
         if not in_comfort and lead > 0 and schedule_next_on is not None and schedule_next_on <= lead:
-            target, mode = comfort, "vorheizen"
+            target, mode, cause = comfort, "vorheizen", f"Vorheizen – Komfort in {schedule_next_on} Min."
     else:
-        target, in_comfort = schedule_at(blocks, week_min, comfort, eco)
+        st = plan_state(blocks, week_min, comfort, eco)
+        target, in_comfort = st["target"], st["kind"] == "komfort"
+        label = plan_label(st, comfort)
+        plan.update(plan_target=target, plan_label=label, plan_kind=st["kind"])
         mode = "komfort" if in_comfort else "eco"
+        cause = f"Heizplan: {label}"
         if not in_comfort and lead > 0:
-            ahead, ahead_comfort = schedule_at(blocks, week_min + lead, comfort, eco)
-            if ahead_comfort and ahead > target:
-                target, mode = ahead, "vorheizen"
+            ahead = plan_state(blocks, week_min + lead, comfort, eco)
+            if ahead["kind"] == "komfort" and ahead["target"] > target:
+                target, mode = ahead["target"], "vorheizen"
+                cause = f"Vorheizen für {plan_label(ahead, comfort)}"
+    plan_text = f"Plan: {_de(plan['plan_target'])} °C" if plan["plan_target"] is not None else ""
 
     if override is not None:
         target, mode = float(override), ("boost" if boost else "manuell")
+        cause = "Boost" if boost else "Von Hand"
     elif force_eco:
-        target, mode = eco, "eco_fix"
+        target, mode, cause = eco, "eco_fix", "Eco erzwungen"
     elif party:
-        target, mode = max(target, comfort), "party"
+        target, mode, cause = max(target, comfort), "party", "Party – mindestens Komfort"
     elif vacation:
-        target, mode = float(settings.get("vacation_temp", 16)), "urlaub"
+        target, mode, cause = float(settings.get("vacation_temp", 16)), "urlaub", f"Urlaub ({plan_text})"
     elif away and long_away:
         # Lange niemand da: auf Frostschutz
-        return result("frost", frost)
+        return result("frost", frost, cause="Lange niemand zu Hause – Frostschutz")
     elif away:
         if settings.get("away_action") == "off":
-            return result("abwesend", target, True)
+            return result("abwesend", target, True, "Niemand zu Hause – Thermostate aus")
         if settings.get("away_mode") == "offset":
             away_temp = target - float(settings.get("away_offset", 2) or 0)
         else:
             away_temp = float(settings.get("away_temp", 17))
         # Niemand da: immer „abwesend“ – höchstens die Abwesend-Temperatur, nie wärmer als der Plan
         target, mode = min(away_temp, target), "abwesend"
+        cause = f"Niemand zu Hause – höchstens {_de(away_temp)} °C ({plan_text})"
     elif occupied is not None:
         if occupied and room.get("presence_mode") == "always" and target < comfort:
-            target, mode = comfort, "belegt"
+            target, mode, cause = comfort, "belegt", "Präsenzmelder: jemand im Raum – Komfort"
         elif not occupied and mode in ("komfort", "vorheizen"):
-            target, mode = eco, "leer"
+            target, mode, cause = eco, "leer", f"Präsenzmelder: niemand im Raum – Eco ({plan_text})"
 
     max_setback = float(room_setting(room, "max_setback") or 0)
-    if max_setback > 0 and mode in ("eco", "abwesend", "urlaub", "leer"):
-        target = max(target, comfort - max_setback)
+    if max_setback > 0 and mode in ("eco", "abwesend", "urlaub", "leer") and target < comfort - max_setback:
+        target = comfort - max_setback
+        cause += f" · höchstens {_de(max_setback)} °C unter Komfort"
 
     off_above = float(room_setting(room, "off_above") or 0)
     if off_above > 0 and room_temp is not None and mode != "boost":
         # Abschalten ab Soll + off_above, wieder einschalten, sobald der Raum unter Soll fällt.
         if room_temp >= target + off_above or (was_warm and room_temp >= target):
-            return result("warm", target, True)
+            return result("warm", target, True, f"Warm genug – Thermostat aus ({cause})")
 
-    return result(mode, target)
+    return result(mode, target, cause=cause)
 
 
 def window_paused(
@@ -298,7 +482,9 @@ def next_comfort(blocks: list[dict], week_min: int, comfort: float, horizon: int
     """Nächster Komfortbeginn innerhalb von horizon Minuten: (Minuten bis dahin, Temperatur)."""
     week_min %= WEEK_MIN
     best: tuple[int, float] | None = None
-    for start, _end, temp in _week_blocks(blocks):
+    for start, _end, temp, _i, kind in _week_blocks(blocks):
+        if kind == "eco":
+            continue
         delta = (start - week_min) % WEEK_MIN
         if 0 < delta <= horizon:
             value = float(temp) if temp is not None else float(comfort)

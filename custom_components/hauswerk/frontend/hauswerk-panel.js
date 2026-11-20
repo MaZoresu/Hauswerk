@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.61.0";
+const VERSION = "0.62.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -309,6 +309,94 @@ const DOMAIN_LABEL = {
   input_boolean: "Schalter-Helfer", switch: "Schalter", schedule: "Zeitplan", calendar: "Kalender", person: "Person", device_tracker: "Tracker",
   weather: "Wetter", light: "Licht", script: "Skript", scene: "Szene", button: "Knopf", input_button: "Knopf-Helfer", fan: "Lüfter",
   lock: "Schloss", media_player: "Medienplayer", input_select: "Auswahl", counter: "Zähler",
+};
+// ---------------------------------------------------------------- Heizplan-Regeln (wie logic.py, per Test abgeglichen)
+// Zeitfenster {start, end, days, kind: "comfort"|"eco", temp}: Komfort = eigene Temperatur, sonst Komfortwert;
+// Eco-Fenster = Eco-Wert; außerhalb aller Fenster immer Eco. end <= start = bis zum Folgetag; "24:00" = Mitternacht.
+const WEEK = 7 * 1440;
+const planWeek = (blocks) => {
+  const out = [];
+  (blocks || []).forEach((b, i) => {
+    const s = hm(b.start);
+    let e = hm(b.end);
+    if (e <= s) e += 1440;
+    const kind = b.kind === "eco" ? "eco" : "comfort";
+    for (const d of [...new Set((b.days ?? [0, 1, 2, 3, 4, 5, 6]).map(Number))].sort())
+      out.push([d * 1440 + s, d * 1440 + e, kind === "comfort" ? b.temp ?? null : null, i, kind]);
+  });
+  return out;
+};
+const planValue = (kind, temp, comfort, eco) => (kind === "eco" ? eco : temp ?? comfort);
+const planState = (blocks, wm, comfort, eco) => {
+  wm = ((wm % WEEK) + WEEK) % WEEK;
+  const hits = planWeek(blocks).filter(([s, e]) => (s <= wm && wm < e) || (s <= wm + WEEK && wm + WEEK < e));
+  if (!hits.length) return { target: eco, kind: "eco", custom: false, index: null, start: null, end: null };
+  const key = (h) => [h[4] === "comfort" ? 1 : 0, planValue(h[4], h[2], comfort, eco), -h[3]];
+  const best = hits.reduce((a, b) => { const ka = key(a), kb = key(b); for (let k = 0; k < 3; k++) if (ka[k] !== kb[k]) return kb[k] > ka[k] ? b : a; return a; });
+  const [s, e, t, i, k] = best;
+  return { target: planValue(k, t, comfort, eco), kind: k === "comfort" ? "komfort" : "eco_window", custom: k === "comfort" && t != null, index: i, start: s % WEEK, end: e % WEEK };
+};
+const DAY_SHORT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const t2 = (m) => { m = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; };
+/** Ungültige bzw. sich überschneidende Zeitfenster: [{i, j, day, text}] (j null = Fenster i selbst). */
+const planConflicts = (blocks) => {
+  const out = [];
+  (blocks || []).forEach((b, i) => {
+    const s = hm(b.start), e = hm(b.end);
+    if (s % 1440 === e % 1440 && !(s === 0 && (e === 0 || e === 1440))) out.push({ i, j: null, text: `Zeitfenster ${i + 1}: Beginn und Ende sind gleich (${b.start})` });
+  });
+  if (out.length) return out;
+  const w = planWeek(blocks);
+  const seen = new Set();
+  for (let a = 0; a < w.length; a++)
+    for (let b = a + 1; b < w.length; b++) {
+      const [s1, e1, , i] = w[a], [s2, e2, , j] = w[b];
+      if (i === j) continue;
+      for (const sh of [0, WEEK, -WEEK]) {
+        const lo = Math.max(s1, s2 + sh), hi = Math.min(e1, e2 + sh), key = `${Math.min(i, j)}-${Math.max(i, j)}`;
+        if (lo < hi && !seen.has(key)) {
+          seen.add(key);
+          const day = Math.floor(lo / 1440) % 7;
+          out.push({ i: Math.min(i, j), j: Math.max(i, j), day, text: `Zeitfenster ${Math.min(i, j) + 1} und ${Math.max(i, j) + 1} überschneiden sich am ${DAY_SHORT[day]} ${t2(lo)}–${hi % 1440 ? t2(hi) : "24:00"}` });
+        }
+      }
+    }
+  return out;
+};
+/** Überschneidungen auflösen: Fenster `win` behält seine Zeit, die anderen werden dort gekürzt bzw. geteilt. */
+const planResolve = (blocks, win) => {
+  const w = planWeek(blocks);
+  const order = [win, ...[...new Set(w.map((x) => x[3]))].filter((i) => i !== win).sort((a, b) => a - b)];
+  const taken = [];
+  const pieces = {};
+  const free = (s, e) => {
+    let parts = [[s, e]];
+    for (const [ts, te] of taken) for (const sh of [0, WEEK, -WEEK]) {
+      const a = ts + sh, b = te + sh;
+      parts = parts.flatMap(([ps, pe]) => (b <= ps || a >= pe ? [[ps, pe]] : [...(ps < a ? [[ps, a]] : []), ...(b < pe ? [[b, pe]] : [])]));
+    }
+    return parts;
+  };
+  for (const i of order) for (const [s, e, , j] of w) if (j === i) { const got = free(s, e); (pieces[i] = pieces[i] || []).push(...got); taken.push(...got); }
+  const out = [];
+  blocks.forEach((b, i) => {
+    const groups = new Map();
+    for (const [s, e] of pieces[i] || []) {
+      const day = Math.floor(s / 1440) % 7, st = s % 1440, key = `${st}|${st + (e - s)}`;
+      groups.set(key, [...(groups.get(key) || []), day]);
+    }
+    for (const [key, days] of groups) {
+      const [st, en] = key.split("|").map(Number);
+      out.push({ ...b, start: t2(st), end: en === 1440 ? "24:00" : t2(en), days: [...new Set(days)].sort() });
+    }
+  });
+  return out;
+};
+const planLabel = (st) => {
+  const span = st.start != null ? ` ${t2(st.start)}–${st.end % 1440 || st.end === st.start ? t2(st.end) : "24:00"}` : "";
+  if (st.kind === "komfort") return `Komfort${span}${st.custom ? ` (eigene ${fmt(st.target)} °C)` : ""}`;
+  if (st.kind === "eco_window") return `Eco-Zeitfenster${span}`;
+  return "Eco (kein Zeitfenster)";
 };
 const PLAN_PRESETS = {
   berufstaetig: {
@@ -3272,7 +3360,7 @@ class HauswerkPanel extends HTMLElement {
             ${s.heating ? `<span class="flame" title="Heizt"><ha-icon icon="mdi:fire"></ha-icon></span>` : ""}
           </div>
           <div class="room-t"><h4><button class="rlink" data-action="room-page" data-id="${room.id}" title="Raum öffnen">${esc(room.name)}</button></h4>${icons.length ? `<small><span class="sis">${icons.join("")}</span></small>` : ""}</div>
-          ${this._chip(mode, s.mode_label || "Automatik aus")}
+          <span title="${esc(s.cause || "")}">${this._chip(mode, s.mode_label || "Automatik aus")}</span>
           ${canBoost ? `<button class="icon ${mode === "boost" ? "hot" : ""}" title="${mode === "boost" ? "Boost beenden" : `Boost: ${this._data.settings.boost_minutes || 30} Min. volle Leistung`}" data-action="${mode === "boost" ? "ovr-reset" : "boost"}" data-id="${room.id}"><ha-icon icon="mdi:rocket-launch-outline"></ha-icon></button>` : ""}
           ${menu}
         </div>
@@ -3502,7 +3590,7 @@ class HauswerkPanel extends HTMLElement {
       const day = this._planDay(0);
       if (day !== (now.getDay() + 6) % 7) src += ` · heute frei, wie ${day === 5 ? "Samstag" : "Sonntag"}`;
       const min = now.getHours() * 60 + now.getMinutes();
-      comfort = this._daySegments(blocks, room, day).some(([a, b, , c]) => c && a <= min && min < b);
+      comfort = s?.plan_kind ? s.plan_kind === "komfort" : this._daySegments(blocks, room, day).some(([a, b, , c]) => c && a <= min && min < b);
     }
     let mins = s.next_change;
     if (blocks && blocks.length) mins = this._nextSwitch(blocks, room, comfort) ?? mins;
@@ -3551,7 +3639,8 @@ class HauswerkPanel extends HTMLElement {
     return `
       <div class="rsched ${mini ? "mini" : ""} ${info.comfort ? "on" : ""}">
         <div class="rs-top"><ha-icon icon="${info.icon}"></ha-icon><span class="rs-src">${esc(info.src)}</span><span class="grow"></span><b>${esc(info.text)}</b></div>
-        ${info.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s), this._awayInfo(room)) : ""}
+        ${info.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s), this._awayInfo(room), this._todaySegs(s)) : ""}
+        ${s?.cause && !mini ? `<div class="rs-why" title="Warum dieser Sollwert"><ha-icon icon="mdi:help-circle-outline"></ha-icon>${esc(s.cause)}</div>` : ""}
         ${info.blocks && !mini && (this._preLead(room, s) || this._awayInfo(room)) ? `<div class="rs-legend">${this._preLead(room, s) && !this._awayInfo(room) ? `<span class="rs-pre"><i></i>Vorheizen ${this._preLead(room, s)} Min. vorher${s?.preheat_mode === "smart" ? " (gelernt)" : ""}</span>` : ""}${this._awayInfo(room) ? `<span class="rs-abs"><i></i>${esc(this._awayInfo(room).text)}</span>` : ""}</div>` : ""}
       </div>`;
   }
@@ -3590,8 +3679,8 @@ class HauswerkPanel extends HTMLElement {
           <span class="rm-temp">${fmt(s.room_temp)}<small>°C</small></span>
           <span class="rm-tgt"><small>Soll</small><b style="color:${tint(tempColor(s.target))}">${fmt(s.target)} °C</b></span>
         </div>
-        <div class="rm-mode"><ha-icon icon="${m.i}"></ha-icon>${esc(s.mode_label || "Automatik aus")}${info ? `<span class="grow"></span><small>${esc(info.text)}</small>` : ""}</div>
-        ${info?.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s), this._awayInfo(room)) : ""}
+        <div class="rm-mode" title="${esc(s.cause || "")}"><ha-icon icon="${m.i}"></ha-icon>${esc(s.mode_label || "Automatik aus")}${info ? `<span class="grow"></span><small>${esc(info.text)}</small>` : ""}</div>
+        ${info?.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s), this._awayInfo(room), this._todaySegs(s)) : ""}
       </article>`;
   }
 
@@ -3738,6 +3827,8 @@ class HauswerkPanel extends HTMLElement {
     }
 
     this._planRefDay = [ref, day];
+    this._planConf = planConflicts(plan.blocks);
+    const conf = this._planConf;
     return `
       ${pills}
       <section class="card">
@@ -3748,7 +3839,9 @@ class HauswerkPanel extends HTMLElement {
           ${DAYS.map((d, i) => `<button class="dp ${i === day ? "on" : ""}" data-action="plan-preview" data-day="${i}">${d}</button>`).join("")}
         </div>
         <div id="plan-preview">${this._planPreview(plan, ref, day)}</div>
+        <p class="muted small plan-rules"><ha-icon icon="mdi:information-outline"></ha-icon>Ohne Zeitfenster gilt automatisch <b>Eco</b> – Lücken muss niemand eintragen. Ein <b>Komfort</b>-Zeitfenster setzt den Komfortwert oder seine eigene Temperatur (nur in diesem Zeitfenster) als Sollwert; geheizt wird nur, wenn es kälter ist. Endet ein Zeitfenster vor seinem Beginn (z. B. 22:00–06:00), läuft es bis zum Folgetag.</p>
       </section>
+      ${conf.length ? `<section class="card note warn plan-conf"><ha-icon icon="mdi:alert-outline"></ha-icon><span class="grow"><b>${conf.length === 1 ? "Ein Problem" : `${conf.length} Probleme`} – so lässt sich der Plan nicht speichern</b>${conf.map((c) => `<small>${esc(c.text)}</small>`).join("")}<small>Zeiten anpassen oder beim Zeitfenster „hat Vorrang“ wählen: das andere wird dort gekürzt bzw. geteilt.</small></span></section>` : ""}
 
       <div class="blocks">
         ${plan.blocks.length ? plan.blocks.map((b, i) => this._blockCard(b, i, ref, dis)).join("") : `<section class="card empty small"><p>Keine Komfortzeiten: ${plan.kind === "plan" ? "Räume mit diesem Plan bleiben" : `${esc(ref.name)} bleibt`} immer auf Eco.</p></section>`}
@@ -3764,7 +3857,7 @@ class HauswerkPanel extends HTMLElement {
       </div>
       <div class="savebar" id="plan-savebar" ${plan.dirty ? "" : "hidden"}>
         <button class="secondary" data-action="plan-revert">Verwerfen</button>
-        <button class="primary" data-action="plan-save">Speichern</button>
+        <button class="primary" data-action="plan-save" ${conf.length ? "disabled title=\"Erst die Überschneidungen auflösen\"" : ""}>Speichern</button>
       </div>` : ""}`;
   }
 
@@ -3773,7 +3866,8 @@ class HauswerkPanel extends HTMLElement {
     return `
         ${this._dayBar(plan.blocks, ref, day)}
         <div class="muted small legend-line">${["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"][day]}
-          <span><i style="background:color-mix(in srgb, #60a5fa 38%, var(--card2))"></i>Eco</span>
+          <span><i style="background:color-mix(in srgb, #60a5fa 38%, var(--card2))"></i>Eco (ohne Zeitfenster)</span>
+          <span><i class="ecow-i"></i>Eco-Zeitfenster</span>
           <span><i style="background:${tempColor(ref.comfort)}"></i>Komfort</span>
           <span><i style="background:linear-gradient(90deg,#fde047,#fb923c)"></i>eigene Temperatur</span>
         </div>
@@ -3834,31 +3928,26 @@ class HauswerkPanel extends HTMLElement {
       cal: kind === "plan" && !!src?.calendar, calendar: src?.calendar || null, keyword: src?.keyword || "" };
   }
   /** Segmente eines Tages: [start, end, temp, isComfort], lückenlos 0–1440. */
+  /** Tagesablauf (0 = Mo): [[Beginn, Ende, Soll, Komfort?, Art, eigene Temperatur?]] – Regeln wie in logic.day_segments. */
   _daySegments(blocks, room, day) {
-    const cover = [];
-    for (const b of blocks) {
-      const s = hm(b.start);
-      let e = hm(b.end);
-      if (e <= s) e += 1440;
-      const t = b.temp ?? room.comfort;
-      for (const d of b.days || []) {
-        if (d === day) cover.push([s, Math.min(e, 1440), t]);
-        if (e > 1440 && (d + 1) % 7 === day) cover.push([0, e - 1440, t]);
-      }
-    }
+    const comfort = Number(room.comfort ?? 21), eco = Number(room.eco ?? 18);
     const cuts = new Set([0, 1440]);
-    cover.forEach(([s, e]) => (cuts.add(s), cuts.add(e)));
+    const base = day * 1440;
+    for (const [s, e] of planWeek(blocks)) for (const sh of [0, WEEK, -WEEK]) for (const m of [s + sh - base, e + sh - base]) if (m > 0 && m < 1440) cuts.add(m);
     const pts = [...cuts].sort((a, b) => a - b);
     const segs = [];
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i], b = pts[i + 1];
-      const hits = cover.filter(([s, e]) => s <= a && b <= e).map((c) => c[2]);
-      const t = hits.length ? Math.max(...hits) : room.eco;
+    for (let k = 0; k < pts.length - 1; k++) {
+      const st = planState(blocks, base + pts[k], comfort, eco);
       const last = segs[segs.length - 1];
-      if (last && last[2] === t) last[1] = b;
-      else segs.push([a, b, t, hits.length > 0]);
+      if (last && last[2] === st.target && last[4] === st.kind && last[5] === st.custom && last[6] === st.index) last[1] = pts[k + 1];
+      else segs.push([pts[k], pts[k + 1], st.target, st.kind === "komfort", st.kind, st.custom, st.index]);
     }
     return segs;
+  }
+
+  /** Heutiger Ablauf aus der Steuerung (status.plan_today), damit Kachel und Regelung dasselbe zeigen. */
+  _todaySegs(s) {
+    return Array.isArray(s?.plan_today) ? s.plan_today.map((x) => [x.start, x.end, x.target, x.kind === "komfort", x.kind, x.custom, x.index]) : null;
   }
 
   /** Vorlaufzeit fürs Vorheizen in Minuten (wie Heizwerk sie gerade rechnet), 0 = kein Vorheizen. */
@@ -3889,8 +3978,8 @@ class HauswerkPanel extends HTMLElement {
     return away.offset != null ? t - away.offset : Math.min(away.temp, t);
   }
 
-  _dayBar(blocks, room, day, mini = false, lead = 0, away = null) {
-    const segs = this._daySegments(blocks, room, day);
+  _dayBar(blocks, room, day, mini = false, lead = 0, away = null, given = null) {
+    const segs = given && day === this._planDay(0) ? given : this._daySegments(blocks, room, day);
     const now = new Date();
     const today = this._planDay(0);
     const nowPct = ((now.getHours() * 60 + now.getMinutes()) / 1440) * 100;
@@ -3914,8 +4003,8 @@ class HauswerkPanel extends HTMLElement {
       : "";
     const bar = segs
       .map(
-        ([s, e, t, comfort]) =>
-          `<div class="dseg ${comfort ? "" : "eco"}" style="left:${(s / 1440) * 100}%;width:${((e - s) / 1440) * 100}%;background:${tempColor(t)}" title="${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}–${String(Math.floor(e / 60)).padStart(2, "0")}:${String(e % 60).padStart(2, "0")} · ${fmt(t)} °C"></div>`
+        ([s, e, t, comfort, kind, custom]) =>
+          `<div class="dseg ${comfort ? "" : "eco"} ${kind === "eco_window" ? "ecow" : ""}" style="left:${(s / 1440) * 100}%;width:${((e - s) / 1440) * 100}%;background:${tempColor(t)}" title="${t2(s)}–${e === 1440 ? "24:00" : t2(e)} · ${comfort ? (custom ? "Komfort, eigene Temperatur" : "Komfort") : kind === "eco_window" ? "Eco-Zeitfenster" : "Eco (kein Zeitfenster)"} · ${fmt(t)} °C"></div>`
       )
       .join("");
     if (mini) return `<div class="dbar mini">${bar}${pre}${abs}${day === today ? `<div class="now" style="left:${nowPct}%"></div>` : ""}</div>`;
@@ -3929,8 +4018,10 @@ class HauswerkPanel extends HTMLElement {
     let dur = hm(b.end) - hm(b.start);
     if (dur <= 0) dur += 1440;
     const durTxt = dur > 0 ?`${Math.floor(dur / 60)} h${dur % 60 ? ` ${dur % 60} min` : ""}` : "";
+    const bad = (this._planConf || []).filter((c) => c.i === i || c.j === i);
     return `
-      <section class="block" style="--tc:${tempColor(b.temp ?? room.comfort)}">
+      <section class="block ${bad.length ? "conflict" : ""} ${b.kind === "eco" ? "ecoblk" : ""}" style="--tc:${b.kind === "eco" ? "#60a5fa" : tempColor(b.temp ?? room.comfort)}">
+        <div class="blk-no">Zeitfenster ${i + 1}</div>
         <div class="block-top">
           <div class="times">
             <label class="timebox"><input type="time" value="${esc(b.start)}" data-plan="start" data-i="${i}" ${dis}><ha-icon icon="mdi:clock-outline"></ha-icon></label>
@@ -3939,11 +4030,17 @@ class HauswerkPanel extends HTMLElement {
 <span class="dur" data-i="${i}">${durTxt}${durTxt && hm(b.end) <= hm(b.start) ? " · bis zum Folgetag" : ""}</span>
           </div>
           <div class="block-temp">
-            ${this._admin ? this._stepper("blk", i, b.temp, { placeholder: room.comfort }) : `<b style="color:${tint(tempColor(b.temp ?? room.comfort))}">${fmt(b.temp ?? room.comfort)} °C</b>`}
-            ${b.temp != null && this._admin ? `<button class="link tiny" data-action="blk-comfort" data-i="${i}">= Komfort</button>` : `<span class="tiny muted">${b.temp == null ? "Komfort" : ""}</span>`}
+            ${b.kind === "eco" ? `<b class="blk-eco">${room.eco != null ? `${fmt(room.eco)} °C` : "Eco"}</b><span class="tiny muted">Eco-Wert</span>`
+              : `${this._admin ? this._stepper("blk", i, b.temp, { placeholder: room.comfort }) : `<b style="color:${tint(tempColor(b.temp ?? room.comfort))}">${fmt(b.temp ?? room.comfort)} °C</b>`}
+            ${b.temp != null && this._admin ? `<button class="link tiny" data-action="blk-comfort" data-i="${i}">= Komfortwert</button>` : ""}`}
           </div>
           ${this._admin ? `<button class="icon boxed" title="Entfernen" data-action="plan-del" data-i="${i}"><ha-icon icon="mdi:trash-can-outline"></ha-icon></button>` : ""}
         </div>
+        <div class="blk-kind-row">
+          <div class="segs small blk-kind">${[["comfort", "Komfort", "mdi:sofa-outline"], ["eco", "Eco", "mdi:leaf"]].map(([v, l, ic]) => `<button class="seg ${(b.kind === "eco" ? "eco" : "comfort") === v ? "on" : ""}" data-action="blk-kind" data-i="${i}" data-v="${v}" ${dis}><ha-icon icon="${ic}"></ha-icon>${l}</button>`).join("")}</div>
+          <span class="tiny muted">${b.kind === "eco" ? "ausdrücklich Eco (sonst nicht nötig – Lücken sind Eco)" : b.temp != null ? "eigene Temperatur – gilt nur in diesem Zeitfenster" : "Komfortwert des Raums"}</span>
+        </div>
+        ${bad.map((c) => `<div class="blk-conf"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><span class="grow">${esc(c.text)}</span>${c.j != null && this._admin ? `<button class="secondary small" data-action="plan-resolve" data-win="${i}">Zeitfenster ${i + 1} hat Vorrang</button>` : ""}</div>`).join("")}
         <div class="lbl">Gilt an (mehrere Tage möglich)</div>
         <div class="daypills">
           ${DAYS.map((d, di) => `<button class="dp ${days.includes(di) ? "on" : ""}" data-action="plan-day" data-i="${i}" data-day="${di}" ${dis}>${d}</button>`).join("")}
@@ -6961,6 +7058,7 @@ class HauswerkPanel extends HTMLElement {
           body: `
             <div class="rq-facts">${facts.map(([i, txt, c]) => `<span style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${esc(txt)}</span>`).join("")}</div>
             ${blocked ? `<p class="note"><ha-icon icon="mdi:information-outline"></ha-icon>${blocked}</p>` : ""}
+            ${rs.cause ? `<div class="rq-why"><ha-icon icon="mdi:help-circle-outline"></ha-icon><span><b>Warum ${rs.target != null ? `${fmt(rs.target)} °C` : "dieser Zustand"}?</b><small>${esc(rs.cause)}</small>${rs.plan_label && !String(rs.cause).includes(rs.plan_label) ? `<small class="muted">Heizplan: ${esc(rs.plan_label)} · ${fmt(rs.plan_target)} °C</small>` : ""}</span></div>` : ""}
             ${this._fireChip(rs) ? `<p class="muted small"><ha-icon icon="mdi:fireplace"></ha-icon>${esc(this._fireChip(rs)[3])}${fp.manual && fp.until ? ` Endet von selbst um ${new Date(fp.until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}.` : ""}</p>` : ""}
             ${(mode === "manuell" || mode === "boost") && until ? `<div class="room-note ${mode === "boost" ? "boost" : ""}"><ha-icon icon="${mode === "boost" ? "mdi:rocket-launch-outline" : "mdi:hand-back-right-outline"}"></ha-icon>${mode === "boost" ? "Boost" : "Manuell"} bis ${until}<span class="grow"></span><button class="link" data-action="ovr-reset" data-id="${room.id}">Zurück zum Plan</button></div>` : ""}
             <div class="rq-temp">
@@ -8395,8 +8493,13 @@ class HauswerkPanel extends HTMLElement {
       const i = Number(t.dataset.i);
       const b = this._plan.blocks[i];
       if (t.value) b[t.dataset.plan] = t.value;
-      // Uhrzeit: nicht neu zeichnen (sonst schließt der Wähler am Handy und die Seite springt)
-      if (t.value) this._planSoftUpdate(i);
+      // Uhrzeit: nicht neu zeichnen (sonst schließt der Wähler am Handy und die Seite springt) –
+      // außer beim Bestätigen, wenn sich dadurch Überschneidungen ändern
+      const before = JSON.stringify(this._planConf || []);
+      if (t.value && isChange && JSON.stringify(planConflicts(this._plan.blocks)) !== before) {
+        this._plan.dirty = true;
+        this._renderMain();
+      } else if (t.value) this._planSoftUpdate(i);
       return;
     }
     if (t.dataset.lookColor !== undefined && this._settings) {
@@ -9208,11 +9311,38 @@ class HauswerkPanel extends HTMLElement {
         this._renderMain();
         break;
       }
-      case "plan-add":
-        this._plan.blocks.push({ days: [0, 1, 2, 3, 4], start: "06:00", end: "22:00", temp: null });
+      case "plan-add": {
+        // freies Zeitfenster vorschlagen, damit nichts überschneidet
+        const tries = [["06:00", "08:00"], ["17:00", "21:00"], ["12:00", "14:00"], ["08:00", "10:00"], ["21:00", "23:00"], ["14:00", "17:00"], ["10:00", "12:00"], ["22:00", "24:00"], ["04:00", "06:00"], ["00:00", "02:00"]];
+        let nb = null;
+        for (const days of [[0, 1, 2, 3, 4], [5, 6], [0, 1, 2, 3, 4, 5, 6]]) {
+          for (const [a, e] of tries) {
+            const cand = { days, start: a, end: e, temp: null };
+            if (!planConflicts([...this._plan.blocks, cand]).length) { nb = cand; break; }
+          }
+          if (nb) break;
+        }
+        this._plan.blocks.push(nb || { days: [0, 1, 2, 3, 4], start: "06:00", end: "08:00", temp: null });
         this._plan.dirty = true;
         this._renderMain();
         break;
+      }
+      case "blk-kind": {
+        const b = this._plan.blocks[Number(el.dataset.i)];
+        if (el.dataset.v === "eco") { b.kind = "eco"; b.temp = null; } else delete b.kind;
+        this._plan.dirty = true;
+        this._renderMain();
+        break;
+      }
+      case "plan-resolve": {
+        const win = Number(el.dataset.win);
+        const before = this._plan.blocks.length;
+        this._plan.blocks = planResolve(this._plan.blocks, win);
+        this._plan.dirty = true;
+        this._renderMain();
+        this._toast(`Zeitfenster ${win + 1} hat Vorrang – ${this._plan.blocks.length > before ? "andere Zeitfenster geteilt bzw. gekürzt" : "andere Zeitfenster gekürzt"}`);
+        break;
+      }
       case "plan-del":
         this._plan.blocks.splice(Number(el.dataset.i), 1);
         this._plan.dirty = true;
@@ -9226,6 +9356,11 @@ class HauswerkPanel extends HTMLElement {
       case "plan-save": {
         const P = this._plan;
         const blocks = P.blocks.filter((b) => b.days.length);
+        const pc = planConflicts(blocks);
+        if (pc.length) {
+          this._toast(`Nicht gespeichert: ${pc[0].text}`);
+          return;
+        }
         if (P.kind === "plan") {
           if (!P.name.trim()) {
             this._toast("Bitte einen Namen für den Plan eingeben.");
@@ -11626,6 +11761,22 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .nk-hr b { display:block; font-size:13px; } .nk-hr small { display:block; font-size:12px; }
 .nk-hr em { font-style:normal; font-size:12px; color:var(--muted); }
 @media (max-width:560px) { .nk-stats { grid-template-columns:repeat(2,1fr); } .nk-tabs .seg { font-size:12px; padding:0 6px; } }
+.block .blk-no { font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+.block.conflict { box-shadow:0 0 0 2px #ef4444 inset; }
+.block.ecoblk { background:color-mix(in srgb, #60a5fa 8%, var(--card)); }
+.blk-kind-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin:8px 0 2px; }
+.blk-kind { display:inline-flex; flex-direction:row; width:auto; flex:none; }
+.blk-kind .seg { flex:none; width:auto; padding:0 12px; }
+.blk-eco { color:#60a5fa; font-size:20px; }
+.blk-conf { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin:8px 0 2px; padding:8px 10px; border-radius:10px; background:color-mix(in srgb, #ef4444 12%, transparent); color:#ef4444; font-size:12.5px; font-weight:600; }
+.plan-conf small { display:block; margin-top:3px; }
+.plan-rules { margin-top:10px; }
+.dseg.ecow { background-image:repeating-linear-gradient(135deg, rgba(255,255,255,.35) 0 3px, transparent 3px 7px) !important; }
+.ecow-i { background:#93c5fd repeating-linear-gradient(135deg, rgba(255,255,255,.5) 0 2px, transparent 2px 5px); }
+.rs-why { display:flex; gap:6px; align-items:center; font-size:12px; color:var(--muted); margin-top:4px; }
+.rs-why ha-icon { --mdc-icon-size:15px; flex:none; }
+.rq-why { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:12px; background:var(--card2); margin:8px 0; }
+.rq-why b { display:block; font-size:13px; } .rq-why small { display:block; font-size:12.5px; }
 .lg-colors { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px 12px; margin:4px 0 12px; }
 .lg-c { display:grid; grid-template-columns:14px 1fr; column-gap:8px; align-items:center; align-content:start; font-size:13px; }
 .lg-c b { font-size:13px; }

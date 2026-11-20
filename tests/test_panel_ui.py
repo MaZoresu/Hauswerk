@@ -1218,3 +1218,65 @@ def test_symbol_legende(panel):
     assert len(shown) == 3 and all("Kamin" in x or "kamin" in x.lower() for x in shown)
     # Farbsprache: von Hand überall Violett
     assert p.js("MODE.manuell.c") == p.js("C.hand")
+
+
+_LOGIC_SPEC = importlib.util.spec_from_file_location("hw_logic_ui", Path(__file__).resolve().parents[1] / "custom_components" / "hauswerk" / "logic.py")
+LG = importlib.util.module_from_spec(_LOGIC_SPEC)
+_LOGIC_SPEC.loader.exec_module(LG)
+
+PLAN_CASES = [
+    [{"start": "06:00", "end": "08:00", "days": [0, 1, 2, 3, 4]}, {"start": "17:00", "end": "21:00", "days": [0, 1, 2, 3, 4], "temp": 22.0},
+     {"start": "12:00", "end": "13:00", "days": [0], "kind": "eco"}],
+    [{"start": "22:00", "end": "02:00", "days": [5]}, {"start": "23:00", "end": "01:00", "days": [6], "temp": 19.5}, {"start": "18:00", "end": "24:00", "days": [2]}],
+    [{"start": "06:00", "end": "22:00", "days": [0, 1, 2, 3, 4]}, {"start": "17:00", "end": "21:00", "days": [0, 1, 2, 3, 4], "temp": 22.0}],  # alt: überschneidend
+    [{"start": "22:00", "end": "07:00", "days": [6]}, {"start": "06:00", "end": "08:00", "days": [0], "kind": "eco"}],
+]
+
+
+def test_heizplan_js_wie_python(panel):
+    """Kachel/Zeitleiste (JS) und Steuerung (Python) rechnen den Heizplan identisch: Sollwert je Minute, Tagesablauf,
+    Überschneidungen und Auflösen."""
+    p = panel
+    for blocks in PLAN_CASES:
+        js = p.js("""(b) => ({
+            states: Array.from({ length: 7 * 96 }, (_, k) => { const s = planState(b, k * 15, 21, 18); return [s.target, s.kind, s.custom]; }),
+            days: [0, 1, 2, 3, 4, 5, 6].map((d) => document.querySelector('hauswerk-panel')._daySegments(b, { comfort: 21, eco: 18 }, d).map((x) => [x[0], x[1], x[2], x[4], x[5]])),
+            conf: planConflicts(b).map((c) => c.text),
+            res: planConflicts(b).length ? planResolve(b, 1) : null })""", blocks)
+        for k in range(7 * 96):
+            st = LG.plan_state(blocks, k * 15, 21, 18)
+            assert js["states"][k] == [st["target"], st["kind"], st["custom"]], (blocks, k)
+        for d in range(7):
+            py = [[x["start"], x["end"], x["target"], x["kind"], x["custom"]] for x in LG.day_segments(blocks, d, 21, 18)]
+            assert js["days"][d] == py, (blocks, d)
+        assert js["conf"] == [c["text"] for c in LG.block_conflicts(blocks)]
+        if js["res"] is not None:
+            py = LG.resolve_overlaps(blocks, lambda i: (1 if i == 1 else 0, -i))
+            norm = lambda l: sorted((x["start"], x["end"], tuple(x["days"]), x.get("temp"), x.get("kind")) for x in l)  # noqa: E731
+            assert norm(js["res"]) == norm(py) and LG.block_conflicts(js["res"]) == []
+
+
+def test_heizplan_editor(panel):
+    """Eco-Zeitfenster, Konflikt sichtbar (Speichern gesperrt), „hat Vorrang“ löst auf, Speichern gegen das Schema."""
+    p = panel
+    p.view("plans")
+    p.js(f"() => {{ {EL}._selectPlan('room', 'a1'); {EL}._renderMain(); }}")
+    p.wait()
+    n = p.js(f"{EL}._plan.blocks.length")
+    p.click('[data-action="plan-add"]')
+    assert p.js(f"{EL}._plan.blocks.length") == n + 1 and p.js(f"planConflicts({EL}._plan.blocks).length") == 0
+    # Eco-Fenster
+    p.click(f'[data-action="blk-kind"][data-i="{n}"][data-v="eco"]')
+    assert p.js(f"{EL}._plan.blocks[{n}].kind") == "eco"
+    # Konflikt erzeugen: ein Komfort-Fenster über den ganzen Tag
+    p.js(f"() => {{ {EL}._plan.blocks.push({{ days: [0,1,2,3,4,5,6], start: '05:00', end: '23:00', temp: 20 }}); {EL}._renderMain(); }}")
+    p.wait()
+    assert p.has('.block.conflict') and p.has('[data-action="plan-save"][disabled]')
+    assert "überschneiden sich" in p.js(f"{EL}.shadowRoot.querySelector('.plan-conf').textContent")
+    last = p.js(f"{EL}._plan.blocks.length") - 1
+    p.click(f'[data-action="plan-resolve"][data-win="0"]')
+    assert p.js(f"planConflicts({EL}._plan.blocks).length") == 0 and not p.has('.block.conflict')
+    p.click('[data-action="plan-save"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/room/save"][-1]["room"]["schedule"]
+    assert LG.block_conflicts(saved) == [] and any(b.get("kind") == "eco" for b in saved)
