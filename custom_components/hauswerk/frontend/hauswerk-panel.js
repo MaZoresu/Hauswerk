@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.58.0";
+const VERSION = "0.59.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -126,6 +126,7 @@ const PICKERS = {
   kwa_status: { scope: "pop", multi: false, domains: ["sensor", "binary_sensor", "select", "input_select"] },
   persons: { scope: "settings", multi: true, domains: ["person", "device_tracker"] },
   presence_sensor: { scope: "room", multi: false, domains: ["binary_sensor"] },
+  fireplace_entity: { scope: "room", multi: false, domains: ["binary_sensor", "switch", "input_boolean", "sensor"] },
   comfort_entity: { scope: "room", multi: false, domains: ["input_number", "number", "sensor"] },
   eco_entity: { scope: "room", multi: false, domains: ["input_number", "number", "sensor"] },
   proximity_sensors: { scope: "settings", multi: true, domains: ["sensor"] },
@@ -1685,6 +1686,19 @@ class HauswerkPanel extends HTMLElement {
 
   // ------------------------------------------------------------ Lüften
   /** Lüften-Zustand eines Raums für Kachel und Listen: [icon, Kurztext, Farbe, Titel] oder null. */
+  /** Kamin bzw. zusätzliche Wärme: [Symbol, Text, Farbe, Erklärung] oder null. */
+  _fireChip(s) {
+    const fp = s?.fireplace;
+    if (!fp?.state) return null;
+    const keep = " – zählt nicht für die Bewertung der Heizleistung.";
+    if (fp.state === "on") return ["mdi:fireplace", "", "#f97316", `Kamin an (${fp.source === "manuell" ? "von Hand" : "laut Signal"})${keep}`];
+    if (fp.state === "maybe")
+      return ["mdi:fireplace", "?", "#a8a29e", fp.cause === "other"
+        ? `Wärmer ohne Heizung (+${fmt(fp.rise)} °C in 30 Min.) – der Kamin ist laut Signal aus, also eine andere Wärmequelle${keep}`
+        : `Wärmer ohne Heizung (+${fmt(fp.rise)} °C in 30 Min.) – vielleicht der Kamin, die Sonne oder Kochen. Sicher ist das nicht${keep}`];
+    return ["mdi:fireplace", "", "#fdba74", `Nachwärme – der Raum ist noch wärmer als gewollt${keep}`];
+  }
+
   _ventChip(s) {
     const a = s?.air || {};
     if (a.open?.done) return ["mdi:window-closed-variant", "schließen", "#ef4444", `Genug gelüftet – Fenster schließen (${a.open.done})`];
@@ -3122,6 +3136,8 @@ class HauswerkPanel extends HTMLElement {
     const vc = this._ventChip(s);
     if (vc) icons.push(si(vc[0], vc[2], vc[3], vc[1]));
     else if (s.windows_open) icons.push(si("mdi:window-open-variant", "#22d3ee", s.window_pending ? "Fenster offen – Pause beginnt gleich" : "Fenster offen"));
+    const fc = this._fireChip(s);
+    if (fc) icons.push(si(fc[0], fc[2], fc[3], fc[1]));
     if (s.occupied === true) icons.push(si("mdi:account-check-outline", "#fbbf24", "Präsenzmelder: jemand im Raum"));
     else if (s.occupied === false) icons.push(si("mdi:account-off-outline", "var(--muted)", "Präsenzmelder: niemand im Raum"));
     const dv = this._devIndicators(room);
@@ -3471,6 +3487,7 @@ class HauswerkPanel extends HTMLElement {
         </div>
         ${this._wrapInd(`
           ${s.heating ? `<ha-icon class="rm-fire" icon="mdi:fire" title="Heizt"></ha-icon>` : ""}
+          ${(() => { const fc = this._fireChip(s); return fc ? `<span class="rm-dev on" style="color:${fc[2]}" title="${esc(fc[3])}"><ha-icon icon="${fc[0]}"></ha-icon>${esc(fc[1])}</span>` : ""; })()}
           ${(() => { const vc = this._ventChip(s); return vc ? `<span class="rm-dev on" style="color:${vc[2]}" title="${esc(vc[3])}"><ha-icon icon="${vc[0]}"></ha-icon>${esc(vc[1])}</span>` : s.windows_open ? `<ha-icon class="rm-win" icon="mdi:window-open-variant" title="Fenster offen"></ha-icon>` : ""; })()}
           ${(() => {
             const dv = this._devIndicators(room);
@@ -5574,6 +5591,7 @@ class HauswerkPanel extends HTMLElement {
           ${fact("Aufheizen", f.rate != null ? `${fmt(f.rate, 1)} °C/h` : null)}
           ${fact("Überheizt", f.over_pct ? `${f.over_pct} %` : null)}
           ${fact("Frost / mild", f.ok_cold != null && f.ok_mild != null ? `${f.ok_cold} / ${f.ok_mild} %` : null)}
+          ${fact("Kamin u. Ä.", f.fire_h ? `${fmt(f.fire_h, 1)} h` : null, f.fire_h ? "herausgerechnet" : "")}
         </div>
         <div class="pw-list">${(a.findings || []).map((x) => { const [i, c] = LV[x.level] || LV.info; return `<div class="pw-i"><ha-icon icon="${i}" style="color:${c}"></ha-icon><span><b>${esc(x.title)}</b><small>${esc(x.text)}</small></span></div>`; }).join("")}</div>
         ${this._admin && ["weak", "sensor", "tight"].includes(a.verdict) ? `<button class="link" data-action="room-edit" data-id="${r.id}"><ha-icon icon="mdi:cog-outline"></ha-icon>Raum einstellen</button>` : ""}
@@ -6624,13 +6642,18 @@ class HauswerkPanel extends HTMLElement {
           ...(dv.floor?.on ? [["mdi:heating-coil", `${dv.floor.label} heizt`, "#f97316"]] : []),
           ...(rs.assist ? [["mdi:radiator", rs.assist.on ? "Heizkörper hilft nach" : "Heizkörper zu", rs.assist.on ? "#f97316" : "#64748b"]] : []),
           ...(rs.windows_open ? [["mdi:window-open-variant", "Fenster offen", "#22d3ee"]] : []),
+          ...(this._fireChip(rs) ? [[this._fireChip(rs)[0], { on: "Kamin an", maybe: "Wärmer ohne Heizung", after: "Nachwärme" }[rs.fireplace.state], this._fireChip(rs)[2]]] : []),
         ];
+        const fp = rs.fireplace || {};
+        const fireBtn = room.fireplace && !(fp.state === "on" && fp.source === "signal")
+          ? `<button class="qbtn ${fp.manual ? "hot" : ""}" data-action="rq-fire" data-id="${room.id}" data-on="${fp.manual ? "0" : "1"}"><ha-icon icon="mdi:fireplace${fp.manual ? "-off" : ""}"></ha-icon>Kamin ${fp.manual ? "aus" : "an"}</button>` : "";
         const auto = room.enabled !== false;
         return {
           icon: roomIcon(room), c: this._roomColor(room.id), title: esc(room.name || "Raum"), sub: "Manuell ändern", open: true,
           body: `
             <div class="rq-facts">${facts.map(([i, txt, c]) => `<span style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${esc(txt)}</span>`).join("")}</div>
             ${blocked ? `<p class="note"><ha-icon icon="mdi:information-outline"></ha-icon>${blocked}</p>` : ""}
+            ${this._fireChip(rs) ? `<p class="muted small"><ha-icon icon="mdi:fireplace"></ha-icon>${esc(this._fireChip(rs)[3])}${fp.manual && fp.until ? ` Endet von selbst um ${new Date(fp.until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}.` : ""}</p>` : ""}
             ${(mode === "manuell" || mode === "boost") && until ? `<div class="room-note ${mode === "boost" ? "boost" : ""}"><ha-icon icon="${mode === "boost" ? "mdi:rocket-launch-outline" : "mdi:hand-back-right-outline"}"></ha-icon>${mode === "boost" ? "Boost" : "Manuell"} bis ${until}<span class="grow"></span><button class="link" data-action="ovr-reset" data-id="${room.id}">Zurück zum Plan</button></div>` : ""}
             <div class="rq-temp">
               <small>Gewünschte Temperatur</small>
@@ -6644,6 +6667,7 @@ class HauswerkPanel extends HTMLElement {
             <div class="segs small rq-dur">${durs.map(([h, l]) => `<button class="seg ${String(d.hours ?? "") === h ? "on" : ""}" data-action="rq-dur" data-h="${h}">${l}</button>`).join("")}</div>
             <div class="rq-more">
               ${(room.climates || []).length && !["aus", "fenster", "entkalken"].includes(mode) ? `<button class="qbtn hot" data-action="rq-boost" data-id="${room.id}"><ha-icon icon="mdi:rocket-launch-outline"></ha-icon>Boost ${this._data.settings.boost_minutes || 30} Min.</button>` : ""}
+              ${fireBtn}
               <button class="qbtn" data-action="room-page" data-id="${room.id}" data-hint="1"><ha-icon icon="mdi:chart-line"></ha-icon>Raumseite</button>
               ${this._admin ? `<button class="qbtn" data-action="plan-open" data-id="${room.id}" data-hint="1"><ha-icon icon="mdi:calendar-clock"></ha-icon>Heizplan</button>
               <button class="qbtn" data-action="room-auto" data-id="${room.id}" data-hint="1"><ha-icon icon="${auto ? "mdi:robot-off-outline" : "mdi:robot-outline"}"></ha-icon>Automatik ${auto ? "aus" : "an"}</button>` : ""}
@@ -7381,6 +7405,11 @@ class HauswerkPanel extends HTMLElement {
           <label class="field"><span>Morgens lüften</span><select data-room="vent_morning">${[["", "Automatisch (Schlaf-/Kinderzimmer)"], ["1", "Ja"], ["0", "Nein"]].map(([v, l]) => `<option value="${v}" ${(r.vent_morning == null ? "" : r.vent_morning ? "1" : "0") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
           <div class="field"><span><ha-icon icon="mdi:molecule-co2"></ha-icon> CO₂-Sensor <span class="muted small">· optional</span></span>${this._picker("co2_sensor", r.co2_sensor ? [r.co2_sensor] : [])}</div>
         </div>
+        <div class="sub-h"><ha-icon icon="mdi:fireplace"></ha-icon>Kamin</div>
+        ${check("fireplace", "mdi:fireplace", "Kamin im Raum vorhanden", "Wird der Raum wärmer, ohne dass geheizt wird, rechnet Heizwerk mit einer zusätzlichen Wärmequelle: Diese Zeit zählt nicht für die Bewertung der Heizleistung und nicht fürs Lernen der Aufheizzeit.")}
+        ${r.fireplace ? `
+        <div class="field"><span><ha-icon icon="mdi:flash-outline"></ha-icon> Signal „Kamin in Betrieb“ <span class="muted small">· optional</span></span>${this._picker("fireplace_entity", r.fireplace_entity ? [r.fireplace_entity] : [])}</div>
+        <p class="muted small">Ein vorhandener Kamin heißt nicht, dass er brennt. Ohne Signal sagt Heizwerk nur „wärmer ohne Heizung – vielleicht der Kamin“ (es kann auch Sonne, Kochen oder Besuch sein). Mit Signal ist es sicher: Schalter, Binärsensor oder Steckdose (an = brennt), Temperaturfühler am Ofen bzw. Rohr (ab 50 °C) oder Leistung eines Gebläses. Ohne Signal lässt sich „Kamin an“ auch von Hand angeben – Tipp auf die Raumkachel.</p>` : ""}
         <div class="sub-h"><ha-icon icon="mdi:motion-sensor"></ha-icon>Präsenzmelder im Raum <span class="muted small">· optional</span></div>
         <div class="field">${this._picker("presence_sensor", r.presence_sensor ? [r.presence_sensor] : [])}</div>
         ${r.presence_sensor ? `
@@ -7954,7 +7983,7 @@ class HauswerkPanel extends HTMLElement {
       if (key === "plan_id" || key === "use") v = v || null;
       if (key === "vent_morning") v = v === "" ? null : v === "1";
       this._dialog.room[key] = v;
-      if (["name", "valve_control", "calibration", "window_detect"].includes(key) && isChange) this._renderDialog();
+      if (["name", "valve_control", "calibration", "window_detect", "fireplace"].includes(key) && isChange) this._renderDialog();
       return;
     }
     if (t.dataset.action === "log-search") {
@@ -8754,6 +8783,13 @@ class HauswerkPanel extends HTMLElement {
         await this._ws({ type: "hauswerk/heizen/override", room_id: d.id, temp: d.temp, hours: d.hours });
         this._closePop();
         this._toast(`${name}: ${fmt(d.temp)} °C ${d.hours ? `für ${d.hours} h` : "bis zum nächsten Planwechsel"}`);
+        break;
+      }
+      case "rq-fire": {
+        const on = el.dataset.on === "1";
+        await this._ws({ type: "hauswerk/heizen/fireplace", room_id: el.dataset.id, on });
+        this._closePop();
+        this._toast(on ? "Kamin an – zählt nicht für die Heizleistung (längstens 8 Std.)" : "Kamin aus");
         break;
       }
       case "rq-boost":

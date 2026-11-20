@@ -1351,3 +1351,54 @@ def test_benachrichtigungskanaele(hw):
         assert [r["ok"] for r in res] == [True, False] and res[1]["error"] == "nicht erreichbar"
 
     asyncio.run(run())
+
+
+def test_kamin(hw):
+    """Kamin: wärmer ohne Heizung → „vielleicht“, nicht in Komfort/überheizt; von Hand an/aus; Signal; Lernen verworfen."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 20, 17, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("climate.wz", "heat", {"current_temperature": 21.0, "temperature": 21.0, "hvac_action": "idle"}, "Thermostat WZ")
+        hass.set("sensor.wz_t", "21.0", name="WZ Temperatur")
+        log, haus, ctl = await _setup(hw, hass)
+        await ctl.async_save_room({"id": "wz", "name": "Wohnzimmer", "type": "heizkoerper", "comfort": 21, "eco": 18, "fireplace": True,
+                                   "climates": ["climate.wz"], "temp_sensor": "sensor.wz_t", "enabled": True,
+                                   "schedule": [{"start": "00:00", "end": "23:59", "days": [0, 1, 2, 3, 4, 5, 6]}]})
+        for _ in range(80):
+            NOW[0] += timedelta(minutes=1)
+            await ctl.async_evaluate()
+        assert ctl.status()["rooms"]["wz"]["fireplace"]["state"] is None
+        for i in range(30):  # +1 °C in 30 Min. ohne Heizung
+            NOW[0] += timedelta(minutes=1)
+            hass.set("sensor.wz_t", f"{21.0 + (i + 1) / 30:.2f}", name="WZ Temperatur")
+            await ctl.async_evaluate()
+        fp = ctl.status()["rooms"]["wz"]["fireplace"]
+        assert fp["state"] == "maybe" and fp["cause"] == "kamin?"
+        assert any(e["title"] == "Wärmer ohne Heizung" for e in log.entries)
+        ctl._record_stats()
+        b = ctl._stat("wz")
+        assert b["fire"] == 1 and b.get("mn", 0) == 0 and b.get("over", 0) == 0
+        # von Hand an, dann aus
+        await ctl.async_set_fireplace("wz", True, by="Test")
+        fp = ctl.status()["rooms"]["wz"]["fireplace"]
+        assert fp["state"] == "on" and fp["manual"] and fp["until"]
+        await ctl.async_set_fireplace("wz", False)
+        assert ctl.status()["rooms"]["wz"]["fireplace"]["state"] == "maybe"  # wird noch wärmer: Ursache wieder offen
+        # Signal: Ofenrohr-Fühler 120 °C → an
+        hass.set("sensor.ofen", "120", {"unit_of_measurement": "°C"}, "Ofenrohr")
+        await ctl.async_save_room({**ctl.rooms["wz"], "fireplace_entity": "sensor.ofen"})
+        await ctl.async_evaluate()
+        fp = ctl.status()["rooms"]["wz"]["fireplace"]
+        assert fp["state"] == "on" and fp["source"] == "signal"
+        # Aufheizmessung während Kamin wird verworfen
+        rt = ctl._rt("wz")
+        rt["learn"] = {"ts": NOW[0].timestamp() - 1800, "temp": 19.0, "target": 21.0, "factor": 1.0}
+        ctl._learn("wz", rt, {"mode": "komfort", "target": 21.0}, 21.0, NOW[0].timestamp())
+        assert "wz" not in ctl.heat_rates and any(e["title"] == "Aufheizmessung verworfen" for e in log.entries)
+        # Kamin abgewählt: alles weg
+        await ctl.async_save_room({**ctl.rooms["wz"], "fireplace": False})
+        assert ctl.status()["rooms"]["wz"]["fireplace"] is None
+
+    asyncio.run(run())

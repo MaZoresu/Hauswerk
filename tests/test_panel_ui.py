@@ -1133,3 +1133,29 @@ def test_benachrichtigungskanaele(panel):
     p.wait(300)
     saved = [m for m in p.sent() if m["type"].endswith("settings/save") and "notify_channels" in m.get("settings", {})][-1]["settings"]
     assert saved["notify_channels"] == chans and saved["notify_routes"]["vent_done"][0] == "svc:pushover"
+
+
+def test_kamin(panel):
+    """Kamin: Symbol mit „vielleicht“, Schnellmenü „Kamin an“, Raum-Dialog mit Haken und Signal (Backend-Schema)."""
+    p = panel
+    p.view("overview")
+    p.wait()
+    assert "vielleicht der Kamin" in p.js(f"{EL}.shadowRoot.querySelector('#room-a1').innerHTML")
+    p.js(f"() => {{ {EL}._openPop('rq', {{ id: 'a1', temp: 21, hours: null }}); }}")
+    p.wait()
+    assert "Wärmer ohne Heizung" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    p.click('#pop [data-action="rq-fire"][data-on="1"]')
+    p.wait(200)
+    m = [x for x in p.sent() if x["type"] == "hauswerk/heizen/fireplace"][-1]
+    assert m["room_id"] == "a1" and m["on"] is True
+    # Raum-Dialog: Haken ab- und anwählen, Signal wählen, speichern
+    p.js(f"(id) => {EL}._openRoom({EL}._data.rooms[id])", "a1")
+    p.wait()
+    p.click('#dialog [data-action="dialog-tab"][data-tab="devices"]')
+    assert "Kamin im Raum vorhanden" in p.js(f"{EL}.shadowRoot.querySelector('#dialog').textContent")
+    assert "Signal „Kamin in Betrieb“" in p.js(f"{EL}.shadowRoot.querySelector('#dialog').textContent")
+    p.js(f"() => {{ {EL}._dialog.room.fireplace_entity = 'binary_sensor.kamin_wohnzimmer'; }}")
+    p.click('#dialog [data-action="room-save"]')
+    p.wait(300)
+    saved = [x for x in p.sent() if x["type"] == "hauswerk/heizen/room/save"][-1]
+    assert saved["room"]["fireplace"] is True and saved["room"]["fireplace_entity"] == "binary_sensor.kamin_wohnzimmer"

@@ -515,3 +515,36 @@ def test_vorhersage_ohne_erfundene_zeit():
     # zwei Stufen: Stufe 1 bei Sonnenrichtung 220°, Stufe 2 zur spätesten Zeit
     p = L.predict_open_close(_prof(close_stage1=True, stage1_trigger="azimuth", stage1_azimuth=220), (420, 540), (900, 1320), elev, azim)
     assert p["close"] == 1320 and 13 * 60 <= p["stage1"] <= 16 * 60 and abs(azim(p["stage1"]) - 220) < 0.5
+
+
+def test_kamin_zusaetzliche_waerme():
+    """Wärmer ohne Heizanforderung → „vielleicht Kamin“; Restwärme der Heizung zählt nicht; Phasen mit Nachwirkung."""
+    t0 = 100000.0
+    # 2 Std. ruhig bei 20 °C ohne Heizung, dann in 30 Min. +0,8 °C
+    s = [(t0 + i * 60, 20.0, False) for i in range(90)] + [(t0 + (90 + i) * 60, 20.0 + 0.8 * i / 30, False) for i in range(31)]
+    now = s[-1][0]
+    assert L.extra_heat_rise(s, now) == 0.8
+    # geheizt in den letzten 50 Min. → Restwärme, keine Aussage
+    h = [(ts, t, ts > now - 2700 and ts < now - 2400) for ts, t, _ in s]
+    assert L.extra_heat_rise(h, now) is None
+    # Fußbodenheizung: Heizanforderung vor 2 Std. reicht schon aus
+    f = [(ts, t, ts < now - 2 * 3600 + 60) for ts, t, _ in s]
+    assert L.extra_heat_rise(f, now) == 0.8 and L.extra_heat_rise(f, now, floor=True) is None
+    # zu kurze Vorgeschichte (Neustart) bzw. kleiner Anstieg
+    assert L.extra_heat_rise(s[-31:], now) is None
+    assert L.extra_heat_rise([(ts, 20.0 + (0.2 if ts > now - 600 else 0), False) for ts, _, _ in s], now) is None
+    # Phasen
+    p = L.fireplace_phase(None, now, rise=0.8, temp=20.8, target=20)
+    assert p["state"] == "maybe" and p["cause"] == "kamin?"
+    assert L.fireplace_phase(None, now, rise=0.8, signal=False)["cause"] == "other"
+    on = L.fireplace_phase(p, now + 60, manual=True)
+    assert on["state"] == "on" and on["source"] == "manuell"
+    after = L.fireplace_phase(on, now + 600, temp=22.0, target=20)
+    assert after["state"] == "after"
+    assert L.fireplace_phase(after, now + 1200, temp=22.0, target=20)["state"] == "after"
+    assert L.fireplace_phase(after, now + 1200, temp=20.2, target=20) is None  # abgekühlt
+    assert L.fireplace_phase(after, now + 3 * 3600 + 120, temp=22.0, target=20) is None
+    # Bericht: Kamin-Zeit ausgewiesen
+    rows = [{"comfort_n": 300, "under_min": 0, "measured_min": 400, "over_min": 0, "fire_min": 120, "heat_min": 100, "comfort_dev": 0.1, "valve_avg": 40}]
+    a = L.room_analysis(rows, None)
+    assert a["facts"]["fire_h"] == 2.0 and any(f["title"] == "Zusätzliche Wärme herausgerechnet" for f in a["findings"])

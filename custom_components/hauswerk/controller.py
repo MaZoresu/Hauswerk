@@ -59,6 +59,8 @@ from .logic import (
     keyword_match,
     keywords,
     learn_rate,
+    extra_heat_rise,
+    fireplace_phase,
     room_analysis,
     liming_active,
     minutes_until,
@@ -190,6 +192,8 @@ class Heizen:
         self.outside_hours: dict[str, list] = stored.get("outside_hours") or {}
         # Lüftungen je Raum (14 Tage): Beginn, Dauer, Feuchte und Temperatur vorher/nachher, Wärmeverlust
         self.vent_log: dict[str, list] = stored.get("vent_log") or {}
+        # „Kamin in Betrieb“ von Hand: Raum → gilt bis (Zeitstempel); übersteht Neustarts
+        self.fire_manual: dict[str, float] = stored.get("fire_manual") or {}
 
     def _data(self) -> dict[str, Any]:
         return {
@@ -202,6 +206,7 @@ class Heizen:
             "demand": self.demand,
             "outside_hours": self.outside_hours,
             "vent_log": self.vent_log,
+            "fire_manual": self.fire_manual,
         }
 
     def _note_outside(self, outside: float | None) -> None:
@@ -1123,10 +1128,21 @@ class Heizen:
         if abs(result["target"] - run["target"]) > 0.6 or now - run["ts"] > 8 * 3600:
             rt["learn"] = None  # Ziel geändert oder zu lange: Messung verwerfen
             return
+        if rt.get("fire"):
+            run["fire"] = True  # Kamin an oder Wärme ohne Heizung: diese Messung zählt nicht
         if room_temp >= run["target"] - 0.2:
             # auf 5 °C draußen umrechnen (gemessene Geschwindigkeit × Wetterfaktor)
             hours = (now - run["ts"]) / 3600 / (run.get("factor") or 1.0)
-            rate = learn_rate(self.heat_rates.get(room_id), run["temp"], room_temp, hours)
+            old = self.heat_rates.get(room_id)
+            measured = (room_temp - run["temp"]) / hours if hours > 0 else None
+            if run.get("fire") or ((self.rooms.get(room_id) or {}).get("fireplace") and old and measured and measured > 2.5 * old):
+                # Kamin-Raum und viel schneller als gelernt: wahrscheinlich half eine andere Wärmequelle mit
+                self.log.add("target", "Aufheizmessung verworfen",
+                             "Kamin bzw. zusätzliche Wärme während des Aufheizens – zählt nicht für die Heizleistung",
+                             room_id, (self.rooms.get(room_id) or {}).get("name"))
+                rt["learn"] = None
+                return
+            rate = learn_rate(old, run["temp"], room_temp, hours)
             if rate is not None:
                 self.heat_rates[room_id] = rate
                 self._save()
@@ -1297,6 +1313,7 @@ class Heizen:
                                       rt.get("cold_run"), now)
             rt["cold_run"] = run
             self._assist(room, rt, result, room_temp)
+            fire = self._fireplace(room_id, room, rt, result, room_temp, valve_all, now)
             self._learn(room_id, rt, result, room_temp, now)
             result.update(
                 preheat_mode=self._preheat_mode(room),
@@ -1332,6 +1349,7 @@ class Heizen:
                 assist=self._assist_status(room, rt),
                 valve=valve,
                 valve_all=valve_all,
+                fireplace=fire,
                 cold_radiator={"minutes": int((now - run["since"]) // 60), "valve": valve,
                                "rise": round(room_temp - run["t0"], 1)} if cold else None,
             )
@@ -1402,6 +1420,87 @@ class Heizen:
             rt["temps"] = []  # nach der Pause neu messen
             return True
         return False
+
+    # ------------------------------------------------------------ Kamin
+    def _fire_signal(self, room: dict) -> bool | None:
+        """Signal „Kamin in Betrieb“: Schalter/Binärsensor an, Temperaturfühler am Ofen/Rohr ≥ 50 °C (unter 35 °C aus),
+        Leistung/Gebläse > 5 W. None = kein Signal gewählt oder gerade kein Wert."""
+        entity_id = room.get("fireplace_entity")
+        st = self.hass.states.get(entity_id) if entity_id else None
+        if st is None or st.state in ("unavailable", "unknown", ""):
+            return None
+        if st.state in ("on", "off", "open", "closed", "detected", "clear", "true", "false"):
+            return st.state in ("on", "open", "detected", "true")
+        try:
+            value = float(st.state)
+        except ValueError:
+            return st.state.lower() in ("heating", "burning", "an", "brennt", "heizen")
+        unit = st.attributes.get("unit_of_measurement") or ""
+        if unit in ("°C", "°F"):
+            value = (value - 32) / 1.8 if unit == "°F" else value
+            return True if value >= 50 else False if value < 35 else None
+        if unit in ("W", "kW"):
+            return value > (0.005 if unit == "kW" else 5)
+        return value > 0
+
+    def _fireplace(self, room_id: str, room: dict, rt: dict, result: dict, room_temp: float | None,
+                   valve_all: float | None, now: float) -> dict | None:
+        """Kamin im Raum: in Betrieb (Hand/Signal), wahrscheinlich (wärmer ohne Heizanforderung) oder Nachwirkung.
+        Ergebnis steht in rt["fire"] und schließt die Zeit aus Lernen und Heizleistungs-Bewertung aus."""
+        if not room.get("fireplace"):
+            rt["fire"] = None
+            rt.pop("fire_hist", None)
+            self.fire_manual.pop(room_id, None)
+            return None
+        demand = bool(result.get("heating")) or self._is_heating(room, room_temp, result.get("target")) or (valve_all or 0) >= 15
+        hist = rt.setdefault("fire_hist", [])
+        if room_temp is not None and (not hist or now - hist[-1][0] >= 55):
+            hist.append((now, room_temp, demand))
+        elif hist and demand:
+            hist[-1] = (hist[-1][0], hist[-1][1], True)
+        while hist and now - hist[0][0] > 4 * 3600:
+            hist.pop(0)
+        until = self.fire_manual.get(room_id)
+        if until and now >= until:
+            self.fire_manual.pop(room_id, None)
+            self._save()
+            self.log.add("manual", "Kamin aus", "„Kamin in Betrieb“ nach 8 Std. von selbst beendet", room_id, room.get("name"))
+            until = None
+        signal = self._fire_signal(room)
+        rise = extra_heat_rise(hist, now, floor=room.get("type") == "flaeche")
+        prev = rt.get("fire")
+        phase = fireplace_phase(prev, now, manual=bool(until), signal=signal, rise=rise, temp=room_temp, target=result.get("target"))
+        rt["fire"] = phase
+        old, new = (prev or {}).get("state"), (phase or {}).get("state")
+        if new == "maybe" and old not in ("maybe", "on"):
+            self.log.add("target", "Wärmer ohne Heizung",
+                         f"+{self._t(phase['rise'])} °C in 30 Min. ohne Heizanforderung · "
+                         + ("Kamin laut Signal aus – andere Wärmequelle (Sonne, Kochen …)" if phase.get("cause") == "other"
+                            else "vielleicht der Kamin oder Sonne – zählt nicht für die Heizleistung"),
+                         room_id, room.get("name"))
+        if new == "on" and old != "on" and phase["source"] == "signal":
+            self.log.add("target", "Kamin an", f"laut {self._name(room['fireplace_entity'])}", room_id, room.get("name"))
+        if old == "on" and new != "on" and (prev or {}).get("source") == "signal":
+            self.log.add("target", "Kamin aus", f"laut {self._name(room['fireplace_entity'])}", room_id, room.get("name"))
+        if not phase:
+            return {"state": None, "signal": signal, "manual": False}
+        out = {**phase, "signal": signal, "manual": bool(until),
+               "minutes": int((now - phase["since"]) // 60)}
+        if until:
+            out["until"] = dt_util.utc_from_timestamp(until).isoformat()
+        return out
+
+    async def async_set_fireplace(self, room_id: str, on: bool, by: str | None = None) -> None:
+        """„Kamin in Betrieb“ von Hand – längstens 8 Stunden."""
+        room = self.rooms.get(room_id) or {}
+        if on:
+            self.fire_manual[room_id] = dt_util.utcnow().timestamp() + 8 * 3600
+            self.log.add("manual", "Kamin an", f"von Hand · zählt bis zum Ausschalten (längstens 8 Std.) nicht für die Heizleistung{self._by(by)}", room_id, room.get("name"))
+        else:
+            self.fire_manual.pop(room_id, None)
+            self.log.add("manual", "Kamin aus", f"von Hand{self._by(by)}", room_id, room.get("name"))
+        self._save()
+        await self.async_evaluate()
 
     def _shower(self, room_id: str, room: dict, rt: dict, override: dict | None, paused: bool, now: float) -> dict | None:
         minutes = int(room.get("shower_boost") or 0)
@@ -1904,6 +2003,10 @@ class Heizen:
                 bucket["tsum"] += result["room_temp"]
                 bucket["tn"] += 1
             temp, target, mode = result.get("room_temp"), result.get("target"), result.get("mode")
+            if self._rt(room_id).get("fire"):
+                # Kamin bzw. zusätzliche Wärme: nicht in die Bewertung der Heizleistung (Komfort, überheizt, Ventil)
+                bucket["fire"] = bucket.get("fire", 0) + 1
+                temp = None
             # Für die Analyse der Heizleistung: Komfort erreicht? Überheizt? Ventil ganz offen? Außentemperatur?
             if temp is not None and target is not None and mode in COMFORT_MODES:
                 bucket["cn"] = bucket.get("cn", 0) + 1
@@ -1914,7 +2017,7 @@ class Heizen:
                 bucket["mn"] = bucket.get("mn", 0) + 1
                 if temp > target + 1.0:
                     bucket["over"] = bucket.get("over", 0) + 1
-            if (result.get("valve_all") or 0) >= 90:
+            if temp is not None and (result.get("valve_all") or 0) >= 90:
                 bucket["full"] = bucket.get("full", 0) + 1
             outside = self.haus.outside_temp()
             if outside is not None:
@@ -1954,6 +2057,7 @@ class Heizen:
                         "comfort_dev": round(b["cdev"] / b["cn"], 2) if b.get("cn") else None,
                         "measured_min": b.get("mn", 0), "over_min": b.get("over", 0), "full_min": b.get("full", 0),
                         "outside_avg": round(b["osum"] / b["on"], 1) if b.get("on") else None,
+                        "fire_min": b.get("fire", 0),
                     }
                 )
             out[room_id] = rows

@@ -22,6 +22,7 @@ const states = {
   "person.jens": st("home", { friendly_name: "Jens" }),
   "person.julia": st("not_home", { friendly_name: "Julia", latitude: 51.3432, longitude: 12.3742 }),
   "zone.arbeit": st("0", { friendly_name: "Arbeit", latitude: 51.30, longitude: 12.40 }),
+  "binary_sensor.kamin_wohnzimmer": st("off", { friendly_name: "Kamin Wohnzimmer" }),
   "sensor.wohnzimmer_temperatur": st("20.6", { friendly_name: "Wohnzimmer Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   "sensor.bad_temperatur": st("21.9", { friendly_name: "Bad Klima Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
   "sensor.kueche_temperatur": st("unavailable", { friendly_name: "Küche Temperatur", device_class: "temperature", unit_of_measurement: "°C" }),
@@ -87,7 +88,7 @@ const settings = {
     { id: "trockner", name: "Trockner", type: "trockner", power: "sensor.steckdose_trockner_leistung", notify: ["mobile_app_jens"] }], calendars: [], waste_calendars: ["calendar.muell"], waste_hidden: ["Sperrmüll"], waste_remind: "18:00", notify_waste: "normal", workday_as: 6, vent_rh: 65, demand_entity: "climate.vaillant_zone", demand_action: "lower", demand_low: 17, demand_valve: 15, demand_hold: 20, demand_preheat: 1, rw_covers: ["cover.ra_wohnzimmer", "cover.ra_kuche_links", "cover.ra_kuche_rechts", "cover.ma_terasse"], rw_shade: true, rw_shade_temp: 24, rw_shade_pos: 30,
 };
 const rooms = {
-  a1: { id: "a1", name: "Wohnzimmer", type: "heizkoerper", comfort: 21, eco: 18, climates: ["climate.wohnzimmer", "climate.wohnzimmer_heizkoerper", "climate.wohnzimmer_heizkoerper2"], assist_entities: ["climate.wohnzimmer_heizkoerper2"], windows: [], enabled: true,
+  a1: { id: "a1", name: "Wohnzimmer", type: "heizkoerper", comfort: 21, eco: 18, fireplace: true, climates: ["climate.wohnzimmer", "climate.wohnzimmer_heizkoerper", "climate.wohnzimmer_heizkoerper2"], assist_entities: ["climate.wohnzimmer_heizkoerper2"], windows: [], enabled: true,
     schedule: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "06:00", end: "22:00" }] },
   b2: { id: "b2", name: "Gästebad Erdgeschoss", type: "flaeche", comfort: 22, eco: 19, climates: ["climate.bad"], windows: ["binary_sensor.fenster_bad"], enabled: true,
     humidity_sensor: "sensor.bad_feuchte", shower_boost: 30, show_entities: ["climate.bad_heizkoerper", "switch.fussbodenheizung_bad"],
@@ -96,6 +97,7 @@ const rooms = {
 const status = {
   rooms: {
     a1: { mode: "komfort", mode_label: "Komfort", target: 21, room_temp: 20.4, heating: true, humidity: 48, next_change: 120, preheat_factor: 1.06,
+      fireplace: { state: "maybe", source: "verlauf", cause: "kamin?", rise: 0.7, minutes: 12, manual: false, signal: null },
       air: { limit: 65, minutes: 10, mold: { wall_temp: 14.9, wall_rh: 66, level: "ok" }, co2: 840, reasons: [], kind: null,
         open: { since: new Date(Date.now() - 4 * 60e3).toISOString(), minutes: 4.2, target: 10, done: null, cool: false },
         last: { at: new Date(Date.now() - 20 * 3600e3).toISOString(), min: 12, rh0: 58, rh1: 49 }, week: { count: 6, minutes: 61, kwh: 1.1, rh_drop: 7 } },

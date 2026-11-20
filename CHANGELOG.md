@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.59.0 – 2026-11-20
+
+### Neu – Heizwerk: Kamin im Raum
+- **„Kamin im Raum vorhanden“** (Raum › Geräte › Kamin). Vorhanden heißt nicht in Betrieb: Wird ein solcher Raum in 30 Min. um mindestens 0,4 °C wärmer, **ohne dass geheizt wird** (auch keine Restwärme – Heizkörper 20 Min., Fußbodenheizung 3 Std.), zeigt die Raumkachel ein Kamin-Symbol mit „?“: „Wärmer ohne Heizung – vielleicht der Kamin, die Sonne oder Kochen. Sicher ist das nicht.“
+- **Signal „Kamin in Betrieb“ (optional):** Schalter, Binärsensor oder Steckdose (an = brennt), Temperaturfühler am Ofen/Rohr (ab 50 °C) oder Leistung eines Gebläses. Dann ist die Aussage sicher („Kamin an laut Signal“); meldet das Signal „aus“, gilt ein Anstieg als andere Wärmequelle.
+- **Von Hand:** „Kamin an / aus“ im Schnellmenü der Raumkachel – endet spätestens nach 8 Stunden von selbst. Darf jeder (wie Temperatur von Hand).
+- **Bewertung unverfälscht:** Solange der Kamin an ist, die Temperatur ohne Heizung steigt oder der Raum danach noch wärmer als gewollt ist (Nachwärme, bis höchstens 0,3 °C über Soll bzw. 3 Std.), zählt die Zeit weder für „Komfort erreicht“ noch „überheizt“ oder „Ventil ganz offen“. Aufheizmessungen in dieser Zeit – oder in Kamin-Räumen deutlich schneller als gelernt – werden verworfen und nicht ins Vorheizen übernommen (steht im Protokoll).
+- **Bericht › Heizleistung:** „Kamin u. Ä. – x h herausgerechnet“ je Raum.
+
 ## 0.58.0 – 2026-11-20
 
 ### Neu

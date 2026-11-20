@@ -113,6 +113,9 @@ ROOM_SCHEMA = vol.Schema(
         vol.Optional("vent_rh"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=95))),
         vol.Optional("co2_sensor"): _opt(str),
         vol.Optional("vent_morning"): _opt(bool),
+        # Kamin im Raum: vorhanden; optional ein Signal „in Betrieb“ (Schalter, Binärsensor, Ofen-/Rohrtemperatur, Leistung)
+        vol.Optional("fireplace"): _opt(bool),
+        vol.Optional("fireplace_entity"): _opt(ENTITY),
         vol.Optional("shower_rise"): _opt(vol.All(vol.Coerce(float), vol.Range(min=3, max=40))),
         # Weitere Geräte nur zur Anzeige (z. B. Heizkörper-Thermostat oder Stellantrieb neben dem Wandthermostat)
         vol.Optional("show_entities", default=[]): ENTITY_LIST,
@@ -497,6 +500,22 @@ async def ws_override(hass: HomeAssistant, connection, msg) -> None:
 
 
 @websocket_api.websocket_command(
+    {vol.Required("type"): "hauswerk/heizen/fireplace", vol.Required("room_id"): str, vol.Required("on"): bool}
+)
+@websocket_api.async_response
+async def ws_fireplace(hass: HomeAssistant, connection, msg) -> None:
+    """„Kamin in Betrieb“ von Hand – darf jeder (wie Temperatur von Hand)."""
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    if not (ctl.rooms.get(msg["room_id"]) or {}).get("fireplace"):
+        connection.send_error(msg["id"], "not_found", "Raum ohne Kamin")
+        return
+    await ctl.async_set_fireplace(msg["room_id"], msg["on"], by=_who(connection))
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command(
     {
         vol.Required("type"): "hauswerk/heizen/report",
         vol.Optional("days", default=7): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
@@ -778,6 +797,7 @@ COMMANDS = (
     ws_room_delete,
     ws_settings_save,
     ws_override,
+    ws_fireplace,
     ws_report,
     ws_preheat_reset,
     ws_plan_save,

@@ -968,7 +968,7 @@ def room_analysis(rows: list[dict], heat_rate: float | None, room_type: str = "h
     floor = room_type == "flaeche"
     sum_ = lambda k: sum(r.get(k) or 0 for r in rows)  # noqa: E731
     cn, under, mn, over, full, heat = sum_("comfort_n"), sum_("under_min"), sum_("measured_min"), sum_("over_min"), sum_("full_min"), sum_("heat_min")
-    pause, openings = sum_("pause_min"), sum_("openings")
+    pause, openings, fire = sum_("pause_min"), sum_("openings"), sum_("fire_min")
     devs = [(r["comfort_dev"], r["comfort_n"]) for r in rows if r.get("comfort_dev") is not None and r.get("comfort_n")]
     dev = round(sum(d * n for d, n in devs) / sum(n for _, n in devs), 1) if devs else None
     valves = [(r["valve_avg"], 1) for r in rows if r.get("valve_avg") is not None]
@@ -985,7 +985,8 @@ def room_analysis(rows: list[dict], heat_rate: float | None, room_type: str = "h
     add = lambda level, title, text: findings.append({"level": level, "title": title, "text": text})  # noqa: E731
     facts = {"ok_pct": ok_pct, "dev": dev, "valve": valve, "full_pct": full_pct, "over_pct": over_pct,
              "heat_h": round(heat / 60, 1), "rate": round(heat_rate, 2) if heat_rate else None,
-             "ok_cold": ok_cold, "ok_mild": ok_mild, "pause_h": round(pause / 60, 1), "openings": openings}
+             "ok_cold": ok_cold, "ok_mild": ok_mild, "pause_h": round(pause / 60, 1), "openings": openings,
+             "fire_h": round(fire / 60, 1)}
     if cn < 120:
         return {"verdict": "nodata", "facts": facts,
                 "findings": [{"level": "info", "title": "Noch zu wenig Daten",
@@ -1032,9 +1033,62 @@ def room_analysis(rows: list[dict], heat_rate: float | None, room_type: str = "h
             add("warn", "Heizt langsam auf", f"Gelernt: {heat_rate:.1f} °C pro Stunde. Für {'Fußbodenheizung' if floor else 'Heizkörper'} ist das wenig – Vorheizen startet deshalb früh.")
         elif heat_rate > fast:
             add("ok", "Heizt schnell auf", f"Gelernt: {heat_rate:.1f} °C pro Stunde – kurze Vorheizzeit reicht.")
+    if fire >= 30:
+        add("info", "Zusätzliche Wärme herausgerechnet",
+            f"{round(fire / 60, 1)} h war der Raum durch eine andere Wärmequelle (Kamin oder Ähnliches) wärmer – "
+            "diese Zeit zählt weder für „Komfort erreicht“ noch für „überheizt“, und Aufheizmessungen daraus werden verworfen.")
     if pause >= 180 or openings >= 5 * max(1, len(rows)):
         add("info", "Viel gelüftet", f"{round(pause / 60, 1)} h Fensterpause bei {openings} Öffnungen. Stoßlüften (kurz, weit auf) verliert weniger Wärme als lange gekippte Fenster.")
     return {"verdict": verdict, "facts": facts, "findings": findings}
+
+
+# ---------------------------------------------------------------- Heizwerk: Kamin / zusätzliche Wärme
+def extra_heat_rise(samples: list[tuple[float, float, bool]], now: float, floor: bool = False,
+                    window: float = 1800, rise_min: float = 0.4) -> float | None:
+    """Raum wird wärmer, ohne dass geheizt wird? samples = [(Zeit, Raumtemperatur, Heizanforderung)], älteste zuerst.
+
+    Anstieg ≥ rise_min °C innerhalb von `window` Sekunden, und in dieser Zeit plus Nachlauf keine Heizanforderung
+    (Heizkörper 20 Min., Fußbodenheizung 3 Std. – deren Restwärme ist kein fremder Wärmeeintrag).
+    Rückgabe: Anstieg in °C, sonst None. Sagt nichts über die Ursache (Kamin, Sonne, Kochen, viele Leute).
+    """
+    if not samples or now - samples[-1][0] > 300:
+        return None
+    calm = window + (3 * 3600 if floor else 1200)
+    if samples[0][0] > now - calm + 120:
+        return None  # zu kurze Vorgeschichte (z. B. nach Neustart): keine Aussage
+    if any(demand for ts, _, demand in samples if ts >= now - calm):
+        return None
+    recent = [t for ts, t, _ in samples if ts >= now - window]
+    if len(recent) < 3:
+        return None
+    rise = samples[-1][1] - min(recent)
+    return round(rise, 1) if rise >= rise_min else None
+
+
+def fireplace_phase(prev: dict | None, now: float, *, manual: bool = False, signal: bool | None = None,
+                    rise: float | None = None, temp: float | None = None, target: float | None = None) -> dict | None:
+    """Phase zusätzlicher Wärme in einem Raum mit Kamin.
+
+    - on:    Kamin in Betrieb – von Hand angegeben oder vom Signal (Sensor, Schalter) gemeldet.
+    - maybe: wird wärmer ohne Heizanforderung; Ursache offen (cause "kamin?" bzw. "other", wenn das Signal „aus“ sagt).
+    - after: Nachwirkung – der Raum ist noch wärmer als gewollt; endet, sobald er höchstens 0,3 °C über Soll liegt
+             (frühestens 15 Min. nach dem letzten Hinweis) bzw. spätestens 3 Std. danach.
+    Kamin vorhanden heißt nicht Kamin an: ohne Signal oder Angabe bleibt es bei „maybe“.
+    """
+    if manual or signal:
+        keep = prev and prev.get("state") == "on"
+        return {"state": "on", "source": "manuell" if manual else "signal", "since": prev["since"] if keep else now, "last": now}
+    if rise is not None:
+        keep = prev and prev.get("state") == "maybe"
+        return {"state": "maybe", "source": "verlauf", "cause": "other" if signal is False else "kamin?",
+                "since": prev["since"] if keep else now, "last": now, "rise": rise}
+    if prev:
+        last = prev.get("last", now)
+        cooled = temp is not None and target is not None and temp <= target + 0.3
+        if now - last > 3 * 3600 or (cooled and now - last >= 900):
+            return None
+        return {**prev, "state": "after"}
+    return None
 
 
 # ---------------------------------------------------------------- Rollwerk: Öffnen/Schließen vorausberechnen
