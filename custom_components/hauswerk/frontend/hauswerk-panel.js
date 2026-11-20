@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.56.1";
+const VERSION = "0.57.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4717,7 +4717,8 @@ class HauswerkPanel extends HTMLElement {
     const nowHm = new Date().toTimeString().slice(0, 5);
     if (rs.sun_on) out.push(["mdi:white-balance-sunny", rs.shading ? "Sonne – beschattet" : "Sonne aufs Fenster", "#f59e0b", "Die Sonne steht gerade in der Fensterrichtung des Profils"]);
     else {
-      const next = (tl.shade || []).find(([a]) => a && a > nowHm);
+      // nur, wenn die Außentemperatur-Bedingung der Beschattung gerade erfüllt ist (sonst ganz ausblenden)
+      const next = rs.shade_temp_ok === true ? (tl.shade || []).find(([a]) => a && a > nowHm) : null;
       if (next) out.push(["mdi:weather-sunny", `Beschattung ab ${next[0]}`, "#f97316", `voraussichtlich ${next[0]}–${next[1]}`]);
     }
     // letzte Fahrt
@@ -4737,6 +4738,27 @@ class HauswerkPanel extends HTMLElement {
     const prof = this._data?.rollwerk?.profiles?.[rs.profile || c.cfg?.profile || "standard"];
     if (prof?.name) out.push(["mdi:tune-variant", prof.name, "", "Profil"]);
     return out;
+  }
+
+  /** Felder „Öffnet“ / „Stufe 1“ / „Schließt“: nur die berechnete Uhrzeit, sonst ein neutraler Platzhalter. */
+  _rwTimes(c) {
+    const t = c.rs?.times;
+    if (!t) return "";
+    const feats = new Set(this._rwProfOf(c)?.features ?? ["up", "down"]);
+    const field = (key, label, icon) => {
+      const v = t[key];
+      return `<span class="rw-t" data-rwt="${key}" title="${v ? `${label}${v.tomorrow ? " morgen" : ""} um ${v.at} Uhr` : `${label}: keine Uhrzeit vorhersagbar`}"><small><ha-icon icon="${icon}"></ha-icon>${label}${v?.tomorrow ? " morgen" : ""}</small><b>${v ? `${v.at} Uhr` : "–"}</b></span>`;
+    };
+    const parts = [];
+    if (feats.has("up")) parts.push(field("open", "Öffnet", "mdi:arrow-up"));
+    if (t.stage1) parts.push(field("stage1", "Stufe 1", "mdi:arrow-collapse-down"));
+    if (feats.has("down")) parts.push(field("close", "Schließt", "mdi:arrow-down"));
+    return parts.length ? `<div class="rw-times">${parts.join("")}</div>` : "";
+  }
+
+  _rwProfOf(c) {
+    const pid = c.rs?.profile || c.cfg?.profile || "standard";
+    return this._data?.rollwerk?.profiles?.[pid] || this._data?.rollwerk?.profiles?.standard || { features: ["up", "down"] };
   }
 
   /** „16:30 schließt“ → kurze Form mit Pfeil für die kompakte Kachel. */
@@ -4802,7 +4824,7 @@ class HauswerkPanel extends HTMLElement {
             <span class="grow">${areaLabel ? `<small class="rw-al">${esc(areaLabel)}</small>` : ""}<b>${esc(this._entityName(c.id))}</b><small>${esc(posTxt)}${why ? ` · ${esc(why)}` : ""}</small></span>
             ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="rwc:${esc(c.id)}" title="Einstellungen dieses Rollladens"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
           </div>
-          ${c.cfg.auto !== false && this._rwStatus?.timelines?.[c.cfg.profile || "standard"] ? `<div class="rw-next">${this._rwDayBar(this._rwStatus.timelines[c.cfg.profile || "standard"], true)}${c.rs.next ? `<small><ha-icon icon="mdi:clock-outline"></ha-icon>Als Nächstes: ${esc(c.rs.next)}</small>` : ""}</div>` : ""}
+          ${c.cfg.auto !== false && this._rwStatus?.timelines?.[c.cfg.profile || "standard"] ? `<div class="rw-next">${this._rwDayBar(this._rwStatus.timelines[c.cfg.profile || "standard"], true)}${this._rwTimes(c)}</div>` : ""}
           ${flags.length ? `<div class="rw-flags">${flags.map(([i, l, k]) => `<span style="--c:${k}"><ha-icon icon="${i}"></ha-icon>${l}</span>`).join("")}${c.rs.manual ? `<button class="link" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="resume"><ha-icon icon="mdi:robot-outline"></ha-icon>Automatik übernimmt</button>` : ""}</div>` : ""}
           ${info.length && !this._tablet ? `<div class="rw-info">${infoHtml}</div>` : ""}
           <div class="rw-ctl">
@@ -9683,6 +9705,11 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .rw-next { display:flex; flex-direction:column; gap:4px; margin:4px 0 2px; }
 .rw-next small { display:flex; align-items:center; gap:5px; color:var(--muted); font-size:12px; }
 .rw-next small ha-icon { --mdc-icon-size:14px; }
+.rw-times { display:flex; gap:14px; flex-wrap:nowrap; }
+.rw-t { display:flex; flex-direction:column; min-width:0; }
+.rw-t small { display:flex; align-items:center; gap:3px; font-size:11px; color:var(--muted); white-space:nowrap; }
+.rw-t small ha-icon { --mdc-icon-size:12px; }
+.rw-t b { font-size:14px; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .rwtop { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
 .rwexp { flex:none; display:inline-flex; align-items:center; gap:5px; padding:6px 11px; border-radius:99px; border:1px solid var(--line2); background:var(--card2); color:var(--muted); font:inherit; font-size:12px; cursor:pointer; }
 .rwexp.on { color:#fff; background:#8b5cf6; border-color:#8b5cf6; }

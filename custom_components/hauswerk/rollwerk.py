@@ -11,7 +11,7 @@ zurückgesetzt wird, oder der nächste automatische Wechsel übernimmt wieder.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import date, timedelta
 import logging
 import random
 from typing import Any
@@ -25,7 +25,7 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN, MODULE_HEATING, SHUTTER_STORAGE_KEY, WINDOW_OPEN_STATES
 from .core import Haus, async_calendar_events, parse_when
 from .log import Protokoll, log_settings
-from .logic import FACADES, _in_azimuth, parse_hm, shade_conditions, shade_wanted
+from .logic import FACADES, _in_azimuth, parse_hm, predict_open_close, shade_conditions, shade_wanted
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -750,8 +750,21 @@ class Rollwerk:
         return now - since >= seconds
 
     # ------------------------------------------------------------ Steuerung
-    def _windows(self, prof: dict) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
-        """Zeitfenster heute (früheste/späteste Minute) fürs Öffnen und Schließen."""
+    def _is_free(self, day: date) -> bool:
+        """Wochenende oder laut Arbeitstage-Kalender frei (für künftige Tage)."""
+        return day.weekday() >= 5 or self.haus.is_workday(day) is False
+
+    def _windows(self, prof: dict, offset: int = 0) -> tuple[tuple[int, int] | None, tuple[int, int] | None]:
+        """Zeitfenster (früheste/späteste Minute) fürs Öffnen und Schließen – heute bzw. in `offset` Tagen."""
+        if offset:
+            if prof.get("time_mode") == "calendar":
+                return None, None  # Kalender-Termine kennt Rollwerk nur für heute
+            day = dt_util.now().date() + timedelta(days=offset)
+            free, free_next = self._is_free(day), self._is_free(day + timedelta(days=1))
+            up = (_hm(prof.get("up_early_we" if free else "up_early"), "07:00"), _hm(prof.get("up_late_we" if free else "up_late"), "08:00"))
+            down = (_hm(prof.get("down_early_we" if free_next else "down_early"), "16:00"),
+                    _hm(prof.get("down_late_we" if free_next else "down_late"), "22:00"))
+            return up, down
         if prof.get("time_mode") == "calendar":
             events = self._cal.get(prof.get("calendar") or "") or []
             def window(title: str):
@@ -1220,6 +1233,113 @@ class Rollwerk:
         self._track_cache = (today, track)
         return track
 
+    def _sun_fns(self, offset: int = 0):
+        """Sonnenhöhe und -richtung als Funktion der Minute (Ortszeit) an einem Tag – Standort aus Home Assistant."""
+        day = dt_util.now().date() + timedelta(days=offset)
+        cache = getattr(self, "_sunfn_cache", {})
+        if day in cache:
+            return cache[day]
+        fns = (None, None)
+        try:
+            from homeassistant.helpers.sun import get_astral_location  # noqa: PLC0415
+
+            location, height = get_astral_location(self.hass)
+            start = dt_util.start_of_local_day(day)
+            memo: dict[float, tuple[float, float]] = {}
+
+            def at(m: float) -> tuple[float, float]:
+                key = round(m, 3)
+                if key not in memo:
+                    when = start + timedelta(minutes=m)
+                    memo[key] = (float(location.solar_elevation(when, height)), float(location.solar_azimuth(when, height)))
+                return memo[key]
+
+            fns = (lambda m: at(m)[0], lambda m: at(m)[1])
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Sonnenstand nicht berechenbar: %s", err)
+        self._sunfn_cache = {k: v for k, v in cache.items() if k >= dt_util.now().date()} | {day: fns}
+        return fns
+
+    def predict(self, prof: dict, offset: int = 0) -> dict[str, int | None]:
+        """Öffnen/Stufe 1/Schließen (Minute) eines Profils heute (0) bzw. morgen (1) – wie die Steuerung entscheidet."""
+        key = ("p", offset, dt_util.now().date().isoformat(), repr(sorted(prof.items(), key=lambda kv: kv[0])),
+               self._free_day(), self._free_day(tomorrow=True))
+        if key not in self._tl_cache:
+            up, down = self._windows(prof, offset)
+            if offset and prof.get("time_mode") == "calendar":
+                self._tl_cache[key] = {"open": None, "close": None, "stage1": None}
+            else:
+                elev, azim = self._sun_fns(offset)
+                self._tl_cache[key] = predict_open_close(prof, up, down, elev, azim)
+        return self._tl_cache[key]
+
+    def cover_times(self, entity_id: str, now_min: int) -> dict[str, Any]:
+        """Nächstes Öffnen und Schließen dieses Rollladens: Uhrzeit oder None (nicht vorhersagbar / gesperrt).
+
+        Vergangenes zählt nicht als bevorstehend: Ist heute schon geöffnet bzw. geschlossen (oder die Zeit vorbei),
+        gilt der Zeitpunkt von morgen. Gesperrt (Automatik aus, Pause, Sturm, Erzwungen) → None.
+        """
+        cfg = self.covers.get(entity_id) or {}
+        prof = self.profile(entity_id)
+        rt = self._rt.get(entity_id) or {}
+        today = dt_util.now().date().isoformat()
+        blocked = cfg.get("auto") is False or self._on(prof.get("force_pause")) or (self._storm and cfg.get("storm", True)) \
+            or any(self._on(prof.get(k)) for k in ("force_up", "force_down", "force_ventilate", "force_shading"))
+        out: dict[str, Any] = {"open": None, "close": None, "stage1": None}
+        if blocked:
+            return out
+        p0, p1 = self.predict(prof, 0), self.predict(prof, 1)
+
+        def pick(key: str, done_key: str | None) -> dict | None:
+            m = p0.get(key)
+            if m is not None and m > now_min and not (done_key and rt.get(done_key) == today):
+                return {"at": f"{m // 60:02d}:{m % 60:02d}", "min": m, "tomorrow": False}
+            m = p1.get(key)
+            return {"at": f"{m // 60:02d}:{m % 60:02d}", "min": m, "tomorrow": True} if m is not None else None
+
+        out["open"] = pick("open", "opened_on")
+        out["close"] = pick("close", "closed_on")
+        out["stage1"] = pick("stage1", "stage1_on")
+        # heute gesperrt: niemand zu Hause (tagsüber zu) bzw. Bewohner schläft ohne „Öffnen erlauben“
+        o = out["open"]
+        if o and not o["tomorrow"]:
+            away = bool(getattr(self.haus, "away", False) or getattr(self.haus, "vacation", False))
+            if (away and prof.get("away_mode") == "closed") or (
+                    self._on(prof.get("resident_sensor")) and "allow_opening" not in set(prof.get("resident_config") or [])):
+                out["open"] = None
+        return out
+
+    def shade_temp_ok(self, entity_id: str) -> bool:
+        """Ist die Außentemperatur-Bedingung der Beschattung gerade erfüllt (mit Abstand/Hysterese)?
+
+        Nur die Bedingungen, ohne die keine Beschattung startet: Außentemperatur bzw. Höchstwert der Vorhersage in der
+        UND-Liste – oder in der ODER-Liste, wenn dort nur Temperaturen stehen. Kein Messwert = nicht erfüllt.
+        Ohne Temperaturbedingung: keine Einschränkung. Das abendliche Schließen hängt davon nicht ab.
+        """
+        prof = self.profile(entity_id)
+        rt = self._rt.get(entity_id) or {}
+        temp_keys = {"temp2", "forecast_temp"}
+        and_l = set(prof.get("shade_start_and") or [])
+        or_l = set(prof.get("shade_start_or") or [])
+        need = (and_l & temp_keys) | (or_l if or_l and or_l <= temp_keys else set())
+        if not need:
+            return True
+        fc = self._fc.get(prof.get("forecast_entity") or self.haus.weather_entity() or "") or {}
+        temp2 = self._num(prof.get("temp2_sensor")) if prof.get("temp2_sensor") else self.haus.outside_air()[0]
+        values = {"temp2": temp2, "forecast_temp": fc.get("tmax")}
+        start, end = shade_conditions(values, prof)
+        active = bool(rt.get("shading"))
+
+        def ok(k: str) -> bool:
+            if k == "forecast_temp" and prof.get("forecast_temp") is None:
+                return True
+            if values.get(k) is None:
+                return False
+            return (not end.get(k)) if active else bool(start.get(k))
+
+        hits = [ok(k) for k in need]
+        return all(hits) if need & and_l else any(hits)
+
     def timeline(self, pid: str) -> dict[str, Any]:
         """Voraussichtlicher Tag eines Profils: öffnen, Beschattung (möglich), schließen."""
         prof = {**PROFILE_DEFAULTS, **(self.profiles.get(pid) or {})}
@@ -1229,45 +1349,10 @@ class Rollwerk:
         feats = set(prof.get("features") or [])
         track = self._sun_track()
         up, down = self._windows(prof)
-        sun_on = "sun" in feats and track is not None
-        approx = "brightness" in feats
-
-        def first(lo: int, hi: int, test) -> int | None:
-            for m, az, el in track or []:
-                if lo <= m <= hi and test(el):
-                    return m
-            return None
-
-        open_at = close_at = None
-        if "up" in feats:
-            if "time" in feats and up:
-                hit = first(up[0], up[1], lambda el: el >= float(prof.get("sun_up") or 0)) if sun_on else None
-                open_at = hit if hit is not None else (up[1] if sun_on else up[0])
-            elif sun_on:
-                open_at = first(0, 1439, lambda el: el >= float(prof.get("sun_up") or 0))
+        approx = False  # Zeiten mit Helligkeit sind nicht vorhersagbar und kommen als None
         two = bool(prof.get("close_stage1")) and "down" in feats
-        if two and down:
-            down = (down[1], down[1]) if prof.get("close_stage2", True) else None
-        if "down" in feats and not (two and down is None):
-            if two and down:
-                close_at = down[1]
-            elif "time" in feats and down:
-                hit = first(down[0], down[1], lambda el: el <= float(prof.get("sun_down") or 0)) if sun_on else None
-                close_at = hit if hit is not None else (down[1] if sun_on else down[0])
-            elif sun_on:
-                close_at = first(max(open_at or 0, 720), 1439, lambda el: el <= float(prof.get("sun_down") or 0))
-        stage1 = None
-        if two:
-            trig = prof.get("stage1_trigger") or "azimuth"
-            if trig == "time":
-                stage1 = _hm(prof.get("stage1_time"), "18:00")
-            elif track:
-                if trig == "azimuth":
-                    stage1 = next((m for m, az, _el in track if m >= 720 and az >= float(prof.get("stage1_azimuth") or 250)), None)
-                else:
-                    stage1 = next((m for m, _az, el in track if m >= 720 and el <= float(prof.get("stage1_elevation") or 10)), None)
-            if stage1 is not None and close_at is not None and stage1 >= close_at:
-                stage1 = None
+        pred = self.predict(prof, 0)
+        open_at, close_at, stage1 = pred["open"], pred["close"], pred["stage1"]
         shade: list[list[int]] = []
         if "shading" in feats and track:
             lo, hi = open_at if open_at is not None else 0, close_at if close_at is not None else 1440
@@ -1353,6 +1438,8 @@ class Rollwerk:
                                            float(prof.get("azimuth_end") if prof.get("azimuth_end") is not None else 265))
                            and self._sunshine(prof) is True),
                 "last": (self._persist.get("last") or {}).get(entity_id),
+                "times": self.cover_times(entity_id, now_min),
+                "shade_temp_ok": self.shade_temp_ok(entity_id),
                 "want": rt.get("blocked_target") if rt.get("blocked") else rt.get("target"),
                 "dev": self._device_health(entity_id),
                 "next": self.next_event(timelines.get(cfg.get("profile") or "standard") or {}, now_min) if cfg.get("auto", True) else None,

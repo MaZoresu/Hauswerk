@@ -1069,3 +1069,24 @@ def test_kraftwerk_geraete_fertigerkennung(panel):
     new = saved[-1]
     assert new["id"] == "spuelmaschine_kueche" and new["type"] == "geschirrspueler" and new["important"] is True
     assert new["power"] == "sensor.steckdose_trockner_leistung" and len(saved) == 3
+
+
+def test_rollwerk_zeiten_und_beschattung_nur_bei_waerme(panel):
+    """Kachel: „Öffnet/Schließt“ zeigt nur die Uhrzeit („16:42 Uhr“) bzw. „–“; „morgen“ steht in der Beschriftung.
+    „Beschattung ab …“ nur, wenn die Außentemperatur-Bedingung erfüllt ist."""
+    p = panel
+    p.view("shutters")
+    vals = p.js(f"() => [...{EL}.shadowRoot.querySelectorAll('.rw-t')].map((e) => [e.dataset.rwt, e.querySelector('small').textContent, e.querySelector('b').textContent])")
+    assert ["close", "Schließt", "16:42 Uhr"] in vals and ["open", "Öffnet morgen", "07:41 Uhr"] in vals
+    assert ["close", "Schließt", "–"] in vals  # nicht vorhersagbar: Platzhalter, keine erfundene Uhrzeit
+    import re
+    assert all(re.fullmatch(r"\d\d:\d\d Uhr|–", v) for _, _, v in vals)
+    # Beschattung ab: nur bei erfüllter Temperatur
+    def infos():
+        return " | ".join(p.js(f"() => [...{EL}.shadowRoot.querySelectorAll('.rw-c .rw-info')].map((e) => e.textContent)"))
+    p.js(f"() => {{ for (const c of Object.values({EL}._rwStatus.covers)) {{ c.sun_on = false; c.shade_temp_ok = true; }} const tl = {EL}._rwStatus.timelines; for (const k in tl) tl[k].shade = [['23:58', '23:59']]; {EL}._renderMain(); }}")
+    p.wait()
+    assert "Beschattung ab 23:58" in infos()
+    p.js(f"() => {{ for (const c of Object.values({EL}._rwStatus.covers)) c.shade_temp_ok = false; {EL}._renderMain(); }}")
+    p.wait()
+    assert "Beschattung ab" not in infos()

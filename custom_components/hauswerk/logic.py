@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 import math
 import re
-from typing import Any
+from typing import Any, Callable
 
 DAY_MIN = 1440
 WEEK_MIN = 7 * DAY_MIN
@@ -1035,3 +1035,90 @@ def room_analysis(rows: list[dict], heat_rate: float | None, room_type: str = "h
     if pause >= 180 or openings >= 5 * max(1, len(rows)):
         add("info", "Viel gelüftet", f"{round(pause / 60, 1)} h Fensterpause bei {openings} Öffnungen. Stoßlüften (kurz, weit auf) verliert weniger Wärme als lange gekippte Fenster.")
     return {"verdict": verdict, "facts": facts, "findings": findings}
+
+
+# ---------------------------------------------------------------- Rollwerk: Öffnen/Schließen vorausberechnen
+def sun_crossing(elev: Callable[[float], float | None], target: float, rising: bool,
+                 lo: float = 0.0, hi: float = 1440.0, step: float = 10.0) -> float | None:
+    """Minute (seit Mitternacht, Ortszeit), zu der die Sonnenhöhe `target` erreicht – aufsteigend (rising)
+    bzw. absteigend. Grob in `step`-Minuten-Schritten suchen, dann auf Sekunden genau halbieren. None = nie."""
+    prev_m, prev = lo, elev(lo)
+    m = lo
+    while m < hi:
+        m = min(m + step, hi)
+        cur = elev(m)
+        if prev is not None and cur is not None:
+            if (rising and prev < target <= cur) or (not rising and prev > target >= cur):
+                a, b = prev_m, m
+                for _ in range(12):  # 10 Min. / 2^12 < 0,2 s
+                    mid = (a + b) / 2
+                    v = elev(mid)
+                    if v is None:
+                        break
+                    if (rising and v >= target) or (not rising and v <= target):
+                        b = mid
+                    else:
+                        a = mid
+                return b
+        prev_m, prev = m, cur
+    return None
+
+
+def predict_open_close(prof: dict, up: tuple[int, int] | None, down: tuple[int, int] | None,
+                       elev: Callable[[float], float | None] | None,
+                       azim: Callable[[float], float | None] | None = None) -> dict[str, Any]:
+    """Voraussichtliche Minute fürs Öffnen, Stufe 1 und Schließen an einem Tag – wie die Steuerung entscheidet.
+
+    Steuerung (Rollwerk._day_phase): Mit Zeitsteuerung wird im Fenster [früheste, späteste] Zeit geöffnet bzw.
+    geschlossen, sobald die Sonnenregel erfüllt ist (Sonnenhöhe ≥ „Öffnen ab“ bzw. ≤ „Schließen ab“, so lange
+    wie „Sonnenhöhe Dauer“ am Stück) – spätestens zur spätesten Zeit. Ohne Sonnenregel zur frühesten Zeit.
+    Ohne Zeitsteuerung entscheidet allein die Sonne. Hängt es (auch) an der Helligkeit, ist der Zeitpunkt
+    nicht vorhersagbar: None statt einer erfundenen Uhrzeit.
+    """
+    feats = set(prof.get("features") or [])
+    hold = float(prof.get("sun_duration") or 0) / 60
+    sun = "sun" in feats and elev is not None
+    bright = "brightness" in feats
+    both_and = prof.get("bs_operator") == "and"
+    out: dict[str, Any] = {"open": None, "close": None, "stage1": None}
+
+    def when(window: tuple[int, int] | None, target: float, rising: bool) -> float | None:
+        if bright and (not sun or both_and):
+            # Helligkeit entscheidet mit: nur sicher, wenn ohnehin die späteste Zeit greift
+            return None
+        # Sonne: aufsteigend am Vormittag, absteigend ab Mittag; „Dauer“ muss die Bedingung am Stück halten
+        cross = sun_crossing(elev, target, rising, lo=0, hi=1440) if sun and rising else \
+            sun_crossing(elev, target, rising, lo=720, hi=1440) if sun else None
+        hit = None if cross is None else cross + hold
+        if window and "time" in feats:
+            lo, hi = window
+            if not sun:
+                return float(lo)
+            # schon vor der frühesten Zeit erfüllt → zur frühesten Zeit; nie erfüllt → späteste Zeit
+            return float(hi) if hit is None or hit > hi else max(float(lo), hit)
+        if not sun or hit is None:
+            return None
+        return min(hit, 1439)
+
+    if "up" in feats:
+        out["open"] = when(up if "time" in feats else None, float(prof.get("sun_up") or 0), True)
+    two = bool(prof.get("close_stage1")) and "down" in feats
+    if "down" in feats:
+        if two:
+            out["close"] = float(down[1]) if down and prof.get("close_stage2", True) else None
+        else:
+            out["close"] = when(down if "time" in feats else None, float(prof.get("sun_down") or 0), False)
+    if two:
+        trig = prof.get("stage1_trigger") or "azimuth"
+        if trig == "time":
+            out["stage1"] = float(parse_hm(prof.get("stage1_time") or "18:00"))
+        elif trig == "elevation" and elev is not None:
+            out["stage1"] = sun_crossing(elev, float(prof.get("stage1_elevation") or 10), False, lo=720)
+        elif trig == "azimuth" and azim is not None:
+            out["stage1"] = sun_crossing(azim, float(prof.get("stage1_azimuth") or 250), True, lo=720)
+        if out["stage1"] is not None and out["close"] is not None and out["stage1"] >= out["close"]:
+            out["stage1"] = None
+    for k in out:
+        if out[k] is not None:
+            out[k] = int(math.ceil(out[k] - 1e-6))  # zur vollen Minute, in der es soweit ist
+    return out

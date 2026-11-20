@@ -1253,3 +1253,53 @@ def test_geraet_fertig_einmal_gemeldet(hw):
         assert res["ok"] and kw2.appliances.status()["wm"]["state"] == "idle"
 
     asyncio.run(run())
+
+
+def test_rollwerk_zeiten_je_rollladen_und_beschattungstemperatur(hw):
+    """Öffnen/Schließen je Rollladen: wie die Steuerung (hier ohne Sonnenregel = früheste Zeit), vorbei → morgen,
+    gesperrt → keine Uhrzeit. „Beschattung ab“ nur bei erfüllter Außentemperatur (mit Hysterese)."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 19, 8, 0, tzinfo=timezone.utc)  # 09:00 lokal, Donnerstag
+        hass = Hass()
+        feat = {"supported_features": 15}
+        hass.set("cover.wz", "open", {"current_position": 100, **feat}, "Wohnzimmer")
+        hass.set("cover.sz", "open", {"current_position": 100, **feat}, "Schlafzimmer")
+        hass.set("sensor.aussen", "19.0", {"unit_of_measurement": "°C"}, "Außen")
+        log, haus, ctl = await _setup(hw, hass)
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        await rw.async_start()
+        prof = dict(rw.profiles["standard"], features=["up", "down", "time", "shading"], up_early="07:00", up_late="08:00",
+                    up_early_we="08:30", up_late_we="09:30", down_early="17:30", down_late="22:00", down_early_we="18:00",
+                    shade_start_and=["azimuth", "elevation", "temp2"], temp2_sensor="sensor.aussen", temp2_min=20, temp2_hyst=1)
+        await rw.async_save_profile("standard", prof)
+        await rw.async_save_settings({"rw_covers": ["cover.wz", "cover.sz"]})
+        await rw.async_save_cover("cover.sz", {"profile": "standard", "auto": False})
+        t = rw.status()["covers"]["cover.wz"]["times"]
+        # 09:00: heute schon offen → Öffnen morgen (Freitag 07:00); Schließen heute 17:30 (Freitag ist Arbeitstag)
+        assert t["open"] == {"at": "07:00", "min": 420, "tomorrow": True}
+        assert t["close"]["at"] == "17:30" and t["close"]["tomorrow"] is False
+        # Automatik aus: keine Uhrzeit
+        assert rw.status()["covers"]["cover.sz"]["times"] == {"open": None, "close": None, "stage1": None}
+        # nach dem Schließen: Schließen morgen – Freitagabend vor dem Samstag mit Wochenend-Zeit 18:00
+        rw._rt.setdefault("cover.wz", {})["closed_on"] = "2026-11-19"
+        assert rw.status()["covers"]["cover.wz"]["times"]["close"] == {"at": "18:00", "min": 1080, "tomorrow": True}
+        # Beschattungstemperatur: 19 °C < 20 °C → nicht erfüllt; 20,5 °C → erfüllt; während Beschattung bis 19 °C (Hysterese)
+        assert rw.shade_temp_ok("cover.wz") is False
+        hass.set("sensor.aussen", "20.5", {"unit_of_measurement": "°C"}, "Außen")
+        assert rw.shade_temp_ok("cover.wz") is True
+        rw._rt["cover.wz"]["shading"] = True
+        hass.set("sensor.aussen", "19.5", {"unit_of_measurement": "°C"}, "Außen")
+        assert rw.shade_temp_ok("cover.wz") is True
+        hass.set("sensor.aussen", "18.9", {"unit_of_measurement": "°C"}, "Außen")
+        assert rw.shade_temp_ok("cover.wz") is False
+        # Messwert fehlt: keine Beschattungsbereitschaft vortäuschen
+        hass.set("sensor.aussen", "unavailable", {}, "Außen")
+        assert rw.shade_temp_ok("cover.wz") is False
+        # das Schließen hängt nicht an der Beschattungstemperatur
+        assert rw.status()["covers"]["cover.wz"]["times"]["close"] is not None
+        await rw.async_stop()
+
+    asyncio.run(run())

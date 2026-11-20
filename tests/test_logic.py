@@ -434,3 +434,84 @@ def test_tagesmittel_fuer_sommerpause():
     assert hourly_mean({str(1000): [25.0, 1]}, now, 24) is None  # zu wenig Werte
     old = {str(1000 - 30 - i): [10.0, 1] for i in range(10)}  # älter als 24 h zählt nicht
     assert hourly_mean({**b, **old}, now, 24) == hourly_mean(b, now, 24)
+
+
+# ---------------------------------------------------------------- Rollwerk: Öffnen/Schließen vorausberechnen
+import math as _m
+from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+
+def _noaa(lat, lon, day, tz_h):
+    """Unabhängige Sonnenhöhe/-richtung (NOAA, vereinfacht) als Funktion der Ortsminute – nur für Tests."""
+    def pos(minute):
+        t = _dt(day.year, day.month, day.day, tzinfo=_tz(_td(hours=tz_h))) + _td(minutes=minute)
+        jd = t.timestamp() / 86400 + 2440587.5
+        n = jd - 2451545.0
+        L = (280.46 + 0.9856474 * n) % 360
+        g = _m.radians((357.528 + 0.9856003 * n) % 360)
+        lam = _m.radians(L + 1.915 * _m.sin(g) + 0.020 * _m.sin(2 * g))
+        eps = _m.radians(23.439 - 0.0000004 * n)
+        dec = _m.asin(_m.sin(eps) * _m.sin(lam))
+        ra = _m.atan2(_m.cos(eps) * _m.sin(lam), _m.cos(lam))
+        gmst = (280.46061837 + 360.98564736629 * n) % 360
+        ha = _m.radians((gmst + lon) % 360) - ra
+        la = _m.radians(lat)
+        el = _m.asin(_m.sin(la) * _m.sin(dec) + _m.cos(la) * _m.cos(dec) * _m.cos(ha))
+        az = _m.degrees(_m.atan2(-_m.sin(ha), _m.tan(dec) * _m.cos(la) - _m.sin(la) * _m.cos(ha))) % 360
+        return _m.degrees(el), az
+    return (lambda m: pos(m)[0]), (lambda m: pos(m)[1])
+
+
+def test_sonne_kreuzt_genau_leipzig():
+    from datetime import date
+    elev, azim = _noaa(51.34, 12.37, date(2026, 11, 20), 1)
+    down = L.sun_crossing(elev, 0.0, False, lo=720)
+    up = L.sun_crossing(elev, 0.0, True)
+    # Leipzig, 20.11.: Sonnenuntergang (Mittelpunkt 0°) gegen 16:16, Aufgang gegen 07:38
+    assert 16 * 60 + 8 <= down <= 16 * 60 + 24, down
+    assert 7 * 60 + 28 <= up <= 7 * 60 + 46, up
+    assert abs(elev(down)) < 0.01  # auf Sekunden genau
+
+
+def _prof(**kw):
+    base = {"features": ["up", "down", "time", "sun"], "sun_up": 0, "sun_down": 0, "sun_duration": 0}
+    base.update(kw)
+    return base
+
+
+def test_schliessen_nach_sonnenhoehe_mit_zeitfenster_und_dauer():
+    from datetime import date
+    elev, azim = _noaa(51.34, 12.37, date(2026, 11, 20), 1)
+    sunset = L.sun_crossing(elev, 3.0, False, lo=720)
+    # Fenster 16:00–22:00, Sonnenhöhe 3°, 5 Min. am Stück: Schließen zur Kreuzung + 5 Min.
+    p = L.predict_open_close(_prof(sun_down=3, sun_duration=300), (420, 540), (900, 1320), elev, azim)
+    assert p["close"] == _m.ceil(sunset + 5), (p, sunset)
+    # früheste Zeit erst 17:30 → Sonne schon tiefer → genau 17:30
+    p = L.predict_open_close(_prof(sun_down=3), (420, 540), (1050, 1320), elev, azim)
+    assert p["close"] == 1050
+    # späteste Zeit 15:00 vor der Kreuzung → 15:00 (späteste Zeit greift)
+    p = L.predict_open_close(_prof(sun_down=3), (420, 540), (840, 900), elev, azim)
+    assert p["close"] == 900
+    # Öffnen: aufsteigend 5°, Fenster 06:00–09:00
+    rise5 = L.sun_crossing(elev, 5.0, True)
+    p = L.predict_open_close(_prof(sun_up=5), (360, 540), (900, 1320), elev, azim)
+    assert p["open"] == _m.ceil(rise5)
+    # Sonne erreicht 30° im November nie: Öffnen zur spätesten Zeit, ohne Zeitsteuerung gar nicht
+    assert L.predict_open_close(_prof(sun_up=30), (360, 540), None, elev, azim)["open"] == 540
+    assert L.predict_open_close(_prof(sun_up=30, features=["up", "down", "sun"]), None, None, elev, azim)["open"] is None
+
+
+def test_vorhersage_ohne_erfundene_zeit():
+    from datetime import date
+    elev, azim = _noaa(51.34, 12.37, date(2026, 11, 20), 1)
+    # nur Helligkeit: nicht vorhersagbar
+    p = L.predict_open_close(_prof(features=["up", "down", "time", "brightness"]), (420, 540), (900, 1320), elev, azim)
+    assert p["open"] is None and p["close"] is None
+    # nur Zeit: früheste Zeit
+    p = L.predict_open_close(_prof(features=["up", "down", "time"]), (420, 540), (1000, 1320), None, None)
+    assert p == {"open": 420, "close": 1000, "stage1": None}
+    # Schließen aus: keine Schließzeit
+    assert L.predict_open_close(_prof(features=["up", "time", "sun"]), (420, 540), (900, 1320), elev, azim)["close"] is None
+    # zwei Stufen: Stufe 1 bei Sonnenrichtung 220°, Stufe 2 zur spätesten Zeit
+    p = L.predict_open_close(_prof(close_stage1=True, stage1_trigger="azimuth", stage1_azimuth=220), (420, 540), (900, 1320), elev, azim)
+    assert p["close"] == 1320 and 13 * 60 <= p["stage1"] <= 16 * 60 and abs(azim(p["stage1"]) - 220) < 0.5

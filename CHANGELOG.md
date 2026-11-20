@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.57.0 – 2026-11-20
+
+### Neu (Rollwerk-Kacheln)
+- **Öffnet / Schließt (und Stufe 1) je Rollladen mit Uhrzeit**, z. B. „Schließt 16:42 Uhr“. Berechnet aus dem Standort und der Zeitzone von Home Assistant und dem Sonnenstand des Tages – auf die Minute genau (Sonnenbahn mit Halbierungssuche statt 10-Minuten-Raster). Es gilt dieselbe Entscheidung wie in der Steuerung:
+  - eingestellte Sonnenhöhe: Öffnen bei **aufsteigender**, Schließen bei **absteigender** Sonne, inklusive „Sonnenhöhe Dauer“,
+  - Zeitfenster früheste/späteste Zeit (Werktag/frei – auch für morgen über den Arbeitstage-Kalender), zwei Stufen, ohne Zeitsteuerung nur die Sonne,
+  - Sperren: Automatik aus, Pause-Schalter, Sturm, Erzwingen; heute zusätzlich „niemand zu Hause – bleibt zu“ und „Bewohner schläft“.
+- Ist die Fahrt heute schon passiert oder die Zeit vorbei, steht der Zeitpunkt von morgen da („Öffnet morgen“). Hängt der Zeitpunkt (auch) von der Helligkeit ab oder ist er nicht berechenbar (z. B. Sonne erreicht die Höhe nie, Kalender-Zeiten für morgen), steht „–“ statt einer erfundenen Uhrzeit. Neu berechnet bei Tageswechsel und jeder Profil-Änderung. Tagesleiste und „Als Nächstes“ nutzen dieselben Zeiten.
+
+### Geändert
+- **„Beschattung ab …“ nur bei passender Außentemperatur:** erscheint nur, wenn die Temperaturbedingung des Profils (Außentemperatur bzw. Vorhersage, mit Abstand/Hysterese bei laufender Beschattung) gerade erfüllt ist; ohne gültigen Messwert nie. Das abendliche Schließen hängt davon nicht ab.
+
 ## 0.56.1 – 2026-11-20
 
 ### Behoben
