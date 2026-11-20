@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.65.4";
+const VERSION = "0.65.5";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1179,7 +1179,6 @@ class HauswerkPanel extends HTMLElement {
         <div class="hacts">
           ${this._data ? this._headInfo() : ""}
           ${this._data ? `<button class="bell gsearch" data-action="search-open" title="Suchen (/)" aria-label="Suchen"><ha-icon icon="mdi:magnify"></ha-icon></button>` : ""}
-          ${this._data ? `<button class="bell help" data-action="legend-open" data-first="${esc(mod?.name || "")}" title="Was bedeuten die Symbole? (?)" aria-label="Symbole erklärt"><ha-icon icon="mdi:help-circle-outline"></ha-icon></button>` : ""}
           ${(() => {
             if (!this._data) return "";
             const h = this._hints();
@@ -6735,6 +6734,8 @@ class HauswerkPanel extends HTMLElement {
         { g: "Darstellung", id: "look", icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung",
           sum: `${{ auto: "Wie Home Assistant", sun: "Nach Sonnenstand", light: "Hell", dark: "Dunkel" }[p.look_theme || "auto"]} · Akzent ${(ACCENTS.find(([v]) => v === (p.look_accent || null)) || [0, "eigene Farbe"])[1]} · Hintergrund ${{ pattern: "Muster", daytime: "Tageszeit", plain: "schlicht" }[p.look_background || "pattern"]}`,
           words: "design farbe akzent hell dunkel hintergrund tageszeit himmel uhr uhrzeit wetter kopfzeile größe tablet" },
+        { g: "Darstellung", act: "legend-open", icon: "mdi:help-circle-outline", c: "#64748b", title: "Symbole & Farben",
+          sum: "Was die Zeichen und Farben in Heizwerk, Rollwerk, Kraftwerk und Lichtwerk bedeuten – mit Suche (am Computer auch Taste „?“)", words: "symbole farben legende zeichen bedeutung hilfe erklärung icon" },
         { g: "Darstellung", start: true, icon: "mdi:view-dashboard-edit-outline", c: "#2dd4bf", title: "Widgets der Startseite",
           sum: `${n} Widget${n === 1 ? "" : "s"} · für alle Benutzer gleich`, words: "start dashboard widget übersicht anpassen" },
         ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => ["settings", "shutset", "kwset", "lightset"].includes(v)) || m.views[0], icon: `logo:${m.logo}`,

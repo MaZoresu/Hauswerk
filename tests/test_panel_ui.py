@@ -1216,12 +1216,23 @@ def test_kamin(panel):
 
 
 def test_symbol_legende(panel):
-    """„?“ oben erklärt Farben und alle Symbole; das aktuelle Modul steht zuerst; Suche filtert ohne Neuzeichnen."""
+    """Hauswerk › Einstellungen › Symbole & Farben (und Taste „?“) erklärt Farben und alle Symbole; das aktuelle Modul steht zuerst; Suche filtert ohne Neuzeichnen."""
     p = panel
+    assert not p.has('[data-action="legend-open"]')  # kein „?“ mehr oben in der Kopfzeile
+    p.view("house")
+    p.wait()
+    assert "Symbole & Farben" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+    p.click('#set-list [data-action="legend-open"]')
+    p.wait()
+    assert "Symbole & Farben" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    p.js(f"{EL}._closePop()")
     p.view("shutters")
     p.wait()
-    p.click('[data-action="legend-open"]')
+    p.js(f"{EL}.dispatchEvent(new KeyboardEvent('keydown', {{ key: '?', bubbles: true, composed: true }}))")
     p.wait()
+    if not p.has("#pop .lg-q"):
+        p.js(f"() => {{ {EL}._openPop('legend', {{ first: 'Rollwerk', q: '' }}); }}")
+        p.wait()
     txt = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
     for t in ("Violett", "von Hand verstellt", "Kamin an", "Sturm", "Jetzt lüften", "Ende wird geprüft"):
         assert t in txt, t

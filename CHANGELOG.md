@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.65.5 – 2026-11-20
+
+### Geändert
+- **Symbol-Erklärung zieht um:** Das „?“ oben in der Kopfzeile entfällt (mehr Platz, besonders am Handy). Die Erklärung aller Symbole und Farben steht jetzt unter **Hauswerk › Einstellungen › Darstellung › Symbole & Farben** – auch über die Suche („Symbole“, „Legende“) zu finden. Am Computer öffnet die Taste `?` sie weiterhin, mit dem aktuellen Modul zuerst.
+
 ## 0.65.4 – 2026-11-20
 
 ### Geändert (Lichtwerk)
