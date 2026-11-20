@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.65.1 – 2026-11-20
+
+### Geändert (Lichtwerk)
+- **Profil aus = keine Angaben an der Kachel:** Ist das Profil an einer Leuchte abgeschaltet, zeigt die Kachel nur noch Name, Zustand und Helligkeit – kein „Profil … aus“, kein „Profil einschalten“, keine Ursache. Auch das Helligkeitsfenster zeigt dann weder Ursache noch Profil-Schalter.
+- **Ein- und ausschalten nur noch in den Einstellungen** der Leuchte (Lichtwerk › Einstellungen › Leuchte › „Profil aktiv“); dort steht weiter „PROFIL AUS“.
+
 ## 0.65.0 – 2026-11-20
 
 ### Neu – Lichtwerk liest die Direktverknüpfungen der Homematic-CCU

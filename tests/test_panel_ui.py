@@ -817,7 +817,8 @@ def test_neue_widgets_lage_ereignisse_termine(panel):
     assert "Restmüll" in panel.js(f"{EL}.shadowRoot.querySelector('.wcal').innerText")
     assert "Papier" in panel.js(f"{EL}.shadowRoot.querySelector('.wcal').innerText")
     ev = panel.js(f"{EL}.shadowRoot.querySelector('.wev').innerText")
-    assert "Restmüll" in ev and "Rollläden" in ev, ev
+    # Rollladen-Fahrten der Vorschau liegen bis 16:50 – danach erst wieder morgen (hinter den Terminen)
+    assert "Restmüll" in ev and ("Rollläden" in ev or panel.js("new Date().getHours()") >= 16), ev
     # Werte leer: Vorschlag übernehmen
     panel.click('[data-action="w-sugg"]')
     panel.wait(300)
@@ -1365,25 +1366,27 @@ def test_lichtwerk(panel):
 
 
 def test_lichtwerk_profil_aus(panel):
-    """Profil an einer Leuchte ausschalten (Helligkeitsfenster) und an der Kachel wieder einschalten."""
+    """Profil aus: Kachel ohne Hinweis und ohne Schalter; ein- und ausschalten nur in den Einstellungen der Leuchte."""
     p = panel
     p.view("lights")
     p.wait()
-    assert "Profil „Abendlicht“ aus" in p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")  # Decke Küche
-    p.js(f"() => {{ {EL}._openPop('lwbri:light.wohnzimmer'); }}")
+    main = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "Profil „Abendlicht“ aus" not in main and "Profil einschalten" not in main  # Decke Küche
+    assert not p.js(f"!!{EL}.shadowRoot.querySelector('#main [data-action=\"lw-auto\"]')")
+    p.js(f"() => {{ {EL}._openPop('lwbri:light.kuche'); }}")
     p.wait()
-    p.click('#pop [data-action="lw-auto"][data-id="light.wohnzimmer"]')
+    assert not p.js(f"!!{EL}.shadowRoot.querySelector('#pop [data-action=\"lw-auto\"]')")
+    p.js(f"{EL}._closePop()")
+    p.view("lightset")
+    p.wait()
+    assert "PROFIL AUS" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+    p.js(f"() => {{ {EL}._openPop('lwl:light.kuche'); }}")
+    p.wait()
+    p.js(f"""() => {{ {EL}.shadowRoot.querySelector('#pop [data-lwl="auto"]').click(); }}""")
+    p.click('#pop [data-action="lwl-save"]')
     p.wait(200)
     m = [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/light/save"][-1]
-    assert m == {"type": "hauswerk/lichtwerk/light/save", "entity_id": "light.wohnzimmer", "light": {"auto": False}}
-    p.js(f"{EL}._closePop()")
-    p.wait(100)
-    p.click('.lw-c [data-action="lw-auto"][data-id="light.wohnzimmer"][data-on="1"]')
-    p.wait(200)
-    assert [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/light/save"][-1]["light"] == {"auto": True}
-    p.view("lightset")
-    assert "PROFIL AUS" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
-
+    assert m["entity_id"] == "light.kuche" and m["light"]["auto"] is True
 
 def test_homematic_verknuepfungen(panel):
     """CCU-Direktverknüpfungen: im Raum › Geräte, Übersicht unter Heizwerk › Einstellungen (Neu lesen), Hinweise."""
