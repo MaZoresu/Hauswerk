@@ -2,6 +2,13 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.65.3 – 2026-11-20
+
+### Neu (Lichtwerk)
+- **Bewegungsmelder-Symbol:** Leuchten, die über einen Bewegungsmelder schalten – im Profil eingetragen oder per HmIP-Direktverknüpfung in der CCU –, tragen ein kleines Melder-Symbol an der Lampe. In der Info-Zeile steht der Melder (bei mehreren „2 Melder“, Namen beim Antippen bzw. Darüberfahren), in der kompakten Ansicht ein Melder-Symbol neben dem Namen.
+- Hat ein HmIP-Bewegungsmelder die Leuchte eingeschaltet, zeigt die Markierung „HmIP · …“ das Melder-Symbol statt des Verknüpfungs-Symbols.
+- Bei abgeschaltetem Profil erscheint kein Symbol.
+
 ## 0.65.2 – 2026-11-20
 
 ### Geändert (Lichtwerk)

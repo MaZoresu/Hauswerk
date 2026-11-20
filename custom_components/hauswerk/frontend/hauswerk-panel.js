@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.65.2";
+const VERSION = "0.65.3";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4243,12 +4243,15 @@ class HauswerkPanel extends HTMLElement {
       const dim = l.id.startsWith("light.") && (l.ls.modes || []).some((m) => m !== "onoff");
       const stTxt = bad ? "nicht erreichbar" : on ? `an${dim && pct != null ? ` · ${pct} %` : ""}` : "aus";
       const flags = [];
-      if (l.cfg.auto === false) { /* Profil aus: keine Angaben */ } else if (l.ls.ccu) flags.push(["mdi:link-variant", `HmIP · ${l.ls.ccu}`, "#0ea5e9"]);
+      const mot = this._lwMotion(l);
+      const ccuMotion = this._lwLinkPeers(l).some((x) => x.name === l.ls.ccu && x.kind === "motion");
+      if (l.cfg.auto === false) { /* Profil aus: keine Angaben */ } else if (l.ls.ccu) flags.push([ccuMotion ? "mdi:motion-sensor" : "mdi:link-variant", `HmIP · ${l.ls.ccu}`, "#0ea5e9"]);
       else if (l.ls.manual) flags.push(["mdi:hand-back-right-outline", "von Hand – Automatik wartet", C.hand]);
       if (l.ls.motion) flags.push(["mdi:motion-sensor", "Bewegung", C.ok]);
       if (on && l.ls.night) flags.push(["mdi:weather-night", "Nachtlicht", "#6366f1"]);
       const nx = l.ls.next;
       const info = [
+        ...(mot ? [["mdi:motion-sensor", mot.length === 1 ? mot[0].replace(" (HmIP)", "") : `${mot.length} Melder`, `Bewegungsmelder: ${mot.join(", ")}`]] : []),
         ...(on && l.ls.since ? [["mdi:clock-outline", `an seit ${new Date(l.ls.since).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`]] : []),
         ...(nx && l.cfg.auto !== false ? [[nx.action === "on" ? "mdi:lightbulb-on-outline" : "mdi:lightbulb-off-outline", `${nx.action === "on" ? "an" : "aus"} ${this._lwWhen(nx)}`, nx.reason]] : []),
         ...(l.cfg.auto !== false ? [["mdi:tune-variant", this._lwProfName(l.cfg.profile)]] : []),
@@ -4256,7 +4259,7 @@ class HauswerkPanel extends HTMLElement {
       return `
         <article class="card lw-c ${bad ? "bad" : ""} ${on ? "on" : ""}" style="--lc:${this._lwColor(l)}">
           <div class="rw-top">
-            <button class="lw-bulb ${on ? "on" : ""}" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" title="${on ? "Ausschalten" : "Einschalten"}" ${bad ? "disabled" : ""}><ha-icon icon="${bad ? "mdi:lightbulb-alert-outline" : on ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}"></ha-icon></button>
+            <button class="lw-bulb ${on ? "on" : ""}" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" title="${on ? "Ausschalten" : "Einschalten"}" ${bad ? "disabled" : ""}><ha-icon icon="${bad ? "mdi:lightbulb-alert-outline" : on ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}"></ha-icon>${mot ? `<span class="lw-mot" title="Schaltet über Bewegungsmelder: ${esc(mot.join(", "))}"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</button>
             <button class="grow lw-name" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" title="Helligkeit">${areaLabel && areaLabel.toLowerCase() !== this._lwName(l).toLowerCase() ? `<small class="rw-al">${esc(areaLabel)}</small>` : ""}<b>${esc(this._lwName(l))}</b><small>${esc(stTxt)}${l.ls.cause && l.cfg.auto !== false ? ` · ${esc(l.ls.cause)}` : ""}</small></button>
             ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="lwl:${esc(l.id)}" title="Einstellungen dieses Lichts"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
           </div>
@@ -4270,7 +4273,8 @@ class HauswerkPanel extends HTMLElement {
       const bad = !l.st || ["unavailable", "unknown"].includes(l.st.state);
       const on = l.st?.state === "on";
       const pct = this._lwPct(l);
-      const flag = l.cfg.auto === false ? null : l.ls.ccu ? ["mdi:link-variant", "#0ea5e9"] : l.ls.manual ? ["mdi:hand-back-right-outline", C.hand] : l.ls.motion ? ["mdi:motion-sensor", C.ok] : on && l.ls.night ? ["mdi:weather-night", "#6366f1"] : null;
+      const mot = this._lwMotion(l);
+      const flag = l.cfg.auto === false ? null : l.ls.ccu ? [this._lwLinkPeers(l).some((x) => x.name === l.ls.ccu && x.kind === "motion") ? "mdi:motion-sensor" : "mdi:link-variant", "#0ea5e9"] : l.ls.manual ? ["mdi:hand-back-right-outline", C.hand] : l.ls.motion ? ["mdi:motion-sensor", C.ok] : on && l.ls.night ? ["mdi:weather-night", "#6366f1"] : mot ? ["mdi:motion-sensor", "var(--muted)"] : null;
       return `
         <article class="card rw-m lw-m ${bad ? "bad" : ""}" style="--lc:${this._lwColor(l)}" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" role="button" tabindex="0" title="Helligkeit">
           <div class="rwm-top"><b>${esc(this._lwName(l))}</b>${flag ? `<ha-icon icon="${flag[0]}" style="color:${flag[1]}"></ha-icon>` : ""}</div>
@@ -4317,6 +4321,18 @@ class HauswerkPanel extends HTMLElement {
       { g: "Allgemein", act: "lw-log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll", sum: "Schaltungen mit Ursache, von Hand und Einstellungs-Änderungen von Lichtwerk", words: "protokoll log" },
       { g: "Allgemein", go: "house", icon: "mdi:home-cog-outline", c: "#94a3b8", title: "Aus Hauswerk übernommen", sum: "Anwesenheit, Urlaub, Arbeitstage-Kalender, Sonnenstand und Benachrichtigungen – gelten für alle Module", words: "anwesenheit urlaub sonne hauswerk" },
     ];
+  }
+
+  /** Bewegungsmelder einer Leuchte: aus dem Profil und aus HmIP-Direktverknüpfungen (nicht bei Profil aus). */
+  _lwMotion(l) {
+    if (l.cfg.auto === false) return null;
+    const prof = this._data.lichtwerk?.profiles?.[l.cfg.profile || "standard"] || {};
+    const names = [...(prof.motion || []).map((e) => this._entityName(e)), ...(this._lwLinkPeers(l).filter((x) => x.kind === "motion").map((x) => `${x.name} (HmIP)`))];
+    return names.length ? [...new Set(names)] : null;
+  }
+
+  _lwLinkPeers(l) {
+    return (l.ls.links || this._lwStatus?.links?.lights?.[l.id])?.peers || [];
   }
 
   _lwPeer(x) {
@@ -12550,6 +12566,9 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .lw-c.on { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--lc) 45%, transparent); }
 .lw-bulb { width:46px; height:46px; flex:none; border-radius:14px; border:none; display:grid; place-items:center; cursor:pointer; background:var(--card2); color:var(--muted); }
 .lw-bulb ha-icon { --mdc-icon-size:26px; }
+.lw-bulb { position:relative; }
+.lw-mot { position:absolute; right:-5px; bottom:-5px; width:20px; height:20px; border-radius:50%; display:grid; place-items:center; background:var(--card); border:1.5px solid var(--line, var(--card2)); color:#22c55e; }
+.lw-mot ha-icon { --mdc-icon-size:13px !important; }
 .lw-bulb.on { background:color-mix(in srgb, var(--lc) 26%, var(--card2)); color:var(--lc); box-shadow:0 0 18px color-mix(in srgb, var(--lc) 45%, transparent); }
 .lw-name { all:unset; cursor:pointer; min-width:0; display:block; }
 .lw-name b { display:block; font-size:15px; } .lw-name small { display:block; color:var(--muted); font-size:12.5px; }

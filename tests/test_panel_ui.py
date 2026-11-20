@@ -1447,3 +1447,14 @@ def test_lichtwerk_ccu_verknuepfungen(panel):
     p.wait()
     main = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
     assert "HmIP · Bewegung Flur OG" in main and "von Hand" not in main.split("Flur OG")[1].split("\n\n")[0]
+
+
+def test_lichtwerk_bewegungsmelder_symbol(panel):
+    """Leuchten mit Bewegungsmelder (Profil oder HmIP-Direktverknüpfung) tragen ein Melder-Symbol – nicht bei Profil aus."""
+    p = panel
+    p.view("lights")
+    p.wait()
+    ids = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.lw-c')].filter((c) => c.querySelector('.lw-mot')).map((c) => c.querySelector('.lw-bulb').dataset.ids)")
+    assert "light.flur_og" in ids and "light.eingang" in ids and "light.kuche" not in ids and "light.wohnzimmer" not in ids, ids
+    txt = p.js(f"{EL}.shadowRoot.querySelector('.lw-bulb[data-ids=\"light.eingang\"]').closest('.lw-c').innerText")
+    assert "S_Bewegung:Vorgarten" in txt
