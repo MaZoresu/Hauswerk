@@ -828,6 +828,12 @@ def _lw_profile_schema() -> vol.Schema:
         "entity": _opt(ENTITY),
         "list": vol.All([vol.Any(vol.All(str, vol.Length(max=80)), vol.All(vol.Coerce(int), vol.Range(min=0, max=6)))], vol.Length(max=20)),
         "choice": vol.All(str, vol.Length(max=20)),
+        "scenes": vol.All([vol.Schema({
+            vol.Required("from"): _hm,
+            vol.Optional("name"): vol.Any(None, vol.All(str, vol.Length(max=30))),
+            vol.Optional("brightness"): vol.Any(None, vol.All(vol.Coerce(int), vol.Range(min=1, max=100))),
+            vol.Optional("kelvin"): vol.Any(None, vol.All(vol.Coerce(int), vol.Range(min=2000, max=6500))),
+        }, extra=vol.REMOVE_EXTRA)], vol.Length(max=8)),
     }
     return vol.Schema({vol.Optional(k): kinds[kind] for k, (_d, kind) in LW_PROFILE_SPEC.items()}, extra=vol.REMOVE_EXTRA)
 

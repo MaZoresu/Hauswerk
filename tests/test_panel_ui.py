@@ -1492,3 +1492,50 @@ def test_lichtwerk_hmip_bei_profil_aus(panel):
     card = p.js(f"{EL}.shadowRoot.querySelector('.lw-bulb[data-ids=\"light.wohnzimmer\"]').closest('.lw-c').innerText")
     assert "HmIP" in card and "S_Bewegung" not in card and "von Hand" not in card and "Automatik übernimmt" not in card, card
     assert p.js(f"!!{EL}.shadowRoot.querySelector('.lw-bulb[data-ids=\"light.wohnzimmer\"] .lw-mot')")
+
+
+def test_lichtwerk_szenen_editor(panel):
+    """Profil › Tageszeiten: Vorlage, Zeile ändern und löschen, speichern gegen das Schema; Tagesleiste nach Szene."""
+    p = panel
+    p.view("lightset")
+    p.wait()
+    p.js(f"() => {{ {EL}._openPop('lwp:standard:scenes'); }}")
+    p.wait()
+    p.click('#pop [data-action="lwsc-preset"]')
+    p.wait()
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('#pop .lwsc').length") == 4
+    p.js(f"""() => {{ const i = {EL}.shadowRoot.querySelector('#pop [data-lwsc="2:brightness"]'); i.value = '35'; i.dispatchEvent(new Event('change', {{ bubbles: true, composed: true }})); }}""")
+    p.click('#pop [data-action="lwsc-del"][data-i="3"]')
+    p.wait()
+    p.click('#pop [data-action="lwp-save"]')
+    p.wait(300)
+    prof = [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/profile/save"][-1]["profile"]
+    assert prof["scenes_on"] is True and [x["name"] for x in prof["scenes"]] == ["Morgen", "Tag", "Abend"] and prof["scenes"][2]["brightness"] == 35
+    p.view("lights")
+    p.wait()
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('#main .lwseg.sc').length") > 0
+
+
+def test_lichtwerk_raumansicht(panel):
+    """Ansicht „Räume“: je Raum eine Kachel mit allen an/aus und Leuchten-Zeilen; Profil für den ganzen Raum."""
+    p = panel
+    p.view("lights")
+    p.wait()
+    p.click('[data-action="lw-view"][data-v="rooms"]')
+    p.wait()
+    rooms = p.js(f"[...{EL}.shadowRoot.querySelectorAll('#main .lw-room')].map((x) => x.dataset.area)")
+    assert "Wohnzimmer" in rooms and "Vorgarten" in rooms, rooms
+    card = f"{EL}.shadowRoot.querySelector('#main .lw-room[data-area=\"Wohnzimmer\"]')"
+    assert "1 von 1 an" in p.js(f"{card}.innerText")
+    p.js(f"{card}.querySelector('.lw-bulb').click()")
+    p.wait(200)
+    cmd = [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/command"][-1]
+    assert cmd["entity_ids"] == ["light.wohnzimmer"] and cmd["action"] == "off", cmd
+    p.js(f"() => {{ {EL}._openPop('lwroom:Vorgarten'); }}")
+    p.wait()
+    p.js(f"""() => {{ const s = {EL}.shadowRoot.querySelector('#pop [data-lwroom="profile"]'); s.value = 'flur'; s.dispatchEvent(new Event('change', {{ bubbles: true, composed: true }})); }}""")
+    p.click('#pop [data-action="lw-room-save"]')
+    p.wait(300)
+    m = [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/light/save"][-1]
+    assert m["entity_id"] == "light.eingang" and m["light"] == {"profile": "flur", "auto": True}
+    p.js("localStorage.removeItem('hauswerk_lw_view')")

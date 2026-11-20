@@ -1787,7 +1787,7 @@ def test_lichtwerk_ccu_verknuepfungen(hw):
         assert lw.status()["manual"] == 0
         # Ablauftimer: Melder meldet noch → „solange Bewegung + 1 Min.“; Melder ruhig → Ablauf 1 Min. danach
         assert wf["peers"][0]["on_time"] == 60 and st["lights"]["light.eingang"]["peers"][0]["on_time"] == 90
-        assert lw.status()["lights"]["light.windfang"]["off"] == {"while": 60, "src": "HmIP"}
+        assert lw.status()["lights"]["light.windfang"]["off"] == {"while": 60, "src": "HmIP", "learned": False}
         hass.set("binary_sensor.spi", "off", {"device_class": "occupancy"}, "S_Bewegung:Windfang")
         await lw.async_evaluate()
         off = lw.status()["lights"]["light.windfang"]["off"]
@@ -1822,5 +1822,73 @@ def test_lichtwerk_ccu_verknuepfungen(hw):
         # Bewegungsmelder auch im Profil: doppelt → Warnung
         await lw.async_save_profile("standard", {"motion": ["binary_sensor.spi"]})
         assert any(f["level"] == "warn" and "schaltet bei Bewegung doppelt" in f["text"] for f in lw.links_status()["findings"])
+
+    asyncio.run(run())
+
+
+def test_lichtwerk_szenen_tageszeit(hw):
+    """Szenen je Tageszeit: letzte begonnene gilt, vor der ersten die vom Vortag; Nachtlicht hat Vorrang."""
+    L = hw.light
+    sc = [{"from": "06:00", "name": "Morgen", "brightness": 60, "kelvin": 4000}, {"from": "18:00", "name": "Abend", "brightness": 40, "kelvin": 2700},
+          {"from": "22:00", "name": "Spät", "brightness": 20}]
+    prof = {**L.LW_PROFILE_DEFAULTS, "scenes_on": True, "scenes": sc, "brightness": 80}
+    assert L.light_params(prof, 7 * 60) == {"brightness": 60, "night": False, "mode": "Szene „Morgen“", "scene": "Morgen", "kelvin": 4000}
+    assert L.light_params(prof, 19 * 60)["brightness"] == 40
+    p = L.light_params(prof, 3 * 60)  # vor 06:00: „Spät“ vom Vortag, ohne eigene Farbe
+    assert p["scene"] == "Spät" and p["brightness"] == 20 and "kelvin" not in p
+    assert L.light_params({**prof, "scenes_on": False}, 7 * 60)["brightness"] == 80
+    night = L.light_params({**prof, "night": True, "night_from": "22:30", "night_to": "06:00"}, 23 * 60)
+    assert night["night"] and night["mode"] == "Nachtlicht"
+
+
+def test_lichtwerk_ausschaltzeit_lernen(hw):
+    """Lichtwerk lernt, wie lange nach dem letzten Melden die CCU wirklich ausschaltet (Median ab 3 Messungen)."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        DEVS.clear()
+        NOW[0] = datetime(2026, 11, 20, 18, 0, tzinfo=timezone.utc)
+        hass = Hass()
+
+        def dev(eid, did, addr, model, name, state, attrs=None):
+            DEVS[did] = types.SimpleNamespace(id=did, model=model, name=name, name_by_user=None, area_id=None,
+                                              identifiers={("homematicip_local", f"{addr}@ccu3")})
+            REG[eid] = types.SimpleNamespace(entity_id=eid, device_id=did, domain=eid.split(".")[0], disabled_by=None, platform="homematicip_local")
+            hass.set(eid, state, attrs or {}, name)
+
+        dev("light.windfang", "l1", "BSM1", "HmIP-BSM", "Windfang Wand", "off", {"supported_color_modes": ["onoff"]})
+        dev("binary_sensor.spi", "s1", "SPI1", "HmIP-SPI", "S_Bewegung:Windfang", "off", {"device_class": "occupancy"})
+        sys.modules["homeassistant.helpers.entity_registry"].async_get = lambda h: types.SimpleNamespace(async_get=REG.get, entities=REG)
+        hass.links = {"BSM1": ["SPI1:1"]}
+        hass.paramsets = {("SPI1:1", "BSM1:4"): {"SHORT_ON_TIME_BASE": 4, "SHORT_ON_TIME_FACTOR": 1}}
+        log, haus, ctl = await _setup(hw, hass)
+        lw = hw.Lichtwerk(hass, log, haus)
+        await lw.async_load()
+        lw._sun_fn = lambda offset=0: None
+        await lw.async_save_settings({"lw_lights": ["light.windfang"]})
+        await lw.async_refresh_links()
+
+        def ch(eid, state, attrs):
+            old = hass.st[eid]
+            hass.set(eid, state, attrs, old.name if hasattr(old, "name") else eid)
+            lw._on_change(types.SimpleNamespace(data={"entity_id": eid, "old_state": old, "new_state": hass.st[eid]}))
+
+        for wait in (95, 100, 90):
+            ch("binary_sensor.spi", "on", {"device_class": "occupancy"})
+            ch("light.windfang", "on", {"supported_color_modes": ["onoff"]})
+            NOW[0] += timedelta(seconds=30)
+            ch("binary_sensor.spi", "off", {"device_class": "occupancy"})
+            NOW[0] += timedelta(seconds=wait)
+            ch("light.windfang", "off", {"supported_color_modes": ["onoff"]})
+            NOW[0] += timedelta(minutes=5)
+        assert lw._learn["light.windfang"]["SPI1"] == [95, 100, 90]
+        # nächstes Mal: Timer mit gelerntem Wert (95 s statt 60 s aus der CCU)
+        ch("binary_sensor.spi", "on", {"device_class": "occupancy"})
+        ch("light.windfang", "on", {"supported_color_modes": ["onoff"]})
+        ch("binary_sensor.spi", "off", {"device_class": "occupancy"})
+        await lw.async_evaluate()
+        off = lw.status()["lights"]["light.windfang"]["off"]
+        assert off["learned"] and off["at"] == (NOW[0] + timedelta(seconds=95)).isoformat(), off
+        assert lw._data()["learn"]["light.windfang"]["SPI1"]
 
     asyncio.run(run())

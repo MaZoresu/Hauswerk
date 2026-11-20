@@ -2,6 +2,13 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.67.0 – 2026-11-20
+
+### Neu (Lichtwerk)
+- **Ausschaltzeit lernen:** Lichtwerk misst bei HmIP-Direktverknüpfungen, wie lange nach dem letzten Melden die CCU die Leuchte wirklich ausschaltet (je Leuchte und Melder, die letzten 10 Mal). Ab drei Messungen nutzt der Ablauftimer den Median statt der Einschaltdauer aus der CCU – bis dahin steht „aus in ~0:42“, danach ohne „~“. Übersteht Neustarts.
+- **Szenen je Tageszeit** (Profil › Tageszeiten): ab einer Uhrzeit eigene Helligkeit und Farbtemperatur, z. B. 06:00 Morgen 60 % kühl, 09:00 Tag 100 %, 18:00 Abend 50 % warm, 22:00 Nacht 15 % – als Vorlage mit einem Tipp. Die Szene gilt bis zur nächsten, auch über Mitternacht; brennt das Licht beim Wechsel, wird übergeblendet. Nachtlicht hat Vorrang, „Licht“ und „Dynamisch“ treten zurück. Die Tagesleiste der Kachel zeigt die Szenen in ihrer Lichtfarbe und Helligkeit.
+- **Ansicht „Räume“** (neben Detailliert und Kompakt): je Raum eine Kachel – Lampe schaltet alle Leuchten des Raums an bzw. aus, Melder-Symbol, „x von y an“, Profil und der nächste Ablauf. Darunter jede Leuchte als Zeile mit Zustand, HmIP bzw. von Hand, Countdown und Ein/Aus. Über das Zahnrad bekommt der ganze Raum ein Profil (und „Profil aktiv“) auf einmal – z. B. Windfang Wand und Decke gemeinsam.
+
 ## 0.66.0 – 2026-11-20
 
 ### Neu (Lichtwerk)

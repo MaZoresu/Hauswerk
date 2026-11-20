@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.66.0";
+const VERSION = "0.67.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -454,9 +454,17 @@ const LW_VIEWS = [
 // Abschnitte des Lichtwerk-Profils (wie die Bereiche des Blueprints „Smart Light“)
 const LW_SECTIONS = [
   ["on", "Einschalten", "mdi:lightbulb-on-outline"], ["off", "Ausschalten", "mdi:lightbulb-off-outline"], ["motion", "Bewegung", "mdi:motion-sensor"],
-  ["days", "Tage", "mdi:calendar-week"], ["light", "Licht", "mdi:brightness-6"], ["dyn", "Dynamisch", "mdi:theme-light-dark"],
+  ["days", "Tage", "mdi:calendar-week"], ["light", "Licht", "mdi:brightness-6"], ["scenes", "Tageszeiten", "mdi:clock-time-four-outline"], ["dyn", "Dynamisch", "mdi:theme-light-dark"],
   ["night", "Nachtlicht", "mdi:weather-night"], ["more", "Ausnahmen", "mdi:hand-back-right-outline"],
 ];
+// Szenen je Tageszeit: Vorlage
+const LW_SCENES = [
+  { from: "06:00", name: "Morgen", brightness: 60, kelvin: 4000 },
+  { from: "09:00", name: "Tag", brightness: 100, kelvin: 4500 },
+  { from: "18:00", name: "Abend", brightness: 50, kelvin: 2700 },
+  { from: "22:00", name: "Nacht", brightness: 15, kelvin: 2200 },
+];
+const lwKelvinColor = (k) => (!k ? "#facc15" : k < 2600 ? "#f59e0b" : k < 3300 ? "#fbbf24" : k < 4200 ? "#fde68a" : "#bae6fd");
 // Vorlagen für neue Lichtwerk-Profile
 const LW_PRESETS = {
   abend: { name: "Abendlicht", icon: "mdi:sofa-outline", text: "an bei Sonnenuntergang, aus um 23:00", prof: { on_sun: true, sun_on: 2, off_sun: true, off_time: true, time_off: "23:00", on_time: false, motion: [], night: false } },
@@ -4170,7 +4178,20 @@ class HauswerkPanel extends HTMLElement {
     const nw = l.ls.night_window;
     const now = new Date();
     const nowPct = ((now.getHours() * 60 + now.getMinutes()) / 1440) * 100;
-    const segs = plan.map((p) => `<div class="lwseg" style="left:${(p.start / 1440) * 100}%;width:${((p.end - p.start) / 1440) * 100}%" title="${t2(p.start)}–${p.end >= 1440 ? "24:00" : t2(p.end)} an · ${esc(p.reason || "")}${p.until ? ` · aus: ${esc(p.until)}` : ""}"></div>`).join("");
+    const prof = this._data.lichtwerk?.profiles?.[l.cfg.profile || "standard"] || {};
+    const scs = prof.scenes_on ? (prof.scenes || []).filter((x) => x.from).map((x) => ({ ...x, m: hm(x.from) })).sort((a, b) => a.m - b.m) : [];
+    // Szene je Minute: letzte begonnene, sonst die letzte vom Vortag
+    const sceneAt = (m) => scs.filter((x) => x.m <= m).pop() || scs[scs.length - 1];
+    const cuts = scs.map((x) => x.m);
+    const segs = plan.flatMap((p) => {
+      const tip = `${t2(p.start)}–${p.end >= 1440 ? "24:00" : t2(p.end)} an · ${esc(p.reason || "")}${p.until ? ` · aus: ${esc(p.until)}` : ""}`;
+      if (!scs.length) return [`<div class="lwseg" style="left:${(p.start / 1440) * 100}%;width:${((p.end - p.start) / 1440) * 100}%" title="${tip}"></div>`];
+      const pts = [p.start, ...cuts.filter((c) => c > p.start && c < p.end), p.end];
+      return pts.slice(0, -1).map((a, i) => {
+        const sc = sceneAt(a);
+        return `<div class="lwseg sc" style="left:${(a / 1440) * 100}%;width:${((pts[i + 1] - a) / 1440) * 100}%;background:${lwKelvinColor(sc.kelvin || (prof.color === "temp" ? prof.kelvin : null))};opacity:${0.35 + 0.65 * ((sc.brightness ?? prof.brightness ?? 80) / 100)}" title="${tip} · ${esc(sc.name || sc.from)} ${sc.brightness ?? prof.brightness ?? 80} %"></div>`;
+      });
+    }).join("");
     let night = "";
     if (nw) {
       const a = hm(nw[0]), b = hm(nw[1]);
@@ -4239,7 +4260,8 @@ class HauswerkPanel extends HTMLElement {
       if (!groups.has(area)) groups.set(area, []);
       groups.get(area).push(l);
     }
-    const compact = this._lwView() === "compact";
+    const view = this._lwView();
+    const compact = view === "compact";
     const tile = (l, areaLabel = "") => {
       const bad = !l.st || ["unavailable", "unknown"].includes(l.st.state);
       const on = l.st?.state === "on";
@@ -4288,14 +4310,52 @@ class HauswerkPanel extends HTMLElement {
     };
     const tog = `<div class="shead outer"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><h3>Licht</h3><span class="count">${lights.length}</span><span class="grow"></span>
       <div class="vtog" role="group" aria-label="Ansicht">
-        <button class="${compact ? "" : "on"}" data-action="lw-view" data-v="detail" title="Detailliert"><ha-icon icon="mdi:view-agenda-outline"></ha-icon><span>Detailliert</span></button>
+        <button class="${view === "detail" || !["compact", "rooms"].includes(view) ? "on" : ""}" data-action="lw-view" data-v="detail" title="Detailliert"><ha-icon icon="mdi:view-agenda-outline"></ha-icon><span>Detailliert</span></button>
         <button class="${compact ? "on" : ""}" data-action="lw-view" data-v="compact" title="Kompakt"><ha-icon icon="mdi:view-grid-outline"></ha-icon><span>Kompakt</span></button>
+        <button class="${view === "rooms" ? "on" : ""}" data-action="lw-view" data-v="rooms" title="Räume"><ha-icon icon="mdi:floor-plan"></ha-icon><span>Räume</span></button>
       </div></div>`;
     const sorted = [...groups.entries()].sort((a, b) => (a[0] === "Ohne Raum") - (b[0] === "Ohne Raum") || a[0].localeCompare(b[0], "de"));
+    if (view === "rooms") return head + tog + `<div class="rw-grid ${this._tablet ? "tgrid" : ""}">${sorted.map(([area, list]) => this._lwRoomTile(area, list)).join("")}</div>`;
     if (this._tablet && !compact) return head + tog + `<div class="rw-grid tgrid">${sorted.map(([area, list]) => list.map((l) => tile(l, area)).join("")).join("")}</div>`;
     // meist nur ein Licht je Raum: ein gemeinsames Raster, der Raum steht in der Kachel (statt fast leerer Zeilen)
     if (!compact && lights.length / groups.size < 1.6) return head + tog + `<div class="rw-grid">${sorted.map(([area, list]) => list.map((l) => tile(l, area)).join("")).join("")}</div>`;
     return head + tog + sorted.map(([area, list]) => `<div class="rw-area ${compact ? "compact" : ""}"><h3>${esc(area)}</h3><div class="rw-grid ${compact ? "compact" : ""}">${list.map((l) => (compact ? mini(l) : tile(l))).join("")}</div></div>`).join("");
+  }
+
+  /** Raumkachel: alle Leuchten eines Raums – alle an/aus, je Leuchte Zeile mit Zustand, HmIP/von Hand, Ablauftimer. */
+  _lwRoomTile(area, list) {
+    const S = this._hass.states;
+    const bad = (l) => !l.st || ["unavailable", "unknown"].includes(l.st.state);
+    const on = list.filter((l) => l.st?.state === "on");
+    const ok = list.filter((l) => !bad(l));
+    const ids = ok.map((l) => l.id).join(",");
+    const mot = [...new Set(list.flatMap((l) => this._lwMotion(l) || []))];
+    const timers = on.map((l) => l.ls.off?.at).filter(Boolean).sort();
+    const profs = [...new Set(list.filter((l) => l.cfg.auto !== false).map((l) => this._lwProfName(l.cfg.profile)))];
+    const lead = on[0] || list[0];
+    const sub = [`${on.length} von ${list.length} an`, profs.length === 1 ? profs[0] : profs.length > 1 ? `${profs.length} Profile` : "Profil aus"].join(" · ");
+    const row = (l) => {
+      const o = l.st?.state === "on";
+      const pct = this._lwPct(l);
+      const dim = l.id.startsWith("light.") && (l.ls.modes || []).some((m) => m !== "onoff");
+      const f = [];
+      if (l.ls.ccu) f.push(`<ha-icon icon="mdi:link-variant" style="color:#0ea5e9" title="HmIP"></ha-icon>HmIP`);
+      else if (l.ls.manual && l.cfg.auto !== false) f.push(`<ha-icon icon="mdi:hand-back-right-outline" style="color:${C.hand}" title="von Hand"></ha-icon>`);
+      if (o && l.ls.off?.at) f.push(`<ha-icon icon="mdi:timer-outline" style="color:${C.ok}"></ha-icon><span data-lw-until="${esc(l.ls.off.at)}">${this._lwLeft(l.ls.off.at)}</span>`);
+      return `<div class="lwr"><ha-icon icon="${bad(l) ? "mdi:lightbulb-alert-outline" : o ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}" style="color:${bad(l) ? C.alert : this._lwColor(l)}"></ha-icon>
+        <button class="lwr-n" data-action="pop-open" data-pop="lwbri:${esc(l.id)}"><b>${esc(this._lwName(l))}</b><small>${bad(l) ? "nicht erreichbar" : o ? `an${dim && pct != null ? ` · ${pct} %` : ""}` : "aus"}</small></button>
+        ${f.length ? `<span class="lwr-f">${f.join("")}</span>` : ""}
+        <button class="sbtn" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${o ? "off" : "on"}" ${bad(l) ? "disabled" : ""} title="${o ? "Aus" : "An"}"><ha-icon icon="mdi:power"></ha-icon></button></div>`;
+    };
+    return `
+      <article class="card lw-c lw-room ${on.length ? "on" : ""}" style="--lc:${this._lwColor(lead)}" data-area="${esc(area)}">
+        <div class="rw-top">
+          <button class="lw-bulb ${on.length ? "on" : ""}" data-action="lw-cmd" data-ids="${esc(on.length ? on.map((l) => l.id).join(",") : ids)}" data-a="${on.length ? "off" : "on"}" title="${on.length ? "Alle aus" : "Alle an"}" ${ok.length ? "" : "disabled"}><ha-icon icon="${on.length ? "mdi:lightbulb-group" : "mdi:lightbulb-group-outline"}"></ha-icon>${mot.length ? `<span class="lw-mot" title="Bewegungsmelder: ${esc(mot.join(", "))}"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</button>
+          <div class="grow lw-name"><b>${esc(area)}</b><small>${esc(sub)}${timers.length ? ` · aus in <span data-lw-until="${esc(timers[0])}">${this._lwLeft(timers[0])}</span>` : ""}</small></div>
+          ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="lwroom:${esc(area)}" title="Profil für den ganzen Raum"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
+        </div>
+        <div class="lwr-list">${list.map(row).join("")}</div>
+      </article>`;
   }
 
   _lwView() {
@@ -4342,7 +4402,7 @@ class HauswerkPanel extends HTMLElement {
 
   /** Ablauftimer: „aus in 0:42“ (läuft live) bzw. „aus 1 Min. nach der letzten Bewegung“. */
   _lwOffTxt(off) {
-    if (off.at) return `aus in <span data-lw-until="${esc(off.at)}">${this._lwLeft(off.at)}</span>`;
+    if (off.at) return `aus in ${off.src === "HmIP" && !off.learned ? "~" : ""}<span data-lw-until="${esc(off.at)}">${this._lwLeft(off.at)}</span>`;
     const m = off.while >= 60 ? `${fmt(off.while / 60, off.while % 60 ? 1 : 0)} Min.` : `${Math.round(off.while)} s`;
     return `aus ${m} nach der letzten Bewegung`;
   }
@@ -4370,7 +4430,7 @@ class HauswerkPanel extends HTMLElement {
   _lwProfSum(x) {
     const on = [x.on_sun && `Sonne unter ${fmt(x.sun_on ?? -1, 0)}°`, x.on_lux && `unter ${fmt(x.lux_on ?? 30, 0)} lx`, x.on_time && `um ${x.time_on}`, x.on_entity && x.entity && `${this._entityName(x.entity)} an`, (x.motion || []).length && "Bewegung", x.on_covers && "Rollläden zu"].filter(Boolean);
     const off = [x.off_time && `spätestens ${x.time_off}`, x.off_sun && "Sonnenaufgang", x.off_lux && `über ${fmt(x.lux_off ?? 80, 0)} lx`, x.off_entity && "Entität aus"].filter(Boolean);
-    return `${on.length ? `an: ${on.join(" / ")}` : "kein Einschalt-Auslöser"} · ${off.length ? `aus: ${off.join(" / ")}` : "aus von Hand"}${x.night ? ` · Nachtlicht ${x.night_from}–${x.night_to}` : ""}`;
+    return `${on.length ? `an: ${on.join(" / ")}` : "kein Einschalt-Auslöser"} · ${off.length ? `aus: ${off.join(" / ")}` : "aus von Hand"}${x.night ? ` · Nachtlicht ${x.night_from}–${x.night_to}` : ""}${x.scenes_on && (x.scenes || []).length ? ` · ${x.scenes.length} Tageszeiten` : ""}`;
   }
 
   /** Fenster von Lichtwerk: Helligkeit, Einstellungen je Licht, Assistent, Allgemein, Automationen. */
@@ -4418,6 +4478,27 @@ class HauswerkPanel extends HTMLElement {
         foot: `${this._admin ? `<button class="icon boxed danger" data-action="lwl-remove" data-id="${esc(eid)}" title="Aus Lichtwerk entfernen"><ha-icon icon="mdi:delete-outline"></ha-icon></button>` : ""}
           <button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
           ${this._admin ? `<button class="primary" data-action="lwl-save" data-id="${esc(eid)}"><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>` : ""}`,
+      };
+    }
+    if (id.startsWith("lwroom:")) {
+      const area = id.slice(7);
+      const list = this._lwLights().filter((l) => (l.ls.area || "Ohne Raum") === area);
+      const d = this._pop.draft;
+      if (!d.ids) {
+        const profs = [...new Set(list.map((l) => l.cfg.profile || "standard"))];
+        Object.assign(d, { ids: list.map((l) => l.id), profile: profs[0] || "standard", auto: list.some((l) => l.cfg.auto !== false) });
+      }
+      const profs = this._lwProfiles();
+      const mixed = new Set(list.map((l) => l.cfg.profile || "standard")).size > 1;
+      return {
+        icon: "mdi:floor-plan", c: "#6366f1", title: esc(area), sub: `Lichtwerk · ${list.length} ${list.length === 1 ? "Leuchte" : "Leuchten"}`,
+        body: `
+          <p class="muted small">Ein Profil für alle Leuchten des Raums – z. B. Wand und Decke im Windfang gemeinsam. Einzelne Leuchten lassen sich danach weiter unter ihren Einstellungen ändern.</p>
+          ${mixed ? `<p class="note"><ha-icon icon="mdi:information-outline"></ha-icon>Bisher unterschiedliche Profile: ${list.map((l) => `${esc(this._lwName(l))} – ${esc(this._lwProfName(l.cfg.profile))}`).join(", ")}</p>` : ""}
+          <label class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Profil für alle</span><select data-lwroom="profile">${profs.map((x) => `<option value="${esc(x.id)}" ${d.profile === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+          <p class="muted small">${esc(this._lwProfSum(profs.find((x) => x.id === d.profile) || {}))}</p>
+          <div class="wxrows">${this._setRow("lwroom_auto", "Profil aktiv", "für alle Leuchten des Raums", `<label class="switch"><input type="checkbox" data-lwroom="auto" ${d.auto ? "checked" : ""}><span></span></label>`, "Aus: Lichtwerk schaltet die Leuchten dieses Raums nicht – HmIP-Direktverknüpfungen der CCU schalten weiter.")}</div>`,
+        foot: `<button class="secondary" data-action="pop-close">Abbrechen</button><button class="primary" data-action="lw-room-save"><ha-icon icon="mdi:content-save-outline"></ha-icon>Für ${list.length} ${list.length === 1 ? "Leuchte" : "Leuchten"} speichern</button>`,
       };
     }
     if (id === "lwlinks") {
@@ -4540,6 +4621,22 @@ class HauswerkPanel extends HTMLElement {
           ${p.color === "temp" ? `<div class="wxrows">${row("kv", "Farbtemperatur", "2200 warm … 6500 kalt", num("kelvin", 2700, 2000, 6500, 100, "K"))}</div>` : ""}
           ${p.color === "rgb" ? `<label class="field narrow"><span>Farbe</span><input type="color" data-lwp="rgb" data-kind="text" value="${esc(p.rgb || "#ffb464")}" ${dis}></label>` : ""}`;
         break;
+      case "scenes": {
+        const sc = p.scenes || [];
+        const inner = `<div class="lwsc-list">${sc.map((x, i) => `<div class="lwsc">
+            <input type="time" data-lwsc="${i}:from" value="${esc(x.from || "")}" ${dis} aria-label="ab">
+            <input type="text" data-lwsc="${i}:name" value="${esc(x.name || "")}" maxlength="30" placeholder="Name" ${dis}>
+            <div class="unit"><input type="number" min="1" max="100" step="1" data-lwsc="${i}:brightness" value="${x.brightness ?? ""}" placeholder="${p.brightness ?? 80}" ${dis}><i>%</i></div>
+            <div class="unit"><input type="number" min="2000" max="6500" step="100" data-lwsc="${i}:kelvin" value="${x.kelvin ?? ""}" placeholder="Farbe" ${dis}><i>K</i></div>
+            <i class="lwsc-dot" style="background:${lwKelvinColor(x.kelvin)};opacity:${0.35 + 0.65 * ((x.brightness ?? 80) / 100)}"></i>
+            ${this._admin ? `<button class="icon" data-action="lwsc-del" data-i="${i}" title="Entfernen"><ha-icon icon="mdi:close"></ha-icon></button>` : ""}</div>`).join("")}</div>
+          ${this._admin ? `<div class="rq-quick"><button class="pill" data-action="lwsc-add" ${sc.length >= 8 ? "disabled" : ""}><ha-icon icon="mdi:plus"></ha-icon>Tageszeit</button>${sc.length ? "" : `<button class="pill" data-action="lwsc-preset"><ha-icon icon="mdi:auto-fix"></ha-icon>Morgen · Tag · Abend · Nacht</button>`}</div>` : ""}
+          ${note("Ab der Uhrzeit gilt die Szene bis zur nächsten (über Mitternacht weiter). Leere Farbe = wie unter „Licht“. Brennt das Licht beim Wechsel, wird übergeblendet. Nachtlicht hat Vorrang.")}`;
+        body = `${note("Je Tageszeit eigene Helligkeit und Lichtfarbe – z. B. morgens kühl und hell, abends warm und gedimmt. Ersetzt „Licht“ und „Dynamisch“, solange eingeschaltet.", "mdi:clock-time-four-outline")}
+          ${stage("mdi:clock-time-four-outline", "Szenen nach Tageszeit", "scenes_on", inner)}
+          ${!p.scenes_on && this._admin ? `<div class="rq-quick"><button class="pill" data-action="lwsc-preset"><ha-icon icon="mdi:auto-fix"></ha-icon>${sc.length ? "Einschalten mit Vorlage Morgen · Tag · Abend · Nacht" : "Morgen · Tag · Abend · Nacht"}</button></div>` : ""}`;
+        break;
+      }
       case "dyn":
         body = `${note("Helligkeit und Farbtemperatur passen sich an: nach der Sonnenhöhe (abends wärmer und gedimmt) oder nach der Helligkeit draußen.", "mdi:theme-light-dark")}
           ${choice("dynamic", [["off", "Aus"], ["sun", "Nach Sonne", "mdi:white-balance-sunny"], ["lux", "Nach Helligkeit", "mdi:brightness-5"]], "off")}
@@ -7350,7 +7447,7 @@ class HauswerkPanel extends HTMLElement {
     if (String(id).startsWith("rwpos:")) return this._rwPosPop(id.slice(6));
     if (String(id).startsWith("kwapp:")) return this._kwAppPop(id.slice(6));
     if (String(id).startsWith("lwp:")) { const [, pid, sec] = String(id).split(":"); return this._lwpPop(pid, LW_SECTIONS.some(([x]) => x === sec) ? sec : "on"); }
-    if (String(id).startsWith("lwbri:") || String(id).startsWith("lwl:") || LW_POPS.includes(id)) return this._lwPop(id);
+    if (String(id).startsWith("lwbri:") || String(id).startsWith("lwl:") || String(id).startsWith("lwroom:") || LW_POPS.includes(id)) return this._lwPop(id);
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (KW_POPS.includes(id)) return this._kwPop(id);
     if (id === "setup") return this._setupPop();
@@ -9046,6 +9143,19 @@ class HauswerkPanel extends HTMLElement {
       if ((kind === "bool" || kind === "entity") && isChange) this._renderPop();
       return;
     }
+    if (t.dataset.lwroom && this._pop?.draft?.ids) {
+      this._pop.draft[t.dataset.lwroom] = t.type === "checkbox" ? t.checked : t.value;
+      if (isChange) this._renderPop();
+      return;
+    }
+    if (t.dataset.lwsc && this._pop?.draft?.prof) {
+      const [i, k] = t.dataset.lwsc.split(":");
+      const sc = (this._pop.draft.prof.scenes = (this._pop.draft.prof.scenes || []).map((x) => ({ ...x })));
+      if (!sc[+i]) return;
+      sc[+i][k] = ["brightness", "kelvin"].includes(k) ? (t.value === "" ? null : Number(t.value)) : t.value || null;
+      if (isChange) this._renderPop();
+      return;
+    }
     if (t.dataset.lwl && this._pop?.draft?.cfg) {
       this._pop.draft.cfg[t.dataset.lwl] = t.type === "checkbox" ? t.checked : t.value || null;
       return;
@@ -10191,6 +10301,35 @@ class HauswerkPanel extends HTMLElement {
         await this._ws({ type: "hauswerk/lichtwerk/command", entity_ids: [el.dataset.ids], action: "on", brightness: Number(this._pop.draft.v) });
         this._closePop();
         break;
+      case "lwsc-add": {
+        const pr = this._pop.draft.prof;
+        const sc = (pr.scenes || []).slice();
+        const last = sc.length ? hm(sc[sc.length - 1].from || "00:00") : 300;
+        sc.push({ from: t2(Math.min(1425, last + 180)), name: "", brightness: pr.brightness ?? 80, kelvin: null });
+        pr.scenes = sc;
+        pr.scenes_on = true;
+        this._renderPop();
+        break;
+      }
+      case "lwsc-del":
+        this._pop.draft.prof.scenes = (this._pop.draft.prof.scenes || []).filter((_, i) => i !== +el.dataset.i);
+        this._renderPop();
+        break;
+      case "lwsc-preset":
+        Object.assign(this._pop.draft.prof, { scenes: LW_SCENES.map((x) => ({ ...x })), scenes_on: true });
+        this._renderPop();
+        break;
+      case "lw-room-save": {
+        const d = this._pop.draft;
+        let res = null;
+        for (const id of d.ids) res = await this._ws({ type: "hauswerk/lichtwerk/light/save", entity_id: id, light: { profile: d.profile, auto: d.auto } });
+        if (res?.lights) this._data.lichtwerk.lights = res.lights;
+        if (res?.settings) this._data.settings = res.settings;
+        this._closePop();
+        this._renderMain();
+        this._toast("Gespeichert");
+        break;
+      }
       case "lw-view":
         try { localStorage.setItem("hauswerk_lw_view", el.dataset.v); } catch (err) { /* ohne Speicher */ }
         this._renderMain();
@@ -12585,6 +12724,23 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .lw-bulb { width:46px; height:46px; flex:none; border-radius:14px; border:none; display:grid; place-items:center; cursor:pointer; background:var(--card2); color:var(--muted); }
 .lw-bulb ha-icon { --mdc-icon-size:26px; }
 .lw-bulb { position:relative; }
+.lwsc-list { display:flex; flex-direction:column; gap:8px; margin:8px 0; }
+.lwsc { display:grid; grid-template-columns:118px minmax(70px,1fr) 104px 124px 14px 36px; grid-template-areas:"t n b k d x"; gap:6px; align-items:center; padding:8px; border-radius:12px; background:var(--card2, transparent); }
+.lwsc > :nth-child(1) { grid-area:t; } .lwsc > :nth-child(2) { grid-area:n; } .lwsc > :nth-child(3) { grid-area:b; }
+.lwsc > :nth-child(4) { grid-area:k; } .lwsc > :nth-child(5) { grid-area:d; } .lwsc > :nth-child(6) { grid-area:x; }
+.lwsc input { min-width:0; width:100%; box-sizing:border-box; }
+.lwsc .unit { min-width:0; }
+.lwsc-dot { width:14px; height:14px; border-radius:50%; box-shadow:0 0 0 1px var(--line); }
+@media (max-width:560px) { .lwsc { grid-template-columns:minmax(0,1fr) minmax(0,1fr) 14px 36px; grid-template-areas:"t n d x" "b k k k"; } }
+.lw-room .lwr-list { display:flex; flex-direction:column; gap:2px; margin-top:8px; }
+.lw-room .lwr { display:flex; align-items:center; gap:8px; padding:6px 4px; border-top:1px solid var(--line); }
+.lw-room .lwr:first-child { border-top:none; }
+.lw-room .lwr > ha-icon { --mdc-icon-size:20px; flex:none; }
+.lw-room .lwr .lwr-n { all:unset; cursor:pointer; flex:1; min-width:0; display:flex; flex-direction:column; }
+.lw-room .lwr .lwr-n b { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lw-room .lwr .lwr-n small { color:var(--muted); font-size:12px; }
+.lw-room .lwr .lwr-f { display:inline-flex; gap:4px; align-items:center; color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+.lw-room .lwr .lwr-f ha-icon { --mdc-icon-size:15px; }
 .lw-offm { margin-left:auto; font-variant-numeric:tabular-nums; color:#22c55e; font-weight:600; }
 .lw-mot { position:absolute; right:-5px; bottom:-5px; width:20px; height:20px; border-radius:50%; display:grid; place-items:center; background:var(--card); border:1.5px solid var(--line, var(--card2)); color:#22c55e; }
 .lw-mot ha-icon { --mdc-icon-size:13px !important; }

@@ -51,6 +51,9 @@ LW_PROFILE_SPEC: dict[str, tuple[Any, str]] = {
     "color": ("keep", "choice"),       # keep | temp | rgb
     "kelvin": (2700, "num"),
     "rgb": ("#ffb464", "text"),
+    # Szenen je Tageszeit: ab Uhrzeit eigene Helligkeit/Farbtemperatur (vor Dynamisch und fester Helligkeit)
+    "scenes_on": (False, "bool"),
+    "scenes": ([], "scenes"),          # [{"from": "06:00", "name": "Morgen", "brightness": 60, "kelvin": 4000}]
     # Dynamisch
     "dynamic": ("off", "choice"),      # off | sun | lux
     "dyn_min": (35, "num"),
@@ -179,6 +182,25 @@ def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, x))
 
 
+def _min(v: str | None) -> int:
+    try:
+        h, m = str(v or "00:00").split(":")[:2]
+        return int(h) * 60 + int(m)
+    except ValueError:
+        return 0
+
+
+def active_scene(prof: dict, minute: float) -> dict | None:
+    """Szene zur Uhrzeit: die letzte, deren Beginn erreicht ist – vor der ersten gilt die letzte vom Vortag."""
+    if not prof.get("scenes_on"):
+        return None
+    scenes = sorted((x for x in prof.get("scenes") or [] if x and x.get("from")), key=lambda x: _min(x["from"]))
+    if not scenes:
+        return None
+    cur = [x for x in scenes if _min(x["from"]) <= minute]
+    return cur[-1] if cur else scenes[-1]
+
+
 def light_params(prof: dict, minute: float, elev: float | None = None, lux: float | None = None) -> dict:
     """Helligkeit (%), Farbtemperatur (K) bzw. Farbe und Übergang für „an“ – Nachtlicht, dynamisch oder fest."""
     color = prof.get("color") or "keep"
@@ -186,6 +208,17 @@ def light_params(prof: dict, minute: float, elev: float | None = None, lux: floa
         out = {"brightness": int(prof.get("night_brightness") or 10), "night": True, "mode": "Nachtlicht"}
         if color != "keep":
             out["kelvin"] = int(prof.get("night_kelvin") or 2200)
+        return out
+    sc = active_scene(prof, minute)
+    if sc is not None:
+        out = {"brightness": int(sc.get("brightness") or prof.get("brightness") or 80), "night": False,
+               "mode": f"Szene „{sc.get('name') or sc['from']}“", "scene": sc.get("name") or sc["from"]}
+        if sc.get("kelvin"):
+            out["kelvin"] = int(sc["kelvin"])
+        elif (prof.get("color") or "keep") == "temp":
+            out["kelvin"] = int(prof.get("kelvin") or 2700)
+        elif prof.get("color") == "rgb":
+            out["rgb"] = hex_rgb(prof.get("rgb") or "#ffb464")
         return out
     dyn = prof.get("dynamic") or "off"
     if dyn != "off":

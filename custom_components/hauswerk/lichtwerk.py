@@ -70,6 +70,8 @@ class Lichtwerk:
         self._link_findings: list[dict] = []
         self._links_next = 0.0
         self._sensor_seen: dict[str, float] = {}
+        # gelernt: wie lange nach dem letzten Melden die CCU wirklich ausschaltet (Leuchte → Sender-Adresse → Sekunden)
+        self._learn: dict[str, dict[str, list[float]]] = {}
 
     # ------------------------------------------------------------ Speicher
     async def async_load(self) -> None:
@@ -77,6 +79,7 @@ class Lichtwerk:
         self.settings.update({k: v for k, v in (stored.get("settings") or {}).items() if k in LW_KEYS})
         self.lights = stored.get("lights") or {}
         self.profiles = stored.get("profiles") or {}
+        self._learn = stored.get("learn") or {}
         for eid, rt in (stored.get("rt") or {}).items():
             self._rt[eid] = {k: v for k, v in rt.items() if k in ("latch", "latch_reason", "latch_at", "manual", "ours")}
         if not self.profiles:
@@ -84,7 +87,7 @@ class Lichtwerk:
 
     def _data(self) -> dict[str, Any]:
         rt = {eid: {k: r.get(k) for k in ("latch", "latch_reason", "latch_at", "manual", "ours")} for eid, r in self._rt.items()}
-        return {"settings": self.settings, "lights": self.lights, "profiles": self.profiles, "rt": rt}
+        return {"settings": self.settings, "lights": self.lights, "profiles": self.profiles, "rt": rt, "learn": self._learn}
 
     def _save(self, delay: float = 2) -> None:
         self._store.async_delay_save(self._data, delay)
@@ -159,6 +162,8 @@ class Lichtwerk:
             sender = next((p for p in peers if p.get("kind") == "motion" and any(
                 (st := self.hass.states.get(e)) is not None and st.state == "off"
                 and now - st.last_changed.timestamp() <= 1800 for e in p.get("entities") or [])), None)
+        if sender is not None and new.state == "off":
+            self._learn_off(eid, sender, now)
         if sender is not None:
             if new.state == "on":
                 rt["manual"] = {"since": now, "until": None, "state": "on", "ccu": sender["name"]}
@@ -172,6 +177,9 @@ class Lichtwerk:
             return
         if new.state == "off" and (rt.get("manual") or {}).get("ccu"):
             sender = rt["manual"]["ccu"]
+            peer = next((p for p in peers if p["name"] == sender), None)
+            if peer:
+                self._learn_off(eid, peer, now)
             rt["manual"] = None  # CCU-Verknüpfung (Nachlaufzeit) hat ausgeschaltet
             self.log.add("light", f"{self._name(eid)}: HmIP aus", f"Direktverknüpfung {sender}", module="lichtwerk")
             self._save()
@@ -188,6 +196,23 @@ class Lichtwerk:
                      "Automatik wartet " + (f"bis {dt_util.as_local(dt_util.utc_from_timestamp(until)).strftime('%H:%M')}"
                                             if until else "bis zum nächsten Wechsel"), module="lichtwerk")
         self._save()
+
+    def _learn_off(self, eid: str, peer: dict, now: float) -> None:
+        """CCU hat ausgeschaltet: Abstand zum letzten Melden des Melders merken (letzte 10, Median zählt)."""
+        sts = [st for e in peer.get("entities") or [] if (st := self.hass.states.get(e)) is not None]
+        if not sts or any(st.state == "on" for st in sts):
+            return
+        delta = now - max(st.last_changed.timestamp() for st in sts)
+        if not 0 <= delta <= 3600:
+            return
+        lst = self._learn.setdefault(eid, {}).setdefault(peer["address"], [])
+        lst.append(round(delta, 1))
+        del lst[:-10]
+        self._save()
+
+    def learned_off(self, eid: str, peer: dict) -> float | None:
+        lst = sorted((self._learn.get(eid) or {}).get(peer.get("address"), []))
+        return lst[len(lst) // 2] if len(lst) >= 3 else None
 
     @callback
     def _recheck_ccu(self, eid: str, state: str, at: float) -> None:
@@ -519,7 +544,8 @@ class Lichtwerk:
             await self._switch(eid, False, params, prof, cause)
         elif want == "on" and is_on and rt.get("ours") and eid.startswith("light."):
             last = rt.get("sent") or {}
-            night_change = last.get("night") != params.get("night") and prof.get("night_adjust", True)
+            night_change = (last.get("night") != params.get("night") and prof.get("night_adjust", True)) or (
+                prof.get("scenes_on") and last.get("scene") != params.get("scene"))
             dyn_change = prof.get("dynamic") not in (None, "off") and (
                 abs((last.get("brightness") or 0) - params["brightness"]) >= 8 or abs((last.get("kelvin") or 0) - (params.get("kelvin") or 0)) >= 300)
             if night_change or dyn_change:
@@ -550,7 +576,7 @@ class Lichtwerk:
             await self.hass.services.async_call(domain if domain in ("switch", "input_boolean") else "homeassistant",
                                                 "turn_on" if on else "turn_off", {"entity_id": eid}, context=ctx)
         rt["ours"] = on
-        rt["sent"] = {"on": on, "brightness": params.get("brightness"), "kelvin": params.get("kelvin"), "night": params.get("night")}
+        rt["sent"] = {"on": on, "brightness": params.get("brightness"), "kelvin": params.get("kelvin"), "night": params.get("night"), "scene": params.get("scene")}
         rt["switched_at"] = dt_util.utcnow().timestamp()
         if not adjust:
             self.log.add("light", f"{self._name(eid)} {'an' if on else 'aus'}", cause
@@ -640,13 +666,18 @@ class Lichtwerk:
         rt = self._rt.get(eid) or {}
         if x.get("ccu"):
             peer = next((p for p in (self._links.get(eid) or {}).get("peers", []) if p["name"] == x["ccu"]), None)
-            if not peer or not peer.get("on_time"):
+            if not peer:
+                return None
+            learned = self.learned_off(eid, peer)
+            dur = learned if learned is not None else peer.get("on_time")
+            if not dur:
                 return None
             sts = [st for e in peer.get("entities") or [] if (st := self.hass.states.get(e)) is not None and st.state in ("on", "off")]
             if any(st.state == "on" for st in sts) or not sts:
-                return {"while": peer["on_time"], "src": "HmIP"}
+                return {"while": dur, "src": "HmIP", "learned": learned is not None}
             last = max(st.last_changed.timestamp() for st in sts)
-            return {"at": dt_util.utc_from_timestamp(max(last + peer["on_time"], dt_util.utcnow().timestamp())).isoformat(), "src": "HmIP"}
+            return {"at": dt_util.utc_from_timestamp(max(last + dur, dt_util.utcnow().timestamp())).isoformat(), "src": "HmIP",
+                    "learned": learned is not None}
         if x.get("motion") and x.get("auto") and str(x.get("cause") or "").startswith("Bewegung"):
             prof = self.profile(eid)
             off = float(prof.get("motion_off") or 3) * 60
