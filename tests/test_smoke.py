@@ -1764,7 +1764,7 @@ def test_lichtwerk_ccu_verknuepfungen(hw):
         n = len(hass.calls)
         await lw.async_evaluate()
         x = lw.status()["lights"]["light.windfang"]
-        assert x["ccu"] == "S_Bewegung:Windfang" and x["want"] is None and "CCU-Verknüpfung" in x["cause"] and len(hass.calls) == n
+        assert x["ccu"] == "S_Bewegung:Windfang" and x["want"] is None and x["cause"].startswith("HmIP: S_Bewegung:Windfang") and len(hass.calls) == n
         assert lw.status()["manual"] == 0
         # CCU schaltet nach ihrer Nachlaufzeit aus → Lichtwerk übernimmt wieder
         NOW[0] += timedelta(minutes=3)
@@ -1783,6 +1783,16 @@ def test_lichtwerk_ccu_verknuepfungen(hw):
         lw._recheck_ccu("light.eingang", "on", lw._rt["light.eingang"]["manual"]["since"])
         await asyncio.sleep(0)
         assert lw._rt["light.eingang"]["manual"]["ccu"] == "S_Bewegung:Vorgarten"
+        # CCU schaltet nach der Nachlaufzeit aus, ohne dass Lichtwerk das Einschalten gesehen hat → HmIP statt von Hand
+        lw._rt["light.windfang"]["manual"] = None
+        hass.set("light.windfang", "on", hass.st["light.windfang"].attributes, "Windfang Wand")
+        hass.set("binary_sensor.spi", "off", {"device_class": "occupancy"}, "S_Bewegung:Windfang")
+        NOW[0] += timedelta(minutes=5)
+        old = hass.st["light.windfang"]
+        hass.set("light.windfang", "off", old.attributes, "Windfang Wand")
+        lw._on_change(types.SimpleNamespace(data={"entity_id": "light.windfang", "old_state": old, "new_state": hass.st["light.windfang"]}))
+        assert lw._rt["light.windfang"]["manual"] is None
+        assert any(e["title"] == "Windfang Wand: HmIP aus" for e in log.entries[-3:])
         # Bewegungsmelder auch im Profil: doppelt → Warnung
         await lw.async_save_profile("standard", {"motion": ["binary_sensor.spi"]})
         assert any(f["level"] == "warn" and "schaltet bei Bewegung doppelt" in f["text"] for f in lw.links_status()["findings"])

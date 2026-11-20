@@ -1446,4 +1446,4 @@ def test_lichtwerk_ccu_verknuepfungen(panel):
     p.view("lights")
     p.wait()
     main = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
-    assert "über CCU-Verknüpfung · Bewegung Flur OG" in main
+    assert "HmIP · Bewegung Flur OG" in main and "von Hand" not in main.split("Flur OG")[1].split("\n\n")[0]

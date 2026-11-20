@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.65.1";
+const VERSION = "0.65.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4181,7 +4181,8 @@ class HauswerkPanel extends HTMLElement {
   _lwBrief(lights) {
     const s = this._lwStatus || {};
     const on = lights.filter((l) => l.st?.state === "on");
-    const manual = lights.filter((l) => l.ls.manual);
+    const manual = lights.filter((l) => l.ls.manual && !l.ls.ccu && l.cfg.auto !== false);
+    const hmip = lights.filter((l) => l.ls.ccu && l.cfg.auto !== false);
     const motion = lights.filter((l) => l.ls.motion);
     const bad = lights.filter((l) => !l.st || ["unavailable", "unknown"].includes(l.st.state));
     const act = (l) => `data-action="pop-open" data-pop="lwbri:${esc(l.id)}"`;
@@ -4199,6 +4200,8 @@ class HauswerkPanel extends HTMLElement {
       title = on.length ? `${on.length} ${on.length === 1 ? "Licht an" : "Lichter an"} – keine Schaltung geplant` : "Alles aus – keine Schaltung geplant";
     }
     const lines = [];
+    for (const l of hmip.slice(0, 2))
+      lines.push({ icon: "mdi:link-variant", c: "#0ea5e9", text: `${this._lwName(l)} HmIP an – ${l.ls.ccu}`, act: act(l) });
     for (const l of manual.slice(0, 2))
       lines.push({ icon: "mdi:hand-back-right-outline", c: C.hand, text: `${this._lwName(l)} von Hand ${l.st?.state === "on" ? "an" : "aus"} – Automatik wartet${l.ls.manual.until ? ` bis ${new Date(l.ls.manual.until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : " bis zum nächsten Wechsel"}`, act: act(l) });
     for (const l of motion.slice(0, 1)) lines.push({ icon: "mdi:motion-sensor", c: C.ok, text: `${this._lwName(l)}: Bewegung`, act: act(l) });
@@ -4240,7 +4243,7 @@ class HauswerkPanel extends HTMLElement {
       const dim = l.id.startsWith("light.") && (l.ls.modes || []).some((m) => m !== "onoff");
       const stTxt = bad ? "nicht erreichbar" : on ? `an${dim && pct != null ? ` · ${pct} %` : ""}` : "aus";
       const flags = [];
-      if (l.ls.ccu) flags.push(["mdi:link-variant", `über CCU-Verknüpfung · ${l.ls.ccu}`, "#0ea5e9"]);
+      if (l.cfg.auto === false) { /* Profil aus: keine Angaben */ } else if (l.ls.ccu) flags.push(["mdi:link-variant", `HmIP · ${l.ls.ccu}`, "#0ea5e9"]);
       else if (l.ls.manual) flags.push(["mdi:hand-back-right-outline", "von Hand – Automatik wartet", C.hand]);
       if (l.ls.motion) flags.push(["mdi:motion-sensor", "Bewegung", C.ok]);
       if (on && l.ls.night) flags.push(["mdi:weather-night", "Nachtlicht", "#6366f1"]);
@@ -4258,7 +4261,7 @@ class HauswerkPanel extends HTMLElement {
             ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="lwl:${esc(l.id)}" title="Einstellungen dieses Lichts"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
           </div>
           ${l.cfg.auto !== false ? `<div class="rw-next">${this._lwDayBar(l, true)}</div>` : ""}
-          ${flags.length ? `<div class="rw-flags">${flags.map(([i, t, c]) => `<span style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${t}</span>`).join("")}${l.ls.manual ? `<button class="link" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="resume"><ha-icon icon="mdi:robot-outline"></ha-icon>Automatik übernimmt</button>` : ""}</div>` : ""}
+          ${flags.length ? `<div class="rw-flags">${flags.map(([i, t, c]) => `<span style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${t}</span>`).join("")}${l.ls.manual && !l.ls.ccu && l.cfg.auto !== false ? `<button class="link" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="resume"><ha-icon icon="mdi:robot-outline"></ha-icon>Automatik übernimmt</button>` : ""}</div>` : ""}
           <div class="rw-info">${info.map(([i, t, tt]) => `<span title="${esc(tt || t)}"><ha-icon icon="${i}"></ha-icon>${esc(t)}</span>`).join("")}</div>
           ${dim && !bad ? `<div class="lw-dim"><ha-icon icon="mdi:brightness-6"></ha-icon><div class="lw-meter"><i style="width:${pct ?? 0}%"></i></div><b>${pct != null ? `${pct} %` : "aus"}</b><button class="sbtn" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" title="Helligkeit"><ha-icon icon="mdi:tune-vertical"></ha-icon></button></div>` : ""}
         </article>`;
@@ -4267,7 +4270,7 @@ class HauswerkPanel extends HTMLElement {
       const bad = !l.st || ["unavailable", "unknown"].includes(l.st.state);
       const on = l.st?.state === "on";
       const pct = this._lwPct(l);
-      const flag = l.ls.manual ? ["mdi:hand-back-right-outline", C.hand] : l.ls.motion ? ["mdi:motion-sensor", C.ok] : on && l.ls.night ? ["mdi:weather-night", "#6366f1"] : null;
+      const flag = l.cfg.auto === false ? null : l.ls.ccu ? ["mdi:link-variant", "#0ea5e9"] : l.ls.manual ? ["mdi:hand-back-right-outline", C.hand] : l.ls.motion ? ["mdi:motion-sensor", C.ok] : on && l.ls.night ? ["mdi:weather-night", "#6366f1"] : null;
       return `
         <article class="card rw-m lw-m ${bad ? "bad" : ""}" style="--lc:${this._lwColor(l)}" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" role="button" tabindex="0" title="Helligkeit">
           <div class="rwm-top"><b>${esc(this._lwName(l))}</b>${flag ? `<ha-icon icon="${flag[0]}" style="color:${flag[1]}"></ha-icon>` : ""}</div>
@@ -4328,7 +4331,7 @@ class HauswerkPanel extends HTMLElement {
     const f = (this._lwStatus.links.findings || []).filter((x) => x.light === eid);
     return `<div class="lbl">Direktverknüpfungen in der CCU</div>
       <div class="hl-w lw-hl"><span class="hl-ps">${info.peers.length ? info.peers.map((x) => this._lwPeer(x)).join("") : `<em class="hl-none">${info.own ? "nur die eigenen Taster der Leuchte" : "keine – Lichtwerk schaltet allein"}</em>`}</span></div>
-      ${info.peers.length ? `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Schaltet die CCU diese Leuchte, wartet Lichtwerk, bis sie wieder aus ist – das zählt nicht als „von Hand“.</p>` : ""}
+      ${info.peers.length ? `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Schaltet die Direktverknüpfung diese Leuchte, steht „HmIP“ statt „von Hand“ – Lichtwerk wartet, bis sie wieder aus ist.</p>` : ""}
       ${f.map((x) => `<p class="note ${x.level === "warn" ? "warn" : ""}"><ha-icon icon="mdi:link-variant-off"></ha-icon>${esc(x.text.split(" – ")[1] || x.text)}</p>`).join("")}`;
   }
 
@@ -4357,7 +4360,8 @@ class HauswerkPanel extends HTMLElement {
         icon: "mdi:lightbulb-outline", c: "#6366f1", title: esc(this._lwName(l)), sub: `Lichtwerk · ${l.st?.state === "on" ? `an${pct != null ? ` · ${pct} %` : ""}` : "aus"}`, open: true,
         body: `
           ${l.ls.cause && l.cfg.auto !== false ? `<div class="rq-why"><ha-icon icon="mdi:help-circle-outline"></ha-icon><span><b>Automatik</b><small>${esc(l.ls.cause)}</small>${l.ls.next ? `<small class="muted">Als Nächstes: ${l.ls.next.action === "on" ? "an" : "aus"} ${this._lwWhen(l.ls.next)} (${esc(l.ls.next.reason)})</small>` : ""}</span></div>` : ""}
-          ${l.ls.manual ? `<div class="room-note"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>Von Hand – Automatik wartet<span class="grow"></span><button class="link" data-action="lw-cmd" data-ids="${esc(eid)}" data-a="resume">Automatik übernimmt</button></div>` : ""}
+          ${l.ls.ccu && l.cfg.auto !== false ? `<div class="room-note"><ha-icon icon="mdi:link-variant"></ha-icon>HmIP · ${esc(l.ls.ccu)} – Lichtwerk wartet, bis die Direktverknüpfung ausschaltet</div>` : ""}
+          ${l.ls.manual && !l.ls.ccu && l.cfg.auto !== false ? `<div class="room-note"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>Von Hand – Automatik wartet<span class="grow"></span><button class="link" data-action="lw-cmd" data-ids="${esc(eid)}" data-a="resume">Automatik übernimmt</button></div>` : ""}
           ${dim ? `<div class="lw-slider"><input type="range" min="1" max="100" step="1" value="${d.v}" data-lwbri><b id="lwbri-v">${d.v} %</b></div>` : ""}
           <div class="rq-quick lw-pre">${presets.map(([v, t, i]) => `<button class="pill" data-action="lw-pre" data-ids="${esc(eid)}" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${t}${v !== "off" && dim ? ` · ${v} %` : ""}</button>`).join("")}</div>
           

@@ -152,21 +152,28 @@ class Lichtwerk:
         prof = self.profile(eid)
         now = dt_util.utcnow().timestamp()
         # über eine Direktverknüpfung der CCU? (Sender der Verknüpfung hat sich gerade geändert)
-        sender = next((p for p in (self._links.get(eid) or {}).get("peers", [])
-                       if any(now - self._sensor_seen.get(e, 0) <= 10 for e in p.get("entities") or [])), None)
+        peers = (self._links.get(eid) or {}).get("peers", [])
+        sender = next((p for p in peers if any(now - self._sensor_seen.get(e, 0) <= 10 for e in p.get("entities") or [])), None)
+        if sender is None and new.state == "off":
+            # Ausschalten nach der Nachlaufzeit der CCU: Melder ist seit höchstens 30 Min. wieder ruhig
+            sender = next((p for p in peers if p.get("kind") == "motion" and any(
+                (st := self.hass.states.get(e)) is not None and st.state == "off"
+                and now - st.last_changed.timestamp() <= 1800 for e in p.get("entities") or [])), None)
         if sender is not None:
             if new.state == "on":
                 rt["manual"] = {"since": now, "until": None, "state": "on", "ccu": sender["name"]}
             elif (rt.get("manual") or {}).get("ccu"):
                 rt["manual"] = None  # die CCU hat wieder ausgeschaltet: Lichtwerk übernimmt
             rt["ours"] = False
-            self.log.add("light", f"{self._name(eid)} {'an' if new.state == 'on' else 'aus'}",
-                         f"über CCU-Verknüpfung ({sender['name']})" + (" · Lichtwerk wartet, bis die CCU wieder ausschaltet" if new.state == "on" else ""),
+            self.log.add("light", f"{self._name(eid)}: HmIP {'an' if new.state == 'on' else 'aus'}",
+                         f"Direktverknüpfung {sender['name']}" + (" · Lichtwerk wartet, bis sie wieder ausschaltet" if new.state == "on" else ""),
                          module="lichtwerk")
             self._save()
             return
         if new.state == "off" and (rt.get("manual") or {}).get("ccu"):
+            sender = rt["manual"]["ccu"]
             rt["manual"] = None  # CCU-Verknüpfung (Nachlaufzeit) hat ausgeschaltet
+            self.log.add("light", f"{self._name(eid)}: HmIP aus", f"Direktverknüpfung {sender}", module="lichtwerk")
             self._save()
             return
         until = None
@@ -190,8 +197,8 @@ class Lichtwerk:
         if sender is None or not rt.get("manual") or rt["manual"].get("since", 0) < at - 1:
             return
         rt["manual"] = {"since": at, "until": None, "state": state, "ccu": sender["name"]} if state == "on" else None
-        self.log.add("light", f"{self._name(eid)}: doch über CCU-Verknüpfung ({sender['name']})",
-                     "nicht von Hand – Lichtwerk wartet, bis die CCU wieder ausschaltet" if state == "on" else "Lichtwerk übernimmt", module="lichtwerk")
+        self.log.add("light", f"{self._name(eid)}: HmIP {'an' if state == 'on' else 'aus'}",
+                     f"Direktverknüpfung {sender['name']} – doch nicht von Hand" + (" · Lichtwerk wartet, bis sie wieder ausschaltet" if state == "on" else ""), module="lichtwerk")
         self._save()
         self.hass.async_create_task(self.async_evaluate())
 
@@ -487,7 +494,7 @@ class Lichtwerk:
                              latched=bool(rt.get("latch")), latched_reason=rt.get("latch_reason"))
         params = light_params(prof, now_min, elev, lux)
         if (rt.get("manual") or {}).get("ccu") and cfg.get("auto", True) is not False and not bypass_on:
-            cause = f"Über CCU-Verknüpfung geschaltet ({rt['manual']['ccu']}) – Lichtwerk wartet"
+            cause = f"HmIP: {rt['manual']['ccu']} – Lichtwerk wartet"
         if want == "on" and params.get("mode"):
             cause = f"{cause} · {params['mode']}"
         rt.update(want=want, cause=cause, params=params, motion=motion_on)

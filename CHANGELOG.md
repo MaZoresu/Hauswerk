@@ -2,6 +2,13 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.65.2 – 2026-11-20
+
+### Geändert (Lichtwerk)
+- **„HmIP“ statt „von Hand“:** Schaltet eine Homematic-Direktverknüpfung (Bewegungsmelder, Taster) eine Leuchte, steht an Kachel, Kopfkachel, Helligkeitsfenster und im Protokoll „HmIP · S_Bewegung:Windfang“ bzw. „Windfang Wand: HmIP an/aus“ – nicht mehr „von Hand“. „Automatik übernimmt“ entfällt dann.
+- Auch das **Ausschalten nach der Nachlaufzeit** der CCU wird erkannt (Melder seit höchstens 30 Min. ruhig) – selbst wenn Lichtwerk das Einschalten nicht mitbekommen hat.
+- Bei abgeschaltetem Profil zeigt die Kachel auch „von Hand“ bzw. „HmIP“ nicht mehr an.
+
 ## 0.65.1 – 2026-11-20
 
 ### Geändert (Lichtwerk)
