@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.60.0 – 2026-11-20
+
+### Neu
+- **„?“ oben rechts erklärt alle Symbole und Farben** (am Computer auch mit der Taste `?`): die Farbsprache und alle Zeichen aus Heizwerk, Lüften, Rollwerk und Kraftwerk mit kurzer Erklärung – z. B. Kamin an / „?“ / Nachwärme, Lüften läuft, Fenster schließen, Sturm, Tür offen, von Hand, Ende wird geprüft. Das Modul, in dem du gerade bist, steht zuerst; mit Suchfeld.
+
+### Geändert – einheitliche Farbsprache
+- Grün = läuft wie gewollt · Orange = Wärme (heizt, Beschattung, Kamin) · Gelb = Sonne und Hinweise · Türkis = Fenster und Lüften · Hellblau = kühl, Frost, Gerät läuft · Violett = von Hand · Rot = Achtung · Grau = Ruhe/aus.
+- Angeglichen: „von Hand“ überall im selben Violett (Heizwerk, Rollwerk, Protokoll), gekippte Fenster in Rollwerk und „Jetzt lüften“ türkis wie die Fenster in Heizwerk, „Gerät läuft“ hellblau.
+
 ## 0.59.0 – 2026-11-20
 
 ### Neu – Heizwerk: Kamin im Raum

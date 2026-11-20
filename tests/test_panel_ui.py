@@ -1159,3 +1159,21 @@ def test_kamin(panel):
     p.wait(300)
     saved = [x for x in p.sent() if x["type"] == "hauswerk/heizen/room/save"][-1]
     assert saved["room"]["fireplace"] is True and saved["room"]["fireplace_entity"] == "binary_sensor.kamin_wohnzimmer"
+
+
+def test_symbol_legende(panel):
+    """„?“ oben erklärt Farben und alle Symbole; das aktuelle Modul steht zuerst; Suche filtert ohne Neuzeichnen."""
+    p = panel
+    p.view("shutters")
+    p.wait()
+    p.click('[data-action="legend-open"]')
+    p.wait()
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    for t in ("Violett", "von Hand verstellt", "Kamin an", "Sturm", "Jetzt lüften", "Ende wird geprüft"):
+        assert t in txt, t
+    assert p.js(f"{EL}.shadowRoot.querySelector('#pop .lbl').textContent") == "Rollwerk"
+    p.js(f"""() => {{ const i = {EL}.shadowRoot.querySelector('#pop [data-legend-q]'); i.value = 'kamin'; i.dispatchEvent(new Event('input', {{ bubbles: true, composed: true }})); }}""")
+    shown = p.js(f"[...{EL}.shadowRoot.querySelectorAll('#pop .lg-r')].filter(r => !r.hidden).map(r => r.textContent)")
+    assert len(shown) == 3 and all("Kamin" in x or "kamin" in x.lower() for x in shown)
+    # Farbsprache: von Hand überall Violett
+    assert p.js("MODE.manuell.c") == p.js("C.hand")

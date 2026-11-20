@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.59.0";
+const VERSION = "0.60.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -14,12 +14,33 @@ const TYPES = {
     text: "Fußboden- oder Wandheizung, sehr träge. Lange Fensterverzögerung, frühes Vorheizen, nur geringe Absenkung.",
   },
 };
+/** Farbsprache – überall gleich: Kacheln, Kopfkacheln, Hinweise, Widgets. */
+const C = {
+  ok: "#22c55e",     // läuft wie gewollt, fertig
+  warm: "#f97316",   // Wärme: heizt, Beschattung, Kamin
+  sun: "#f59e0b",    // Sonne und Hinweis: Tür offen, lange offen, Ende wird geprüft
+  air: "#22d3ee",    // Fenster und Lüften
+  cool: "#38bdf8",   // kühl, Frost, sparen, Gerät läuft
+  hand: "#8b5cf6",   // von Hand
+  alert: "#ef4444",  // Achtung: Sturm, Fenster schließen, Schimmel, Batterie
+  rest: "#94a3b8",   // Ruhe, aus, ohne Automatik
+};
+const COLOR_LEGEND = [
+  [C.ok, "Grün", "läuft wie gewollt, fertig"],
+  [C.warm, "Orange", "Wärme – heizt, Beschattung, Kamin"],
+  [C.sun, "Gelb", "Sonne und Hinweise – Tür offen, lange offen"],
+  [C.air, "Türkis", "Fenster und Lüften"],
+  [C.cool, "Hellblau", "kühl, Frost, sparen, Gerät läuft"],
+  [C.hand, "Violett", "von Hand verstellt"],
+  [C.alert, "Rot", "Achtung – bitte handeln"],
+  [C.rest, "Grau", "Ruhe, aus, Automatik aus"],
+];
 const MODE = {
   komfort: { c: "#fbbf24", i: "mdi:sofa-outline" },
   vorheizen: { c: "#fb923c", i: "mdi:clock-fast" },
   eco: { c: "#60a5fa", i: "mdi:leaf" },
   fenster: { c: "#22d3ee", i: "mdi:window-open-variant" },
-  manuell: { c: "#a78bfa", i: "mdi:hand-back-right-outline" },
+  manuell: { c: "#8b5cf6", i: "mdi:hand-back-right-outline" },
   urlaub: { c: "#34d399", i: "mdi:palm-tree" },
   abwesend: { c: "#94a3b8", i: "mdi:home-export-outline" },
   aus: { c: "#6b7280", i: "mdi:power" },
@@ -33,6 +54,52 @@ const MODE = {
   eco_fix: { c: "#22c55e", i: "mdi:leaf-circle-outline" },
   frost: { c: "#38bdf8", i: "mdi:snowflake-thermometer" },
 };
+/** Symbol-Legende: [Gruppe, Symbol, Farbe, Kurzname, Erklärung, Text am Symbol (optional)] – Quelle für das „?“-Fenster. */
+const LEGEND = [
+  ["Heizwerk", "mdi:fire", C.warm, "Heizt", "Das Thermostat fordert gerade Wärme an."],
+  ["Heizwerk", "mdi:sofa-outline", "#fbbf24", "Komfort", "Heizplan: Wohlfühltemperatur."],
+  ["Heizwerk", "mdi:leaf", "#60a5fa", "Eco", "Heizplan: abgesenkt, spart Energie."],
+  ["Heizwerk", "mdi:clock-fast", "#fb923c", "Vorheizen", "Heizt schon vor, damit es zur Komfortzeit warm ist."],
+  ["Heizwerk", "mdi:hand-back-right-outline", C.hand, "Von Hand", "Temperatur von Hand gesetzt – gilt bis zur angezeigten Zeit, dann wieder der Plan."],
+  ["Heizwerk", "mdi:rocket-launch-outline", "#f43f5e", "Boost", "Kurz volle Leistung."],
+  ["Heizwerk", "mdi:home-export-outline", C.rest, "Abwesend", "Niemand zu Hause – höchstens die Abwesend-Temperatur."],
+  ["Heizwerk", "mdi:palm-tree", "#34d399", "Urlaub", "Urlaubstemperatur."],
+  ["Heizwerk", "mdi:weather-sunny", "#facc15", "Sommerpause", "Heizperiode vorbei – Thermostate ruhen."],
+  ["Heizwerk", "mdi:snowflake-thermometer", C.cool, "Frostschutz", "Nur Schutz vor Frost."],
+  ["Heizwerk", "mdi:power", "#6b7280", "Automatik aus", "Heizwerk stellt in diesem Raum nichts ein."],
+  ["Heizwerk", "mdi:account-check-outline", "#fbbf24", "Jemand im Raum", "Präsenzmelder meldet: belegt."],
+  ["Heizwerk", "mdi:account-off-outline", C.rest, "Niemand im Raum", "Präsenzmelder meldet: leer."],
+  ["Heizwerk", "mdi:valve", C.warm, "Ventil", "Öffnung des Heizkörperventils in % (grau = zu).", "42 %"],
+  ["Heizwerk", "mdi:heating-coil", C.warm, "Fußbodenheizung heizt", "Nur sichtbar, solange sie heizt."],
+  ["Heizwerk", "mdi:radiator", C.warm, "Heizkörper hilft nach", "Mischbetrieb: der Heizkörper unterstützt die Fußbodenheizung."],
+  ["Heizwerk", "mdi:fireplace", C.warm, "Kamin an", "Von Hand oder laut Signal – zählt nicht für die Bewertung der Heizleistung."],
+  ["Heizwerk", "mdi:fireplace", C.rest, "Wärmer ohne Heizung", "Vielleicht der Kamin, die Sonne oder Kochen – sicher ist das nicht.", "?"],
+  ["Heizwerk", "mdi:fireplace", "#fdba74", "Nachwärme", "Nach dem Kamin noch wärmer als gewollt."],
+  ["Heizwerk", "mdi:radiator-off", C.alert, "Heizkörper bleibt kalt", "Ventil offen, Raum wird nicht wärmer – Luft, Ventilstift oder Heizung prüfen."],
+  ["Heizwerk", "mdi:battery-alert-variant-outline", C.alert, "Batterie schwach", "Batterie eines Thermostats oder Sensors bald leer."],
+  ["Lüften", "mdi:window-open-variant", C.air, "Fenster offen", "Fensterpause – Thermostate auf Frostschutz bzw. aus."],
+  ["Lüften", "mdi:weather-windy", C.air, "Jetzt lüften", "Empfohlen, mit Dauer (Feuchte, CO₂, morgens).", "10 Min."],
+  ["Lüften", "mdi:timer-sand", C.ok, "Lüften läuft", "Countdown bis genug gelüftet ist.", "4/10 Min."],
+  ["Lüften", "mdi:window-closed-variant", C.alert, "Fenster schließen", "Genug gelüftet."],
+  ["Lüften", "mdi:window-open-variant", C.sun, "Lange offen", "Kippen kostet Wärme – lieber kurz stoßlüften.", "45 Min."],
+  ["Lüften", "mdi:snowflake", C.cool, "Kühlt", "Sommer: Fenster offen zum Kühlen."],
+  ["Lüften", "mdi:alert-octagon-outline", C.alert, "Schimmelgefahr", "An der Außenwand sehr feucht."],
+  ["Rollwerk", "mdi:white-balance-sunny", C.sun, "Sonne aufs Fenster", "Die Sonne scheint gerade wirklich aufs Fenster."],
+  ["Rollwerk", "mdi:sun-thermometer-outline", C.warm, "Beschattung", "Sonnenschutz aktiv bzw. ab der angezeigten Zeit."],
+  ["Rollwerk", "mdi:weather-windy-variant", C.alert, "Sturm", "Sturmschutz – alle Rollläden oben."],
+  ["Rollwerk", "mdi:door-open", C.sun, "Tür offen", "Aussperrschutz – fährt nicht herunter."],
+  ["Rollwerk", "mdi:window-open-variant", C.air, "Fenster gekippt", "Lüftungsstellung."],
+  ["Rollwerk", "mdi:hand-back-right-outline", C.hand, "Von Hand", "Von Hand verstellt – die Automatik wartet bis zum nächsten Wechsel."],
+  ["Rollwerk", "mdi:robot-off-outline", C.rest, "Automatik aus", "Rollwerk fährt diesen Rollladen nicht."],
+  ["Rollwerk", "mdi:battery-alert-variant-outline", C.alert, "Batterie schwach", "Batterie am Rollladen bald leer."],
+  ["Kraftwerk", "mdi:power-sleep", "#64748b", "Bereit", "Gerät wartet auf den nächsten Durchlauf."],
+  ["Kraftwerk", "mdi:play-circle-outline", C.cool, "Läuft", "Mit Restzeit aus den gelernten Durchläufen."],
+  ["Kraftwerk", "mdi:timer-sand", C.sun, "Ende wird geprüft", "Ruhe erkannt – ist es eine Pause oder fertig?"],
+  ["Kraftwerk", "mdi:check-circle", C.ok, "Fertig", "Bitte ausräumen – „Gesehen“ quittiert."],
+  ["Kraftwerk", "mdi:solar-power-variant", C.sun, "Solar", "Erzeugung der Solaranlage."],
+  ["Allgemein", "mdi:bell-badge-outline", C.sun, "Hinweise", "Oben rechts: Hinweise aller Module, rot = Achtung."],
+  ["Allgemein", "mdi:account-group-outline", "#e879f9", "Gäste / Party", "Gilt fürs ganze Haus."],
+];
 /** Raum-Icon aus dem Namen erraten (reihenfolgeabhängig: spezielle Begriffe zuerst). */
 const ROOM_GUESS = [
   [/wc|toilette|klo/, "mdi:toilet"],
@@ -296,7 +363,7 @@ const APP_TYPES = {
   geschirrspueler: { label: "Geschirrspüler", icon: "mdi:dishwasher", match: /sp(ü|ue)l|dishwasher/ },
   sonstiges: { label: "Anderes Gerät", icon: "mdi:power-plug-outline", match: null },
 };
-const APP_STATE = { idle: ["Bereit", "#64748b", "mdi:power-sleep"], running: ["Läuft", "#0ea5e9", "mdi:play-circle-outline"], ending: ["Ende wird geprüft", "#f59e0b", "mdi:timer-sand"], done: ["Fertig", "#22c55e", "mdi:check-circle"] };
+const APP_STATE = { idle: ["Bereit", "#64748b", "mdi:power-sleep"], running: ["Läuft", "#38bdf8", "mdi:play-circle-outline"], ending: ["Ende wird geprüft", "#f59e0b", "mdi:timer-sand"], done: ["Fertig", "#22c55e", "mdi:check-circle"] };
 const KW_POPS = ["kwdetect", "kwsolar", "kwgrid", "kwbatt", "kwhome", "kwcons"];
 // Geplante Module: nur ausgegraut angezeigt, noch ohne Funktion.
 const COMING = [
@@ -368,7 +435,7 @@ const LOG_CATS = {
   season: { name: "Saison", icon: "mdi:sun-snowflake-variant", c: "#f97316" },
   target: { name: "Ziel & Heizung", icon: "mdi:thermometer-auto", c: "#14b8a6" },
   window: { name: "Fenster", icon: "mdi:window-open-variant", c: "#3b82f6" },
-  manual: { name: "Von Hand", icon: "mdi:hand-back-right-outline", c: "#a78bfa" },
+  manual: { name: "Von Hand", icon: "mdi:hand-back-right-outline", c: "#8b5cf6" },
   health: { name: "Geräte", icon: "mdi:heart-pulse", c: "#f43f5e" },
   shutter: { name: "Rollläden", icon: "mdi:window-shutter", c: "#0ea5e9" },
   command: { name: "Thermostat-Befehle", icon: "mdi:access-point", c: "#94a3b8", off: true },
@@ -759,6 +826,11 @@ class HauswerkPanel extends HTMLElement {
             this._openPop("search", { q: "" });
             setTimeout(() => this.shadowRoot.querySelector("#pop [data-action=g-search]")?.focus(), 30);
           }
+          if (e.key === "?" && !typing && !this._pop) {
+            e.preventDefault();
+            const mod = MODULES.find((m) => m.views.includes(this._tab));
+            this._openPop("legend", { first: mod?.name || "", q: "" });
+          }
         });
       }
       const safeInput = (e, change) => {
@@ -957,6 +1029,7 @@ class HauswerkPanel extends HTMLElement {
         <div class="hacts">
           ${this._data ? this._headInfo() : ""}
           ${this._data ? `<button class="bell gsearch" data-action="search-open" title="Suchen (/)" aria-label="Suchen"><ha-icon icon="mdi:magnify"></ha-icon></button>` : ""}
+          ${this._data ? `<button class="bell help" data-action="legend-open" data-first="${esc(mod?.name || "")}" title="Was bedeuten die Symbole? (?)" aria-label="Symbole erklärt"><ha-icon icon="mdi:help-circle-outline"></ha-icon></button>` : ""}
           ${(() => {
             if (!this._data) return "";
             const h = this._hints();
@@ -1691,9 +1764,9 @@ class HauswerkPanel extends HTMLElement {
     const fp = s?.fireplace;
     if (!fp?.state) return null;
     const keep = " – zählt nicht für die Bewertung der Heizleistung.";
-    if (fp.state === "on") return ["mdi:fireplace", "", "#f97316", `Kamin an (${fp.source === "manuell" ? "von Hand" : "laut Signal"})${keep}`];
+    if (fp.state === "on") return ["mdi:fireplace", "", C.warm, `Kamin an (${fp.source === "manuell" ? "von Hand" : "laut Signal"})${keep}`];
     if (fp.state === "maybe")
-      return ["mdi:fireplace", "?", "#a8a29e", fp.cause === "other"
+      return ["mdi:fireplace", "?", C.rest, fp.cause === "other"
         ? `Wärmer ohne Heizung (+${fmt(fp.rise)} °C in 30 Min.) – der Kamin ist laut Signal aus, also eine andere Wärmequelle${keep}`
         : `Wärmer ohne Heizung (+${fmt(fp.rise)} °C in 30 Min.) – vielleicht der Kamin, die Sonne oder Kochen. Sicher ist das nicht${keep}`];
     return ["mdi:fireplace", "", "#fdba74", `Nachwärme – der Raum ist noch wärmer als gewollt${keep}`];
@@ -1705,7 +1778,7 @@ class HauswerkPanel extends HTMLElement {
     if (a.open && a.open.cool) return ["mdi:snowflake", `kühlt ${Math.floor(a.open.minutes)} Min.`, "#38bdf8", "Fenster offen zum Kühlen – Hinweis, sobald es draußen wärmer ist"];
     if (a.open && !a.long) return ["mdi:timer-sand", `${Math.floor(a.open.minutes)}/${a.open.target} Min.`, "#22c55e", `Lüften läuft – empfohlen ${a.open.target} Min.`];
     if (a.long) return ["mdi:window-open-variant", `${a.long.minutes} Min.`, "#f59e0b", `Lange offen – ca. ${fmt(a.long.kwh)} kWh Wärme; lieber kurz stoßlüften`];
-    if (s?.vent) return ["mdi:weather-windy", `${s.vent.minutes} Min.`, "#0891b2", `Jetzt ${s.vent.minutes} Min. stoßlüften – ${(s.vent.reasons || []).join(", ")}`];
+    if (s?.vent) return ["mdi:weather-windy", `${s.vent.minutes} Min.`, C.air, `Jetzt ${s.vent.minutes} Min. stoßlüften – ${(s.vent.reasons || []).join(", ")}`];
     if (a.mold?.level === "bad") return ["mdi:alert-octagon-outline", `${a.mold.wall_rh} %`, "#ef4444", `Schimmelgefahr: an Außenwänden ca. ${a.mold.wall_rh} % Luftfeuchte`];
     return null;
   }
@@ -4722,7 +4795,7 @@ class HauswerkPanel extends HTMLElement {
     if (opened.length || rs.contact_open || rs.contact_tilted) {
       const since = opened.map((e) => S[e]?.last_changed).filter(Boolean).sort()[0];
       const door = rs.contact_open;
-      out.push([door ? "mdi:door-open" : "mdi:window-open-variant", `${door ? "offen" : "gekippt"}${since ? ` seit ${ago(since)}` : ""}${temp ? ` · ${temp}` : ""}`, door ? "#f59e0b" : "#22c55e", opened.map((e) => this._entityName(e)).join(", ")]);
+      out.push([door ? "mdi:door-open" : "mdi:window-open-variant", `${door ? "offen" : "gekippt"}${since ? ` seit ${ago(since)}` : ""}${temp ? ` · ${temp}` : ""}`, door ? C.sun : C.air, opened.map((e) => this._entityName(e)).join(", ")]);
     } else if (temp) out.push(["mdi:thermometer", temp, "", rs.room?.name ? `Raum ${rs.room.name}` : "Raumtemperatur"]);
     // Sonne aufs Fenster bzw. Beschattung später
     const tl = this._rwStatus?.timelines?.[rs.profile || c.cfg?.profile || "standard"] || {};
@@ -4853,7 +4926,7 @@ class HauswerkPanel extends HTMLElement {
       const bad = !c.st || ["unavailable", "unknown"].includes(c.st.state);
       const moving = c.st?.state === "opening" ? "fährt hoch" : c.st?.state === "closing" ? "fährt runter" : "";
       const flag = c.rs.cat === "storm" ? ["mdi:weather-windy-variant", "#ef4444"] : c.rs.contact_open ? ["mdi:door-open", "#f59e0b"] : c.rs.cat === "shading" ? ["mdi:sun-thermometer-outline", "#f97316"]
-        : c.rs.manual ? ["mdi:hand-back-right-outline", "#8b5cf6"] : c.rs.contact_tilted ? ["mdi:window-open-variant", "#22c55e"] : c.cfg.auto === false ? ["mdi:robot-off-outline", "#94a3b8"] : null;
+        : c.rs.manual ? ["mdi:hand-back-right-outline", "#8b5cf6"] : c.rs.contact_tilted ? ["mdi:window-open-variant", C.air] : c.cfg.auto === false ? ["mdi:robot-off-outline", "#94a3b8"] : null;
       return `
         <article class="card rw-m ${bad ? "bad" : ""}" data-action="pop-open" data-pop="rwpos:${esc(c.id)}" role="button" tabindex="0" title="Höhe einstellen">
           <div class="rwm-top"><b>${esc(this._entityName(c.id))}</b>${flag ? `<ha-icon icon="${flag[0]}" style="color:${flag[1]}"></ha-icon>` : ""}</div>
@@ -6677,6 +6750,25 @@ class HauswerkPanel extends HTMLElement {
         };
       }
 
+      case "legend": {
+        const d = this._pop.draft || {};
+        const groups = [...new Set(LEGEND.map((x) => x[0]))];
+        const order = d.first && groups.includes(d.first) ? [d.first, ...groups.filter((g) => g !== d.first)] : groups;
+        const q = String(d.q || "").toLowerCase().trim();
+        const hit = (x) => !q || `${x[3]} ${x[4]}`.toLowerCase().includes(q);
+        const row = ([, icon, c, name, text, label]) => `<div class="lg-r"><span class="si lg-s" style="--c:${c}"><ha-icon icon="${icon}"></ha-icon>${label ? esc(label) : ""}</span><span class="grow"><b>${esc(name)}</b><small>${esc(text)}</small></span></div>`;
+        const list = order.map((g) => [g, LEGEND.filter((x) => x[0] === g && hit(x))]).filter(([, l]) => l.length);
+        return {
+          icon: "mdi:help-circle-outline", c: "#64748b", title: "Symbole & Farben", sub: "Was die Zeichen in Hauswerk bedeuten",
+          body: `
+            <div class="lg-colors">${COLOR_LEGEND.map(([c, n, t]) => `<span class="lg-c" style="--c:${c}"><i></i><b>${n}</b><small>${t}</small></span>`).join("")}</div>
+            <input class="lg-q" type="search" placeholder="Symbol suchen, z. B. Kamin" value="${esc(d.q || "")}" data-legend-q>
+            ${list.map(([g, l]) => `<div class="lbl">${g}</div><div class="lg-list">${l.map(row).join("")}</div>`).join("") || `<p class="muted">Nichts gefunden.</p>`}
+            <p class="muted small"><ha-icon icon="mdi:gesture-tap"></ha-icon>Einzelne Symbole erklären sich auch selbst: am Computer mit der Maus darauf zeigen, am Handy und Tablet die Kachel antippen.</p>`,
+          foot: `<button class="primary" data-action="pop-close">Verstanden</button>`,
+        };
+      }
+
       case "radio": {
         const rd = this._status?.radio || {};
         const ids = rd.entities || [];
@@ -7963,6 +8055,19 @@ class HauswerkPanel extends HTMLElement {
   // ------------------------------------------------------------ Ereignisse
   _onInput(e, isChange = false) {
     const t = e.target;
+    if (t.dataset.legendQ !== undefined) {
+      // Legende filtern, ohne neu zu zeichnen (Fokus und Tastatur bleiben)
+      const q = t.value.toLowerCase().trim();
+      if (this._pop?.draft) this._pop.draft.q = t.value;
+      const box = t.closest(".sheet-body") || t.parentElement;
+      box.querySelectorAll(".lg-list").forEach((list) => {
+        let any = false;
+        list.querySelectorAll(".lg-r").forEach((r) => { const on = !q || r.textContent.toLowerCase().includes(q); r.hidden = !on; any = any || on; });
+        list.hidden = !any;
+        if (list.previousElementSibling?.classList.contains("lbl")) list.previousElementSibling.hidden = !any;
+      });
+      return;
+    }
     if (t.dataset.newp !== undefined) {
       this._newPerson = t.value;
       return;
@@ -8785,6 +8890,9 @@ class HauswerkPanel extends HTMLElement {
         this._toast(`${name}: ${fmt(d.temp)} °C ${d.hours ? `für ${d.hours} h` : "bis zum nächsten Planwechsel"}`);
         break;
       }
+      case "legend-open":
+        this._openPop("legend", { first: el.dataset.first || "", q: "" });
+        break;
       case "rq-fire": {
         const on = el.dataset.on === "1";
         await this._ws({ type: "hauswerk/heizen/fireplace", room_id: el.dataset.id, on });
@@ -11177,6 +11285,17 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .rwm-win.big { width:34px; height:42px; border-radius:7px; }
 .rwm-nx { margin-left:auto; display:inline-flex; align-items:center; gap:3px; font-size:12px; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .rwm-nx ha-icon { --mdc-icon-size:13px; }
+.lg-colors { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px 12px; margin:4px 0 12px; }
+.lg-c { display:grid; grid-template-columns:14px 1fr; column-gap:8px; align-items:center; align-content:start; font-size:13px; }
+.lg-c b { font-size:13px; }
+.lg-c i { width:12px; height:12px; border-radius:50%; background:var(--c); grid-row:span 2; box-shadow:0 0 0 3px color-mix(in srgb, var(--c) 22%, transparent); }
+.lg-c small { color:var(--muted); font-size:11.5px; line-height:1.25; }
+.lg-q { width:100%; box-sizing:border-box; margin:2px 0 6px; }
+.lg-list { display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
+.lg-r { display:flex; align-items:center; gap:10px; }
+.lg-r b { display:block; font-size:13.5px; }
+.lg-r small { display:block; color:var(--muted); font-size:12px; line-height:1.3; }
+.lg-s { min-width:34px; justify-content:center; flex:none; }
 .chpick { display:flex; flex-direction:column; gap:10px; margin:6px 0 12px; }
 .chg small { display:block; font-size:11.5px; color:var(--muted); font-weight:600; margin-bottom:4px; text-transform:uppercase; letter-spacing:.04em; }
 .ch-tts { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
