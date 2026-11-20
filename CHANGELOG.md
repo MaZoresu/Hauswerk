@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.63.2 – 2026-11-20
+
+### Geändert (Benachrichtigungen)
+- **Empfänger aktivieren und deaktivieren:** Jede Empfänger-Karte hat oben einen Schalter. Pausiert bekommt der Empfänger nichts mehr – für alle Anlässe, auch die Fertigmeldung der Geräte –, Anlässe, Zeiten und Bündeln bleiben erhalten. Oben steht „x aktiv · y pausiert“; in Anlässen und Tabelle sind pausierte Empfänger gekennzeichnet; sind alle Empfänger eines Anlasses pausiert, steht im Protokoll „alle Empfänger pausiert“. Die Testnachricht geht auch an pausierte Empfänger.
+- **„Kanal hinzufügen“** steht jetzt oben im Reiter Empfänger und springt direkt zur Auswahl (die sich dabei öffnet) – kein Scrollen mehr. Die Auswahl-Chips stehen linksbündig.
+
 ## 0.63.1 – 2026-11-20
 
 ### Geändert (Lichtwerk)

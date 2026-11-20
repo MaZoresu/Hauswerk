@@ -57,7 +57,7 @@ SETTING_LABELS = {
     "notify_battery": "Benachrichtigungen", "notify_quiet": "Ruhezeit", "notify_quiet_from": "Ruhezeit", "notify_quiet_to": "Ruhezeit",
     "battery_low": "Batterie-Warnung", "preheat_weather": "Vorheizen nach Wetter", "workday_entity": "Arbeitstag-Sensor",
     "workday_as": "Feiertage wie", "vent_rh": "Lüften-Hinweis", "sun_entity": "Sonne",
-    "notify_ha": "Mitteilung in Home Assistant", "notify_channels": "Benachrichtigungen an", "notify_routes": "Benachrichtigungen je Anlass", "notify_storm": "Benachrichtigungen", "notify_light_away": "Benachrichtigungen", "notify_light_offline": "Benachrichtigungen", "notify_cover": "Benachrichtigungen", "notify_hours": "Benachrichtigungen je Kanal", "notify_voice_away": "Benachrichtigungen", "notify_bundle": "Benachrichtigungen bündeln", "notify_cold": "Benachrichtigungen", "notify_vent": "Benachrichtigungen", "notify_vent_done": "Benachrichtigungen", "vent_morning": "Lüften", "vent_co2": "Lüften", "vent_cool": "Lüften", "vent_long_min": "Lüften",
+    "notify_ha": "Mitteilung in Home Assistant", "notify_channels": "Benachrichtigungen an", "notify_routes": "Benachrichtigungen je Anlass", "notify_storm": "Benachrichtigungen", "notify_light_away": "Benachrichtigungen", "notify_light_offline": "Benachrichtigungen", "notify_cover": "Benachrichtigungen", "notify_hours": "Benachrichtigungen je Kanal", "notify_voice_away": "Benachrichtigungen", "notify_bundle": "Benachrichtigungen bündeln", "notify_off": "Empfänger pausiert", "notify_cold": "Benachrichtigungen", "notify_vent": "Benachrichtigungen", "notify_vent_done": "Benachrichtigungen", "vent_morning": "Lüften", "vent_co2": "Lüften", "vent_cool": "Lüften", "vent_long_min": "Lüften",
     "demand_entity": "Wärmeanforderung", "demand_action": "Wärmeanforderung", "demand_low": "Wärmeanforderung",
     "demand_valve": "Wärmeanforderung", "rw_covers": "Rollwerk: Rollläden", "rw_storm": "Rollwerk: Sturmschutz", "rw_wind_entity": "Rollwerk: Sturmschutz", "rw_recovery": "Rollwerk: Nach Neustart", "demand_hold": "Wärmeanforderung", "demand_preheat": "Wärmeanforderung",
     "kw_solar": "Kraftwerk: Solar", "kw_grid": "Kraftwerk: Netz", "kw_grid_export": "Kraftwerk: Netz", "kw_grid_invert": "Kraftwerk: Netz",
@@ -149,6 +149,7 @@ HOUSE_DEFAULTS = {
     "notify_hours": {},           # je Kanal aktiv von–bis: {"tts:…": ["08:00", "21:00"]}; außerhalb nur Wichtiges
     "notify_voice_away": True,    # Ansagen nur, wenn jemand zu Hause ist (außer Wichtiges)
     "notify_bundle": [],          # Kanäle, an die Meldungen binnen 5 Min. gebündelt gehen
+    "notify_off": [],             # Empfänger pausiert: bekommen nichts, Einstellungen bleiben (Testnachricht geht trotzdem)
     "notify_ha": False,           # zusätzlich als Mitteilung in Home Assistant (Glocke in der Seitenleiste)
     "notify_quiet": True,         # Ruhezeit: Nachrichten erst danach senden
     "notify_quiet_from": "22:00",

@@ -1110,6 +1110,11 @@ def test_benachrichtigungskanaele(panel):
     p = panel
     p.js(f"() => {{ {EL}._nkTab = 'who'; {EL}._openPop('notify'); }}")
     p.wait()
+    p.click('#pop [data-action="nk-add-open"]')
+    p.wait(400)
+    # springt zum Bereich „Kanal hinzufügen“: Kopf steht oben im sichtbaren Teil des Fensters
+    top = p.js(f"(() => {{ const r = {EL}.shadowRoot; const b = r.querySelector('#pop .sheet-body') || r.querySelector('#pop'); const t = r.querySelector('#pop #nk-add').getBoundingClientRect().top - b.getBoundingClientRect().top; return t; }})()")
+    assert top < 200, top
     body = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
     for t in ("Pushover", "Telegram", "Jules iPhone", "Tablet Overlay-Nachricht", "Mitteilung (Glocke)", "Ansage hinzufügen"):
         assert t in body, t
@@ -1119,6 +1124,12 @@ def test_benachrichtigungskanaele(panel):
     assert p.js(f"[...{EL}.shadowRoot.querySelectorAll('#pop [data-tts-player] option')].map(o => o.value)") == ["media_player.tablet"]
     p.click('#pop [data-action="ch-tts-add"][data-list="default"]')
     chans = p.js(f"{EL}._settings.notify_channels")
+    # Empfänger pausieren und wieder aktivieren
+    p.click('#pop [data-action="nk-off"][data-ch="svc:pushover"]')
+    assert p.js(f"{EL}._settings.notify_off") == ["svc:pushover"] and p.has('#pop .nk-card.paused')
+    assert "pausiert" in p.js(f"{EL}.shadowRoot.querySelector('#pop .nk-card.paused').textContent")
+    p.click('#pop [data-action="nk-off"][data-ch="svc:pushover"]')
+    p.click('#pop [data-action="nk-off"][data-ch="ent:notify.jules_iphone"]')
     assert chans == ["svc:mobile_app_pixel_8", "svc:pushover", "ent:notify.jules_iphone", "tts:tts.google_translate|media_player.tablet"]
     assert p.js(f"{EL}.shadowRoot.querySelectorAll('#pop .nk-card').length") == 4
     # Anlässe als Liste: „Fenster schließen“ aufklappen, eigene Kanäle, Vorschau
@@ -1137,6 +1148,7 @@ def test_benachrichtigungskanaele(panel):
     p.wait(300)
     saved = [m for m in p.sent() if m["type"].endswith("settings/save") and "notify_channels" in m.get("settings", {})][-1]["settings"]
     assert saved["notify_channels"] == chans and saved["notify_routes"]["vent_done"][0] == "svc:pushover"
+    assert saved["notify_off"] == ["ent:notify.jules_iphone"]
 
 
 def test_benachrichtigung_tabelle_vorlagen(panel):

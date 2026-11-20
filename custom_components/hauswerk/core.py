@@ -663,8 +663,11 @@ class Haus:
         now_min = local.hour * 60 + local.minute
         hours = self.settings.get("notify_hours") or {}
         bundle = set(self.settings.get("notify_bundle") or [])
+        paused = set(self.settings.get("notify_off") or [])
         sent = []
         for ch in dict.fromkeys(channels):
+            if ch in paused:
+                continue  # Empfänger pausiert (Benachrichtigungen › Empfänger)
             if (ch, title, message) in self._recent:
                 continue
             if not self.channel_ok(ch):
@@ -774,9 +777,12 @@ class Haus:
             return
         self._sent[key] = now
         important = mode == "important"
-        targets = self.channels_for(kind)
+        chosen = self.channels_for(kind)
+        targets = [c for c in chosen if c not in set(self.settings.get("notify_off") or [])]
         if mode == "log":
             how = "nur Protokoll"
+        elif chosen and not targets:
+            how = "nur hier – alle Empfänger pausiert"
         elif not targets:
             how = "nur hier – kein Kanal unter Benachrichtigungen gewählt"
         elif self._quiet() and not important:

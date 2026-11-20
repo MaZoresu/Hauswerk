@@ -1448,6 +1448,13 @@ def test_benachrichtigung_ausbau(hw):
         # niemand zu Hause: normale Ansage fällt weg, Handy nicht
         haus.away = True
         assert haus.send(["svc:mobile_app_pixel", tts], "E", "fünf") == ["svc:mobile_app_pixel"]
+        # Empfänger pausiert: bekommt nichts; sind alle pausiert, steht es so im Protokoll
+        await haus.async_save_settings({"notify_off": ["svc:mobile_app_pixel"]})
+        assert haus.send(["svc:mobile_app_pixel"], "F", "sechs") == []
+        await haus.async_save_settings({"notify_channels": ["svc:mobile_app_pixel"], "notify_routes": {}, "notify_frost": "normal"})
+        haus.notify("frost2", "frost", "Frost", "−6 °C")
+        assert log.entries[-1]["why"].endswith("nur hier – alle Empfänger pausiert")
+        await haus.async_save_settings({"notify_off": []})
         # Probehören mit eigenem Text
         res = await haus.async_test_notify(channels=[tts], title="Fenster schließen", message="Bad: genug gelüftet")
         assert res[0]["ok"] and hass.calls[-1][2]["message"] == "Fenster schließen. Bad: genug gelüftet"

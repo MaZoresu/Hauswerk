@@ -226,6 +226,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_hours"): vol.All(dict, vol.Length(max=20), {CHANNEL: vol.All([_hm], vol.Length(min=2, max=2))}),
         vol.Optional("notify_voice_away"): bool,
         vol.Optional("notify_bundle"): CHANNELS,
+        vol.Optional("notify_off"): vol.All([CHANNEL], vol.Length(max=30)),
         vol.Optional("notify_storm"): NOTIFY_MODE,
         vol.Optional("notify_cover"): NOTIFY_MODE,
         vol.Optional("notify_light_away"): NOTIFY_MODE,

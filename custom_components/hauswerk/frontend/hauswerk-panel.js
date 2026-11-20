@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.63.1";
+const VERSION = "0.63.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -6413,7 +6413,9 @@ class HauswerkPanel extends HTMLElement {
       const chs = this._nkChannels(x.k, p);
       const own = (routes[x.k] || []).length > 0;
       const open = this._nkOpen === x.k;
-      const to = mode === "off" ? "aus" : mode === "log" ? "nur Protokoll" : chs.length ? chs.map((c) => chInfo(c).label).join(", ") : "kein Kanal";
+      const live = chs.filter((c) => !(p.notify_off || []).includes(c));
+      const to = mode === "off" ? "aus" : mode === "log" ? "nur Protokoll" : !chs.length ? "kein Kanal"
+        : !live.length ? "alle Empfänger pausiert" : live.map((c) => chInfo(c).label).join(", ") + (live.length < chs.length ? ` (+${chs.length - live.length} pausiert)` : "");
       return `<div class="nk-k ${open ? "open" : ""} ${on ? "" : "off"}">
         <div class="nk-h"><button class="nk-sum" data-action="nk-open" data-k="${x.k}" aria-expanded="${open}">
           <ha-icon icon="${x.icon}" style="color:${x.c}"></ha-icon><span class="grow"><b>${esc(x.title)}${mode === "important" ? ` <ha-icon class="nk-imp" icon="mdi:bell-alert" title="wichtig"></ha-icon>` : ""}</b><small>${esc(sub(x))} → ${esc(to)}${own ? " · eigene Kanäle" : ""}</small></span>
@@ -6435,7 +6437,7 @@ class HauswerkPanel extends HTMLElement {
     const wide = (this.offsetWidth || 0) >= 700;
     const view = wide ? this._nkView || "table" : "list";
     const cols = used;
-    const table = `<div class="nk-tbl-w"><table class="nk-tbl"><thead><tr><th>Anlass</th><th>Art</th>${cols.map((c) => `<th title="${esc(chInfo(c).sub || c)}">${dot(c)}${esc(chInfo(c).label)}</th>`).join("")}</tr></thead><tbody>
+    const table = `<div class="nk-tbl-w"><table class="nk-tbl"><thead><tr><th>Anlass</th><th>Art</th>${cols.map((c) => `<th class="${(p.notify_off || []).includes(c) ? "paused" : ""}" title="${esc(chInfo(c).sub || c)}${(p.notify_off || []).includes(c) ? " · pausiert" : ""}">${dot(c)}${esc(chInfo(c).label)}${(p.notify_off || []).includes(c) ? " ⏸" : ""}</th>`).join("")}</tr></thead><tbody>
       ${groups.map((g) => `<tr class="nk-tg"><td colspan="${cols.length + 2}">${g}</td></tr>${NK_KINDS.filter((x) => x.g === g).map((x) => {
         const mode = p[`notify_${x.k}`];
         const chs = this._nkChannels(x.k, p);
@@ -6455,7 +6457,8 @@ class HauswerkPanel extends HTMLElement {
         : [...groups, "Kraftwerk"].map((g) => `<div class="nk-g" style="--c:${NK_GROUPS[g][0]}"><div class="nk-gh"><span class="lg-logo">${modIcon(NK_GROUPS[g][1])}</span>${g}</div>${g === "Kraftwerk" ? appRow : NK_KINDS.filter((x) => x.g === g).map(kindRow).join("")}</div>`).join("")}`;
 
     // ---------- Reiter „Empfänger“
-    const failing = used.filter((c) => health[c] && !health[c].ok);
+    const paused = new Set(p.notify_off || []);
+    const failing = used.filter((c) => health[c] && !health[c].ok && !paused.has(c));
     const hours = p.notify_hours || {};
     const bundle = new Set(p.notify_bundle || []);
     const card = (id) => {
@@ -6465,9 +6468,11 @@ class HauswerkPanel extends HTMLElement {
       const devs = apps.filter((a) => appChannels(a).includes(id));
       const win = hours[id];
       const voice = id.startsWith("tts:") || id.startsWith("sat:");
-      return `<div class="nk-card ${c.ok ? "" : "bad"}">
+      const off = paused.has(id);
+      return `<div class="nk-card ${c.ok ? "" : "bad"} ${off ? "paused" : ""}">
         <div class="nk-ch"><ha-icon icon="${NK_GICON[c.group] || "mdi:bell-outline"}"></ha-icon><span class="grow"><b>${esc(c.label)}</b><small>${esc(c.group)}${c.sub ? ` · ${esc(c.sub)}` : ""}</small></span>
-          <span class="nk-hs">${dot(id)}${h ? (h.ok ? `zugestellt ${hm(h.at)}` : "Fehler") : c.ok ? "bereit" : "nicht erreichbar"}</span></div>
+          <label class="switch" title="${off ? "Empfänger pausiert – einschalten" : "Empfänger aktiv – pausieren"}"><input type="checkbox" data-action="nk-off" data-ch="${esc(id)}" ${off ? "" : "checked"} ${dis}><span></span></label></div>
+        <div class="nk-hs">${off ? `<ha-icon icon="mdi:pause-circle-outline"></ha-icon>pausiert – bekommt nichts, Einstellungen bleiben` : `${dot(id)}${h ? (h.ok ? `zugestellt ${hm(h.at)}` : "Fehler") : c.ok ? "bereit" : "nicht erreichbar"}`}</div>
         ${h && !h.ok ? `<p class="nk-err"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${esc(h.error || "nicht zugestellt")} · ${hm(h.at)}</p>` : ""}
         <div class="pchips nk-kinds">${kinds.map((x) => { const on = p[`notify_${x.k}`] !== "log" && this._nkChannels(x.k, p).includes(id); return `<button class="pchip ${on ? "on" : ""}" data-action="nk-cell" data-k="${x.k}" data-ch="${esc(id)}" aria-pressed="${on}" ${dis}><i></i>${esc(x.title)}</button>`; }).join("")}
           ${devs.map((a) => `<span class="pchip on ro" title="unter Kraftwerk › Geräte"><i></i>${esc(a.name || "Gerät")} fertig</span>`).join("")}</div>
@@ -6483,13 +6488,18 @@ class HauswerkPanel extends HTMLElement {
       </div>`;
     };
     const anyVoice = used.some((c) => c.startsWith("tts:") || c.startsWith("sat:"));
+    const addOpen = !used.length || this._nkAdd;
+    const nOff = used.filter((c) => paused.has(c)).length;
     const who = `
+      <div class="nk-whohead"><span class="grow muted small">${used.length ? `${used.length - nOff} aktiv${nOff ? ` · ${nOff} pausiert` : ""}` : ""}</span>
+        ${this._admin ? `<button class="secondary small" data-action="nk-add-open"><ha-icon icon="mdi:plus"></ha-icon>Kanal hinzufügen</button>` : ""}</div>
       ${failing.length ? `<div class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon><span class="grow">Nicht zugestellt: ${failing.map((c) => esc(chInfo(c).label)).join(", ")}</span>${this._admin ? `<button class="secondary small" data-action="ch-test1" data-ch="${esc(failing.join(","))}">Testen</button>` : ""}</div>` : ""}
       ${used.length ? `<div class="nk-cards">${used.map(card).join("")}</div>` : `<p class="muted">Noch kein Kanal gewählt – unten hinzufügen.</p>`}
       ${anyVoice ? `<div class="wxrows">${this._setRow("nva", "Ansagen nur, wenn jemand zu Hause ist", "sonst nur Wichtiges", sw("notify_voice_away"), "Ist niemand zu Hause (Hauswerk › Anwesenheit), sagt Hauswerk nichts an – außer bei „Wichtig“. Ruhezeit gilt für Ansagen immer.")}</div>` : ""}
-      <details class="role-help nk-add" ${used.length ? "" : "open"}><summary><ha-icon icon="mdi:plus"></ha-icon>Kanal hinzufügen · Standard-Kanäle</summary>
-        <p class="muted small">Alles, was in Home Assistant eingerichtet ist: App, Pushover, Telegram, E-Mail, Ansagen (Sprachdienst + Lautsprecher), Sprachassistenten, Anzeige am Tablet. Wählbar sind nur erreichbare Kanäle. Gewählte Kanäle sind die Standard-Kanäle – sie bekommen alle Anlässe ohne eigene Auswahl.</p>
-        ${this._chPicker("default", p.notify_channels, { disabled: dis })}</details>`;
+      <section class="nk-addsec ${addOpen ? "open" : ""}" id="nk-add">
+        <button class="nk-addh" data-action="nk-add-toggle" aria-expanded="${addOpen}"><ha-icon icon="mdi:plus-circle-outline"></ha-icon><span class="grow">Kanal hinzufügen · Standard-Kanäle</span><ha-icon icon="mdi:chevron-${addOpen ? "up" : "down"}"></ha-icon></button>
+        ${addOpen ? `<p class="muted small">Alles, was in Home Assistant eingerichtet ist: App, Pushover, Telegram, E-Mail, Ansagen (Sprachdienst + Lautsprecher), Sprachassistenten, Anzeige am Tablet. Wählbar sind nur erreichbare Kanäle. Gewählte Kanäle sind die Standard-Kanäle – sie bekommen alle Anlässe ohne eigene Auswahl.</p>
+        ${this._chPicker("default", p.notify_channels, { disabled: dis })}` : ""}</section>`;
 
     // ---------- Reiter „Ruhezeit & Verlauf“
     const ST = { sent: ["mdi:send-check-outline", C.ok, "gesendet"], held: ["mdi:sleep", C.cool, "zurückgehalten"], log: ["mdi:text-box-outline", C.rest, "nur Protokoll"] };
@@ -9682,6 +9692,7 @@ class HauswerkPanel extends HTMLElement {
       }
       case "nk-tab":
         this._nkTab = el.dataset.v;
+        this._nkAdd = false;
         this._nkOpen = null;
         this._renderPop();
         break;
@@ -9723,9 +9734,24 @@ class HauswerkPanel extends HTMLElement {
         this._refreshSettings();
         break;
       }
+      case "nk-off": {
+        const set = new Set(this._settings.notify_off || []);
+        if (set.has(el.dataset.ch)) set.delete(el.dataset.ch); else set.add(el.dataset.ch);
+        this._settings.notify_off = [...set];
+        this._refreshSettings();
+        break;
+      }
+      case "nk-add-open":
+      case "nk-add-toggle": {
+        this._nkAdd = a === "nk-add-open" ? true : !this._nkAdd;
+        this._renderPop();
+        if (this._nkAdd) requestAnimationFrame(() => this.shadowRoot.querySelector("#pop #nk-add")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+        break;
+      }
       case "nk-remove": {
         const ch = el.dataset.ch;
         const p = this._settings;
+        p.notify_off = (p.notify_off || []).filter((c) => c !== ch);
         p.notify_channels = (p.notify_channels || []).filter((c) => c !== ch);
         const routes = {};
         for (const [k, l] of Object.entries(p.notify_routes || {})) { const r = l.filter((c) => c !== ch); if (r.length) routes[k] = r; }
@@ -12383,6 +12409,15 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .nk-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:10px; margin-bottom:12px; }
 .nk-card { border:1px solid var(--line); border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:8px; background:var(--card); }
 .nk-card.bad { border-color:#ef4444; }
+.nk-card.paused { opacity:.72; border-style:dashed; }
+.nk-card.paused .nk-kinds, .nk-card.paused .nk-opts { filter:grayscale(1); }
+.nk-card .nk-hs { display:flex; align-items:center; gap:6px; margin-top:-4px; }
+.nk-card .nk-hs ha-icon { --mdc-icon-size:16px; }
+.nk-whohead { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+.nk-addsec { border:1px solid var(--line); border-radius:14px; padding:4px 12px; margin-top:8px; scroll-margin-top:8px; }
+.nk-addsec.open { padding-bottom:12px; border-color:#0ea5e9; }
+.nk-addh { all:unset; cursor:pointer; display:flex; align-items:center; gap:8px; width:100%; padding:8px 0; font-weight:700; font-size:14px; color:#0ea5e9; }
+.nk-tbl th.paused { opacity:.55; text-decoration:line-through; }
 .nk-ch { display:flex; align-items:center; gap:10px; }
 .nk-ch > ha-icon { --mdc-icon-size:22px; color:#0ea5e9; }
 .nk-ch b { display:block; font-size:14px; } .nk-ch small { display:block; color:var(--muted); font-size:11.5px; }
@@ -12466,6 +12501,7 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .lg-r small { display:block; color:var(--muted); font-size:12px; line-height:1.3; }
 .lg-s { min-width:34px; justify-content:center; flex:none; }
 .chpick { display:flex; flex-direction:column; gap:10px; margin:6px 0 12px; }
+.chpick .pchips { justify-content:flex-start; }
 .chg small { display:block; font-size:11.5px; color:var(--muted); font-weight:600; margin-bottom:4px; text-transform:uppercase; letter-spacing:.04em; }
 .ch-tts { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
 .ch-tts select { min-width:0; flex:1 1 140px; }
