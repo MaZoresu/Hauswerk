@@ -1031,3 +1031,15 @@ def test_lueften_seite_und_kacheln(panel):
     p.wait(300)
     saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
     assert saved["vent_morning"] == "07:00" and saved["notify_vent"] == "normal"
+
+
+def test_rollwerk_fenster_nur_wenn_offen(panel):
+    """Rollwerk-Kachel: Fenster nur, wenn offen/gekippt; „Sonne aufs Fenster“ nur bei sun_on (Sonne scheint wirklich)."""
+    p = panel
+    p.view("shutters")
+    joined = " | ".join(p.js(f"() => [...{EL}.shadowRoot.querySelectorAll('.rw-c .rw-info')].map((e) => e.textContent)"))
+    assert "Fenster zu" not in joined and "gekippt" in joined
+    p.js(f"() => {{ for (const c of Object.values({EL}._rwStatus.covers)) c.sun_on = false; {EL}._renderMain(); }}")
+    p.wait()
+    joined = " | ".join(p.js(f"() => [...{EL}.shadowRoot.querySelectorAll('.rw-c .rw-info')].map((e) => e.textContent)"))
+    assert "Sonne aufs Fenster" not in joined and "Sonne – beschattet" not in joined

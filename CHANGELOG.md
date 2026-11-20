@@ -2,6 +2,13 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.55.1 – 2026-11-20
+
+### Geändert (Rollwerk-Kacheln)
+- **„Sonne aufs Fenster“ nur, wenn die Sonne wirklich scheint:** Neben der Richtung zählt jetzt der Helligkeitssensor des Profils (ab der Grenze „Beschattung endet“) bzw. ohne Sensor die Wetterlage (sonnig oder teils bewölkt).
+- Fenster erscheinen in der Info-Zeile nur noch, wenn sie offen bzw. gekippt sind („Fenster zu“ entfällt).
+- Die Tagesleiste in den Kacheln ist dicker.
+
 ## 0.55.0 – 2026-11-18
 
 ### Neu – Lüften in Heizwerk

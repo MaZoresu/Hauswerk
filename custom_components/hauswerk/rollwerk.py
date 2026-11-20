@@ -1131,6 +1131,16 @@ class Rollwerk:
                 rt["sent"] = None  # zurück zur aktuellen Sollstellung
             self._log("manual", f"{self._name(entity_id)}: Übersteuerung zurückgesetzt", done, entity_id)
 
+    def _sunshine(self, prof: dict) -> bool | None:
+        """Scheint die Sonne wirklich? Helligkeitssensor des Profils (ab der Grenze „Beschattung endet“), sonst Wetterlage."""
+        bright = self._num(prof.get("shade_brightness_sensor")) if prof.get("shade_brightness_sensor") else None
+        if bright is not None:
+            return bright >= float(prof.get("shade_bright_end") or 25000)
+        weather = self.hass.states.get(prof.get("forecast_entity") or self.haus.weather_entity() or "")
+        if weather is None or weather.state in ("unknown", "unavailable"):
+            return None
+        return weather.state in ("sunny", "partlycloudy", "clear")
+
     def _note_move(self, entity_id: str, pos: float | None, why: str, by: str) -> None:
         """Letzte Fahrt je Rollladen merken (für die Kachel: „07:15 ↑ Morgens öffnen“), übersteht Neustarts."""
         self._persist.setdefault("last", {})[entity_id] = {
@@ -1337,10 +1347,11 @@ class Rollwerk:
                 "up": [hm(up[0]), hm(up[1])] if up else None,
                 "down": [hm(down[0]), hm(down[1])] if down else None,
                 "opened_today": rt.get("opened_on") == dt_util.now().date().isoformat(),
-                # Sonne scheint gerade aufs Fenster (Fensterrichtung des Profils, Sonne über dem Horizont)
+                # Sonne scheint gerade aufs Fenster: Fensterrichtung des Profils, Sonne über dem Horizont – und sie scheint wirklich
                 "sun_on": (azimuth is not None and elevation is not None and elevation > 2
                            and _in_azimuth(float(azimuth), float(prof.get("azimuth_start") if prof.get("azimuth_start") is not None else 95),
-                                           float(prof.get("azimuth_end") if prof.get("azimuth_end") is not None else 265))),
+                                           float(prof.get("azimuth_end") if prof.get("azimuth_end") is not None else 265))
+                           and self._sunshine(prof) is True),
                 "last": (self._persist.get("last") or {}).get(entity_id),
                 "want": rt.get("blocked_target") if rt.get("blocked") else rt.get("target"),
                 "dev": self._device_health(entity_id),

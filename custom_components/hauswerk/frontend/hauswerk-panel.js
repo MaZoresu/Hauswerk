@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.55.0";
+const VERSION = "0.55.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4535,8 +4535,7 @@ class HauswerkPanel extends HTMLElement {
       const since = opened.map((e) => S[e]?.last_changed).filter(Boolean).sort()[0];
       const door = rs.contact_open;
       out.push([door ? "mdi:door-open" : "mdi:window-open-variant", `${door ? "offen" : "gekippt"}${since ? ` seit ${ago(since)}` : ""}${temp ? ` · ${temp}` : ""}`, door ? "#f59e0b" : "#22c55e", opened.map((e) => this._entityName(e)).join(", ")]);
-    } else if ((ct.open || []).length || (ct.tilted || []).length) out.push(["mdi:window-closed-variant", `Fenster zu${temp ? ` · ${temp}` : ""}`, "", rs.room?.name || ""]);
-    else if (temp) out.push(["mdi:thermometer", temp, "", rs.room?.name ? `Raum ${rs.room.name}` : "Raumtemperatur"]);
+    } else if (temp) out.push(["mdi:thermometer", temp, "", rs.room?.name ? `Raum ${rs.room.name}` : "Raumtemperatur"]);
     // Sonne aufs Fenster bzw. Beschattung später
     const tl = this._rwStatus?.timelines?.[rs.profile || c.cfg?.profile || "standard"] || {};
     const nowHm = new Date().toTimeString().slice(0, 5);
@@ -9441,7 +9440,7 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 /* Rollwerk: Tagesleiste, Kompass, Experte */
 .rwday { margin:2px 0 4px; }
 .rwday-bar { position:relative; height:12px; border-radius:99px; background:color-mix(in srgb, #1e293b 55%, var(--card2)); overflow:hidden; }
-.rwday.small .rwday-bar { height:7px; }
+.rwday.small .rwday-bar { height:11px; }
 .rwday-bar i { position:absolute; top:0; bottom:0; }
 .rwday-bar .d-day { background:color-mix(in srgb, #38bdf8 55%, var(--card2)); }
 .rwday-bar .d-half { background:repeating-linear-gradient(135deg, #6366f1 0 4px, #818cf8 4px 8px); }
