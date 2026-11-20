@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.63.1 – 2026-11-20
+
+### Geändert (Lichtwerk)
+- **Profil an einer Leuchte abschalten** – direkt im Helligkeitsfenster (Tipp auf den Namen), im Einstellungsfenster der Leuchte („Profil aktiv“) und wieder einschalten mit „Profil einschalten“ an der Kachel. Die Leuchte bleibt in Lichtwerk und lässt sich schalten, Lichtwerk schaltet sie nur nicht mehr; Profil und Einstellungen bleiben erhalten, andere Leuchten mit demselben Profil laufen weiter.
+- Kachel zeigt „Profil „…“ aus“ statt „Automatik aus“, die Einstellungsliste „PROFIL AUS“; jede Änderung steht im Protokoll.
+
 ## 0.63.0 – 2026-11-20
 
 ### Neu – Modul Lichtwerk

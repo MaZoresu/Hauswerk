@@ -197,7 +197,7 @@ const hass = {
     if (msg.type === "hauswerk/heizen/get") return { settings, rooms, plans: {}, target_sensors: {}, status, defaults, modes: {}, is_admin: true, user_admin: true, rollwerk: { covers: rwCovers, profiles: rwProfiles, status: rwStatus }, lichtwerk: { lights: lwLights, profiles: lwProfiles, status: lwStatus, automations: [{ entity_id: "automation.nachtlicht", name: "Auto_Nachtlicht", state: "on" }] } };
     if (msg.type === "hauswerk/rollwerk/command") return null;
     if (msg.type === "hauswerk/lichtwerk/command") return null;
-    if (msg.type === "hauswerk/lichtwerk/light/save") { lwLights[msg.entity_id] = msg.light; if (!settings.lw_lights.includes(msg.entity_id)) settings.lw_lights.push(msg.entity_id); return { lights: lwLights, settings }; }
+    if (msg.type === "hauswerk/lichtwerk/light/save") { lwLights[msg.entity_id] = { ...(lwLights[msg.entity_id] || {}), ...msg.light }; if (!settings.lw_lights.includes(msg.entity_id)) settings.lw_lights.push(msg.entity_id); return { lights: lwLights, settings }; }
     if (msg.type === "hauswerk/lichtwerk/light/remove") { delete lwLights[msg.entity_id]; settings.lw_lights = settings.lw_lights.filter((x) => x !== msg.entity_id); return { lights: lwLights, settings }; }
     if (msg.type === "hauswerk/lichtwerk/profile/save") { const id = msg.profile_id || "neu" + Object.keys(lwProfiles).length; lwProfiles[id] = msg.profile; return { profile_id: id, profiles: lwProfiles }; }
     if (msg.type === "hauswerk/lichtwerk/profile/delete") { delete lwProfiles[msg.profile_id]; return { profiles: lwProfiles, lights: lwLights }; }

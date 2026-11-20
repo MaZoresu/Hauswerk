@@ -533,8 +533,14 @@ class Lichtwerk:
         if cfg.get("profile") and cfg.get("profile") != old.get("profile"):
             self._rt.pop(eid, None)  # neues Profil: Stand neu aus der Vorausrechnung
         prof_name = (self.profiles.get(self.lights[eid].get("profile") or "standard") or {}).get("name")
-        self.log.add("settings", f"Lichtwerk: {self._name(eid)} geändert", f"Profil {prof_name}"
-                     + ("" if self.lights[eid].get("auto", True) else " · Automatik aus") + (f" · {by}" if by else ""), module="lichtwerk")
+        active = self.lights[eid].get("auto", True) is not False
+        if "auto" in cfg and (old.get("auto", True) is not False) != active and set(cfg) <= {"auto"}:
+            self.log.add("settings", f"{self._name(eid)}: Profil „{prof_name}“ {'aktiv' if active else 'aus'}",
+                         ("Lichtwerk schaltet wieder nach dem Profil" if active else "Lichtwerk zeigt das Licht nur noch an")
+                         + (f" · {by}" if by else ""), module="lichtwerk")
+        else:
+            self.log.add("settings", f"Lichtwerk: {self._name(eid)} geändert", f"Profil {prof_name}"
+                         + ("" if active else " (aus)") + (f" · {by}" if by else ""), module="lichtwerk")
         self._save()
         self._track()
         await self.async_evaluate()

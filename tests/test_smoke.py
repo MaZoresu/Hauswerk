@@ -1628,5 +1628,16 @@ def test_lichtwerk(hw):
         assert hass.calls[-1] == ("light", "turn_on", {"entity_id": "light.wz", "brightness_pct": 40})
         await lw.async_command(["light.wz"], "resume")
         assert lw.status()["lights"]["light.wz"]["manual"] is None
+        # Profil an der Leuchte aus: nichts schalten, Ursache und Protokoll
+        haus.settings["presence_force"] = None
+        haus.update()
+        await lw.async_save_light("light.wz", {"auto": False})
+        n = len(hass.calls)
+        await lw.async_evaluate()
+        st = lw.status()["lights"]["light.wz"]
+        assert st["auto"] is False and st["want"] is None and st["cause"] == "Profil aus – Lichtwerk schaltet nicht" and len(hass.calls) == n
+        assert any(e["title"] == "Wohnzimmer: Profil „Abendlicht“ aus" for e in log.entries)
+        await lw.async_save_light("light.wz", {"auto": True})
+        assert lw.status()["lights"]["light.wz"]["auto"] is True
 
     asyncio.run(run())

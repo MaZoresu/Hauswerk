@@ -228,11 +228,11 @@ def decide(*, auto: bool = True, bypass_on: bool = False, bypass_action: str = "
            latched: bool = False, latched_reason: str | None = None) -> tuple[str | None, str]:
     """Die eine Vorrang-Logik von Lichtwerk: Soll „on“/„off“ oder None (nichts tun) und die Ursache.
 
-    1. Automatik aus  2. Pause-Schalter (Bypass)  3. von Hand  4. niemand zu Hause (außer Urlaubs-Simulation)
+    1. Profil an der Leuchte aus  2. Pause-Schalter (Bypass)  3. von Hand  4. niemand zu Hause (außer Urlaubs-Simulation)
     5. Bewegung  6. feste Auslöser des Profils (Sonne, Helligkeit, Uhrzeit, Entität, Rollläden)
     """
     if not auto:
-        return None, "Automatik aus – Lichtwerk schaltet nicht"
+        return None, "Profil aus – Lichtwerk schaltet nicht"
     if bypass_on:
         if bypass_action == "on":
             return "on", "Pause-Schalter an – Licht an"

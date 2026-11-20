@@ -1350,3 +1350,24 @@ def test_lichtwerk(panel):
     p.click('#pop [data-action="lw-auto-off"][data-id="automation.nachtlicht"]')
     p.wait(150)
     assert [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/automation/off"]
+
+
+def test_lichtwerk_profil_aus(panel):
+    """Profil an einer Leuchte ausschalten (Helligkeitsfenster) und an der Kachel wieder einschalten."""
+    p = panel
+    p.view("lights")
+    p.wait()
+    assert "Profil „Abendlicht“ aus" in p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")  # Decke Küche
+    p.js(f"() => {{ {EL}._openPop('lwbri:light.wohnzimmer'); }}")
+    p.wait()
+    p.click('#pop [data-action="lw-auto"][data-id="light.wohnzimmer"]')
+    p.wait(200)
+    m = [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/light/save"][-1]
+    assert m == {"type": "hauswerk/lichtwerk/light/save", "entity_id": "light.wohnzimmer", "light": {"auto": False}}
+    p.js(f"{EL}._closePop()")
+    p.wait(100)
+    p.click('.lw-c [data-action="lw-auto"][data-id="light.wohnzimmer"][data-on="1"]')
+    p.wait(200)
+    assert [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/light/save"][-1]["light"] == {"auto": True}
+    p.view("lightset")
+    assert "PROFIL AUS" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
