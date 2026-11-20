@@ -212,6 +212,11 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_targets"): vol.All([vol.All(str, vol.Match(r"^[a-z0-9_]+$"))], vol.Length(max=10)),
         vol.Optional("notify_channels"): CHANNELS,
         vol.Optional("notify_routes"): vol.All(dict, vol.Length(max=20), {vol.All(str, vol.Match(r"^[a-z_]{2,30}$")): CHANNELS}),
+        vol.Optional("notify_hours"): vol.All(dict, vol.Length(max=20), {CHANNEL: vol.All([_hm], vol.Length(min=2, max=2))}),
+        vol.Optional("notify_voice_away"): bool,
+        vol.Optional("notify_bundle"): CHANNELS,
+        vol.Optional("notify_storm"): NOTIFY_MODE,
+        vol.Optional("notify_cover"): NOTIFY_MODE,
         vol.Optional("notify_window"): NOTIFY_MODE,
         vol.Optional("notify_window_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=720)),
         vol.Optional("notify_offline"): NOTIFY_MODE,
@@ -624,7 +629,9 @@ async def ws_appliance_action(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command({vol.Required("type"): "hauswerk/notify/test", vol.Optional("channels"): CHANNELS})
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/notify/test", vol.Optional("channels"): CHANNELS,
+                                  vol.Optional("title"): vol.All(str, vol.Length(max=80)),
+                                  vol.Optional("message"): vol.All(str, vol.Length(max=300))})
 @require_editor
 @websocket_api.async_response
 async def ws_notify_test(hass: HomeAssistant, connection, msg) -> None:
@@ -638,7 +645,7 @@ async def ws_notify_test(hass: HomeAssistant, connection, msg) -> None:
     if not channels:
         connection.send_error(msg["id"], "no_targets", "Erst einen Kanal auswählen")
         return
-    result = await haus.async_test_notify(by=_who(connection), channels=channels)
+    result = await haus.async_test_notify(by=_who(connection), channels=channels, title=msg.get("title"), message=msg.get("message"))
     connection.send_result(msg["id"], {"results": result})
 
 

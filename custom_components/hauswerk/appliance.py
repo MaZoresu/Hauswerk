@@ -159,6 +159,8 @@ class Appliances:
         sent = self.haus.send(new, f"{name} fertig", text, bool(c.get("important")), key=f"geraet_{dev_id}") if new else []
         new = [self.haus.channel_name(ch) for ch in sent]
         how = f"gesendet an {', '.join(new)}" if new else ("schon gemeldet" if channels else "keine Kanäle gewählt")
+        if new or not channels:
+            self.haus._hist(f"{name} fertig", text, "appliance", "sent" if new else "log", how)
         self.log.add("appliance", f"{name} fertig", f"{text} · {how}", module="kraftwerk")
 
     @staticmethod

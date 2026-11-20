@@ -95,6 +95,10 @@ const rooms = {
     schedule: [{ days: [0, 1, 2, 3, 4, 5, 6], start: "05:30", end: "08:00" }] },
 };
 const status = {
+  notify: { sent: 3, held: 1, log: 2, failed: 0, queued: 0,
+    health: { "svc:mobile_app_pixel_8": { ok: true, at: new Date(Date.now() - 50 * 60e3).toISOString() } },
+    last: [{ at: new Date(Date.now() - 50 * 60e3).toISOString(), title: "Fenster schließen", message: "Bad: genug gelüftet (10 Min. um)", kind: "vent_done", state: "sent", how: "gesendet an Pixel 8" },
+      { at: new Date(Date.now() - 3 * 3600e3).toISOString(), title: "Frost erwartet", message: "Tiefstwert −3 °C morgen", kind: "frost", state: "held", how: "Ruhezeit" }] },
   rooms: {
     a1: { mode: "komfort", mode_label: "Komfort", target: 21, room_temp: 20.4, heating: true, humidity: 48, next_change: 120, preheat_factor: 1.06,
       fireplace: { state: "maybe", source: "verlauf", cause: "kamin?", rise: 0.7, minutes: 12, manual: false, signal: null },

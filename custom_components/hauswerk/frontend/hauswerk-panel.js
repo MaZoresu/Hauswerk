@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.60.0";
+const VERSION = "0.61.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -100,6 +100,23 @@ const LEGEND = [
   ["Allgemein", "mdi:bell-badge-outline", C.sun, "Hinweise", "Oben rechts: Hinweise aller Module, rot = Achtung."],
   ["Allgemein", "mdi:account-group-outline", "#e879f9", "Gäste / Party", "Gilt fürs ganze Haus."],
 ];
+/** Anlässe für Benachrichtigungen: k = Einstellung notify_<k>, g = Modul, def = Standard, ex = Beispielmeldung. */
+const NK_KINDS = [
+  { k: "window", g: "Heizwerk", icon: "mdi:window-open-variant", c: C.air, title: "Fenster lange offen", def: "normal", ex: ["Fenster lange offen", "Wohnzimmer: seit 30 Min. offen"], text: "Steht ein Fenster so lange offen, kommt eine Nachricht – einmal je Öffnen." },
+  { k: "offline", g: "Heizwerk", icon: "mdi:thermostat", c: C.alert, title: "Thermostat nicht erreichbar", def: "normal", ex: ["Thermostat nicht erreichbar", "Heizkörper Bad (Bad) seit 15 Min."], text: "Meldet sich ein Thermostat so lange nicht (Funk, Batterie). Kommt es zurück, ist die Sache erledigt." },
+  { k: "frost", g: "Heizwerk", icon: "mdi:snowflake-thermometer", c: C.cool, title: "Frost erwartet", def: "normal", ex: ["Frost erwartet", "Tiefstwert −4 °C morgen (Grenze 0 °C)"], text: "Die Vorhersage der nächsten 3 Tage liegt unter der Grenze „Kälteeinbruch“ (Hauswerk › Wetter)." },
+  { k: "battery", g: "Heizwerk", icon: "mdi:battery-alert-variant-outline", c: C.alert, title: "Batterie schwach", def: "normal", ex: ["Batterie schwach", "Fensterkontakt Bad (Bad): 12 %"], text: "Batterien an Thermostaten, Fensterkontakten und Raumsensoren. Die Grenze gilt auch für die Glocke." },
+  { k: "cold", g: "Heizwerk", icon: "mdi:radiator-off", c: C.alert, title: "Heizkörper bleibt kalt", def: "normal", ex: ["Heizkörper bleibt kalt", "Küche: Ventil seit 1 Std. offen, Raum wird nicht wärmer"], text: "Ventil eine Stunde ≥ 90 % offen, Raum unter Soll und wird nicht wärmer – Luft, Ventilstift oder Heizung prüfen." },
+  { k: "vent", g: "Lüften", icon: "mdi:weather-windy", c: C.air, title: "Lüften empfohlen", def: "off", ex: ["Lüften empfohlen", "Bad: Luftfeuchte 72 % – 10 Min. stoßlüften"], text: "Feucht, Schimmelgefahr, CO₂ oder morgens – mit empfohlener Dauer, einmal je Anlass." },
+  { k: "vent_done", g: "Lüften", icon: "mdi:window-closed-variant", c: C.alert, title: "Fenster schließen", def: "normal", ex: ["Fenster schließen", "Bad: genug gelüftet (10 Min. um)"], text: "Zeit um, Feuchte gesunken oder Raum ausgekühlt." },
+  { k: "storm", g: "Rollwerk", icon: "mdi:weather-windy-variant", c: C.alert, title: "Sturm", def: "normal", ex: ["Sturm – Rollläden fahren hoch", "Böen 82 km/h (Grenze 70 km/h)"], text: "Der Sturmschutz fährt alle Rollläden hoch. Erledigt, sobald er endet." },
+  { k: "cover", g: "Rollwerk", icon: "mdi:window-shutter-alert", c: C.alert, title: "Rollladen nicht erreichbar", def: "normal", ex: ["Rollladen nicht erreichbar", "Küche links meldet sich seit 15 Min. nicht – Funk oder Strom prüfen"], text: "Ein Rollladen meldet sich so lange nicht (gleiche Zeit wie bei Thermostaten)." },
+  { k: "waste", g: "Hauswerk", icon: "mdi:trash-can-outline", c: "#64748b", title: "Müllabfuhr morgen", def: "off", ex: ["Morgen Müllabfuhr", "Restabfall, Papier – Tonne heute Abend rausstellen."], text: "Am Vorabend ab der Uhrzeit unter Hauswerk › Kalender › Müllabholung, einmal je Abholtag." },
+];
+const NK_GROUPS = { Heizwerk: ["#f97316", "logo:heizen"], "Lüften": ["#22d3ee", "mdi:weather-windy"], Rollwerk: ["#0ea5e9", "logo:rollwerk"], Kraftwerk: ["#eab308", "logo:kraftwerk"], Hauswerk: ["#14b8a6", "mdi:home-outline"] };
+const NK_GICON = { App: "mdi:cellphone", Pushover: "mdi:message-badge-outline", Telegram: "mdi:send-circle-outline", "E-Mail": "mdi:email-outline", Sprachausgabe: "mdi:account-voice", Bildschirm: "mdi:tablet", Weitere: "mdi:bell-outline", "Home Assistant": "mdi:home-assistant" };
+/** Kanäle eines Kraftwerk-Geräts (alte Einträge: nur Dienstname, notify_ha). */
+const appChannels = (a) => [...new Set([...(a.notify || []).map((x) => (x.includes(":") || x === "ha" ? x : `svc:${x}`)), ...(a.notify_ha ? ["ha"] : [])])];
 /** Raum-Icon aus dem Namen erraten (reihenfolgeabhängig: spezielle Begriffe zuerst). */
 const ROOM_GUESS = [
   [/wc|toilette|klo/, "mdi:toilet"],
@@ -5719,6 +5736,224 @@ class HauswerkPanel extends HTMLElement {
     };
   }
 
+  // ------------------------------------------------------------ Benachrichtigungen (Fenster)
+  /** Kanäle eines Anlasses im Entwurf: eigene Auswahl oder die Standard-Kanäle. */
+  _nkChannels(k, p = this._settings) {
+    const own = (p.notify_routes || {})[k];
+    return own && own.length ? [...own] : [...(p.notify_channels || [])];
+  }
+
+  /** Kanal für einen Anlass an/aus – gleich den Standard-Kanälen → keine eigene Auswahl. Leer → nur Protokoll. */
+  _nkToggle(k, ch) {
+    const p = this._settings;
+    // Aus bzw. nur Protokoll: kein Kanal angehakt – ein Tipp schaltet mit diesem Kanal ein
+    const cur = ["off", "log"].includes(p[`notify_${k}`]) ? [] : this._nkChannels(k);
+    const i = cur.indexOf(ch);
+    if (i >= 0) cur.splice(i, 1); else cur.push(ch);
+    const def = p.notify_channels || [];
+    const routes = { ...(p.notify_routes || {}) };
+    if (!cur.length) { delete routes[k]; p[`notify_${k}`] = "log"; }
+    else if (cur.length === def.length && cur.every((c) => def.includes(c))) delete routes[k];
+    else routes[k] = cur;
+    p.notify_routes = routes;
+    if (cur.length && ["off", "log"].includes(p[`notify_${k}`])) p[`notify_${k}`] = "normal";
+  }
+
+  /** Alle Kanäle, die irgendwo genutzt werden (Standard, je Anlass, Zeiten, Bündeln). */
+  _nkUsed(p = this._settings) {
+    return [...new Set([...(p.notify_channels || []), ...Object.values(p.notify_routes || {}).flat(),
+      ...Object.keys(p.notify_hours || {}), ...(p.notify_bundle || [])])];
+  }
+
+  _nkTemplate(t) {
+    const p = this._settings;
+    const S = this._hass?.states || {};
+    const all = this._channels(this._nkUsed());
+    const used = this._nkUsed();
+    const apps = all.filter((c) => c.ok && c.group === "App");
+    const appCh = used.filter((c) => apps.some((a) => a.id === c));
+    const phones = appCh.length ? appCh : apps.map((c) => c.id);
+    let voice = used.find((c) => c.startsWith("tts:") || c.startsWith("sat:"));
+    if (!voice) {
+      const tts = Object.keys(S).find((e) => e.startsWith("tts.") && S[e].state !== "unavailable");
+      const players = Object.keys(S).filter((e) => e.startsWith("media_player.") && S[e].state !== "unavailable");
+      const player = players.find((e) => /tab|tablet|fully|wand/.test(`${e} ${S[e].attributes?.friendly_name || ""}`.toLowerCase())) || players[0];
+      const sat = Object.keys(S).find((e) => e.startsWith("assist_satellite.") && S[e].state !== "unavailable");
+      voice = tts && player ? `tts:${tts}|${player}` : sat ? `sat:${sat}` : null;
+    }
+    const set = (k, v) => { p[`notify_${k}`] = v; };
+    if (t === "important") {
+      if (!phones.length) return this._toast("Keine Home-Assistant-App gefunden");
+      p.notify_channels = phones;
+      p.notify_routes = {};
+      for (const k of NK_KINDS.map((x) => x.k)) set(k, ["frost", "storm", "offline", "cold", "cover"].includes(k) ? "important" : "log");
+    } else if (t === "voice") {
+      if (!voice) return this._toast("Keine Ansage möglich – kein Sprachdienst mit Lautsprecher gefunden");
+      const routes = { ...(p.notify_routes || {}) };
+      for (const k of ["window", "vent", "vent_done", "waste"]) { routes[k] = [voice]; set(k, "normal"); }
+      p.notify_routes = routes;
+      p.notify_hours = { ...(p.notify_hours || {}), [voice]: ["08:00", "21:00"] };
+      p.notify_voice_away = true;
+    } else if (t === "calm") {
+      for (const k of NK_KINDS.map((x) => x.k)) set(k, ["frost", "storm"].includes(k) ? "normal" : "log");
+    }
+    this._toast("Vorlage übernommen – mit „Speichern“ übernehmen");
+    this._refreshSettings();
+  }
+
+  _notifyPop(p, { minutes, segs, sw, head, dis }) {
+    if (p.notify_channels == null) p.notify_channels = [...(p.notify_targets || []).map((t) => `svc:${t}`), ...(p.notify_ha ? ["ha"] : [])];
+    for (const x of NK_KINDS) {
+      const key = `notify_${x.k}`;
+      if (p[key] === true || p[key] == null) p[key] = x.def;
+      else if (p[key] === false) p[key] = "off";
+    }
+    const tab = this._nkTab || "what";
+    const ns = this._status?.notify || {};
+    const health = ns.health || {};
+    const routes = p.notify_routes || {};
+    const used = this._nkUsed(p);
+    const info = new Map(this._channels(used).map((c) => [c.id, c]));
+    const chInfo = (id) => info.get(id) || this._chInfo(id);
+    const voiceOf = (ids) => ids.filter((c) => c.startsWith("tts:") || c.startsWith("sat:"));
+    const hm = (iso) => new Date(iso).toLocaleString("de-DE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    const MODES_N = [["off", "Aus", "mdi:bell-off-outline"], ["log", "Protokoll", "mdi:text-box-outline"], ["normal", "Normal", "mdi:bell-outline"], ["important", "Wichtig", "mdi:bell-alert-outline"]];
+    const MODE_TXT = { off: "aus", log: "nur Protokoll", normal: "normal", important: "wichtig" };
+    const dot = (id) => { const h = health[id]; return `<i class="nk-dot ${h ? (h.ok ? "ok" : "bad") : ""}" title="${h ? (h.ok ? `zuletzt zugestellt ${hm(h.at)}` : `Fehler ${hm(h.at)}: ${esc(h.error || "")}`) : "noch nichts gesendet"}"></i>`; };
+    const thr = {
+      window: () => minutes("notify_window_min", 30, 5, 720, 5),
+      offline: () => minutes("notify_offline_min", 15, 1, 720, 5),
+      cover: () => minutes("notify_offline_min", 15, 1, 720, 5),
+      battery: () => minutes("battery_low", 20, 5, 60, 5, "%"),
+    };
+    const sub = (x) => ({
+      window: `ab ${p.notify_window_min ?? 30} Min.`, offline: `seit ${p.notify_offline_min ?? 15} Min.`, cover: `seit ${p.notify_offline_min ?? 15} Min.`,
+      battery: `unter ${p.battery_low ?? 20} %`, frost: `unter ${fmt(p.cold_snap_temp ?? 0)} °C`,
+      waste: p.waste_remind ? `Vorabend ab ${p.waste_remind}` : "Erinnerung unter Kalender aus",
+    }[x.k] || x.sub);
+
+    // ---------- Reiter „Anlässe“
+    const preview = (x, chs) => {
+      const voice = voiceOf(chs);
+      return `<div class="nk-prev"><div class="nk-phone"><ha-icon icon="mdi:home-automation"></ha-icon><span class="grow"><b>${esc(x.ex[0])}</b><small>${esc(x.ex[1])}</small></span><em>jetzt</em></div>
+        ${this._admin && chs.length ? `<div class="nk-pa">
+          <button class="secondary small" data-action="nk-try" data-k="${x.k}" ${dis}><ha-icon icon="mdi:send-outline"></ha-icon>So senden</button>
+          ${voice.length ? `<button class="secondary small" data-action="nk-try" data-k="${x.k}" data-voice="1" ${dis}><ha-icon icon="mdi:account-voice"></ha-icon>Probehören</button>` : ""}</div>` : ""}</div>`;
+    };
+    const kindRow = (x) => {
+      const key = `notify_${x.k}`;
+      const mode = p[key];
+      const on = !["off"].includes(mode);
+      const chs = this._nkChannels(x.k, p);
+      const own = (routes[x.k] || []).length > 0;
+      const open = this._nkOpen === x.k;
+      const to = mode === "off" ? "aus" : mode === "log" ? "nur Protokoll" : chs.length ? chs.map((c) => chInfo(c).label).join(", ") : "kein Kanal";
+      return `<div class="nk-k ${open ? "open" : ""} ${on ? "" : "off"}">
+        <div class="nk-h"><button class="nk-sum" data-action="nk-open" data-k="${x.k}" aria-expanded="${open}">
+          <ha-icon icon="${x.icon}" style="color:${x.c}"></ha-icon><span class="grow"><b>${esc(x.title)}${mode === "important" ? ` <ha-icon class="nk-imp" icon="mdi:bell-alert" title="wichtig"></ha-icon>` : ""}</b><small>${esc(sub(x))} → ${esc(to)}${own ? " · eigene Kanäle" : ""}</small></span>
+          <ha-icon class="nk-chev" icon="mdi:chevron-${open ? "up" : "down"}"></ha-icon></button>
+          <label class="switch"><input type="checkbox" data-action="nk-onoff" data-k="${x.k}" ${on ? "checked" : ""} ${dis}><span></span></label></div>
+        ${open ? `<div class="nk-body">
+          <div class="nk-modes">${segs(key, MODES_N, x.def).replace('class="segs small"', 'class="segs small n4"')}</div>
+          ${thr[x.k] ? `<label class="field narrow"><span>${x.k === "battery" ? "Grenze" : "Ab"}</span>${thr[x.k]()}</label>` : ""}
+          <p class="muted small">${esc(x.text)}</p>
+          ${!["off", "log"].includes(mode) ? `<label class="ch-own"><input type="checkbox" ${own ? "checked" : ""} data-action="ch-route" data-kind="${x.k}" data-on="${own ? "0" : "1"}" ${dis}> eigene Kanäle für diesen Anlass${own ? "" : ` <span class="muted">(sonst: ${esc((p.notify_channels || []).map((c) => chInfo(c).label).join(", ") || "–")})</span>`}</label>
+            ${own ? this._chPicker(`route:${x.k}`, routes[x.k], { disabled: dis, test: false }) : ""}
+            ${preview(x, chs)}` : ""}
+        </div>` : ""}
+      </div>`;
+    };
+    const groups = [...new Set(NK_KINDS.map((x) => x.g))];
+    const apps = this._data.settings.kw_appliances || [];
+    const appRow = `<div class="nk-k"><div class="nk-h"><button class="nk-sum" data-action="kw-dev-open"><ha-icon icon="mdi:washing-machine" style="color:#eab308"></ha-icon><span class="grow"><b>Gerät fertig</b><small>${apps.length ? apps.map((a) => `${esc(a.name || "Gerät")} → ${esc(appChannels(a).map((c) => chInfo(c).label).join(", ") || "kein Kanal")}`).join(" · ") : "Kein Gerät eingerichtet"} · je Gerät unter Kraftwerk › Geräte</small></span><ha-icon class="nk-chev" icon="mdi:chevron-right"></ha-icon></button></div></div>`;
+    const wide = (this.offsetWidth || 0) >= 700;
+    const view = wide ? this._nkView || "table" : "list";
+    const cols = used;
+    const table = `<div class="nk-tbl-w"><table class="nk-tbl"><thead><tr><th>Anlass</th><th>Art</th>${cols.map((c) => `<th title="${esc(chInfo(c).sub || c)}">${dot(c)}${esc(chInfo(c).label)}</th>`).join("")}</tr></thead><tbody>
+      ${groups.map((g) => `<tr class="nk-tg"><td colspan="${cols.length + 2}">${g}</td></tr>${NK_KINDS.filter((x) => x.g === g).map((x) => {
+        const mode = p[`notify_${x.k}`];
+        const chs = this._nkChannels(x.k, p);
+        const live = !["off", "log"].includes(mode);
+        return `<tr><td><ha-icon icon="${x.icon}" style="color:${x.c}"></ha-icon>${esc(x.title)}</td>
+          <td><select data-set="notify_${x.k}" ${dis}>${MODES_N.map(([v, l]) => `<option value="${v}" ${mode === v ? "selected" : ""}>${l}</option>`).join("")}</select></td>
+          ${cols.map((c) => `<td><button class="nk-cell ${live && chs.includes(c) ? "on" : ""}" data-action="nk-cell" data-k="${x.k}" data-ch="${esc(c)}" aria-pressed="${live && chs.includes(c)}" ${dis} title="${esc(x.title)} → ${esc(chInfo(c).label)}"><ha-icon icon="mdi:check"></ha-icon></button></td>`).join("")}</tr>`;
+      }).join("")}`).join("")}
+    </tbody></table></div>`;
+    const tplBar = `<div class="nk-tpl"><small>Vorlagen</small>
+      <button class="pill" data-action="nk-tpl" data-t="important" ${dis}><ha-icon icon="mdi:cellphone-message"></ha-icon>Nur Wichtiges aufs Handy</button>
+      <button class="pill" data-action="nk-tpl" data-t="voice" ${dis}><ha-icon icon="mdi:account-voice"></ha-icon>Ansagen tagsüber</button>
+      <button class="pill" data-action="nk-tpl" data-t="calm" ${dis}><ha-icon icon="mdi:sleep"></ha-icon>Ruhig</button></div>`;
+    const what = `${tplBar}
+      ${wide ? `<div class="segs small nk-view"><button class="seg ${view === "list" ? "on" : ""}" data-action="nk-view" data-v="list"><ha-icon icon="mdi:format-list-bulleted"></ha-icon>Liste</button><button class="seg ${view === "table" ? "on" : ""}" data-action="nk-view" data-v="table"><ha-icon icon="mdi:table"></ha-icon>Tabelle</button></div>` : ""}
+      ${view === "table" ? (cols.length ? table : `<p class="muted">Erst unter „Empfänger“ einen Kanal hinzufügen.</p>`) + `<p class="muted small">Haken = dieser Kanal bekommt den Anlass. Details (Grenzen, Vorschau) in der Liste.</p>`
+        : [...groups, "Kraftwerk"].map((g) => `<div class="nk-g" style="--c:${NK_GROUPS[g][0]}"><div class="nk-gh"><span class="lg-logo">${modIcon(NK_GROUPS[g][1])}</span>${g}</div>${g === "Kraftwerk" ? appRow : NK_KINDS.filter((x) => x.g === g).map(kindRow).join("")}</div>`).join("")}`;
+
+    // ---------- Reiter „Empfänger“
+    const failing = used.filter((c) => health[c] && !health[c].ok);
+    const hours = p.notify_hours || {};
+    const bundle = new Set(p.notify_bundle || []);
+    const card = (id) => {
+      const c = chInfo(id);
+      const h = health[id];
+      const kinds = NK_KINDS.filter((x) => !["off"].includes(p[`notify_${x.k}`]));
+      const devs = apps.filter((a) => appChannels(a).includes(id));
+      const win = hours[id];
+      const voice = id.startsWith("tts:") || id.startsWith("sat:");
+      return `<div class="nk-card ${c.ok ? "" : "bad"}">
+        <div class="nk-ch"><ha-icon icon="${NK_GICON[c.group] || "mdi:bell-outline"}"></ha-icon><span class="grow"><b>${esc(c.label)}</b><small>${esc(c.group)}${c.sub ? ` · ${esc(c.sub)}` : ""}</small></span>
+          <span class="nk-hs">${dot(id)}${h ? (h.ok ? `zugestellt ${hm(h.at)}` : "Fehler") : c.ok ? "bereit" : "nicht erreichbar"}</span></div>
+        ${h && !h.ok ? `<p class="nk-err"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${esc(h.error || "nicht zugestellt")} · ${hm(h.at)}</p>` : ""}
+        <div class="pchips nk-kinds">${kinds.map((x) => { const on = p[`notify_${x.k}`] !== "log" && this._nkChannels(x.k, p).includes(id); return `<button class="pchip ${on ? "on" : ""}" data-action="nk-cell" data-k="${x.k}" data-ch="${esc(id)}" aria-pressed="${on}" ${dis}><i></i>${esc(x.title)}</button>`; }).join("")}
+          ${devs.map((a) => `<span class="pchip on ro" title="unter Kraftwerk › Geräte"><i></i>${esc(a.name || "Gerät")} fertig</span>`).join("")}</div>
+        <div class="nk-opts">
+          <div class="nk-o"><span>Wann</span><div class="segs small"><button class="seg ${win ? "" : "on"}" data-action="nk-hours" data-ch="${esc(id)}" data-v="" ${dis}>Immer</button><button class="seg ${win ? "on" : ""}" data-action="nk-hours" data-ch="${esc(id)}" data-v="${voice ? "08:00-21:00" : "07:00-22:00"}" ${dis}>Zeitraum</button></div>
+            ${win ? `<div class="nrow"><input type="time" data-nk-hours="${esc(id)}" data-i="0" value="${esc(win[0])}" ${dis}><span>–</span><input type="time" data-nk-hours="${esc(id)}" data-i="1" value="${esc(win[1])}" ${dis}></div><small class="muted">außerhalb nur Wichtiges</small>` : ""}</div>
+          ${voice ? "" : `<label class="nk-o"><span>Bündeln<small>mehrere Meldungen binnen 5 Min. zu einer</small></span><span class="switch"><input type="checkbox" data-action="nk-bundle" data-ch="${esc(id)}" ${bundle.has(id) ? "checked" : ""} ${dis}><span></span></span></label>`}
+        </div>
+        <div class="nk-ca">
+          ${this._admin ? `<button class="secondary small" data-action="ch-test1" data-ch="${esc(id)}"><ha-icon icon="mdi:send-outline"></ha-icon>Testen</button>` : ""}
+          <button class="link" data-action="nk-remove" data-ch="${esc(id)}" ${dis}><ha-icon icon="mdi:close"></ha-icon>Entfernen</button>
+        </div>
+      </div>`;
+    };
+    const anyVoice = used.some((c) => c.startsWith("tts:") || c.startsWith("sat:"));
+    const who = `
+      ${failing.length ? `<div class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon><span class="grow">Nicht zugestellt: ${failing.map((c) => esc(chInfo(c).label)).join(", ")}</span>${this._admin ? `<button class="secondary small" data-action="ch-test1" data-ch="${esc(failing.join(","))}">Testen</button>` : ""}</div>` : ""}
+      ${used.length ? `<div class="nk-cards">${used.map(card).join("")}</div>` : `<p class="muted">Noch kein Kanal gewählt – unten hinzufügen.</p>`}
+      ${anyVoice ? `<div class="wxrows">${this._setRow("nva", "Ansagen nur, wenn jemand zu Hause ist", "sonst nur Wichtiges", sw("notify_voice_away"), "Ist niemand zu Hause (Hauswerk › Anwesenheit), sagt Hauswerk nichts an – außer bei „Wichtig“. Ruhezeit gilt für Ansagen immer.")}</div>` : ""}
+      <details class="role-help nk-add" ${used.length ? "" : "open"}><summary><ha-icon icon="mdi:plus"></ha-icon>Kanal hinzufügen · Standard-Kanäle</summary>
+        <p class="muted small">Alles, was in Home Assistant eingerichtet ist: App, Pushover, Telegram, E-Mail, Ansagen (Sprachdienst + Lautsprecher), Sprachassistenten, Anzeige am Tablet. Wählbar sind nur erreichbare Kanäle. Gewählte Kanäle sind die Standard-Kanäle – sie bekommen alle Anlässe ohne eigene Auswahl.</p>
+        ${this._chPicker("default", p.notify_channels, { disabled: dis })}</details>`;
+
+    // ---------- Reiter „Ruhezeit & Verlauf“
+    const ST = { sent: ["mdi:send-check-outline", C.ok, "gesendet"], held: ["mdi:sleep", C.cool, "zurückgehalten"], log: ["mdi:text-box-outline", C.rest, "nur Protokoll"] };
+    const quiet = `
+      <div class="nk-stats">
+        <span style="--c:${C.ok}"><b>${ns.sent ?? 0}</b><small>gesendet heute</small></span>
+        <span style="--c:${C.cool}"><b>${ns.held ?? 0}</b><small>zurückgehalten${ns.queued ? ` · ${ns.queued} wartet` : ""}</small></span>
+        <span style="--c:${C.rest}"><b>${ns.log ?? 0}</b><small>nur Protokoll</small></span>
+        <span style="--c:${(ns.failed ?? 0) ? C.alert : C.rest}"><b>${ns.failed ?? 0}</b><small>nicht zugestellt</small></span>
+      </div>
+      ${head("mdi:sleep", "Ruhezeit")}
+      <div class="wxrows">
+        ${this._setRow("quiet", "Nachts nicht stören", "Nachrichten danach senden, falls noch aktuell", sw("notify_quiet"),
+          "In der Ruhezeit hält Hauswerk normale Nachrichten zurück und schickt sie danach – nur, wenn der Anlass noch besteht. Wichtige kommen sofort, Ansagen gar nicht. Eigene Zeiten je Kanal unter „Empfänger“.")}
+        ${p.notify_quiet ? this._setRow("qtime", "Von – bis", "", `<div class="nrow"><input type="time" data-set="notify_quiet_from" value="${esc(p.notify_quiet_from || "22:00")}" ${dis}><span>–</span><input type="time" data-set="notify_quiet_to" value="${esc(p.notify_quiet_to || "07:00")}" ${dis}></div>`, "Auch über Mitternacht, z. B. 22:00 – 07:00.", true) : ""}
+      </div>
+      ${this._admin && (p.notify_channels || []).length ? `<button class="secondary small" data-action="ch-test" data-list="default"><ha-icon icon="mdi:send-outline"></ha-icon>Testnachricht an alle Standard-Kanäle</button>` : ""}
+      ${head("mdi:history", "Zuletzt")}
+      <div class="nk-hist">${(ns.last || []).map((h) => { const [i, c, l] = ST[h.state] || ST.log; return `<div class="nk-hr"><ha-icon icon="${i}" style="color:${c}"></ha-icon><span class="grow"><b>${esc(h.title)}</b><small>${esc(h.message)}</small><small class="muted">${esc(h.how || l)}</small></span><em>${new Date(h.at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</em></div>`; }).join("") || `<p class="muted small">Noch keine Nachricht.</p>`}</div>
+      <button class="link" data-action="tab" data-tab="log"><ha-icon icon="mdi:text-box-search-outline"></ha-icon>Alle Nachrichten im Protokoll</button>`;
+
+    const tabs = [["what", "mdi:bell-ring-outline", "Anlässe"], ["who", "mdi:account-multiple-outline", "Empfänger"], ["quiet", "mdi:sleep", "Ruhezeit & Verlauf"]];
+    return {
+      icon: "mdi:cellphone-message", c: "#0ea5e9", title: "Benachrichtigungen", sub: "Hauswerk · für Heizwerk, Rollwerk und Kraftwerk",
+      body: `
+        <div class="segs nk-tabs">${tabs.map(([id, i, l]) => `<button class="seg ${tab === id ? "on" : ""}" data-action="nk-tab" data-v="${id}"><ha-icon icon="${i}"></ha-icon>${l}${id === "who" && failing.length ? ` <em class="nk-badge">${failing.length}</em>` : ""}</button>`).join("")}</div>
+        ${tab === "who" ? who : tab === "quiet" ? quiet : what}`,
+    };
+  }
+
   /** Anzeigename eines notify-Dienstes: mobile_app_pixel_8 → Pixel 8. */
   // ------------------------------------------------------------ Benachrichtigungskanäle (gemeinsam für alle Module)
   /** Alle nutzbaren Kanäle aus Home Assistant: Dienste (App, Pushover, Telegram, E-Mail …), notify-Entitäten,
@@ -6794,61 +7029,8 @@ class HauswerkPanel extends HTMLElement {
         };
       }
 
-      case "notify": {
-        const row = (k, title, sub, value, text, ctl) => this._setRow(k, title, sub, value, text, ctl);
-        if (p.notify_channels == null) p.notify_channels = [...(p.notify_targets || []).map((t) => `svc:${t}`), ...(p.notify_ha ? ["ha"] : [])];
-        const routes = p.notify_routes || {};
-        // Art je Anlass (früher an/aus)
-        if (p.notify_waste == null) p.notify_waste = "off";
-        if (p.notify_vent == null) p.notify_vent = "off";
-        if (p.notify_vent_done == null) p.notify_vent_done = "normal";
-        for (const k of ["notify_window", "notify_offline", "notify_frost", "notify_battery", "notify_cold"]) {
-          if (p[k] === true || p[k] == null) p[k] = "normal";
-          else if (p[k] === false) p[k] = "off";
-        }
-        const MODES_N = [["off", "Aus", "mdi:bell-off-outline"], ["log", "Protokoll", "mdi:text-box-outline"], ["normal", "Normal", "mdi:bell-outline"], ["important", "Wichtig", "mdi:bell-alert-outline"]];
-        const kind = (key, title, sub, extra, text) => {
-          const k = key.replace(/^notify_/, "");
-          const own = (routes[k] || []).length > 0;
-          return `<div class="wxsrc">${row(key, title, sub, extra || "", text, !!extra)}<div class="wxr-pk">${segs(key, MODES_N, "normal").replace('class="segs small"', 'class="segs small n4"')}</div>
-            ${p[key] !== "off" && p[key] !== "log" ? `<details class="role-help ch-route" ${own ? "open" : ""}><summary>Kanäle: ${own ? esc(routes[k].map((c) => this._chName(c)).join(", ")) : "Standard"}</summary>
-              <label class="ch-own"><input type="checkbox" ${own ? "checked" : ""} data-action="ch-route" data-kind="${k}" data-on="${own ? "0" : "1"}" ${dis}> eigene Kanäle für diesen Anlass</label>
-              ${own ? this._chPicker(`route:${k}`, routes[k], { disabled: dis }) : ""}</details>` : ""}</div>`;
-        };
-        return {
-          icon: "mdi:cellphone-message", c: "#0ea5e9", title: "Benachrichtigungen", sub: "Hauswerk · für Heizwerk, Rollwerk und Kraftwerk",
-          body: `
-            ${head("mdi:send-variant-outline", "Kanäle")}
-            <p class="muted small">Alles, was in Home Assistant zum Benachrichtigen eingerichtet ist: Home-Assistant-App, Pushover, Telegram, E-Mail, Ansagen über Lautsprecher (Sprachdienst + Gerät), Sprachassistenten, Anzeige am Tablet und weitere. Wählbar sind nur Kanäle, die gerade erreichbar sind. Diese Auswahl gilt für alle Anlässe – je Anlass lassen sich unten eigene Kanäle wählen, Geräte in Kraftwerk haben eine eigene Auswahl.</p>
-            ${this._chPicker("default", p.notify_channels, { disabled: dis })}
-            ${head("mdi:bell-ring-outline", "Wann und wie?")}
-            <p class="muted small">Je Anlass: <b>Aus</b> · <b>Protokoll</b> (nur dort, kein Push) · <b>Normal</b> (Push, in der Ruhezeit zurückgehalten) · <b>Wichtig</b> (sofort, auch in der Ruhezeit; durchbricht „Nicht stören“ auf dem iPhone, hohe Priorität auf Android). Ansagen kommen in der Ruhezeit nur bei „Wichtig“. Dieselbe Nachricht kommt nur einmal – bis der Anlass erledigt ist.</p>
-            <div class="wxsrcs">
-              ${kind("notify_window", "Fenster lange offen", `ab ${p.notify_window_min ?? 30} Min.`, minutes("notify_window_min", 30, 5, 720, 5),
-                "Steht ein Fenster eines Raums so lange offen, kommt eine Nachricht – einmal je Öffnen.")}
-              ${kind("notify_offline", "Thermostat nicht erreichbar", `seit ${p.notify_offline_min ?? 15} Min.`, minutes("notify_offline_min", 15, 1, 720, 5),
-                "Meldet sich ein Thermostat so lange nicht mehr (z. B. Funk weg, Batterie leer), kommt eine Nachricht. Kommt es zurück, ist die Sache erledigt.")}
-              ${kind("notify_frost", "Frost erwartet", `Vorhersage unter ${fmt(p.cold_snap_temp ?? 0)} °C · Grenze unter Wetter`, "",
-                "Sagt die Wettervorhersage für die nächsten 3 Tage einen Tiefstwert unter der Grenze „Kälteeinbruch“ (Hauswerk › Wetter) voraus, kommt eine Nachricht.")}
-              ${kind("notify_battery", "Batterie schwach", `unter ${p.battery_low ?? 20} %`, minutes("battery_low", 20, 5, 60, 5, "%"),
-                "Hauswerk sucht an Thermostaten, Fensterkontakten und Raumsensoren nach Batterie-Sensoren. Liegt einer unter der Grenze, erscheint ein Hinweis unter der Glocke – und je nach Art eine Nachricht. Die Grenze gilt auch für die Glocke.")}
-              ${kind("notify_cold", "Heizkörper bleibt kalt", "Ventil offen, Raum wird nicht wärmer", "",
-                "Steht ein Ventil eine Stunde lang auf 90 % oder mehr, der Raum liegt mindestens 0,5 °C unter Soll und wird trotzdem nicht wärmer, kommt eine Nachricht. Mögliche Ursachen: Luft im Heizkörper, hängender Ventilstift oder die Heizung liefert keine Wärme.")}
-              ${kind("notify_vent", "Lüften empfohlen", "feucht, Schimmelgefahr, CO₂ oder morgens", "", "Sollte ein Raum gelüftet werden, kommt eine Nachricht mit der empfohlenen Dauer – einmal je Anlass.")}
-              ${kind("notify_vent_done", "Fenster schließen", "genug gelüftet", "", "Ist ein Fenster lange genug offen (Zeit um, Feuchte gesunken oder Raum ausgekühlt), kommt „Fenster schließen“.")}
-              ${kind("notify_waste", "Müllabfuhr morgen", p.waste_remind ? `am Vorabend ab ${p.waste_remind} · unter Kalender` : "Erinnerung unter Kalender aus", "",
-                "Am Abend vor der Abholung (ab der Uhrzeit unter Hauswerk › Kalender › Müllabholung) kommt eine Nachricht mit den Abfallarten – einmal je Abholtag.")}
-            </div>
-            ${head("mdi:sleep", "Ruhezeit")}
-            <div class="wxrows">
-              ${row("quiet", "Nachts nicht stören", "Nachrichten danach senden, falls noch aktuell", sw("notify_quiet"),
-                "In der Ruhezeit hält Hauswerk Nachrichten zurück und schickt sie danach – aber nur, wenn der Anlass noch besteht (das Fenster also noch offen ist). Im Protokoll stehen sie sofort.")}
-              ${p.notify_quiet ? row("qtime", "Von – bis", "", `<div class="nrow"><input type="time" data-set="notify_quiet_from" value="${esc(p.notify_quiet_from || "22:00")}" ${dis}><span>–</span><input type="time" data-set="notify_quiet_to" value="${esc(p.notify_quiet_to || "07:00")}" ${dis}></div>`,
-                "Auch über Mitternacht, z. B. 22:00 – 07:00.", true) : ""}
-            </div>
-            <p class="muted small"><ha-icon icon="mdi:text-box-search-outline"></ha-icon>Jede Nachricht steht auch im <button class="link inline" data-action="tab" data-tab="log">Protokoll</button> unter „Nachrichten“ – mit dem Hinweis, ob sie gesendet oder zurückgehalten wurde.</p>`,
-        };
-      }
+      case "notify":
+        return this._notifyPop(p, { minutes, segs, sw, head, dis });
 
       case "vent": {
         const withHum = rooms.filter((r) => r.humidity_sensor);
@@ -8055,6 +8237,16 @@ class HauswerkPanel extends HTMLElement {
   // ------------------------------------------------------------ Ereignisse
   _onInput(e, isChange = false) {
     const t = e.target;
+    if (t.dataset.nkHours !== undefined && this._settings) {
+      const h = { ...(this._settings.notify_hours || {}) };
+      const cur = [...(h[t.dataset.nkHours] || ["08:00", "21:00"])];
+      if (t.value) cur[Number(t.dataset.i)] = t.value;
+      h[t.dataset.nkHours] = cur;
+      this._settings.notify_hours = h;
+      const bar = this.shadowRoot.getElementById("set-save");
+      if (bar) bar.hidden = !this._settingsDirty();
+      return;
+    }
     if (t.dataset.legendQ !== undefined) {
       // Legende filtern, ohne neu zu zeichnen (Fokus und Tastatur bleiben)
       const q = t.value.toLowerCase().trim();
@@ -8890,6 +9082,89 @@ class HauswerkPanel extends HTMLElement {
         this._toast(`${name}: ${fmt(d.temp)} °C ${d.hours ? `für ${d.hours} h` : "bis zum nächsten Planwechsel"}`);
         break;
       }
+      case "nk-tab":
+        this._nkTab = el.dataset.v;
+        this._nkOpen = null;
+        this._renderPop();
+        break;
+      case "nk-open":
+        this._nkOpen = this._nkOpen === el.dataset.k ? null : el.dataset.k;
+        this._renderPop();
+        break;
+      case "nk-view":
+        this._nkView = el.dataset.v;
+        this._renderPop();
+        break;
+      case "nk-onoff": {
+        const k = `notify_${el.dataset.k}`;
+        const def = NK_KINDS.find((x) => x.k === el.dataset.k)?.def;
+        this._nkLast = this._nkLast || {};
+        if (this._settings[k] !== "off") { this._nkLast[k] = this._settings[k]; this._settings[k] = "off"; }
+        else this._settings[k] = this._nkLast[k] || (def === "off" ? "normal" : def);
+        this._refreshSettings();
+        break;
+      }
+      case "nk-cell":
+        this._nkToggle(el.dataset.k, el.dataset.ch);
+        this._refreshSettings();
+        break;
+      case "nk-tpl":
+        this._nkTemplate(el.dataset.t);
+        break;
+      case "nk-hours": {
+        const h = { ...(this._settings.notify_hours || {}) };
+        if (el.dataset.v) h[el.dataset.ch] = el.dataset.v.split("-"); else delete h[el.dataset.ch];
+        this._settings.notify_hours = h;
+        this._refreshSettings();
+        break;
+      }
+      case "nk-bundle": {
+        const b = new Set(this._settings.notify_bundle || []);
+        if (b.has(el.dataset.ch)) b.delete(el.dataset.ch); else b.add(el.dataset.ch);
+        this._settings.notify_bundle = [...b];
+        this._refreshSettings();
+        break;
+      }
+      case "nk-remove": {
+        const ch = el.dataset.ch;
+        const p = this._settings;
+        p.notify_channels = (p.notify_channels || []).filter((c) => c !== ch);
+        const routes = {};
+        for (const [k, l] of Object.entries(p.notify_routes || {})) { const r = l.filter((c) => c !== ch); if (r.length) routes[k] = r; }
+        p.notify_routes = routes;
+        const h = { ...(p.notify_hours || {}) }; delete h[ch]; p.notify_hours = h;
+        p.notify_bundle = (p.notify_bundle || []).filter((c) => c !== ch);
+        this._refreshSettings();
+        break;
+      }
+      case "nk-try": {
+        const x = NK_KINDS.find((k) => k.k === el.dataset.k);
+        let channels = this._nkChannels(x.k);
+        if (el.dataset.voice) channels = channels.filter((c) => c.startsWith("tts:") || c.startsWith("sat:"));
+        try {
+          const res = await this._ws({ type: "hauswerk/notify/test", channels, title: x.ex[0], message: x.ex[1] });
+          const bad = (res?.results || []).filter((r) => !r.ok);
+          this._toast(bad.length ? `Nicht zugestellt: ${bad.map((r) => `${this._chName(r.channel)} (${r.error})`).join(", ")}` : el.dataset.voice ? "Ansage abgespielt" : `„${x.ex[0]}“ gesendet`);
+        } catch (err) {
+          this._toast(`Das hat nicht geklappt: ${err?.message || err}`);
+        }
+        break;
+      }
+      case "ch-test1": {
+        const channels = el.dataset.ch.split(",");
+        try {
+          const res = await this._ws({ type: "hauswerk/notify/test", channels });
+          const bad = (res?.results || []).filter((r) => !r.ok);
+          this._toast(bad.length ? `Nicht zugestellt: ${bad.map((r) => `${this._chName(r.channel)} (${r.error})`).join(", ")}` : "Testnachricht gesendet");
+        } catch (err) {
+          this._toast(`Das hat nicht geklappt: ${err?.message || err}`);
+        }
+        break;
+      }
+      case "kw-dev-open":
+        this._closePop();
+        this._setView("kwdev");
+        break;
       case "legend-open":
         this._openPop("legend", { first: el.dataset.first || "", q: "" });
         break;
@@ -11285,6 +11560,72 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .rwm-win.big { width:34px; height:42px; border-radius:7px; }
 .rwm-nx { margin-left:auto; display:inline-flex; align-items:center; gap:3px; font-size:12px; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .rwm-nx ha-icon { --mdc-icon-size:13px; }
+.nk-tabs { display:flex; margin-bottom:14px; }
+.nk-tabs .seg { flex:1; }
+.nk-badge { font-style:normal; background:#ef4444; color:#fff; border-radius:9px; padding:0 6px; font-size:11px; margin-left:4px; }
+.nk-tpl { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:12px; }
+.nk-tpl small { color:var(--muted); font-weight:600; font-size:12px; margin-right:4px; }
+.nk-view { margin-bottom:10px; }
+.nk-g { margin-bottom:14px; }
+.nk-gh { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--c); margin:0 0 6px; }
+.nk-k { border:1px solid var(--line); border-left:3px solid var(--c); border-radius:12px; margin-bottom:6px; background:var(--card); }
+.nk-k.off { opacity:.62; }
+.nk-h { display:flex; align-items:center; gap:8px; padding-right:10px; }
+.nk-sum { all:unset; cursor:pointer; flex:1; min-width:0; display:flex; align-items:center; gap:10px; padding:10px 12px; }
+.nk-sum b { display:block; font-size:14px; }
+.nk-sum small { display:block; color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.nk-k.open .nk-sum small { white-space:normal; }
+.nk-imp { --mdc-icon-size:14px; color:#ef4444; vertical-align:-2px; }
+.nk-chev { color:var(--muted); --mdc-icon-size:20px; }
+.nk-body { padding:0 12px 12px; display:flex; flex-direction:column; gap:8px; }
+.nk-prev { display:flex; flex-direction:column; gap:6px; }
+.nk-phone { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:16px; background:var(--card2); box-shadow:0 1px 3px rgba(0,0,0,.12); max-width:420px; }
+.nk-phone > ha-icon { --mdc-icon-size:22px; color:#18bcf2; }
+.nk-phone b { display:block; font-size:13.5px; }
+.nk-phone small { display:block; font-size:12.5px; color:var(--muted); }
+.nk-phone em { font-style:normal; font-size:11px; color:var(--muted); align-self:flex-start; }
+.nk-pa { display:flex; gap:6px; flex-wrap:wrap; }
+.nk-tbl-w { overflow-x:auto; margin-bottom:6px; }
+.nk-tbl { border-collapse:collapse; width:100%; font-size:13px; }
+.nk-tbl th { font-size:11.5px; font-weight:700; color:var(--muted); text-align:center; padding:6px 4px; white-space:nowrap; }
+.nk-tbl th:first-child, .nk-tbl td:first-child { text-align:left; }
+.nk-tbl td { border-top:1px solid var(--line); padding:4px; text-align:center; white-space:nowrap; }
+.nk-tbl td:first-child ha-icon { --mdc-icon-size:17px; margin-right:6px; vertical-align:-3px; }
+.nk-tbl select { font-size:12px; padding:2px 4px; }
+.nk-tg td { font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding-top:10px; border-top:none; }
+.nk-cell { width:30px; height:30px; border-radius:8px; border:1px solid var(--line2); background:none; color:transparent; cursor:pointer; display:inline-grid; place-items:center; }
+.nk-cell ha-icon { --mdc-icon-size:18px; }
+.nk-cell.on { background:#0ea5e9; border-color:#0ea5e9; color:#fff; }
+.nk-dot { display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--line2); margin-right:5px; vertical-align:1px; }
+.nk-dot.ok { background:#22c55e; } .nk-dot.bad { background:#ef4444; }
+.nk-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:10px; margin-bottom:12px; }
+.nk-card { border:1px solid var(--line); border-radius:14px; padding:12px; display:flex; flex-direction:column; gap:8px; background:var(--card); }
+.nk-card.bad { border-color:#ef4444; }
+.nk-ch { display:flex; align-items:center; gap:10px; }
+.nk-ch > ha-icon { --mdc-icon-size:22px; color:#0ea5e9; }
+.nk-ch b { display:block; font-size:14px; } .nk-ch small { display:block; color:var(--muted); font-size:11.5px; }
+.nk-hs { font-size:11.5px; color:var(--muted); white-space:nowrap; }
+.nk-err { margin:0; font-size:12px; color:#ef4444; display:flex; gap:6px; align-items:center; }
+.nk-kinds { justify-content:flex-start; }
+.nk-kinds .pchip { font-size:12px; }
+.nk-o .segs { display:inline-flex; flex-direction:row; width:auto; flex:none; }
+.nk-o .segs .seg { flex:none; width:auto; padding:0 12px; }
+.nk-o .nrow { display:flex; align-items:center; gap:6px; }
+.pchip.ro { cursor:default; opacity:.8; }
+.nk-opts { display:flex; flex-direction:column; gap:6px; }
+.nk-o { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:13px; }
+.nk-o > span:first-child { min-width:60px; color:var(--muted); }
+.nk-o small { display:block; font-size:11px; color:var(--muted); }
+.nk-ca { display:flex; justify-content:space-between; align-items:center; }
+.nk-stats { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin-bottom:12px; }
+.nk-stats span { border-radius:12px; padding:8px; background:color-mix(in srgb, var(--c) 12%, transparent); text-align:center; }
+.nk-stats b { display:block; font-size:20px; color:var(--c); }
+.nk-stats small { font-size:11px; color:var(--muted); }
+.nk-hist { display:flex; flex-direction:column; gap:6px; margin-bottom:8px; }
+.nk-hr { display:flex; gap:10px; align-items:flex-start; }
+.nk-hr b { display:block; font-size:13px; } .nk-hr small { display:block; font-size:12px; }
+.nk-hr em { font-style:normal; font-size:12px; color:var(--muted); }
+@media (max-width:560px) { .nk-stats { grid-template-columns:repeat(2,1fr); } .nk-tabs .seg { font-size:12px; padding:0 6px; } }
 .lg-colors { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px 12px; margin:4px 0 12px; }
 .lg-c { display:grid; grid-template-columns:14px 1fr; column-gap:8px; align-items:center; align-content:start; font-size:13px; }
 .lg-c b { font-size:13px; }

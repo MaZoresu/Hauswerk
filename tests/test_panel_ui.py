@@ -1105,10 +1105,10 @@ def test_rollwerk_tagesleiste_beschattung_nur_wenn_zu_erwarten(panel):
 
 
 def test_benachrichtigungskanaele(panel):
-    """Benachrichtigungen: alle Kanäle nach Art (App, Pushover, Telegram, Ansage …), nicht erreichbare nicht wählbar,
-    Ansage hinzufügen, eigene Kanäle je Anlass, Test an die Auswahl; Gerät nutzt dieselbe Auswahl."""
+    """Benachrichtigungen › Empfänger: Kanäle nach Art, nicht erreichbare nicht wählbar, Ansage hinzufügen;
+    Anlässe als Liste: eigene Kanäle je Anlass, Vorschau, Probehören; Speichern gegen das Backend-Schema."""
     p = panel
-    p.js(f"() => {{ {EL}._openPop('notify'); }}")
+    p.js(f"() => {{ {EL}._nkTab = 'who'; {EL}._openPop('notify'); }}")
     p.wait()
     body = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
     for t in ("Pushover", "Telegram", "Jules iPhone", "Tablet Overlay-Nachricht", "Mitteilung (Glocke)", "Ansage hinzufügen"):
@@ -1116,24 +1116,65 @@ def test_benachrichtigungskanaele(panel):
     assert p.js(f"{EL}._settings.notify_channels") == ["svc:mobile_app_pixel_8"]
     p.click('#pop [data-action="ch-toggle"][data-list="default"][data-ch="svc:pushover"]')
     p.click('#pop [data-action="ch-toggle"][data-list="default"][data-ch="ent:notify.jules_iphone"]')
-    # Ansage: Fernseher ist nicht erreichbar → nicht in der Auswahl, Tablet schon
     assert p.js(f"[...{EL}.shadowRoot.querySelectorAll('#pop [data-tts-player] option')].map(o => o.value)") == ["media_player.tablet"]
     p.click('#pop [data-action="ch-tts-add"][data-list="default"]')
     chans = p.js(f"{EL}._settings.notify_channels")
     assert chans == ["svc:mobile_app_pixel_8", "svc:pushover", "ent:notify.jules_iphone", "tts:tts.google_translate|media_player.tablet"]
-    # eigene Kanäle für „Fenster schließen“
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('#pop .nk-card').length") == 4
+    # Anlässe als Liste: „Fenster schließen“ aufklappen, eigene Kanäle, Vorschau
+    p.click('#pop [data-action="nk-tab"][data-v="what"]')
+    p.js(f"() => {{ {EL}._nkView = 'list'; {EL}._renderPop(); }}")
+    p.click('#pop [data-action="nk-open"][data-k="vent_done"]')
+    assert "Bad: genug gelüftet" in p.js(f"{EL}.shadowRoot.querySelector('#pop .nk-phone').textContent")
     p.click('#pop [data-action="ch-route"][data-kind="vent_done"]')
     p.click('#pop [data-action="ch-toggle"][data-list="route:vent_done"][data-ch="svc:mobile_app_pixel_8"]')
     assert p.js(f"{EL}._settings.notify_routes.vent_done") == ["svc:pushover", "ent:notify.jules_iphone", "tts:tts.google_translate|media_player.tablet"]
-    p.click('#pop [data-action="ch-test"][data-list="default"]')
+    p.click('#pop [data-action="nk-try"][data-k="vent_done"][data-voice="1"]')
     p.wait(200)
     test = [m for m in p.sent() if m["type"] == "hauswerk/notify/test"][-1]
-    assert test["channels"] == chans
+    assert test["channels"] == ["tts:tts.google_translate|media_player.tablet"] and test["title"] == "Fenster schließen"
     p.click('#pop [data-action="pop-save"]')
     p.wait(300)
     saved = [m for m in p.sent() if m["type"].endswith("settings/save") and "notify_channels" in m.get("settings", {})][-1]["settings"]
     assert saved["notify_channels"] == chans and saved["notify_routes"]["vent_done"][0] == "svc:pushover"
 
+
+def test_benachrichtigung_tabelle_vorlagen(panel):
+    """Tabelle Anlass × Kanal, An/Aus je Anlass, Vorlagen, Zeiten und Bündeln je Kanal, Verlauf; Backend-Schema."""
+    p = panel
+    p.page.set_viewport_size({"width": 1100, "height": 900})  # Tabelle nur auf breiten Bildschirmen
+    p.js(f"() => {{ {EL}._settings = null; {EL}._nkTab = 'what'; {EL}._nkView = 'table'; {EL}._openPop('notify'); }}")
+    p.wait()
+    assert p.has('#pop table.nk-tbl')
+    # Tabelle: Frost auch an Pushover? Pushover ist noch kein Kanal → erst Spalte nur „Pixel 8“
+    p.click('#pop [data-action="nk-cell"][data-k="frost"][data-ch="svc:mobile_app_pixel_8"]')
+    assert p.js(f"{EL}._settings.notify_frost") == "log"  # letzter Kanal weg → nur Protokoll
+    p.click('#pop [data-action="nk-cell"][data-k="frost"][data-ch="svc:mobile_app_pixel_8"]')
+    assert p.js(f"{EL}._settings.notify_frost") == "normal"
+    # Vorlage „Nur Wichtiges aufs Handy“
+    p.click('#pop [data-action="nk-tpl"][data-t="important"]')
+    assert p.js(f"{EL}._settings.notify_storm") == "important" and p.js(f"{EL}._settings.notify_window") == "log"
+    # Liste: An/Aus
+    p.js(f"() => {{ {EL}._nkView = 'list'; {EL}._renderPop(); }}")
+    p.click('#pop [data-action="nk-onoff"][data-k="window"]')
+    assert p.js(f"{EL}._settings.notify_window") == "off"
+    p.click('#pop [data-action="nk-onoff"][data-k="window"]')
+    assert p.js(f"{EL}._settings.notify_window") == "log"
+    assert "Rollwerk" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    # Empfänger: Zeitraum und Bündeln
+    p.click('#pop [data-action="nk-tab"][data-v="who"]')
+    p.click('#pop [data-action="nk-hours"][data-ch="svc:mobile_app_pixel_8"][data-v="07:00-22:00"]')
+    p.click('#pop [data-action="nk-bundle"][data-ch="svc:mobile_app_pixel_8"]')
+    assert p.js(f"{EL}._settings.notify_hours")["svc:mobile_app_pixel_8"] == ["07:00", "22:00"]
+    assert p.js(f"{EL}._settings.notify_bundle") == ["svc:mobile_app_pixel_8"]
+    # Ruhezeit & Verlauf
+    p.click('#pop [data-action="nk-tab"][data-v="quiet"]')
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    assert "gesendet heute" in txt and "Fenster schließen" in txt
+    p.click('#pop [data-action="pop-save"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"].endswith("settings/save") and "notify_bundle" in m.get("settings", {})][-1]["settings"]
+    assert saved["notify_storm"] == "important" and saved["notify_hours"]["svc:mobile_app_pixel_8"] == ["07:00", "22:00"]
 
 def test_kamin(panel):
     """Kamin: Symbol mit „vielleicht“, Schnellmenü „Kamin an“, Raum-Dialog mit Haken und Signal (Backend-Schema)."""

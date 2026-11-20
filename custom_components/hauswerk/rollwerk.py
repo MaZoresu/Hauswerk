@@ -1042,6 +1042,11 @@ class Rollwerk:
         if self._storm != storm_before:
             self._log("shutter", "Sturmschutz: Rollläden hoch" if self._storm else "Sturmschutz beendet",
                          f"Böen {gust:.0f} km/h · Grenze {limit:.0f} km/h" if gust is not None else None)
+            if self._storm:
+                self.haus.notify("rw_storm", "storm", "Sturm – Rollläden fahren hoch",
+                                 f"Böen {gust:.0f} km/h (Grenze {limit:.0f} km/h)" if gust is not None else "Sturmgrenze erreicht")
+            else:
+                self.haus.clear("rw_storm")
         self._gust = gust
         last_run = float(self._persist.get("last_run") or 0)
         recovery = self.settings.get("rw_recovery") or "never"
@@ -1052,7 +1057,14 @@ class Rollwerk:
             rt = self._rt.setdefault(entity_id, {})
             if state is None or state.state in BAD:
                 rt["unavailable"] = True
+                rt.setdefault("bad_since", now)
+                limit_min = float(self.haus.settings.get("notify_offline_min") or 15)
+                if now - rt["bad_since"] >= limit_min * 60:
+                    self.haus.notify(f"rw_cover:{entity_id}", "cover", "Rollladen nicht erreichbar",
+                                     f"{self._name(entity_id)} meldet sich seit {int((now - rt['bad_since']) // 60)} Min. nicht – Funk oder Strom prüfen")
                 continue
+            if rt.pop("bad_since", None) is not None:
+                self.haus.clear(f"rw_cover:{entity_id}")
             rt["unavailable"] = False
             pos = self._pos(entity_id)
             # Von Hand verstellt? (Stellung ändert sich, ohne dass Rollwerk gerade fährt)

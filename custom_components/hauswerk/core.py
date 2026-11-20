@@ -113,7 +113,10 @@ class Haus:
         # Benachrichtigungen: zuletzt gesendet je Schlüssel, in der Ruhezeit zurückgehalten, gerade aktuell
         self._sent: dict[str, float] = {}
         self._queued: dict[str, tuple] = {}
-        self._recent: dict[tuple, float] = {}  # (Kanal, Titel, Text) → gesendet um: gegen Doppel nach Neuladen o. Ä.
+        self._recent: dict[tuple, float] = {}
+        self.notify_health: dict[str, dict] = {}   # Kanal → letzte Zustellung {ok, at, error}
+        self.notify_hist: list[dict] = []          # letzte Nachrichten {at, title, message, kind, how, channels}
+        self._bundle: dict[str, dict] = {}         # Kanal → {last, items, timer}  # (Kanal, Titel, Text) → gesendet um: gegen Doppel nach Neuladen o. Ä.
         self._active: set[str] = set()
         # Wettervorhersage (Frost)
         self._fc_at = 0.0
@@ -159,10 +162,15 @@ class Haus:
             self.settings["notify_channels"] = [f"svc:{t}" for t in self.settings.get("notify_targets") or []] + (
                 ["ha"] if self.settings.get("notify_ha") else [])
         self.settings = {k: v for k, v in self.settings.items() if k in HOUSE_KEYS}
-        await self._store.async_save({"settings": self.settings})
+        self.notify_health = stored.get("notify_health") or {}
+        self.notify_hist = stored.get("notify_hist") or []
+        await self._store.async_save(self._data())
+
+    def _data(self) -> dict:
+        return {"settings": self.settings, "notify_health": self.notify_health, "notify_hist": self.notify_hist[-40:]}
 
     def _save(self) -> None:
-        self._store.async_delay_save(lambda: {"settings": self.settings}, 2)
+        self._store.async_delay_save(self._data, 2)
 
     # ------------------------------------------------------------ Lebenszyklus
     async def async_start(self) -> None:
@@ -651,19 +659,60 @@ class Haus:
         durch Neuladen/Wiederverbinden). Ansagen in der Ruhezeit nur, wenn wichtig. Rückgabe: gesendete Kanäle."""
         now = dt_util.utcnow().timestamp()
         self._recent = {k: t for k, t in self._recent.items() if now - t < 120}
+        local = dt_util.now()
+        now_min = local.hour * 60 + local.minute
+        hours = self.settings.get("notify_hours") or {}
+        bundle = set(self.settings.get("notify_bundle") or [])
         sent = []
         for ch in dict.fromkeys(channels):
             if (ch, title, message) in self._recent:
                 continue
             if not self.channel_ok(ch):
                 self.log.add("notify", "Kanal nicht erreichbar", f"{self.channel_name(ch)} ({ch}) – übersprungen")
+                self._health(ch, False, "nicht erreichbar")
                 continue
-            if ch.startswith(("tts:", "sat:")) and self._quiet() and not important:
-                continue
+            voice = ch.startswith(("tts:", "sat:"))
+            if not important:
+                if voice and (self._quiet() or (self.settings.get("notify_voice_away", True) and self.away)):
+                    continue  # Ansagen nicht nachts und nicht ins leere Haus
+                win = hours.get(ch)
+                if win and len(win) == 2 and not in_quiet_hours(now_min, win[0], win[1]):
+                    continue  # außerhalb der Zeiten dieses Kanals nur Wichtiges
             self._recent[(ch, title, message)] = now
+            if ch in bundle and not important and self._bundle_add(ch, title, message, now):
+                sent.append(ch)
+                continue
             self.hass.async_create_task(self._async_channel(ch, title, message, important, key))
             sent.append(ch)
         return sent
+
+    def _bundle_add(self, ch: str, title: str, message: str, now: float) -> bool:
+        """Bündeln: Die erste Meldung geht sofort raus; weitere binnen 5 Min. kommen gesammelt am Ende des Fensters.
+        Rückgabe True = zurückgelegt (nicht sofort senden)."""
+        b = self._bundle.get(ch)
+        if not b or now - b["last"] >= 300:
+            self._bundle[ch] = {"last": now, "items": [], "timer": None}
+            return False
+        b["items"].append((title, message))
+        if b["timer"] is None:
+            @callback
+            def flush(_now=None, ch=ch) -> None:
+                bb = self._bundle.get(ch)
+                if not bb or not bb["items"]:
+                    return
+                items, bb["items"], bb["timer"] = bb["items"], [], None
+                bb["last"] = dt_util.utcnow().timestamp()
+                if len(items) == 1:
+                    t, m = items[0]
+                else:
+                    t, m = f"Hauswerk: {len(items)} Meldungen", "\n".join(f"• {a}: {c}" for a, c in items)
+                self.hass.async_create_task(self._async_channel(ch, t, m))
+            b["timer"] = async_call_later(self.hass, max(1, 300 - (now - b["last"])), flush)
+        return True
+
+    def _health(self, ch: str, ok: bool, error: str | None = None) -> None:
+        self.notify_health[ch] = {"ok": ok, "at": dt_util.utcnow().isoformat(), **({"error": error} if error else {})}
+        self._save()
 
     async def _async_channel(self, ch: str, title: str, message: str, important: bool = False,
                              key: str | None = None, raise_errors: bool = False) -> None:
@@ -690,9 +739,11 @@ class Haus:
             return
         try:
             await self.hass.services.async_call(domain, service, data, blocking=True)
+            self._health(ch, True)
         except Exception as err:  # noqa: BLE001 - Kanal weg oder falsch eingerichtet: nur protokollieren
             _LOGGER.warning("Benachrichtigung über %s fehlgeschlagen: %s", ch, err)
             self.log.add("notify", "Nachricht nicht zugestellt", f"{self.channel_name(ch)}: {err}")
+            self._health(ch, False, str(err) or type(err).__name__)
             if raise_errors:
                 raise
 
@@ -734,7 +785,26 @@ class Haus:
         else:
             sent = self.send(targets, title, message, important, key)
             how = f"{'wichtig ' if important else ''}gesendet an {', '.join(self.channel_name(c) for c in sent) or '– (kein Kanal erreichbar)'}"
+        state = "log" if mode == "log" or not targets else "held" if key in self._queued else "sent"
+        self._hist(title, message, kind, state, how)
         self.log.add("notify", title, f"{message} · {how}", room, room_name)
+
+    def _hist(self, title: str, message: str, kind: str | None, state: str, how: str) -> None:
+        self.notify_hist.append({"at": dt_util.utcnow().isoformat(), "title": title, "message": message,
+                                 "kind": kind, "state": state, "how": how})
+        del self.notify_hist[:-40]
+        self._save()
+
+    def notify_summary(self) -> dict:
+        """Heute gesendet / zurückgehalten / nur Protokoll / nicht zugestellt, letzte Nachrichten und Zustand der Kanäle."""
+        today = dt_util.now().date()
+        day = [h for h in self.notify_hist if dt_util.as_local(dt_util.parse_datetime(h["at"])).date() == today]
+        failed = sum(1 for v in self.notify_health.values() if not v.get("ok")
+                     and dt_util.as_local(dt_util.parse_datetime(v["at"])).date() == today)
+        return {"sent": sum(1 for h in day if h["state"] == "sent"), "held": sum(1 for h in day if h["state"] == "held"),
+                "log": sum(1 for h in day if h["state"] == "log"), "failed": failed,
+                "last": list(reversed(self.notify_hist[-10:])), "health": self.notify_health,
+                "queued": len(self._queued)}
 
     @callback
     def clear(self, key: str) -> None:
@@ -755,6 +825,7 @@ class Haus:
             if key in self._active:
                 kind = rest[0] if rest else None
                 sent = self.send(self.channels_for(kind), title, message, False, key)
+                self._hist(title, message, kind, "sent", "nach der Ruhezeit gesendet")
                 self.log.add("notify", title, f"{message} · nach der Ruhezeit gesendet an {', '.join(self.channel_name(c) for c in sent)}", room, room_name)
 
     @staticmethod
@@ -778,9 +849,12 @@ class Haus:
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("%s.%s fehlgeschlagen: %s", domain, service, err)
 
-    async def async_test_notify(self, by: str | None = None, channels: list[str] | None = None) -> list[dict]:
-        """Testnachricht aus dem Panel (ohne Ruhezeit) – an die gewählten Kanäle; Ergebnis je Kanal."""
-        title, message = "Hauswerk", "Testnachricht – Benachrichtigungen funktionieren."
+    async def async_test_notify(self, by: str | None = None, channels: list[str] | None = None,
+                                title: str | None = None, message: str | None = None) -> list[dict]:
+        """Testnachricht aus dem Panel (ohne Ruhezeit) – an die gewählten Kanäle; Ergebnis je Kanal.
+        Mit Titel/Text: Probe einer echten Meldung (z. B. Probehören einer Ansage)."""
+        title = title or "Hauswerk"
+        message = message or "Testnachricht – Benachrichtigungen funktionieren."
         out = []
         for ch in dict.fromkeys(channels if channels is not None else self.channels_for()):
             if not self.channel_ok(ch):
@@ -901,6 +975,7 @@ class Haus:
         return {
             **{k: fn() for k, fn in self.extra_status.items()},
             "away": self.away,
+            "notify": self.notify_summary(),
             "approaching": self.approaching,
             "presence_force": self.settings.get("presence_force"),
             "vacation": self.vacation,

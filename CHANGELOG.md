@@ -2,6 +2,20 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.61.0 – 2026-11-20
+
+### Neu – Benachrichtigungen neu aufgebaut
+- **Drei Reiter:** *Anlässe* (was löst aus) · *Empfänger* (wer bekommt was) · *Ruhezeit & Verlauf*.
+- **Anlässe nach Modul** mit Modulfarbe: Heizwerk, Lüften, Rollwerk, Kraftwerk, Hauswerk. Je Anlass **eine Zeile** – „Fenster lange offen · ab 30 Min. → Pixel 8“ – mit Schalter an/aus und rotem Glöckchen bei „Wichtig“. Antippen klappt Art, Grenze, eigene Kanäle und eine **Vorschau** der Mitteilung auf.
+- **„So senden“ und „Probehören“:** schickt die Beispielmeldung an die Kanäle des Anlasses bzw. spielt sie als Ansage ab.
+- **Tabelle Anlass × Kanal** auf breiten Bildschirmen (PC, Tablet quer): Haken setzen, Art je Zeile wählen. Am Handy die Liste.
+- **Vorlagen:** „Nur Wichtiges aufs Handy“, „Ansagen tagsüber“ (Fenster, Lüften, Müll als Ansage am Tablet 8–21 Uhr), „Ruhig“ (nur Frost und Sturm).
+- **Neue Anlässe aus Rollwerk:** Sturm (Rollläden fahren hoch) und Rollladen nicht erreichbar. Kraftwerk zeigt die Fertigmeldung je Gerät mit Sprung zu den Geräten.
+- **Empfänger als Karten:** je Kanal Zustand (grün = zuletzt zugestellt mit Zeit, rot = Fehler mit Meldung), welche Anlässe er bekommt (antippen schaltet), Testen, Entfernen. Fehlerhafte Kanäle stehen oben mit „Testen“.
+- **Zeiten je Kanal:** z. B. Ansagen nur 8–21 Uhr – außerhalb bekommt der Kanal nur Wichtiges. **Ansagen nur, wenn jemand zu Hause ist** (Standard an).
+- **Bündeln je Kanal:** Kommen binnen 5 Min. mehrere Meldungen, geht die erste sofort, die weiteren zusammen als „Hauswerk: 3 Meldungen“. Wichtiges nie gebündelt.
+- **Verlauf:** heute gesendet · zurückgehalten · nur Protokoll · nicht zugestellt, die letzten 10 Nachrichten mit Ergebnis und Sprung ins Protokoll. Zustand und Verlauf überstehen Neustarts.
+
 ## 0.60.0 – 2026-11-20
 
 ### Neu

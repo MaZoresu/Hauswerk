@@ -1402,3 +1402,52 @@ def test_kamin(hw):
         assert ctl.status()["rooms"]["wz"]["fireplace"] is None
 
     asyncio.run(run())
+
+
+def test_benachrichtigung_ausbau(hw):
+    """Kanal-Zeiten (außerhalb nur Wichtiges), keine Ansage ins leere Haus, Bündeln, Zustand je Kanal, Verlauf,
+    Rollwerk-Sturm als Anlass, Probehören mit eigenem Text."""
+    async def run():
+        import sys
+        STORES.clear()
+        NOW[0] = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)  # 13:00 Ortszeit
+        hass = Hass()
+        hass.set("tts.google", "unknown", {}, "Google")
+        hass.set("media_player.tablet", "idle", {}, "Tablet")
+        log, haus, ctl = await _setup(hw, hass)
+        core = sys.modules[type(haus).__module__]
+        timers = []
+        core.async_call_later = lambda h, delay, fn: timers.append(fn) or (lambda: None)
+        tts = "tts:tts.google|media_player.tablet"
+        await haus.async_save_settings({"notify_channels": ["svc:mobile_app_pixel", tts], "notify_quiet": False,
+                                        "notify_hours": {tts: ["08:00", "12:00"]}, "notify_bundle": ["svc:mobile_app_pixel"]})
+        # 13 Uhr: Ansage außerhalb ihrer Zeit → nur das Handy
+        assert haus.send(["svc:mobile_app_pixel", tts], "A", "eins") == ["svc:mobile_app_pixel"]
+        # wichtig: Ansage trotzdem
+        assert tts in haus.send([tts], "B", "zwei", important=True)
+        # Bündeln: zweite und dritte Meldung binnen 5 Min. warten, kommen gesammelt
+        await asyncio.sleep(0)
+        n = len([c for c in hass.calls if c[1] == "mobile_app_pixel"])
+        haus.send(["svc:mobile_app_pixel"], "C", "drei")
+        haus.send(["svc:mobile_app_pixel"], "D", "vier")
+        await asyncio.sleep(0)
+        assert len([c for c in hass.calls if c[1] == "mobile_app_pixel"]) == n and len(timers) == 1
+        timers[0]()
+        await asyncio.sleep(0)
+        last = [c for c in hass.calls if c[1] == "mobile_app_pixel"][-1][2]
+        assert last["title"] == "Hauswerk: 2 Meldungen" and "C: drei" in last["message"] and "D: vier" in last["message"]
+        # Zustand je Kanal und Verlauf
+        assert haus.notify_health["svc:mobile_app_pixel"]["ok"] is True
+        await haus.async_save_settings({"notify_hours": {}, "notify_bundle": [], "notify_storm": "important"})
+        haus.notify("rw_storm", "storm", "Sturm – Rollläden fahren hoch", "Böen 80 km/h")
+        await asyncio.sleep(0)
+        st = haus.status()["notify"]
+        assert st["sent"] == 1 and st["last"][0]["title"].startswith("Sturm") and st["last"][0]["kind"] == "storm"
+        # niemand zu Hause: normale Ansage fällt weg, Handy nicht
+        haus.away = True
+        assert haus.send(["svc:mobile_app_pixel", tts], "E", "fünf") == ["svc:mobile_app_pixel"]
+        # Probehören mit eigenem Text
+        res = await haus.async_test_notify(channels=[tts], title="Fenster schließen", message="Bad: genug gelüftet")
+        assert res[0]["ok"] and hass.calls[-1][2]["message"] == "Fenster schließen. Bad: genug gelüftet"
+
+    asyncio.run(run())
