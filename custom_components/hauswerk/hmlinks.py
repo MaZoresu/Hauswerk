@@ -38,6 +38,16 @@ def peer_kind(model: str | None) -> str:
     return "other"
 
 
+def sensor_kind(model: str | None) -> str:
+    """Art eines Senders für Licht: motion (Bewegungs-/Anwesenheitsmelder), button (Taster, Fernbedienung) oder other."""
+    m = (model or "").upper()
+    if any(x in m for x in ("SMI", "SPI", "SMO", "SPDR", "MDIR", "SEN-MDIR", "PIR")):
+        return "motion"
+    if any(x in m for x in ("WRC", "BRC", "RC", "PB", "PBI", "DBB", "KRC", "STI", "MOD-RC", "-BSM", "BSL")):
+        return "button"
+    return "other"
+
+
 def fal_channels(model: str | None) -> int | None:
     """Anzahl Heizkreise eines Fußbodenheizungs-Aktors aus dem Modell (HmIP-FAL230-C6 → 6)."""
     m = re.search(r"-C(\d+)", str(model or "").upper())
@@ -173,6 +183,39 @@ class HmLinks:
                 return str(ident).split("@")[0]
         return None
 
+    async def _peers(self, a: str) -> list[str]:
+        """Gegenstellen eines Geräts. Ältere BidCos-Geräte antworten nur je Kanal: dann Kanal 1–4 nacheinander."""
+        try:
+            res = await self.hass.services.async_call(HM_DOMAIN, "get_link_peers", {"device_address": a},
+                                                      blocking=True, return_response=True)
+            return list((res or {}).get(a) or [])
+        except Exception:  # noqa: BLE001
+            out: list[str] = []
+            ok = False
+            for ch in (1, 2, 3, 4):
+                try:
+                    res = await self.hass.services.async_call(HM_DOMAIN, "get_link_peers", {"device_address": a, "channel": ch},
+                                                              blocking=True, return_response=True)
+                except Exception:  # noqa: BLE001 - Kanal gibt es nicht
+                    continue
+                ok = True
+                for v in (res or {}).values():
+                    out.extend(v or [])
+            if not ok:
+                raise
+            return out
+
+    def entities_of(self, addr: str) -> list[str]:
+        """Entitäten eines Homematic-Geräts (für Sender wie Bewegungsmelder)."""
+        reg = er.async_get(self.hass)
+        dreg = dr.async_get(self.hass)
+        out = []
+        for ent in list(getattr(reg, "entities", {}).values()):
+            dev = dreg.async_get(getattr(ent, "device_id", None)) if getattr(ent, "device_id", None) else None
+            if dev and any(dom == HM_DOMAIN and str(i).split("@")[0] == addr for dom, i in getattr(dev, "identifiers", set()) or set()):
+                out.append(ent.entity_id)
+        return out
+
     async def async_refresh(self, entity_ids: list[str]) -> None:
         if not self.available:
             self.error = "Integration „Homematic(IP) Local“ nicht gefunden"
@@ -183,9 +226,7 @@ class HmLinks:
         errors = []
         for a in addrs:
             try:
-                res = await self.hass.services.async_call(HM_DOMAIN, "get_link_peers", {"device_address": a},
-                                                          blocking=True, return_response=True)
-                peers[a] = list((res or {}).get(a) or [])
+                peers[a] = await self._peers(a)
             except Exception as err:  # noqa: BLE001 - Gerät weg, CCU nicht erreichbar: weiter mit den anderen
                 errors.append(f"{a}: {err}")
         if peers:

@@ -165,11 +165,17 @@ const lwProfiles = { standard: { name: "Abendlicht", on_sun: true, sun_on: 2, of
   flur: { name: "Flur mit Bewegung", on_sun: true, sun_on: 5, off_sun: false, off_time: false, motion: ["binary_sensor.flur_og_anwesenheit"], motion_off: 3, motion_dark: true, night: true, night_from: "22:30", night_to: "06:00", night_brightness: 10, brightness: 70, days: [0,1,2,3,4,5,6] } };
 const lwLights = { "light.wohnzimmer": { profile: "standard", auto: true }, "light.flur_og": { profile: "flur", auto: true }, "light.eingang": { profile: "standard", auto: true }, "light.kuche": { profile: "standard", auto: false } };
 const lwPlan = [{ start: 0, end: 360, reason: "Sonne unter 2°", until: "Sonne über 1°" }, { start: 990, end: 1380, reason: "Sonne unter 2°", until: "spätestens 23:00" }];
-const lwStatus = { on: 1, total: 4, elevation: -3.2, manual: 1, away: false,
+const lwLinks = { available: true, at: new Date(Date.now() - 50 * 60e3).toISOString(), error: null,
+  lights: { "light.flur_og": { own: true, peers: [{ address: "SPI1", name: "Bewegung Flur OG", model: "HmIP-SPI", kind: "motion", channels: [1], entities: ["binary_sensor.bewegung_flur"] }] },
+    "light.eingang": { own: true, peers: [{ address: "PEQ9", name: "S_Bewegung:Vorgarten", model: "HM-Sen-MDIR-O-3", kind: "motion", channels: [1], entities: [] }] },
+    "light.wohnzimmer": { own: true, peers: [] } },
+  findings: [{ level: "warn", light: "light.flur_og", text: "Flur OG: Bewegung Flur OG schaltet schon in der CCU – Lichtwerk schaltet bei Bewegung doppelt" },
+    { level: "info", light: "light.eingang", text: "Eingang wird in der CCU direkt von S_Bewegung:Vorgarten geschaltet – zusätzlich zum Profil „Standard“" }] };
+const lwStatus = { on: 1, total: 4, elevation: -3.2, manual: 1, away: false, links: lwLinks,
   next: { day: 0, min: 1380, action: "off", reason: "spätestens 23:00", entity_id: "light.wohnzimmer", count: 2 },
   lights: {
     "light.wohnzimmer": { name: "Wohnzimmer", area: "Wohnzimmer", profile: "standard", state: "on", brightness: 80, modes: ["color_temp"], auto: true, want: "on", cause: "Sonne unter 2°", latch: true, manual: null, motion: false, night: false, plan: lwPlan, night_window: null, next: { day: 0, min: 1380, action: "off", reason: "spätestens 23:00" }, since: new Date(Date.now() - 42 * 60e3).toISOString() },
-    "light.flur_og": { name: "Flur OG", area: "Flur OG", profile: "flur", state: "off", modes: ["color_temp"], auto: true, want: "off", cause: "kein Auslöser aktiv", latch: false, manual: null, motion: false, night: false, plan: [], night_window: ["22:30", "06:00"], next: null },
+    "light.flur_og": { name: "Flur OG", area: "Flur OG", profile: "flur", state: "off", ccu: null, modes: ["color_temp"], auto: true, want: "off", cause: "kein Auslöser aktiv", latch: false, manual: null, motion: false, night: false, plan: [], night_window: ["22:30", "06:00"], next: null },
     "light.eingang": { name: "Eingang", area: "Vorgarten", profile: "standard", state: "off", modes: ["onoff"], auto: true, want: null, cause: "Von Hand geschaltet – Automatik wartet", latch: true, manual: { since: new Date(Date.now() - 15 * 60e3).toISOString(), until: null }, motion: false, night: false, plan: lwPlan, night_window: null, next: { day: 0, min: 1380, action: "off", reason: "spätestens 23:00" } },
     "light.kuche": { name: "Decke Küche", area: "Küche", profile: "standard", state: "unavailable", unavailable: true, auto: false, plan: lwPlan, next: null },
   } };
@@ -206,6 +212,7 @@ const hass = {
     if (msg.type === "hauswerk/rollwerk/command") return null;
     if (msg.type === "hauswerk/lichtwerk/command") return null;
     if (msg.type === "hauswerk/heizen/links/refresh") return status.hm_links;
+    if (msg.type === "hauswerk/lichtwerk/links/refresh") return lwLinks;
     if (msg.type === "hauswerk/lichtwerk/light/save") { lwLights[msg.entity_id] = { ...(lwLights[msg.entity_id] || {}), ...msg.light }; if (!settings.lw_lights.includes(msg.entity_id)) settings.lw_lights.push(msg.entity_id); return { lights: lwLights, settings }; }
     if (msg.type === "hauswerk/lichtwerk/light/remove") { delete lwLights[msg.entity_id]; settings.lw_lights = settings.lw_lights.filter((x) => x !== msg.entity_id); return { lights: lwLights, settings }; }
     if (msg.type === "hauswerk/lichtwerk/profile/save") { const id = msg.profile_id || "neu" + Object.keys(lwProfiles).length; lwProfiles[id] = msg.profile; return { profile_id: id, profiles: lwProfiles }; }

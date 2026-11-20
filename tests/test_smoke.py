@@ -142,7 +142,12 @@ class Hass:
         if (domain, service) == ("calendar", "get_events"):
             return {data["entity_id"]: {"events": getattr(self, "events", {}).get(data["entity_id"], [])}}
         if (domain, service) == ("homematicip_local", "get_link_peers"):
-            return {data["device_address"]: getattr(self, "links", {}).get(data["device_address"], [])}
+            a = data["device_address"]
+            if a in getattr(self, "bidcos", set()):
+                if "channel" not in data:
+                    raise RuntimeError("XMLRPC Fault -1: Failure")
+                return {f"{a}:{data['channel']}": getattr(self, "links", {}).get(f"{a}:{data['channel']}", [])}
+            return {a: getattr(self, "links", {}).get(a, [])}
         if (domain, service) == ("weather", "get_forecasts"):
             return {data["entity_id"]: {"forecast": self.forecast or []}}
         return None
@@ -1708,5 +1713,78 @@ def test_homematic_verknuepfungen(hw):
         n = len(hass.calls)
         await ctl.async_evaluate()
         assert not ctl.status()["rooms"]["wz"]["window_ccu"]
+
+    asyncio.run(run())
+
+
+def test_lichtwerk_ccu_verknuepfungen(hw):
+    """Lichtwerk: Leuchten, die die CCU direkt schaltet (Bewegungsmelder), werden erkannt; Schalten über die
+    Verknüpfung ist nicht „von Hand“ – Lichtwerk wartet, bis die CCU wieder ausschaltet. BidCos je Kanal."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        DEVS.clear()
+        NOW[0] = datetime(2026, 11, 20, 11, 0, tzinfo=timezone.utc)  # 12:00
+        hass = Hass()
+
+        def dev(eid, did, addr, model, name, state, attrs=None):
+            DEVS[did] = types.SimpleNamespace(id=did, model=model, name=name, name_by_user=None, area_id=None,
+                                              identifiers={("homematicip_local", f"{addr}@ccu3")})
+            REG[eid] = types.SimpleNamespace(entity_id=eid, device_id=did, domain=eid.split(".")[0], disabled_by=None, platform="homematicip_local")
+            hass.set(eid, state, attrs or {}, name)
+
+        dev("light.windfang", "l1", "BSM1", "HmIP-BSM", "Windfang Wand", "off", {"supported_color_modes": ["onoff"]})
+        dev("binary_sensor.spi", "s1", "SPI1", "HmIP-SPI", "S_Bewegung:Windfang", "off", {"device_class": "occupancy"})
+        dev("light.eingang", "l2", "PEQ1", "HM-LC-Sw1PBU-FM", "Eingang", "off", {"supported_color_modes": ["onoff"]})
+        dev("binary_sensor.mdir", "s2", "PEQ9", "HM-Sen-MDIR-O-3", "S_Bewegung:Vorgarten", "off", {"device_class": "motion"})
+        REG_ = sys.modules["homeassistant.helpers.entity_registry"]
+        REG_.async_get = lambda h: types.SimpleNamespace(async_get=REG.get, entities=REG)
+        hass.links = {"BSM1": ["BSM1:4", "BSM1:1", "SPI1:1"], "PEQ1:1": ["PEQ9:1", "PEQ1:1", "PEQ1:2"]}
+        hass.bidcos = {"PEQ1"}
+        log, haus, ctl = await _setup(hw, hass)
+        lw = hw.Lichtwerk(hass, log, haus)
+        await lw.async_load()
+        lw._sun_fn = lambda offset=0: None
+        await lw.async_save_profile("standard", {"name": "Abendlicht", "on_sun": False, "off_sun": False, "on_time": True,
+                                                 "time_on": "17:00", "off_time": True, "time_off": "23:00"})
+        await lw.async_save_settings({"lw_lights": ["light.windfang", "light.eingang"]})
+        st = await lw.async_refresh_links(by="Test")
+        wf = st["lights"]["light.windfang"]
+        assert wf["own"] and [p["name"] for p in wf["peers"]] == ["S_Bewegung:Windfang"] and wf["peers"][0]["kind"] == "motion"
+        assert wf["peers"][0]["entities"] == ["binary_sensor.spi"]
+        assert [p["name"] for p in st["lights"]["light.eingang"]["peers"]] == ["S_Bewegung:Vorgarten"]  # BidCos je Kanal
+        assert any(f["text"] == "Windfang Wand wird in der CCU direkt von S_Bewegung:Windfang geschaltet – zusätzlich zum Profil „Abendlicht“" for f in st["findings"])
+        # 12:00, Profil will aus: Anwesenheit → CCU schaltet ein → kein „von Hand“, Lichtwerk schaltet nicht wieder aus
+        old = hass.st["binary_sensor.spi"]
+        hass.set("binary_sensor.spi", "on", {"device_class": "occupancy"}, "S_Bewegung:Windfang")
+        lw._on_change(types.SimpleNamespace(data={"entity_id": "binary_sensor.spi", "old_state": old, "new_state": hass.st["binary_sensor.spi"]}))
+        old = hass.st["light.windfang"]
+        hass.set("light.windfang", "on", old.attributes, "Windfang Wand")
+        lw._on_change(types.SimpleNamespace(data={"entity_id": "light.windfang", "old_state": old, "new_state": hass.st["light.windfang"]}))
+        n = len(hass.calls)
+        await lw.async_evaluate()
+        x = lw.status()["lights"]["light.windfang"]
+        assert x["ccu"] == "S_Bewegung:Windfang" and x["want"] is None and "CCU-Verknüpfung" in x["cause"] and len(hass.calls) == n
+        assert lw.status()["manual"] == 0
+        # CCU schaltet nach ihrer Nachlaufzeit aus → Lichtwerk übernimmt wieder
+        NOW[0] += timedelta(minutes=3)
+        old = hass.st["light.windfang"]
+        hass.set("light.windfang", "off", old.attributes, "Windfang Wand")
+        lw._on_change(types.SimpleNamespace(data={"entity_id": "light.windfang", "old_state": old, "new_state": hass.st["light.windfang"]}))
+        await lw.async_evaluate()
+        assert lw.status()["lights"]["light.windfang"]["manual"] is None and lw.status()["lights"]["light.windfang"]["want"] == "off"
+        # Leuchte meldet vor dem Melder: zuerst „von Hand“, nach der Nachprüfung CCU
+        NOW[0] += timedelta(minutes=10)
+        old = hass.st["light.eingang"]
+        hass.set("light.eingang", "on", old.attributes, "Eingang")
+        lw._on_change(types.SimpleNamespace(data={"entity_id": "light.eingang", "old_state": old, "new_state": hass.st["light.eingang"]}))
+        assert lw._rt["light.eingang"]["manual"].get("ccu") is None
+        lw._sensor_seen["binary_sensor.mdir"] = NOW[0].timestamp() + 1
+        lw._recheck_ccu("light.eingang", "on", lw._rt["light.eingang"]["manual"]["since"])
+        await asyncio.sleep(0)
+        assert lw._rt["light.eingang"]["manual"]["ccu"] == "S_Bewegung:Vorgarten"
+        # Bewegungsmelder auch im Profil: doppelt → Warnung
+        await lw.async_save_profile("standard", {"motion": ["binary_sensor.spi"]})
+        assert any(f["level"] == "warn" and "schaltet bei Bewegung doppelt" in f["text"] for f in lw.links_status()["findings"])
 
     asyncio.run(run())

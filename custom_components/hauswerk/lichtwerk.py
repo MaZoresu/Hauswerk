@@ -25,6 +25,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import LIGHT_STORAGE_KEY
 from .core import Haus
+from .hmlinks import HmLinks, sensor_kind, split_peer
 from .light_logic import LW_PROFILE_DEFAULTS, LW_PROFILE_SPEC, day_allowed, day_events, day_plan, decide, latched_at, light_params
 from .log import Protokoll, log_settings
 
@@ -63,6 +64,12 @@ class Lichtwerk:
         self._sunfn_cache: dict = {}
         self._status: dict = {}
         self._away_since: float | None = None
+        # Direktverknüpfungen der Homematic-CCU (nur lesen): Licht → Gegenstellen; Sender → zuletzt geändert
+        self.hmlinks = HmLinks(hass)
+        self._links: dict[str, dict] = {}
+        self._link_findings: list[dict] = []
+        self._links_next = 0.0
+        self._sensor_seen: dict[str, float] = {}
 
     # ------------------------------------------------------------ Speicher
     async def async_load(self) -> None:
@@ -111,6 +118,9 @@ class Lichtwerk:
                 ids.update(self._covers_near(eid))
         if self.settings.get("lw_lux_sensor"):
             ids.add(self.settings["lw_lux_sensor"])
+        for info in self._links.values():
+            for p in info["peers"]:
+                ids.update(p.get("entities") or [])
         if ids:
             self._state_unsub = async_track_state_change_event(self.hass, sorted(ids), self._on_change)
 
@@ -118,6 +128,8 @@ class Lichtwerk:
     def _on_change(self, event: Event) -> None:
         eid = event.data.get("entity_id")
         new, old = event.data.get("new_state"), event.data.get("old_state")
+        if eid not in self.lights:
+            self._sensor_seen[eid] = dt_util.utcnow().timestamp()
         if eid in self.lights and eid in (self.settings.get("lw_lights") or []):
             self._note_light(eid, old, new)
         if self._pending is None:
@@ -138,22 +150,117 @@ class Lichtwerk:
             return
         rt = self._rt.setdefault(eid, {})
         prof = self.profile(eid)
+        now = dt_util.utcnow().timestamp()
+        # über eine Direktverknüpfung der CCU? (Sender der Verknüpfung hat sich gerade geändert)
+        sender = next((p for p in (self._links.get(eid) or {}).get("peers", [])
+                       if any(now - self._sensor_seen.get(e, 0) <= 10 for e in p.get("entities") or [])), None)
+        if sender is not None:
+            if new.state == "on":
+                rt["manual"] = {"since": now, "until": None, "state": "on", "ccu": sender["name"]}
+            elif (rt.get("manual") or {}).get("ccu"):
+                rt["manual"] = None  # die CCU hat wieder ausgeschaltet: Lichtwerk übernimmt
+            rt["ours"] = False
+            self.log.add("light", f"{self._name(eid)} {'an' if new.state == 'on' else 'aus'}",
+                         f"über CCU-Verknüpfung ({sender['name']})" + (" · Lichtwerk wartet, bis die CCU wieder ausschaltet" if new.state == "on" else ""),
+                         module="lichtwerk")
+            self._save()
+            return
+        if new.state == "off" and (rt.get("manual") or {}).get("ccu"):
+            rt["manual"] = None  # CCU-Verknüpfung (Nachlaufzeit) hat ausgeschaltet
+            self._save()
+            return
         until = None
         if prof.get("manual_hold") == "hours":
             until = dt_util.utcnow().timestamp() + float(prof.get("manual_hours") or 2) * 3600
         rt["manual"] = {"since": dt_util.utcnow().timestamp(), "until": until, "state": new.state}
         rt["ours"] = False
+        if (self._links.get(eid) or {}).get("peers"):
+            # Meldung des Senders kann kurz nach der Leuchte kommen: in 3 s nachsehen, ob es doch die CCU war
+            async_call_later(self.hass, 3, lambda _n, eid=eid, st=new.state, t=now: self._recheck_ccu(eid, st, t))
         self.log.add("light", f"{self._name(eid)}: von Hand {'an' if new.state == 'on' else 'aus' if new.state == 'off' else new.state}",
                      "Automatik wartet " + (f"bis {dt_util.as_local(dt_util.utc_from_timestamp(until)).strftime('%H:%M')}"
                                             if until else "bis zum nächsten Wechsel"), module="lichtwerk")
         self._save()
+
+    @callback
+    def _recheck_ccu(self, eid: str, state: str, at: float) -> None:
+        rt = self._rt.get(eid) or {}
+        sender = next((p for p in (self._links.get(eid) or {}).get("peers", [])
+                       if any(abs(self._sensor_seen.get(e, 0) - at) <= 10 for e in p.get("entities") or [])), None)
+        if sender is None or not rt.get("manual") or rt["manual"].get("since", 0) < at - 1:
+            return
+        rt["manual"] = {"since": at, "until": None, "state": state, "ccu": sender["name"]} if state == "on" else None
+        self.log.add("light", f"{self._name(eid)}: doch über CCU-Verknüpfung ({sender['name']})",
+                     "nicht von Hand – Lichtwerk wartet, bis die CCU wieder ausschaltet" if state == "on" else "Lichtwerk übernimmt", module="lichtwerk")
+        self._save()
+        self.hass.async_create_task(self.async_evaluate())
 
     async def _async_later(self, _now=None) -> None:
         self._pending = None
         await self.async_evaluate()
 
     async def _async_tick(self, _now=None) -> None:
+        if dt_util.utcnow().timestamp() >= self._links_next:
+            await self.async_refresh_links()
         await self.async_evaluate()
+
+    # ------------------------------------------------------------ Homematic: Direktverknüpfungen
+    async def async_refresh_links(self, by: str | None = None) -> dict:
+        """Verknüpfungen der Leuchten aus der CCU lesen (alle 6 Std. und auf Wunsch)."""
+        self._links_next = dt_util.utcnow().timestamp() + 6 * 3600
+        if not self.hmlinks.available:
+            self._links, self._link_findings = {}, []
+            return self.links_status()
+        await self.hmlinks.async_refresh(list(self.settings.get("lw_lights") or []))
+        self._analyze_links()
+        self._track()
+        if by:
+            self.log.add("settings", "Lichtwerk: Homematic-Verknüpfungen gelesen",
+                         f"{sum(1 for i in self._links.values() if i['peers'])} Leuchten mit Verknüpfung · {by}", module="lichtwerk")
+        return self.links_status()
+
+    def _analyze_links(self) -> None:
+        old = {f["text"] for f in self._link_findings}
+        self._links, self._link_findings = {}, []
+        for eid in self.settings.get("lw_lights") or []:
+            a = self.hmlinks.addr(eid)
+            if not a or a not in self.hmlinks.peers:
+                continue
+            merged: dict[str, dict] = {}
+            own = False
+            for p in self.hmlinks.peers.get(a) or []:
+                pa, ch = split_peer(p)
+                if pa == a:
+                    own = True  # eigene Taster bzw. Kanäle des Geräts
+                    continue
+                dev = self.hmlinks.devices.get(pa) or {}
+                if pa in merged:
+                    if ch is not None and ch not in merged[pa]["channels"]:
+                        merged[pa]["channels"].append(ch)
+                    continue
+                ents = [e for e in self.hmlinks.entities_of(pa) if e.startswith("binary_sensor.") or e.startswith("event.")]
+                merged[pa] = {"address": pa, "name": dev.get("name") or pa, "model": dev.get("model"), "kind": sensor_kind(dev.get("model")),
+                              "channels": [ch] if ch is not None else [], "entities": ents}
+            info = {"peers": list(merged.values()), "own": own}
+            self._links[eid] = info
+            prof = self.profile(eid)
+            auto = (self.lights.get(eid) or {}).get("auto", True) is not False
+            for p in info["peers"]:
+                if p["kind"] != "motion":
+                    continue
+                if auto and set(p["entities"]) & set(prof.get("motion") or []):
+                    self._link_findings.append({"level": "warn", "light": eid,
+                        "text": f"{self._name(eid)}: {p['name']} schaltet schon in der CCU – Lichtwerk schaltet bei Bewegung doppelt"})
+                elif auto and any(prof.get(k) for k in ("on_sun", "on_lux", "on_time", "on_entity", "on_covers")):
+                    self._link_findings.append({"level": "info", "light": eid,
+                        "text": f"{self._name(eid)} wird in der CCU direkt von {p['name']} geschaltet – zusätzlich zum Profil „{prof.get('name')}“"})
+        for f in self._link_findings:
+            if f["text"] not in old:
+                self.log.add("health", "Homematic-Verknüpfung", f["text"], module="lichtwerk")
+
+    def links_status(self) -> dict:
+        return {"available": self.hmlinks.available, "at": self.hmlinks.at, "error": self.hmlinks.error,
+                "lights": self._links, "findings": self._link_findings}
 
     @callback
     def _on_house(self) -> None:
@@ -379,6 +486,8 @@ class Lichtwerk:
                              motion_on=motion_on, motion_reason="Bewegung",
                              latched=bool(rt.get("latch")), latched_reason=rt.get("latch_reason"))
         params = light_params(prof, now_min, elev, lux)
+        if (rt.get("manual") or {}).get("ccu") and cfg.get("auto", True) is not False and not bypass_on:
+            cause = f"Über CCU-Verknüpfung geschaltet ({rt['manual']['ccu']}) – Lichtwerk wartet"
         if want == "on" and params.get("mode"):
             cause = f"{cause} · {params['mode']}"
         rt.update(want=want, cause=cause, params=params, motion=motion_on)
@@ -491,6 +600,7 @@ class Lichtwerk:
                             "until": dt_util.utc_from_timestamp(rt["manual"]["until"]).isoformat() if rt["manual"].get("until") else None}
                            if rt.get("manual") else None),
                 "motion": bool(rt.get("motion")), "night": bool((rt.get("params") or {}).get("night")),
+                "links": self._links.get(eid), "ccu": (rt.get("manual") or {}).get("ccu"),
                 "params": rt.get("params"), "plan": rt.get("plan") or [],
                 "night_window": [prof.get("night_from"), prof.get("night_to")] if prof.get("night") else None,
                 "next": self._next(eid, prof, now_min),
@@ -502,7 +612,8 @@ class Lichtwerk:
         return {"lights": lights, "on": len(on), "total": len(lights), "elevation": elev,
                 "next": ({**lights[nxt[0][2]]["next"], "entity_id": nxt[0][2],
                           "count": sum(1 for n in nxt if n[:2] == nxt[0][:2])} if nxt else None),
-                "manual": sum(1 for x in lights.values() if x["manual"]), "away": bool(self.haus.away)}
+                "manual": sum(1 for x in lights.values() if x["manual"] and not x["ccu"]), "away": bool(self.haus.away),
+                "links": self.links_status()}
 
     def status(self) -> dict:
         if not self._status:
@@ -521,6 +632,8 @@ class Lichtwerk:
         self.settings.update(settings)
         for eid in added:
             self.lights.setdefault(eid, {"profile": "standard", "auto": True})
+        if added:
+            self._links_next = 0.0
         self._save()
         self._track()
         await self.async_evaluate()
@@ -532,6 +645,10 @@ class Lichtwerk:
             self.settings["lw_lights"] = list(self.settings.get("lw_lights") or []) + [eid]
         if cfg.get("profile") and cfg.get("profile") != old.get("profile"):
             self._rt.pop(eid, None)  # neues Profil: Stand neu aus der Vorausrechnung
+        if eid not in self._links:
+            self._links_next = 0.0
+        elif self.hmlinks.peers:
+            self._analyze_links()
         prof_name = (self.profiles.get(self.lights[eid].get("profile") or "standard") or {}).get("name")
         active = self.lights[eid].get("auto", True) is not False
         if "auto" in cfg and (old.get("auto", True) is not False) != active and set(cfg) <= {"auto"}:
@@ -568,6 +685,8 @@ class Lichtwerk:
         for eid, cfg in self.lights.items():
             if (cfg.get("profile") or "standard") == pid:
                 self._rt.get(eid, {}).pop("latch", None)  # Auslöser geändert: Stand neu berechnen
+        if self.hmlinks.peers:
+            self._analyze_links()
         self._save()
         self._track()
         await self.async_evaluate()

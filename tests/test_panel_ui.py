@@ -1414,3 +1414,33 @@ def test_homematic_verknuepfungen(panel):
     p.click('#pop [data-action="hmlinks-refresh"]')
     p.wait(200)
     assert [m for m in p.sent() if m["type"] == "hauswerk/heizen/links/refresh"]
+
+
+def test_lichtwerk_ccu_verknuepfungen(panel):
+    """Lichtwerk: CCU-Direktverknüpfungen an der Leuchte, Übersicht unter Lichtwerk › Einstellungen, Hinweise, CCU-Flag."""
+    p = panel
+    hints = p.js(f"{EL}._hints()")
+    h = [x for x in hints if x["data"].get("sub") == "lwlinks"]
+    assert any(x["lvl"] == "warn" and x["text"] == "Flur OG: Bewegung Flur OG schaltet schon in der CCU" for x in h)
+    p.view("lightset")
+    p.wait()
+    assert "Homematic-Verknüpfungen" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+    p.js(f"() => {{ {EL}._openPop('lwlinks'); }}")
+    p.wait()
+    body = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    assert "S_Bewegung:Vorgarten" in body and "Bewegung Flur OG" in body and "nur eigene Taster" in body
+    p.click('#pop [data-action="lwlinks-refresh"]')
+    p.wait(200)
+    assert [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/links/refresh"]
+    p.js(f"{EL}._closePop()")
+    p.js(f"() => {{ {EL}._openPop('lwl:light.flur_og'); }}")
+    p.wait()
+    body = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    assert "Direktverknüpfungen in der CCU" in body and "Lichtwerk schaltet bei Bewegung doppelt" in body
+    p.js(f"{EL}._closePop()")
+    # von der CCU geschaltet: eigenes Flag statt „von Hand“
+    p.js(f"() => {{ Object.assign({EL}._lwStatus.lights['light.flur_og'], {{ state: 'on', ccu: 'Bewegung Flur OG', manual: {{ since: new Date().toISOString() }} }}); }}")
+    p.view("lights")
+    p.wait()
+    main = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "über CCU-Verknüpfung · Bewegung Flur OG" in main

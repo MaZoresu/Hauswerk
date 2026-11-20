@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.65.0 – 2026-11-20
+
+### Neu – Lichtwerk liest die Direktverknüpfungen der Homematic-CCU
+- Wie in Heizwerk (nur lesen, alle 6 Stunden und auf Wunsch): Lichtwerk weiß, welche Leuchten in der CCU direkt von einem Bewegungsmelder oder Taster geschaltet werden. Eigene Taster der Leuchte (z. B. Unterputz-Aktor) werden ausgeblendet.
+- **Kein „von Hand“ mehr durch die CCU:** Schaltet ein verknüpfter Melder die Leuchte ein, zeigt die Kachel „über CCU-Verknüpfung · Melder“; Lichtwerk schaltet sie nicht wieder aus, sondern wartet, bis die CCU nach ihrer Nachlaufzeit ausschaltet – dann übernimmt das Profil. Meldet die Leuchte vor dem Melder, prüft Lichtwerk nach 3 s nach und korrigiert.
+- **Hinweise** unter der Glocke und im Protokoll: Leuchte wird zusätzlich zum Profil direkt in der CCU geschaltet; steht derselbe Bewegungsmelder auch im Profil, schaltet Lichtwerk doppelt (Warnung).
+- **Leuchte › Einstellungen:** Abschnitt „Direktverknüpfungen in der CCU“. **Übersicht** unter Lichtwerk › Einstellungen › Homematic-Verknüpfungen mit „Neu lesen“.
+- Ältere BidCos-Geräte (z. B. HM-LC-Sw1PBU-FM) antworten der CCU nur je Kanal – Hauswerk fragt sie jetzt kanalweise ab (gilt auch für Heizwerk).
+
 ## 0.64.0 – 2026-11-20
 
 ### Neu – Heizwerk liest die Direktverknüpfungen der Homematic-CCU

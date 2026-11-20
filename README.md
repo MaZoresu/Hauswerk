@@ -159,7 +159,7 @@ Alle Werte lassen sich je Raum ändern; seltene Feinheiten (Absenkgrenze, Fenste
 | Heizleistung je Raum | Heizwerk › Bericht | Urteil (Passt, Reserve, Knapp, Reicht nicht, Messung prüfen) aus „Komfort erreicht“, Ø Abweichung, Ø Ventil und „ganz auf“, Aufheizgeschwindigkeit, überheizt und kalten/milden Tagen – mit Ursachen und Tipps (Heizkörper/Vorlauf, Thermostat misst falsch, Heizkurve bei Frost, Reserve für niedrigere Vorlauftemperatur) |
 | Ventilverlauf | Heizwerk › Bericht | Ø Ventilöffnung je Raum und Stunde als Wärmekarte (inkl. Fußbodenheizung an/aus) |
 | Diagnose | Geräte & Dienste › Hauswerk › ⋮ › Diagnose herunterladen | Einstellungen, Räume, Zustände aller beteiligten Entitäten (mit Gerätemodell) und die letzten 1500 Protokolleinträge als Datei |
-| Homematic-Verknüpfungen | Heizwerk › Einstellungen, Raum › Geräte | Direktverknüpfungen der CCU (Integration „Homematic(IP) Local“, nur lesen): Kopplung Wandthermostat/Heizkörper, Fensterpause der CCU überlassen, Hinweise bei fehlenden Verknüpfungen oder freien Aktor-Kanälen |
+| Homematic-Verknüpfungen | Heizwerk › Einstellungen, Raum › Geräte; Lichtwerk › Einstellungen, Leuchte | Direktverknüpfungen der CCU (Integration „Homematic(IP) Local“, nur lesen): Kopplung Wandthermostat/Heizkörper, Fensterpause der CCU überlassen, Hinweise bei fehlenden Verknüpfungen oder freien Aktor-Kanälen; Lichtwerk erkennt Leuchten, die ein Melder oder Taster direkt schaltet (nicht „von Hand“, Warnung bei doppeltem Schalten) |
 | Batterie-Warnung | Hauswerk › Einstellungen › Benachrichtigungen | Batterie-Sensoren an den Geräten von Thermostaten, Fensterkontakten und Raumsensoren; unter X % Hinweis unter der Glocke und auf Wunsch Nachricht |
 
 ## Vorrang der Betriebsarten

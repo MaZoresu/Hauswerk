@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.64.0";
+const VERSION = "0.65.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1141,6 +1141,7 @@ class HauswerkPanel extends HTMLElement {
       const room = f.room ? this._data.rooms?.[f.room] : null;
       add(f.level === "warn" ? "warn" : "info", "mdi:link-variant-off", f.text.split(" – ")[0], `${room ? `${room.name} · ` : ""}${f.text.split(" – ")[1] || "Homematic-Verknüpfung"}`, "settings-go", { sub: "hmlinks" });
     }
+    for (const f of this._lwStatus?.links?.findings || []) add(f.level === "warn" ? "warn" : "info", "mdi:link-variant-off", f.text.split(" – ")[0], `Lichtwerk · ${f.text.split(" – ")[1] || "Homematic-Verknüpfung"}`, "settings-go", { sub: "lwlinks" });
     if (s.radio?.busy) add("warn", "mdi:access-point-network", `Funk ausgelastet · ${fmt(s.radio.level, 0)} %`, `${this._entityName(s.radio.entity)} · Hauswerk sendet nur wichtige Änderungen`, "settings-go", { sub: "radio" });
     if (s.vacation_calendar_error) add("warn", "mdi:calendar-alert", "Urlaubskalender nicht lesbar", s.vacation_calendar_error, "settings-go", { sub: "vacation" });
     for (const [pid, err] of Object.entries(s.plan_errors || {})) add("warn", "mdi:calendar-alert", `Kalender von Plan „${this._data.plans?.[pid]?.name || pid}“ nicht lesbar`, err, "plan-sel", { kind: "plan", id: pid });
@@ -4240,7 +4241,8 @@ class HauswerkPanel extends HTMLElement {
       const dim = l.id.startsWith("light.") && (l.ls.modes || []).some((m) => m !== "onoff");
       const stTxt = bad ? "nicht erreichbar" : on ? `an${dim && pct != null ? ` · ${pct} %` : ""}` : "aus";
       const flags = [];
-      if (l.ls.manual) flags.push(["mdi:hand-back-right-outline", "von Hand – Automatik wartet", C.hand]);
+      if (l.ls.ccu) flags.push(["mdi:link-variant", `über CCU-Verknüpfung · ${l.ls.ccu}`, "#0ea5e9"]);
+      else if (l.ls.manual) flags.push(["mdi:hand-back-right-outline", "von Hand – Automatik wartet", C.hand]);
       if (l.ls.motion) flags.push(["mdi:motion-sensor", "Bewegung", C.ok]);
       if (on && l.ls.night) flags.push(["mdi:weather-night", "Nachtlicht", "#6366f1"]);
       if (l.cfg.auto === false) flags.push(["mdi:robot-off-outline", `Profil „${this._lwProfName(l.cfg.profile)}“ aus`, C.rest]);
@@ -4307,10 +4309,29 @@ class HauswerkPanel extends HTMLElement {
       }),
       { g: "Profile", id: "lwp::on", icon: "mdi:plus", c: "#6366f1", title: "Neues Profil", sum: "aus einer Vorlage oder als Kopie von „Standard“ – entspricht einer Smart-Light-Automation", words: "profil neu anlegen vorlage" },
       { g: "Allgemein", id: "lwgeneral", icon: "mdi:brightness-auto", c: "#6366f1", title: "Helligkeit & Hinweise", sum: `Helligkeit: ${lux} · Hinweis, wenn Licht ${p.lw_away_min ?? 30} Min. brennt und niemand da ist`, words: "lux helligkeit sensor abwesend hinweis" },
+      ...(this._lwStatus?.links?.available ? [{ g: "Allgemein", id: "lwlinks", icon: "mdi:link-variant", c: (this._lwStatus.links.findings || []).some((f) => f.level === "warn") ? "#f97316" : "#0ea5e9", title: "Homematic-Verknüpfungen",
+        sum: (() => { const n = Object.values(this._lwStatus.links.lights || {}).filter((x) => x.peers.length).length; return `${n ? `${n} ${n === 1 ? "Leuchte schaltet" : "Leuchten schalten"} auch direkt in der CCU` : "keine Leuchte direkt verknüpft"}${(this._lwStatus.links.findings || []).length ? ` · ${this._lwStatus.links.findings.length} Hinweis${this._lwStatus.links.findings.length === 1 ? "" : "e"}` : ""}`; })(),
+        words: "homematic ccu direktverknüpfung verknüpfung bewegungsmelder taster" }] : []),
       { g: "Allgemein", id: "lwauto", icon: "mdi:robot-confused-outline", c: "#64748b", title: "Bestehende Licht-Automationen", sum: autos.length ? `${autos.filter((a) => a.state === "on").length} von ${autos.length} aktiv – nach der Übernahme abschalten` : "keine gefunden", words: "automation blueprint smart light übernehmen" },
       { g: "Allgemein", act: "lw-log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll", sum: "Schaltungen mit Ursache, von Hand und Einstellungs-Änderungen von Lichtwerk", words: "protokoll log" },
       { g: "Allgemein", go: "house", icon: "mdi:home-cog-outline", c: "#94a3b8", title: "Aus Hauswerk übernommen", sum: "Anwesenheit, Urlaub, Arbeitstage-Kalender, Sonnenstand und Benachrichtigungen – gelten für alle Module", words: "anwesenheit urlaub sonne hauswerk" },
     ];
+  }
+
+  _lwPeer(x) {
+    const kt = { motion: "Bewegungsmelder", button: "Taster", other: "Gerät" }[x.kind] || "Gerät";
+    return `<span class="hl-p" title="${esc(`${kt} · ${x.model || ""}`)}"><ha-icon icon="${LW_LK[x.kind] || LW_LK.other}"></ha-icon>${esc(x.name)}</span>`;
+  }
+
+  /** Abschnitt „Direktverknüpfungen in der CCU“ im Fenster einer Leuchte. */
+  _lwLinksBox(eid) {
+    const info = this._lwStatus?.links?.lights?.[eid];
+    if (!info) return "";
+    const f = (this._lwStatus.links.findings || []).filter((x) => x.light === eid);
+    return `<div class="lbl">Direktverknüpfungen in der CCU</div>
+      <div class="hl-w lw-hl"><span class="hl-ps">${info.peers.length ? info.peers.map((x) => this._lwPeer(x)).join("") : `<em class="hl-none">${info.own ? "nur die eigenen Taster der Leuchte" : "keine – Lichtwerk schaltet allein"}</em>`}</span></div>
+      ${info.peers.length ? `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Schaltet die CCU diese Leuchte, wartet Lichtwerk, bis sie wieder aus ist – das zählt nicht als „von Hand“.</p>` : ""}
+      ${f.map((x) => `<p class="note ${x.level === "warn" ? "warn" : ""}"><ha-icon icon="mdi:link-variant-off"></ha-icon>${esc(x.text.split(" – ")[1] || x.text)}</p>`).join("")}`;
   }
 
   _lwProfSum(x) {
@@ -4358,10 +4379,25 @@ class HauswerkPanel extends HTMLElement {
           <label class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Profil</span><select data-lwl="profile" ${dis}>${profs.map((x) => `<option value="${esc(x.id)}" ${(d.cfg.profile || "standard") === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
           ${d.cfg.auto === false ? `<p class="note"><ha-icon icon="mdi:robot-off-outline"></ha-icon>Das Profil ist an dieser Leuchte aus – Lichtwerk zeigt sie nur an.</p>` : ""}
           <p class="muted small">${esc(this._lwProfSum(profs.find((x) => x.id === (d.cfg.profile || "standard")) || {}))} · <button class="link inline" data-action="pop-open" data-pop="lwp:${esc(d.cfg.profile || "standard")}:on">Profil bearbeiten</button></p>
+          ${this._lwLinksBox(eid)}
           <div class="wxrows">${this._setRow("lwauto1", "Profil aktiv", "Lichtwerk schaltet diese Leuchte nach dem Profil", `<label class="switch"><input type="checkbox" data-lwl="auto" ${d.cfg.auto !== false ? "checked" : ""} ${dis}><span></span></label>`, "Aus: Das Profil gilt für diese Leuchte nicht – Lichtwerk zeigt sie nur an und schaltet sie nicht (z. B. im Sommer, bei Besuch oder zum Ausprobieren). Profil und Einstellungen bleiben erhalten; einschalten geht auch direkt an der Kachel. Andere Leuchten mit demselben Profil laufen weiter.")}</div>`,
         foot: `${this._admin ? `<button class="icon boxed danger" data-action="lwl-remove" data-id="${esc(eid)}" title="Aus Lichtwerk entfernen"><ha-icon icon="mdi:delete-outline"></ha-icon></button>` : ""}
           <button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
           ${this._admin ? `<button class="primary" data-action="lwl-save" data-id="${esc(eid)}"><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>` : ""}`,
+      };
+    }
+    if (id === "lwlinks") {
+      const L = this._lwStatus?.links || {};
+      const rows = this._lwLights().filter((l) => L.lights?.[l.id]).sort((a, b) => (L.lights[b.id].peers.length - L.lights[a.id].peers.length) || this._lwName(a).localeCompare(this._lwName(b), "de"));
+      return {
+        icon: "mdi:link-variant", c: "#0ea5e9", title: "Homematic-Verknüpfungen", sub: `Lichtwerk · Direktverknüpfungen aus der CCU${L.at ? ` · gelesen ${new Date(L.at).toLocaleString("de-DE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}`,
+        body: `
+          <p class="muted small">Was die CCU direkt verknüpft hat (Bewegungsmelder, Taster), schaltet ohne Home Assistant. Lichtwerk liest das (nur lesen, alle 6 Stunden): Schaltet die CCU eine Leuchte, gilt das nicht als „von Hand“ – Lichtwerk wartet, bis die CCU sie wieder ausschaltet. Meldet ein Profil denselben Bewegungsmelder, würde doppelt geschaltet.</p>
+          ${L.error ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>${esc(L.error)}</p>` : ""}
+          ${(L.findings || []).length ? `<div class="lbl">Hinweise</div><div class="evlist">${L.findings.map((f) => `<div class="ev"><ha-icon icon="mdi:link-variant-off" style="color:${f.level === "warn" ? "#f97316" : "#0ea5e9"}"></ha-icon><span class="grow"><b>${esc(f.text.split(" – ")[0])}</b><small>${esc(f.text.split(" – ")[1] || "")}</small></span></div>`).join("")}</div>` : ""}
+          <div class="lbl">Je Leuchte</div>
+          <div class="hl-list">${rows.map((l) => `<div class="hl-room"><div class="hl-w"><span class="hl-wn"><ha-icon icon="mdi:lightbulb-outline"></ha-icon>${esc(this._lwName(l))}</span><ha-icon class="hl-arrow" icon="mdi:arrow-left"></ha-icon><span class="hl-ps">${L.lights[l.id].peers.length ? L.lights[l.id].peers.map((x) => this._lwPeer(x)).join("") : `<em class="hl-none">${L.lights[l.id].own ? "nur eigene Taster" : "keine Verknüpfung"}</em>`}</span></div></div>`).join("") || `<p class="muted">Keine Homematic-Leuchte in Lichtwerk – oder noch nichts gelesen.</p>`}</div>`,
+        foot: `<button class="secondary" data-action="pop-close">Schließen</button>${this._admin ? `<button class="primary" data-action="lwlinks-refresh"><ha-icon icon="mdi:refresh"></ha-icon>Neu lesen</button>` : ""}`,
       };
     }
     if (id === "lwadd") {
@@ -9941,6 +9977,13 @@ class HauswerkPanel extends HTMLElement {
         }
         break;
       }
+      case "lwlinks-refresh": {
+        const res = await this._ws({ type: "hauswerk/lichtwerk/links/refresh" });
+        if (res && this._lwStatus) this._lwStatus.links = res;
+        this._renderPop();
+        this._toast("Verknüpfungen aus der CCU gelesen");
+        break;
+      }
       case "hmlinks-refresh": {
         const res = await this._ws({ type: "hauswerk/heizen/links/refresh" });
         if (res && this._status) this._status.hm_links = res;
@@ -9950,7 +9993,7 @@ class HauswerkPanel extends HTMLElement {
       }
       case "settings-go":
         // zentrale Pop-ups unter Hauswerk-Einstellungen, alle anderen unter Heizwerk › Einstellungen
-        this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : RW_POPS.includes(el.dataset.sub) || el.dataset.sub?.startsWith("rwc:") || el.dataset.sub?.startsWith("rwp:") ? "shutset" : "settings");
+        this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : LW_POPS.includes(el.dataset.sub) ? "lightset" : RW_POPS.includes(el.dataset.sub) || el.dataset.sub?.startsWith("rwc:") || el.dataset.sub?.startsWith("rwp:") ? "shutset" : "settings");
         if (el.dataset.sub) this._openPop(el.dataset.sub);
         break;
       case "person-new":
@@ -10586,7 +10629,8 @@ function morph(target, html) {
 }
 
 const EXPERT_MOD = { house: "haus", heat: "heizen", rw: "rollwerk", kw: "kraftwerk" };
-const LW_POPS = ["lwadd", "lwgeneral", "lwauto"];
+const LW_POPS = ["lwadd", "lwgeneral", "lwauto", "lwlinks"];
+const LW_LK = { motion: "mdi:motion-sensor", button: "mdi:gesture-tap-button", other: "mdi:link-variant" };
 const MODULE_LOGOS = {
   heizen: `<svg viewBox="0 0 48 48" aria-hidden="true">
   <defs><linearGradient id="hwlg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fdba74"/><stop offset="1" stop-color="#c2410c"/></linearGradient></defs>
@@ -12543,6 +12587,7 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .hl-p.out { background:var(--card2); color:var(--muted); }
 .hl-none { font-style:normal; color:#f97316; font-size:12.5px; font-weight:600; }
 @media (max-width:560px) { .hl-arrow { display:none; } .hl-ps { flex-basis:100%; padding-left:22px; } }
+.lw-hl .hl-ps { padding-left:0 !important; }
 .lg-colors { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px 12px; margin:4px 0 12px; }
 .lg-c { display:grid; grid-template-columns:14px 1fr; column-gap:8px; align-items:center; align-content:start; font-size:13px; }
 .lg-c b { font-size:13px; }

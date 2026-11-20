@@ -935,6 +935,19 @@ async def ws_lw_command(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"])
 
 
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/lichtwerk/links/refresh"})
+@require_editor
+@websocket_api.async_response
+async def ws_lw_links_refresh(hass: HomeAssistant, connection, msg) -> None:
+    """Direktverknüpfungen der Leuchten aus der Homematic-CCU neu lesen (nur lesen)."""
+    lw = _lw(hass)
+    if lw is None:
+        return _not_ready(connection, msg)
+    res = await lw.async_refresh_links(by=_who(connection))
+    await lw.async_evaluate()
+    connection.send_result(msg["id"], res)
+
+
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/lichtwerk/automation/off",
                                   vol.Required("entity_id"): vol.All(str, vol.Match(r"^automation\.[a-z0-9_]+$"))})
 @require_editor
@@ -998,6 +1011,7 @@ COMMANDS = (
     ws_lw_light_remove,
     ws_lw_command,
     ws_lw_automation_off,
+    ws_lw_links_refresh,
     ws_rw_profile_save,
     ws_rw_profile_delete,
     ws_log_get,
