@@ -2,6 +2,19 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.63.0 – 2026-11-20
+
+### Neu – Modul Lichtwerk
+- **Licht nach dem Vorbild des Blueprints „🔆 Smart Light“ (Blackshome)** – ohne Blueprint und YAML, aufgebaut wie Rollwerk: Reiter **Licht** und **Einstellungen**, eigenes Logo (Indigo), Kopfkachel, Kacheln nach Raum (detailliert/kompakt), Tabletmodus.
+- **Profile = Smart-Light-Automationen** mit den Abschnitten Einschalten (Sonne sinkt, Helligkeit fällt, Uhrzeit, Entität an, Rollläden schließen), Ausschalten (spätestens um, Sonne steigt, Helligkeit steigt, Entität aus), **Bewegung** (optional, nur wenn dunkel, aus nach x Min.), Tage (auch Arbeitstage-Kalender), Licht (Helligkeit, Übergang, Farbtemperatur/Farbe), **Dynamisch** (nach Sonne oder Helligkeit), **Nachtlicht** und Ausnahmen (von Hand, Pause-Schalter, niemand zu Hause, Urlaubs-Simulation).
+- **Wechsel statt Zustand** wie im Blueprint (an bei Sonnenuntergang, aus um 23:00 – um 5 Uhr nicht wieder an). Sonne und Uhrzeit werden vorausberechnet: Tagesleiste je Licht, „als Nächstes … um …“, richtiger Stand nach einem Neustart.
+- **Von Hand hat Vorrang:** wer schaltet (Schalter, App, andere Automation), wird erkannt; die Automatik wartet bis zum nächsten Wechsel (oder eine Zeit) – „Automatik übernimmt“ an der Kachel.
+- **Eine Vorrang-Logik mit Ursache an jeder Kachel:** Automatik aus › Pause-Schalter › von Hand › niemand zu Hause › Bewegung › Profil, z. B. „Sonne unter 2° · Nachtlicht“.
+- **Assistent „Licht hinzufügen“** mit Vorlagen: Abendlicht, Außenlicht, Flur mit Bewegung, Fernsehlicht, Deko/Weihnachten, Morgenlicht.
+- **Helligkeit-Fenster** mit Regler und Stufen (Aus, Nachtlicht, Normal, Hell), Lampensymbol in der echten Lichtfarbe.
+- **Hauswerk-Anbindung:** Anwesenheit (niemand da → aus), Urlaub mit Anwesenheits-Simulation (Zeiten zufällig ±30 Min.), Sonnenstand, Arbeitstage; Benachrichtigungen „Licht an, niemand zu Hause“ und „Leuchte nicht erreichbar“; Widget „Licht“, Zeile in „Lage“ und im Bildschirmschoner, Suche, Legende, Protokoll mit Filter „Lichtwerk“, Diagnose, umbenannte Entitäten.
+- **Bestehende Licht-Automationen** (z. B. Nachtlicht) werden unter Lichtwerk › Einstellungen aufgelistet und lassen sich nach der Übernahme mit einem Tipp abschalten.
+
 ## 0.62.0 – 2026-11-20
 
 ### Geändert – Heizpläne: klares Modell

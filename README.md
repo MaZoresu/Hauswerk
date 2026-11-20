@@ -12,7 +12,7 @@ Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite 
 | <img src="docs/icons/heizwerk.svg" height="20"> **Heizwerk** | fertig – raumweise Heizungsregelung (früher eine eigene Integration) |
 | <img src="docs/icons/rollwerk.svg" height="20"> **Rollwerk** | Rollläden mit Profilen wie die Cover Control Automation: Zeiten, Sonne, Helligkeit, Beschattung, Lüften, Bewohner, Sturm |
 | <img src="docs/icons/kraftwerk.svg" height="20"> **Kraftwerk** | Energiefluss live – Solar, Netz, Batterie, Hausverbrauch und Verbraucher; Tageswerte, Autarkie und Kosten aus dem Energie-Dashboard; **lernende Fertigerkennung** für Waschmaschine, Trockner & Co. |
-| Licht | geplant |
+| <img src="docs/icons/lichtwerk.svg" height="20"> **Lichtwerk** | Licht nach dem Vorbild des Blueprints „Smart Light“: Sonne, Helligkeit, Uhrzeit, Entität, Bewegung, Nachtlicht, dynamisches Licht, von Hand, Anwesenheit und Urlaubs-Simulation |
 | Garten | geplant |
 
 ## Installation
@@ -60,7 +60,10 @@ Kraftwerk                   Modul Energie
   ├─ Energiefluss           /hauswerk/kraftwerk/energiefluss
   ├─ Verlauf                /hauswerk/kraftwerk/verlauf
   └─ Einstellungen          /hauswerk/kraftwerk/einstellungen
-Licht · Garten              geplant, ausgegraut
+Lichtwerk                   Modul Licht
+  ├─ Licht                  /hauswerk/lichtwerk/licht
+  └─ Einstellungen          /hauswerk/lichtwerk/einstellungen
+Garten                      geplant, ausgegraut
 ⚙ Einstellungen            /hauswerk/einstellungen  (zentral, für alle Module)
   └─ Protokoll              /hauswerk/protokoll  (was wann warum entschieden wurde)
 🔔 Hinweise                 Pop-up mit allem, was zu beheben oder gut zu wissen ist
@@ -75,7 +78,7 @@ Licht · Garten              geplant, ausgegraut
 - **Heizwerk › Einstellungen:** nur was das Heizen betrifft – **Abwesenheit & Urlaub** (welche Temperatur, wenn niemand da ist oder Urlaub ist; Frostschutz nach langer Abwesenheit), **Saison**, **Heizpläne**, **Vorheizen** (auch nach Wetter), **Lüften & Schimmelschutz**, **Frostschutz**, **Boost**, **Entkalkungsschutz**, **Kalibrierung** und die **Räume**. Ganz oben führt ein Eintrag zu den zentralen Einstellungen.
 - Beide Einstellungsseiten sind Listen mit Suche; ein Tipp öffnet die Einzelheiten als Pop-up.
 - **Entitätssuche** (überall, wo Geräte gewählt werden): gewählte Entitäten als Karten mit aktuellem Wert und Raum; darunter **Vorschläge** mit Trefferquote und Begründung (Geräteklasse, Name, Raum aus Home Assistant, erreichbar), **Nach Raum** gruppiert und **Filter** nach Art und Erreichbarkeit. Temperaturunterschiede zeigt Hauswerk überall in °C.
-- **Kopfzeile:** schrumpft beim Scrollen auf eine Zeile mit Logo, Reitern, Glocke und Zahnrad. Auf dem Handy gibt es stattdessen unten eine Leiste **Start · Heizwerk · Rollwerk · Kraftwerk · Einstellungen**; im Modul Heizwerk bleibt dessen Unterleiste **Räume · Bericht · Einstellungen** sichtbar.
+- **Kopfzeile:** schrumpft beim Scrollen auf eine Zeile mit Logo, Reitern, Glocke und Zahnrad. Auf dem Handy gibt es stattdessen unten eine Leiste **Start · Heizwerk · Rollwerk · Kraftwerk · Lichtwerk · Einstellungen**; im Modul Heizwerk bleibt dessen Unterleiste **Räume · Bericht · Einstellungen** sichtbar.
 - **Raumseite:** Ein Tipp auf den Raumnamen öffnet eine eigene Seite mit Raumkarte, Verlauf der letzten 24 Stunden (Raumtemperatur, Soll, Heizzeiten, offene Fenster), Geräten mit Live-Werten, Einstellungen im Überblick und den letzten 7 Tagen.
 - **Suche über alles:** Lupe oben (am Computer `/` oder Strg+K) – Seiten, Räume, Geräte, Heizpläne, Rollläden, Profile, Verbraucher, alle Einstellungen und das Protokoll.
 - **Hinweise:** Glocke oben rechts mit Zahl. Ein Tipp listet alles, was zu beheben ist (z. B. Thermostat nicht erreichbar, **zweite Regelung** am selben Thermostat, **Funk ausgelastet**, **Batterie schwach** an Thermostat, Fensterkontakt oder Sensor, Raum ohne Thermostat, Kalender nicht lesbar) und was gut zu wissen ist (z. B. Fenster lange offen, **Jetzt lüften**, Fenster vermutlich offen) – jeweils mit Sprung an die richtige Stelle.
@@ -211,11 +214,27 @@ Zeigt, woher der Strom kommt und wohin er fließt (Kraftwerk › Energiefluss):
 - **Nichts doppelt:** Zähler (kWh) und Preise kommen aus dem **Energie-Dashboard von Home Assistant** und dessen Statistik.
 - **Widget „Energie“** für die Startseite: klein Solar und Netz, mittel vier Werte und Autarkie heute, groß mit Energiefluss und Tageswerten.
 
+# Modul Lichtwerk
+
+Licht mit **Profilen** nach dem Vorbild des Blueprints [🔆 Smart Light](https://community.home-assistant.io/t/smart-light-entity-sun-elevation-ambient-time-triggers/527354) (Blackshome) – ohne Blueprint und YAML, alles im Panel (Lichtwerk › Licht und Lichtwerk › Einstellungen). Ein Profil entspricht einer Smart-Light-Automation, jede Leuchte (auch Gruppe oder Schalter) nutzt eines.
+
+- **Einschalten:** Sonne sinkt unter x°, Helligkeit fällt unter x lx, Uhrzeit, eine Entität geht an (z. B. Fernseher), die Rollläden im selben Bereich schließen.
+- **Ausschalten:** spätestens um, Sonne steigt über x°, Helligkeit über x lx, Entität aus.
+- **Wechsel statt Zustand** wie im Blueprint: an bei Sonnenuntergang, aus um 23:00 – und um 5 Uhr nicht wieder an. Feste Auslöser (Sonne, Uhrzeit) werden für heute vorausberechnet: Tagesleiste, „als Nächstes“ und der richtige Stand nach einem Neustart.
+- **Bewegung** (optional, wie „Sensor Light“): an bei Bewegung (nur wenn dunkel), aus nach x Min. ohne Bewegung.
+- **Tage:** Wochentage und Arbeitstage-Kalender aus Hauswerk.
+- **Licht:** Helligkeit, Übergang, Farbtemperatur oder Farbe; **dynamisch** nach Sonnenhöhe oder Helligkeit; **Nachtlicht** mit eigener Helligkeit und Überblenden.
+- **Vorrang:** Automatik aus › Pause-Schalter › von Hand (Automatik wartet bis zum nächsten Wechsel oder eine feste Zeit) › niemand zu Hause (aus; im Urlaub optional Anwesenheits-Simulation mit zufälligen Zeiten) › Bewegung › Profil. Die Ursache steht an jeder Kachel.
+- **Vorlagen:** Abendlicht, Außenlicht, Flur mit Bewegung, Fernsehlicht, Deko/Weihnachten, Morgenlicht.
+- **Benachrichtigungen:** „Licht an, niemand zu Hause“ und „Leuchte nicht erreichbar“.
+- **Übernahme:** bestehende Licht-Automationen werden aufgelistet und lassen sich nach dem Einrichten abschalten.
+- **Widget „Licht“**, Zeile in „Lage“ und im Bildschirmschoner, Symbole in der Legende, Protokoll mit Filter „Lichtwerk“.
+
 # Aufbau des Projekts
 
 ```
 custom_components/hauswerk/
-  __init__.py       Einstieg, Panel, Module (hass.data["hauswerk"]: "log", "haus", "heizen", "rollwerk", "kraftwerk")
+  __init__.py       Einstieg, Panel, Module (hass.data["hauswerk"]: "log", "haus", "heizen", "rollwerk", "kraftwerk", "lichtwerk")
   core.py           Hauswerk-Kern für alle Module: Anwesenheit, Urlaub (auch Kalender), Wetter (Frost-Vorhersage),
                     Benachrichtigungen mit Ruhezeit, Darstellung, Widgets, Berechtigungen (config/.storage/hauswerk.haus)
   logic.py          Modul Heizwerk: Regel-Logik ohne Home-Assistant-Abhängigkeit (getestet)
@@ -223,6 +242,8 @@ custom_components/hauswerk/
   log.py            Protokoll für alle Module (config/.storage/hauswerk.protokoll, 14 Tage)
   rollwerk.py       Modul Rollwerk: Rollläden (config/.storage/hauswerk.rollwerk)
   kraftwerk.py      Modul Kraftwerk: Sensoren für den Energiefluss (config/.storage/hauswerk.kraftwerk)
+  light_logic.py    Modul Lichtwerk: Regel-Logik (Auslöser, Vorausrechnung, Nachtlicht, Vorrang), getestet
+  lichtwerk.py      Modul Lichtwerk: Lichter und Profile (config/.storage/hauswerk.lichtwerk)
   diagnostics.py    Diagnose-Download (Geräte & Dienste › Hauswerk › Diagnose herunterladen)
   api.py            WebSocket-Befehle fürs Panel (hauswerk/heizen/get, /subscribe, /room/save …, hauswerk/log/get, /subscribe, hauswerk/notify/test)
   sensor.py, switch.py, entity.py

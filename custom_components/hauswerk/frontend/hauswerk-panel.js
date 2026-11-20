@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.62.0";
+const VERSION = "0.63.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -92,6 +92,13 @@ const LEGEND = [
   ["Rollwerk", "mdi:hand-back-right-outline", C.hand, "Von Hand", "Von Hand verstellt – die Automatik wartet bis zum nächsten Wechsel."],
   ["Rollwerk", "mdi:robot-off-outline", C.rest, "Automatik aus", "Rollwerk fährt diesen Rollladen nicht."],
   ["Rollwerk", "mdi:battery-alert-variant-outline", C.alert, "Batterie schwach", "Batterie am Rollladen bald leer."],
+  ["Lichtwerk", "mdi:lightbulb-on", "#facc15", "Licht an", "In der echten Lichtfarbe; Prozent = Helligkeit."],
+  ["Lichtwerk", "mdi:lightbulb-outline", C.rest, "Licht aus", ""],
+  ["Lichtwerk", "mdi:hand-back-right-outline", C.hand, "Von Hand", "Von Hand geschaltet – die Automatik wartet bis zum nächsten Wechsel (oder die im Profil eingestellte Zeit)."],
+  ["Lichtwerk", "mdi:motion-sensor", C.ok, "Bewegung", "Licht an durch Bewegung – aus nach der Wartezeit ohne Bewegung."],
+  ["Lichtwerk", "mdi:weather-night", "#6366f1", "Nachtlicht", "Gedimmt im Nachtlicht-Zeitraum des Profils."],
+  ["Lichtwerk", "mdi:lightbulb-alert-outline", C.alert, "Nicht erreichbar", "Leuchte meldet sich nicht (Funk, Strom, ausgeschaltet am Schalter)."],
+  ["Lichtwerk", "mdi:robot-off-outline", C.rest, "Automatik aus", "Lichtwerk schaltet dieses Licht nicht."],
   ["Kraftwerk", "mdi:power-sleep", "#64748b", "Bereit", "Gerät wartet auf den nächsten Durchlauf."],
   ["Kraftwerk", "mdi:play-circle-outline", C.cool, "Läuft", "Mit Restzeit aus den gelernten Durchläufen."],
   ["Kraftwerk", "mdi:timer-sand", C.sun, "Ende wird geprüft", "Ruhe erkannt – ist es eine Pause oder fertig?"],
@@ -111,9 +118,11 @@ const NK_KINDS = [
   { k: "vent_done", g: "Lüften", icon: "mdi:window-closed-variant", c: C.alert, title: "Fenster schließen", def: "normal", ex: ["Fenster schließen", "Bad: genug gelüftet (10 Min. um)"], text: "Zeit um, Feuchte gesunken oder Raum ausgekühlt." },
   { k: "storm", g: "Rollwerk", icon: "mdi:weather-windy-variant", c: C.alert, title: "Sturm", def: "normal", ex: ["Sturm – Rollläden fahren hoch", "Böen 82 km/h (Grenze 70 km/h)"], text: "Der Sturmschutz fährt alle Rollläden hoch. Erledigt, sobald er endet." },
   { k: "cover", g: "Rollwerk", icon: "mdi:window-shutter-alert", c: C.alert, title: "Rollladen nicht erreichbar", def: "normal", ex: ["Rollladen nicht erreichbar", "Küche links meldet sich seit 15 Min. nicht – Funk oder Strom prüfen"], text: "Ein Rollladen meldet sich so lange nicht (gleiche Zeit wie bei Thermostaten)." },
+  { k: "light_away", g: "Lichtwerk", icon: "mdi:home-lightbulb-outline", c: "#6366f1", title: "Licht an, niemand zu Hause", def: "normal", ex: ["Licht an, niemand zu Hause", "Wohnzimmer, Küche – brennt seit 30 Min."], text: "Brennt Licht so lange (Lichtwerk › Einstellungen), obwohl niemand zu Hause ist – nicht im Urlaub mit Anwesenheits-Simulation." },
+  { k: "light_offline", g: "Lichtwerk", icon: "mdi:lightbulb-alert-outline", c: C.alert, title: "Leuchte nicht erreichbar", def: "log", ex: ["Leuchte nicht erreichbar", "Flur OG meldet sich seit 15 Min. nicht"], text: "Eine Leuchte aus Lichtwerk meldet sich so lange nicht (gleiche Zeit wie bei Thermostaten)." },
   { k: "waste", g: "Hauswerk", icon: "mdi:trash-can-outline", c: "#64748b", title: "Müllabfuhr morgen", def: "off", ex: ["Morgen Müllabfuhr", "Restabfall, Papier – Tonne heute Abend rausstellen."], text: "Am Vorabend ab der Uhrzeit unter Hauswerk › Kalender › Müllabholung, einmal je Abholtag." },
 ];
-const NK_GROUPS = { Heizwerk: ["#f97316", "logo:heizen"], "Lüften": ["#22d3ee", "mdi:weather-windy"], Rollwerk: ["#0ea5e9", "logo:rollwerk"], Kraftwerk: ["#eab308", "logo:kraftwerk"], Hauswerk: ["#14b8a6", "mdi:home-outline"] };
+const NK_GROUPS = { Heizwerk: ["#f97316", "logo:heizen"], "Lüften": ["#22d3ee", "mdi:weather-windy"], Rollwerk: ["#0ea5e9", "logo:rollwerk"], Kraftwerk: ["#eab308", "logo:kraftwerk"], Lichtwerk: ["#6366f1", "logo:lichtwerk"], Hauswerk: ["#14b8a6", "mdi:home-outline"] };
 const NK_GICON = { App: "mdi:cellphone", Pushover: "mdi:message-badge-outline", Telegram: "mdi:send-circle-outline", "E-Mail": "mdi:email-outline", Sprachausgabe: "mdi:account-voice", Bildschirm: "mdi:tablet", Weitere: "mdi:bell-outline", "Home Assistant": "mdi:home-assistant" };
 /** Kanäle eines Kraftwerk-Geräts (alte Einträge: nur Dienstname, notify_ha). */
 const appChannels = (a) => [...new Set([...(a.notify || []).map((x) => (x.includes(":") || x === "ha" ? x : `svc:${x}`)), ...(a.notify_ha ? ["ha"] : [])])];
@@ -195,6 +204,7 @@ Object.assign(WIDGETS, {
   events: { name: "Nächste Ereignisse", icon: "mdi:timeline-clock-outline", c: "#38bdf8", text: "Zeitleiste: Heizwechsel, Rollladen-Fahrten und Termine (Kalender wählbar)", config: true, cal: true },
   calendar: { name: "Termine", icon: "mdi:calendar-month-outline", c: "#f472b6", text: "Termine heute und morgen, z. B. Müllabfuhr – mit Symbol je Müllart", config: true, cal: true },
   vent: { name: "Lüften", icon: "mdi:weather-windy", c: "#22d3ee", text: "Wo jetzt gelüftet werden sollte (mit Dauer), laufende Lüftungen mit Countdown, Schimmelgefahr", go: "vent" },
+  light: { name: "Licht", icon: "mdi:lightbulb-outline", c: "#6366f1", text: "Wie viele Lichter an sind, nächste Schaltung, Alle aus; groß mit allen Lichtern zum Schalten", go: "lights" },
 });
 const DEFAULT_WIDGETS = [{ type: "heat", size: "m" }, { type: "weather", size: "s" }, { type: "windows", size: "s" }, { type: "presence", size: "l" }, { type: "rooms", size: "l" }];
 const SC_ICONS = { light: "mdi:lightbulb-outline", switch: "mdi:toggle-switch-outline", input_boolean: "mdi:toggle-switch-outline", script: "mdi:script-text-play-outline", scene: "mdi:palette-outline", button: "mdi:gesture-tap-button", input_button: "mdi:gesture-tap-button", fan: "mdi:fan", cover: "mdi:window-shutter", lock: "mdi:lock-outline", media_player: "mdi:speaker" };
@@ -438,6 +448,25 @@ const SHUT_VIEWS = [
   { id: "shutters", slug: "rolllaeden", name: "Rollläden", icon: "mdi:window-shutter" },
   { id: "shutset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
 ];
+const LW_VIEWS = [
+  { id: "lights", slug: "licht", name: "Licht", icon: "mdi:lightbulb-group-outline" },
+  { id: "lightset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
+];
+// Abschnitte des Lichtwerk-Profils (wie die Bereiche des Blueprints „Smart Light“)
+const LW_SECTIONS = [
+  ["on", "Einschalten", "mdi:lightbulb-on-outline"], ["off", "Ausschalten", "mdi:lightbulb-off-outline"], ["motion", "Bewegung", "mdi:motion-sensor"],
+  ["days", "Tage", "mdi:calendar-week"], ["light", "Licht", "mdi:brightness-6"], ["dyn", "Dynamisch", "mdi:theme-light-dark"],
+  ["night", "Nachtlicht", "mdi:weather-night"], ["more", "Ausnahmen", "mdi:hand-back-right-outline"],
+];
+// Vorlagen für neue Lichtwerk-Profile
+const LW_PRESETS = {
+  abend: { name: "Abendlicht", icon: "mdi:sofa-outline", text: "an bei Sonnenuntergang, aus um 23:00", prof: { on_sun: true, sun_on: 2, off_sun: true, off_time: true, time_off: "23:00", on_time: false, motion: [], night: false } },
+  aussen: { name: "Außenlicht", icon: "mdi:outdoor-lamp", text: "an in der Dämmerung, aus 23:30, danach bei Bewegung", prof: { on_sun: true, sun_on: -2, off_sun: true, off_time: true, time_off: "23:30", motion_off: 3, motion_dark: true } },
+  flur: { name: "Flur mit Bewegung", icon: "mdi:motion-sensor", text: "nur bei Bewegung und Dunkelheit, nachts gedimmt", prof: { on_sun: true, sun_on: 5, off_sun: false, off_time: false, motion_off: 3, motion_dark: true, night: true, night_from: "22:30", night_to: "06:00", night_brightness: 10 } },
+  tv: { name: "Fernsehlicht", icon: "mdi:television-ambient-light", text: "an mit dem Fernseher, aus mit dem Fernseher", prof: { on_sun: false, off_sun: false, on_entity: true, off_entity: true, off_time: false, brightness: 30, color: "temp", kelvin: 2400 } },
+  deko: { name: "Deko / Weihnachten", icon: "mdi:pine-tree", text: "an 16:00 bzw. bei Dämmerung, aus 22:30", prof: { on_sun: true, sun_on: 4, on_time: false, off_sun: false, off_time: true, time_off: "22:30" } },
+  morgen: { name: "Morgenlicht", icon: "mdi:weather-sunset-up", text: "werktags 06:00 an, aus bei Sonnenaufgang", prof: { on_sun: false, on_time: true, time_on: "06:00", off_sun: true, sun_off: 3, off_time: true, time_off: "09:00", day_mode: "workday" } },
+};
 const KW_VIEWS = [
   { id: "kwflow", slug: "energiefluss", name: "Energiefluss", icon: "mdi:transmission-tower" },
   { id: "kwdev", slug: "geraete", name: "Geräte", icon: "mdi:washing-machine" },
@@ -448,8 +477,9 @@ const MODULES = [
   { id: "heizen", no: 1, name: "Heizwerk", icon: "mdi:radiator", logo: "heizen", views: HEAT_VIEWS.map((v) => v.id) },
   { id: "rollwerk", no: 2, name: "Rollwerk", icon: "mdi:window-shutter", logo: "rollwerk", views: SHUT_VIEWS.map((v) => v.id) },
   { id: "kraftwerk", no: 3, name: "Kraftwerk", icon: "mdi:solar-power-variant", logo: "kraftwerk", views: KW_VIEWS.map((v) => v.id) },
+  { id: "lichtwerk", no: 4, name: "Lichtwerk", icon: "mdi:lightbulb-outline", logo: "lichtwerk", views: LW_VIEWS.map((v) => v.id) },
 ];
-const SUB_VIEWS = [...HEAT_VIEWS, ...SHUT_VIEWS, ...KW_VIEWS];
+const SUB_VIEWS = [...HEAT_VIEWS, ...SHUT_VIEWS, ...KW_VIEWS, ...LW_VIEWS];
 // Symbol eines Verbrauchers nach seinem Namen (erster Treffer zählt)
 const KW_ICONS = [
   [/w(ä|ae)rmepumpe|heat ?pump|\bwp\b/, "mdi:heat-pump-outline"], [/wallbox|e-?auto|\bev\b|lades(ä|ae)ule|laden|charger|auto/, "mdi:ev-station"],
@@ -472,11 +502,11 @@ const APP_STATE = { idle: ["Bereit", "#64748b", "mdi:power-sleep"], running: ["L
 const KW_POPS = ["kwdetect", "kwsolar", "kwgrid", "kwbatt", "kwhome", "kwcons"];
 // Geplante Module: nur ausgegraut angezeigt, noch ohne Funktion.
 const COMING = [
-  { name: "Licht", icon: "mdi:lightbulb-outline" },
   { name: "Garten", icon: "mdi:flower-outline" },
 ];
 const SLUGS = { start: "start", house: "einstellungen", log: "protokoll", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])),
-  ...Object.fromEntries(SHUT_VIEWS.map((v) => [v.id, `rollwerk/${v.slug}`])), ...Object.fromEntries(KW_VIEWS.map((v) => [v.id, `kraftwerk/${v.slug}`])) };
+  ...Object.fromEntries(SHUT_VIEWS.map((v) => [v.id, `rollwerk/${v.slug}`])), ...Object.fromEntries(KW_VIEWS.map((v) => [v.id, `kraftwerk/${v.slug}`])),
+  ...Object.fromEntries(LW_VIEWS.map((v) => [v.id, `lichtwerk/${v.slug}`])) };
 // Pop-ups von Rollwerk (Einstellungen unter Rollwerk › Einstellungen)
 const WIZ_USES = [
   { id: "wohnen", label: "Wohnzimmer", icon: "mdi:sofa-outline", comfort: 21, eco: 18, plan: "berufstaetig", match: /wohn|living|stube/ },
@@ -541,6 +571,7 @@ const LOG_CATS = {
   target: { name: "Ziel & Heizung", icon: "mdi:thermometer-auto", c: "#14b8a6" },
   window: { name: "Fenster", icon: "mdi:window-open-variant", c: "#3b82f6" },
   manual: { name: "Von Hand", icon: "mdi:hand-back-right-outline", c: "#8b5cf6" },
+  light: { name: "Licht", icon: "mdi:lightbulb-outline", c: "#6366f1" },
   health: { name: "Geräte", icon: "mdi:heart-pulse", c: "#f43f5e" },
   shutter: { name: "Rollläden", icon: "mdi:window-shutter", c: "#0ea5e9" },
   command: { name: "Thermostat-Befehle", icon: "mdi:access-point", c: "#94a3b8", off: true },
@@ -791,6 +822,16 @@ class HauswerkPanel extends HTMLElement {
         { type: "hauswerk/rollwerk/subscribe" }
       ).catch(() => null);
     }
+    if (this._data?.lichtwerk) {
+      this._lwStatus = this._data.lichtwerk.status;
+      this._lwUnsub = this._hass.connection.subscribeMessage(
+        (status) => {
+          this._lwStatus = status;
+          if (["lights", "start"].includes(this._tab) && !this._busy && !this._pop) this._renderMain();
+        },
+        { type: "hauswerk/lichtwerk/subscribe" }
+      ).catch(() => null);
+    }
   }
 
   async _ws(msg) {
@@ -1012,7 +1053,7 @@ class HauswerkPanel extends HTMLElement {
     if (chips)
       chips.innerHTML =
         this._data && !this._error
-          ? (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "") + (MODULES[1].views.includes(this._tab) ? this._rwNavHtml() : "") + (MODULES[2].views.includes(this._tab) ? this._kwNavHtml() : "")
+          ? (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "") + (MODULES[1].views.includes(this._tab) ? this._rwNavHtml() : "") + (MODULES[2].views.includes(this._tab) ? this._kwNavHtml() : "") + (MODULES[3].views.includes(this._tab) ? this._lwNavHtml() : "")
           : "";
   }
 
@@ -1189,7 +1230,8 @@ class HauswerkPanel extends HTMLElement {
     if (!this._data) return;
     const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, vent: this._viewVent, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom,
       shutters: this._viewShutters, shutset: () => this._settingsPage("rw"),
-      kwflow: this._viewKwFlow, kwdev: this._viewKwDev, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw") }[this._tab] || this._viewStart;
+      kwflow: this._viewKwFlow, kwdev: this._viewKwDev, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw"),
+      lights: this._viewLights, lightset: () => this._settingsPage("lw") }[this._tab] || this._viewStart;
     let html;
     try {
       html = view.call(this);
@@ -1453,13 +1495,13 @@ class HauswerkPanel extends HTMLElement {
     const tab = this._tab;
     // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
     const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
-    const onePage = ["settings", "shutset", "kwset", "house"].includes(tab);
+    const onePage = ["settings", "shutset", "kwset", "lightset", "house"].includes(tab);
     const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66, ...(onePage ? [0.6, 0.55] : [])].map((z) => Math.round(z * f * 100) / 100);
     const maxZ = Math.max(f, Math.min(1.4 * f, (W / 820) * f));
     const zs = ZOOMS.filter((z) => z <= maxZ + 0.001);
     // Kachel-Seiten blättern reihenweise (ohne CSS-Spalten – ältere Tablet-Browser teilen Raster nicht auf),
     // Listen-Seiten fließen in Spalten (bis zu drei).
-    const rows = ["start", "overview", "shutters", "kwflow"].includes(tab) || W < 900;
+    const rows = ["start", "overview", "shutters", "kwflow", "lights"].includes(tab) || W < 900;
     const ks = rows ? [1] : onePage && W >= 1100 ? [1, 2, 3] : [1, 2];
     const base = (z) => {
       tin.style.zoom = z;
@@ -1960,6 +2002,7 @@ class HauswerkPanel extends HTMLElement {
       const fl = this._kwFlow();
       items.push(["kraftwerk", "kwflow", this._briefParts(this._kwBrief(fl, this._kwPrefs()?.ok ? this._kwStats("today") : null))]);
     }
+    if (this._data.lichtwerk && this._lwLights().length) items.push(["lichtwerk", "lights", this._briefParts(this._lwBriefHtml())]);
     const list = items.filter(([, , b]) => b);
     if (!list.length) return `<p class="muted small">Noch kein Modul eingerichtet.</p>`;
     return `<div class="wlage ${z}">${list.map(([m, tab, b]) => `
@@ -2192,6 +2235,14 @@ class HauswerkPanel extends HTMLElement {
       if (fl.grid != null) x.push(it(fl.grid > 0 ? "mdi:transmission-tower-import" : "mdi:transmission-tower-export", this._kwFmt(Math.abs(fl.grid)), fl.grid > 0 ? "Bezug" : "Einspeisung"));
       if (fl.soc != null) x.push(it("mdi:home-battery-outline", `${fmt(fl.soc, 0)} %`, "Akku"));
       if (x.length) mods.push(["kraftwerk", x]);
+    }
+    if (this._data.lichtwerk && this._lwLights().length) {
+      const ls = this._lwLights();
+      const on = ls.filter((l) => l.st?.state === "on").length;
+      const x = [it("mdi:lightbulb-on-outline", String(on), "Lichter an")];
+      const nx = this._lwStatus?.next;
+      if (nx && !nx.day) x.push(`<span class="sv-i sv-next" title="${esc(nx.reason)}"><ha-icon icon="mdi:clock-outline"></ha-icon><b>${t2(nx.min)}</b><ha-icon icon="${nx.action === "on" ? "mdi:lightbulb-on-outline" : "mdi:lightbulb-off-outline"}"></ha-icon><b>${nx.count || 1}</b></span>`);
+      mods.push(["lichtwerk", x]);
     }
     // Vorhersage der nächsten Stunden
     let fcHtml = "";
@@ -4055,6 +4106,422 @@ class HauswerkPanel extends HTMLElement {
       </section>`;
   }
 
+
+  // ------------------------------------------------------------ Lichtwerk
+  _lwNavHtml() {
+    return `<nav class="heatnav">${LW_VIEWS.map((v) => `<button class="hnav ${this._tab === v.id ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span></button>`).join("")}</nav>`;
+  }
+
+  /** Lichter mit Einstellung (cfg), Zustand (st) und Status aus Lichtwerk (ls). */
+  _lwLights() {
+    const lw = this._data.lichtwerk || {};
+    const S = this._hass?.states || {};
+    const stat = this._lwStatus?.lights || {};
+    return (this._data.settings.lw_lights || []).map((id) => ({ id, cfg: lw.lights?.[id] || {}, st: S[id], ls: stat[id] || {} }));
+  }
+
+  _lwProfiles() {
+    const all = this._data.lichtwerk?.profiles || {};
+    return Object.entries(all).map(([id, p]) => ({ id, ...p })).sort((a, b) => (a.id === "standard" ? -1 : b.id === "standard" ? 1 : String(a.name).localeCompare(String(b.name), "de")));
+  }
+
+  _lwProfName(pid) {
+    const all = this._data.lichtwerk?.profiles || {};
+    return (all[pid || "standard"] || all.standard || Object.values(all)[0])?.name || "Standard";
+  }
+
+  _lwName(l) {
+    return l.cfg?.name || l.ls?.name || this._entityName(l.id);
+  }
+
+  /** Farbe der Leuchte für das Symbol: RGB, sonst aus der Farbtemperatur, sonst warmweiß. */
+  _lwColor(l) {
+    if (l.st?.state !== "on") return "var(--muted)";
+    const a = l.st.attributes || {};
+    if (Array.isArray(a.rgb_color) && a.color_mode && !["color_temp", "brightness", "onoff"].includes(a.color_mode)) return `rgb(${a.rgb_color.join(",")})`;
+    const k = a.color_temp_kelvin;
+    if (k) return k < 2600 ? "#fbbf24" : k < 3300 ? "#fcd34d" : k < 4200 ? "#fde68a" : "#e0f2fe";
+    return "#facc15";
+  }
+
+  _lwPct(l) {
+    if (l.st?.state !== "on") return null;
+    const b = l.st.attributes?.brightness;
+    return b != null ? Math.round(b / 2.55) : 100;
+  }
+
+  /** „16:48“ / „morgen 06:12“ für den nächsten Wechsel. */
+  _lwWhen(n) {
+    if (!n) return "";
+    return `${n.day ? "morgen " : ""}${t2(n.min)}`;
+  }
+
+  /** Tagesleiste: wann das Licht laut Profil an ist (gelb), Nachtlicht (indigo), Jetzt-Marke. */
+  _lwDayBar(l, small = false) {
+    const plan = l.ls.plan || [];
+    const nw = l.ls.night_window;
+    const now = new Date();
+    const nowPct = ((now.getHours() * 60 + now.getMinutes()) / 1440) * 100;
+    const segs = plan.map((p) => `<div class="lwseg" style="left:${(p.start / 1440) * 100}%;width:${((p.end - p.start) / 1440) * 100}%" title="${t2(p.start)}–${p.end >= 1440 ? "24:00" : t2(p.end)} an · ${esc(p.reason || "")}${p.until ? ` · aus: ${esc(p.until)}` : ""}"></div>`).join("");
+    let night = "";
+    if (nw) {
+      const a = hm(nw[0]), b = hm(nw[1]);
+      const parts = a < b ? [[a, b]] : [[a, 1440], [0, b]];
+      night = parts.map(([x, y]) => `<div class="lwseg night" style="left:${(x / 1440) * 100}%;width:${((y - x) / 1440) * 100}%" title="Nachtlicht ${nw[0]}–${nw[1]}"></div>`).join("");
+    }
+    return `<div class="lwbar ${small ? "small" : ""}"><div class="lwtrack"></div>${segs}${night}<div class="now" style="left:${nowPct}%"></div></div>
+      ${small ? "" : `<div class="dscale">${[0, 6, 12, 18, 24].map((h) => `<span>${h}</span>`).join("")}</div>`}`;
+  }
+
+  /** Lichtwerk-Lage für Kopfkachel und Widget „Lage“. */
+  _lwBrief(lights) {
+    const s = this._lwStatus || {};
+    const on = lights.filter((l) => l.st?.state === "on");
+    const manual = lights.filter((l) => l.ls.manual);
+    const motion = lights.filter((l) => l.ls.motion);
+    const bad = lights.filter((l) => !l.st || ["unavailable", "unknown"].includes(l.st.state));
+    const act = (l) => `data-action="pop-open" data-pop="lwbri:${esc(l.id)}"`;
+    let tone = "ok", icon = "mdi:lightbulb-outline", title;
+    const nx = s.next;
+    if (s.away && on.length) { tone = "warn"; icon = "mdi:home-alert-outline"; title = `Niemand zu Hause – ${on.length} ${on.length === 1 ? "Licht brennt" : "Lichter brennen"}`; }
+    else if (nx) {
+      const l = lights.find((x) => x.id === nx.entity_id);
+      tone = manual.length ? "hand" : on.length ? "active" : "ok";
+      icon = nx.action === "on" ? "mdi:lightbulb-on-outline" : "mdi:lightbulb-off-outline";
+      title = `${nx.day ? "Morgen um" : "Um"} ${t2(nx.min)} ${nx.action === "on" ? "an" : "aus"} – ${nx.count > 1 ? `${nx.count} Lichter` : esc(l ? this._lwName(l) : "Licht")} (${nx.reason})`;
+    } else {
+      tone = on.length ? "active" : "calm";
+      icon = on.length ? "mdi:lightbulb-group" : "mdi:weather-night";
+      title = on.length ? `${on.length} ${on.length === 1 ? "Licht an" : "Lichter an"} – keine Schaltung geplant` : "Alles aus – keine Schaltung geplant";
+    }
+    const lines = [];
+    for (const l of manual.slice(0, 2))
+      lines.push({ icon: "mdi:hand-back-right-outline", c: C.hand, text: `${this._lwName(l)} von Hand ${l.st?.state === "on" ? "an" : "aus"} – Automatik wartet${l.ls.manual.until ? ` bis ${new Date(l.ls.manual.until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : " bis zum nächsten Wechsel"}`, act: act(l) });
+    for (const l of motion.slice(0, 1)) lines.push({ icon: "mdi:motion-sensor", c: C.ok, text: `${this._lwName(l)}: Bewegung`, act: act(l) });
+    const night = on.filter((l) => l.ls.night);
+    if (night.length) lines.push({ icon: "mdi:weather-night", c: "#6366f1", text: `Nachtlicht: ${night.map((l) => this._lwName(l)).join(", ")}` });
+    if (bad.length) lines.push({ icon: "mdi:lightbulb-alert-outline", c: C.alert, text: `${bad.length} nicht erreichbar: ${bad.slice(0, 3).map((l) => this._lwName(l)).join(", ")}` });
+    const chips = [["mdi:lightbulb-on-outline", String(on.length), "an", ""], ["mdi:lightbulb-outline", String(lights.length - on.length), "aus", ""],
+      ...(manual.length ? [["mdi:hand-back-right-outline", String(manual.length), "von Hand", C.hand]] : []),
+      ...(motion.length ? [["mdi:motion-sensor", String(motion.length), "Bewegung", C.ok]] : [])];
+    const ids = on.map((l) => l.id).join(",");
+    const side = `<span class="br-acts">${this._admin ? `<button class="br-act" data-action="pop-open" data-pop="lwadd" title="Licht hinzufügen"><ha-icon icon="mdi:plus"></ha-icon></button>` : ""}${on.length ? `<button class="br-act" data-action="lw-cmd" data-ids="${ids}" data-a="off" title="Alle aus"><ha-icon icon="mdi:lightbulb-off-outline"></ha-icon><span>Alle aus</span></button>` : ""}</span>`;
+    return this._brief({ cls: "card br-mod-lw", tone, icon, label: `<ha-icon icon="mdi:lightbulb-outline"></ha-icon>Lichtwerk · jetzt`, big: `${on.length}<span>/${lights.length} an</span>`, title, side, lines, chips });
+  }
+
+  _lwBriefHtml() {
+    const lights = this._lwLights();
+    return this._data.lichtwerk && lights.length ? this._lwBrief(lights) : "";
+  }
+
+  _viewLights() {
+    if (!this._data.lichtwerk) return `<section class="card empty"><ha-icon icon="mdi:lightbulb-alert-outline"></ha-icon><h2>Lichtwerk nicht geladen</h2><p>Bitte Home Assistant neu starten.</p></section>`;
+    const lights = this._lwLights();
+    if (!lights.length)
+      return `<section class="card empty"><ha-icon icon="mdi:lightbulb-outline"></ha-icon><h2>Noch keine Lichter</h2>
+        <p>Wähle die Lichter, die Lichtwerk schalten soll – nach Sonne, Helligkeit, Uhrzeit, Bewegung oder einer anderen Entität, mit Nachtlicht und dynamischem Licht. Vorbild ist das Blueprint „Smart Light“.</p>
+        ${this._admin ? `<button class="primary" data-action="pop-open" data-pop="lwadd"><ha-icon icon="mdi:auto-fix"></ha-icon>Licht hinzufügen</button>` : ""}</section>`;
+    const head = this._lwBrief(lights);
+    const groups = new Map();
+    for (const l of lights) {
+      const area = l.ls.area || "Ohne Raum";
+      if (!groups.has(area)) groups.set(area, []);
+      groups.get(area).push(l);
+    }
+    const compact = this._lwView() === "compact";
+    const tile = (l, areaLabel = "") => {
+      const bad = !l.st || ["unavailable", "unknown"].includes(l.st.state);
+      const on = l.st?.state === "on";
+      const pct = this._lwPct(l);
+      const dim = l.id.startsWith("light.") && (l.ls.modes || []).some((m) => m !== "onoff");
+      const stTxt = bad ? "nicht erreichbar" : on ? `an${dim && pct != null ? ` · ${pct} %` : ""}` : "aus";
+      const flags = [];
+      if (l.ls.manual) flags.push(["mdi:hand-back-right-outline", "von Hand – Automatik wartet", C.hand]);
+      if (l.ls.motion) flags.push(["mdi:motion-sensor", "Bewegung", C.ok]);
+      if (on && l.ls.night) flags.push(["mdi:weather-night", "Nachtlicht", "#6366f1"]);
+      if (l.cfg.auto === false) flags.push(["mdi:robot-off-outline", "Automatik aus", C.rest]);
+      const nx = l.ls.next;
+      const info = [
+        ...(on && l.ls.since ? [["mdi:clock-outline", `an seit ${new Date(l.ls.since).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`]] : []),
+        ...(nx && l.cfg.auto !== false ? [[nx.action === "on" ? "mdi:lightbulb-on-outline" : "mdi:lightbulb-off-outline", `${nx.action === "on" ? "an" : "aus"} ${this._lwWhen(nx)}`, nx.reason]] : []),
+        ["mdi:tune-variant", this._lwProfName(l.cfg.profile)],
+      ];
+      return `
+        <article class="card lw-c ${bad ? "bad" : ""} ${on ? "on" : ""}" style="--lc:${this._lwColor(l)}">
+          <div class="rw-top">
+            <button class="lw-bulb ${on ? "on" : ""}" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" title="${on ? "Ausschalten" : "Einschalten"}" ${bad ? "disabled" : ""}><ha-icon icon="${bad ? "mdi:lightbulb-alert-outline" : on ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}"></ha-icon></button>
+            <button class="grow lw-name" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" title="Helligkeit">${areaLabel && areaLabel.toLowerCase() !== this._lwName(l).toLowerCase() ? `<small class="rw-al">${esc(areaLabel)}</small>` : ""}<b>${esc(this._lwName(l))}</b><small>${esc(stTxt)}${l.ls.cause && l.cfg.auto !== false ? ` · ${esc(l.ls.cause)}` : ""}</small></button>
+            ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="lwl:${esc(l.id)}" title="Einstellungen dieses Lichts"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
+          </div>
+          ${l.cfg.auto !== false ? `<div class="rw-next">${this._lwDayBar(l, true)}</div>` : ""}
+          ${flags.length ? `<div class="rw-flags">${flags.map(([i, t, c]) => `<span style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${t}</span>`).join("")}${l.ls.manual ? `<button class="link" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="resume"><ha-icon icon="mdi:robot-outline"></ha-icon>Automatik übernimmt</button>` : ""}</div>` : ""}
+          <div class="rw-info">${info.map(([i, t, tt]) => `<span title="${esc(tt || t)}"><ha-icon icon="${i}"></ha-icon>${esc(t)}</span>`).join("")}</div>
+          ${dim && !bad ? `<div class="lw-dim"><ha-icon icon="mdi:brightness-6"></ha-icon><div class="lw-meter"><i style="width:${pct ?? 0}%"></i></div><b>${pct != null ? `${pct} %` : "aus"}</b><button class="sbtn" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" title="Helligkeit"><ha-icon icon="mdi:tune-vertical"></ha-icon></button></div>` : ""}
+        </article>`;
+    };
+    const mini = (l) => {
+      const bad = !l.st || ["unavailable", "unknown"].includes(l.st.state);
+      const on = l.st?.state === "on";
+      const pct = this._lwPct(l);
+      const flag = l.ls.manual ? ["mdi:hand-back-right-outline", C.hand] : l.ls.motion ? ["mdi:motion-sensor", C.ok] : on && l.ls.night ? ["mdi:weather-night", "#6366f1"] : l.cfg.auto === false ? ["mdi:robot-off-outline", C.rest] : null;
+      return `
+        <article class="card rw-m lw-m ${bad ? "bad" : ""}" style="--lc:${this._lwColor(l)}" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" role="button" tabindex="0" title="Helligkeit">
+          <div class="rwm-top"><b>${esc(this._lwName(l))}</b>${flag ? `<ha-icon icon="${flag[0]}" style="color:${flag[1]}"></ha-icon>` : ""}</div>
+          <div class="rwm-pos"><ha-icon class="lw-mi" icon="${bad ? "mdi:lightbulb-alert-outline" : on ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}"></ha-icon><b>${bad ? "–" : on ? (pct != null && pct < 100 ? `${pct} %` : "an") : "aus"}</b>${l.ls.next && l.cfg.auto !== false ? `<small class="rwm-nx">${this._lwWhen(l.ls.next).replace("morgen ", "")} ${l.ls.next.action === "on" ? "↑" : "↓"}</small>` : ""}</div>
+          <div class="rwm-ctl"><button class="sbtn" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" ${bad ? "disabled" : ""} title="${on ? "Aus" : "An"}"><ha-icon icon="mdi:power"></ha-icon></button></div>
+        </article>`;
+    };
+    const tog = `<div class="shead outer"><ha-icon icon="mdi:lightbulb-group-outline"></ha-icon><h3>Licht</h3><span class="count">${lights.length}</span><span class="grow"></span>
+      <div class="vtog" role="group" aria-label="Ansicht">
+        <button class="${compact ? "" : "on"}" data-action="lw-view" data-v="detail" title="Detailliert"><ha-icon icon="mdi:view-agenda-outline"></ha-icon><span>Detailliert</span></button>
+        <button class="${compact ? "on" : ""}" data-action="lw-view" data-v="compact" title="Kompakt"><ha-icon icon="mdi:view-grid-outline"></ha-icon><span>Kompakt</span></button>
+      </div></div>`;
+    const sorted = [...groups.entries()].sort((a, b) => (a[0] === "Ohne Raum") - (b[0] === "Ohne Raum") || a[0].localeCompare(b[0], "de"));
+    if (this._tablet && !compact) return head + tog + `<div class="rw-grid tgrid">${sorted.map(([area, list]) => list.map((l) => tile(l, area)).join("")).join("")}</div>`;
+    // meist nur ein Licht je Raum: ein gemeinsames Raster, der Raum steht in der Kachel (statt fast leerer Zeilen)
+    if (!compact && lights.length / groups.size < 1.6) return head + tog + `<div class="rw-grid">${sorted.map(([area, list]) => list.map((l) => tile(l, area)).join("")).join("")}</div>`;
+    return head + tog + sorted.map(([area, list]) => `<div class="rw-area ${compact ? "compact" : ""}"><h3>${esc(area)}</h3><div class="rw-grid ${compact ? "compact" : ""}">${list.map((l) => (compact ? mini(l) : tile(l))).join("")}</div></div>`).join("");
+  }
+
+  _lwView() {
+    try { return localStorage.getItem("hauswerk_lw_view") || "detail"; } catch (e) { return "detail"; }
+  }
+
+  /** Einstellungen von Lichtwerk (Liste). */
+  _lwRows(p) {
+    const lights = this._lwLights();
+    const profiles = this._lwProfiles();
+    const autos = this._data.lichtwerk?.automations || [];
+    const lux = p.lw_lux_sensor ? this._entityName(p.lw_lux_sensor) : "automatisch";
+    return [
+      { g: "Lichter", id: "lwadd", icon: "mdi:auto-fix", c: "#6366f1", title: "Licht hinzufügen", sum: "Assistent: Lichter wählen, Profil aus Vorlage (Abendlicht, Außenlicht, Flur mit Bewegung …)", words: "assistent neu hinzufügen licht lampe leuchte" },
+      ...lights.map((l) => ({ g: "Lichter", id: `lwl:${l.id}`, icon: "mdi:lightbulb-outline", c: l.cfg.auto === false ? "#94a3b8" : "#818cf8", title: this._lwName(l), off: l.cfg.auto === false,
+        sum: [`Profil „${this._lwProfName(l.cfg.profile)}“`, l.ls.area ? `Raum ${l.ls.area}` : ""].filter(Boolean).join(" · "), words: `${l.id} licht profil` })),
+      ...profiles.map((x) => {
+        const n = lights.filter((l) => (l.cfg.profile || "standard") === x.id).length;
+        return { g: "Profile", id: `lwp:${x.id}:on`, icon: "mdi:tune-variant", c: "#f59e0b", title: `${x.name} · ${n} ${n === 1 ? "Licht" : "Lichter"}`, sum: this._lwProfSum(x), words: `profil ${x.name} sonne helligkeit zeit bewegung nachtlicht` };
+      }),
+      { g: "Profile", id: "lwp::on", icon: "mdi:plus", c: "#6366f1", title: "Neues Profil", sum: "aus einer Vorlage oder als Kopie von „Standard“ – entspricht einer Smart-Light-Automation", words: "profil neu anlegen vorlage" },
+      { g: "Allgemein", id: "lwgeneral", icon: "mdi:brightness-auto", c: "#6366f1", title: "Helligkeit & Hinweise", sum: `Helligkeit: ${lux} · Hinweis, wenn Licht ${p.lw_away_min ?? 30} Min. brennt und niemand da ist`, words: "lux helligkeit sensor abwesend hinweis" },
+      { g: "Allgemein", id: "lwauto", icon: "mdi:robot-confused-outline", c: "#64748b", title: "Bestehende Licht-Automationen", sum: autos.length ? `${autos.filter((a) => a.state === "on").length} von ${autos.length} aktiv – nach der Übernahme abschalten` : "keine gefunden", words: "automation blueprint smart light übernehmen" },
+      { g: "Allgemein", act: "lw-log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll", sum: "Schaltungen mit Ursache, von Hand und Einstellungs-Änderungen von Lichtwerk", words: "protokoll log" },
+      { g: "Allgemein", go: "house", icon: "mdi:home-cog-outline", c: "#94a3b8", title: "Aus Hauswerk übernommen", sum: "Anwesenheit, Urlaub, Arbeitstage-Kalender, Sonnenstand und Benachrichtigungen – gelten für alle Module", words: "anwesenheit urlaub sonne hauswerk" },
+    ];
+  }
+
+  _lwProfSum(x) {
+    const on = [x.on_sun && `Sonne unter ${fmt(x.sun_on ?? -1, 0)}°`, x.on_lux && `unter ${fmt(x.lux_on ?? 30, 0)} lx`, x.on_time && `um ${x.time_on}`, x.on_entity && x.entity && `${this._entityName(x.entity)} an`, (x.motion || []).length && "Bewegung", x.on_covers && "Rollläden zu"].filter(Boolean);
+    const off = [x.off_time && `spätestens ${x.time_off}`, x.off_sun && "Sonnenaufgang", x.off_lux && `über ${fmt(x.lux_off ?? 80, 0)} lx`, x.off_entity && "Entität aus"].filter(Boolean);
+    return `${on.length ? `an: ${on.join(" / ")}` : "kein Einschalt-Auslöser"} · ${off.length ? `aus: ${off.join(" / ")}` : "aus von Hand"}${x.night ? ` · Nachtlicht ${x.night_from}–${x.night_to}` : ""}`;
+  }
+
+  /** Fenster von Lichtwerk: Helligkeit, Einstellungen je Licht, Assistent, Allgemein, Automationen. */
+  _lwPop(id) {
+    const p = this._settings;
+    const { sw, minutes } = this._setHelpers(p);
+    const dis = this._admin ? "" : "disabled";
+    const S = this._hass.states;
+    if (id.startsWith("lwbri:")) {
+      const eid = id.slice(6);
+      const l = this._lwLights().find((x) => x.id === eid) || { id: eid, cfg: {}, st: S[eid], ls: {} };
+      const prof = { ...(this._data.lichtwerk?.profiles?.[l.cfg.profile || "standard"] || {}) };
+      const pct = this._lwPct(l);
+      const d = this._pop.draft;
+      if (d.v == null) d.v = pct ?? prof.brightness ?? 80;
+      const dim = eid.startsWith("light.") && (l.ls.modes || S[eid]?.attributes?.supported_color_modes || []).some((m) => m !== "onoff");
+      const presets = [["off", "Aus", "mdi:lightbulb-off-outline"], ...(prof.night ? [[prof.night_brightness ?? 10, "Nachtlicht", "mdi:weather-night"]] : []), [prof.brightness ?? 80, "Normal", "mdi:lightbulb-outline"], [100, "Hell", "mdi:lightbulb-on"]];
+      return {
+        icon: "mdi:lightbulb-outline", c: "#6366f1", title: esc(this._lwName(l)), sub: `Lichtwerk · ${l.st?.state === "on" ? `an${pct != null ? ` · ${pct} %` : ""}` : "aus"}`, open: true,
+        body: `
+          ${l.ls.cause ? `<div class="rq-why"><ha-icon icon="mdi:help-circle-outline"></ha-icon><span><b>Automatik</b><small>${esc(l.ls.cause)}</small>${l.ls.next ? `<small class="muted">Als Nächstes: ${l.ls.next.action === "on" ? "an" : "aus"} ${this._lwWhen(l.ls.next)} (${esc(l.ls.next.reason)})</small>` : ""}</span></div>` : ""}
+          ${l.ls.manual ? `<div class="room-note"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>Von Hand – Automatik wartet<span class="grow"></span><button class="link" data-action="lw-cmd" data-ids="${esc(eid)}" data-a="resume">Automatik übernimmt</button></div>` : ""}
+          ${dim ? `<div class="lw-slider"><input type="range" min="1" max="100" step="1" value="${d.v}" data-lwbri><b id="lwbri-v">${d.v} %</b></div>` : ""}
+          <div class="rq-quick lw-pre">${presets.map(([v, t, i]) => `<button class="pill" data-action="lw-pre" data-ids="${esc(eid)}" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${t}${v !== "off" && dim ? ` · ${v} %` : ""}</button>`).join("")}</div>
+          <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Von Hand geschaltet wartet die Automatik ${prof.manual_hold === "hours" ? `${prof.manual_hours ?? 2} Std.` : "bis zum nächsten Wechsel"} (Profil „${esc(this._lwProfName(l.cfg.profile))}“).</p>`,
+        foot: `<button class="secondary" data-action="pop-close">Schließen</button>${dim ? `<button class="primary" data-action="lw-bri-apply" data-ids="${esc(eid)}"><ha-icon icon="mdi:check"></ha-icon>${d.v} % übernehmen</button>` : ""}`,
+      };
+    }
+    if (id.startsWith("lwl:")) {
+      const eid = id.slice(4);
+      const d = this._pop.draft;
+      if (!d.cfg) d.cfg = { profile: "standard", auto: true, name: null, ...(this._data.lichtwerk?.lights?.[eid] || {}) };
+      const profs = this._lwProfiles();
+      return {
+        icon: "mdi:lightbulb-outline", c: "#6366f1", title: esc(this._entityName(eid)), sub: `Lichtwerk · ${esc(eid)}`,
+        body: `
+          <label class="field"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name (leer = aus Home Assistant)</span><input type="text" maxlength="40" data-lwl="name" value="${esc(d.cfg.name || "")}" placeholder="${esc(this._entityName(eid))}" ${dis}></label>
+          <label class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Profil</span><select data-lwl="profile" ${dis}>${profs.map((x) => `<option value="${esc(x.id)}" ${(d.cfg.profile || "standard") === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+          <p class="muted small">${esc(this._lwProfSum(profs.find((x) => x.id === (d.cfg.profile || "standard")) || {}))} · <button class="link inline" data-action="pop-open" data-pop="lwp:${esc(d.cfg.profile || "standard")}:on">Profil bearbeiten</button></p>
+          <div class="wxrows">${this._setRow("lwauto1", "Automatik", "Lichtwerk schaltet dieses Licht", `<label class="switch"><input type="checkbox" data-lwl="auto" ${d.cfg.auto !== false ? "checked" : ""} ${dis}><span></span></label>`, "Aus: Lichtwerk zeigt das Licht nur an und schaltet es nicht.")}</div>`,
+        foot: `${this._admin ? `<button class="icon boxed danger" data-action="lwl-remove" data-id="${esc(eid)}" title="Aus Lichtwerk entfernen"><ha-icon icon="mdi:delete-outline"></ha-icon></button>` : ""}
+          <button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
+          ${this._admin ? `<button class="primary" data-action="lwl-save" data-id="${esc(eid)}"><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>` : ""}`,
+      };
+    }
+    if (id === "lwadd") {
+      const d = this._pop.draft;
+      d.pick = d.pick || [];
+      const have = new Set(this._data.settings.lw_lights || []);
+      const ids = Object.keys(S).filter((e) => /^(light|switch|input_boolean)\./.test(e) && !have.has(e) && (e.startsWith("light.") || /licht|lampe|leuchte|light|lamp/.test(`${e} ${S[e].attributes?.friendly_name || ""}`.toLowerCase())));
+      const byArea = new Map();
+      for (const e of ids) {
+        const a = this._areaOf(e) || "Ohne Raum";
+        if (!byArea.has(a)) byArea.set(a, []);
+        byArea.get(a).push(e);
+      }
+      const chip = (e) => { const on = d.pick.includes(e); const bad = ["unavailable", "unknown"].includes(S[e]?.state); return `<button class="pchip ${on ? "on" : ""}" data-action="lwadd-tog" data-id="${esc(e)}" aria-pressed="${on}"><i></i>${esc(this._entityName(e))}${bad ? " · nicht erreichbar" : ""}</button>`; };
+      const profs = this._lwProfiles();
+      if (!d.prof) d.prof = profs[0]?.id || "standard";
+      return {
+        icon: "mdi:auto-fix", c: "#6366f1", title: "Licht hinzufügen", sub: "Lichtwerk · wie eine Smart-Light-Automation je Profil",
+        body: `
+          <div class="lbl">1 · Welche Lichter?</div>
+          ${[...byArea.entries()].sort((a, b) => (a[0] === "Ohne Raum") - (b[0] === "Ohne Raum") || a[0].localeCompare(b[0], "de")).map(([a, list]) => `<div class="chg"><small>${esc(a)}</small><div class="pchips">${list.map(chip).join("")}</div></div>`).join("") || `<p class="muted">Alle Lichter sind schon in Lichtwerk.</p>`}
+          <div class="lbl">2 · Profil</div>
+          <div class="pchips">${profs.map((x) => `<button class="pchip ${d.prof === x.id ? "on" : ""}" data-action="lwadd-prof" data-v="${esc(x.id)}"><i></i>${esc(x.name)}</button>`).join("")}</div>
+          <div class="lbl">… oder neues Profil aus Vorlage</div>
+          <div class="lw-presets">${Object.entries(LW_PRESETS).map(([k, x]) => `<button class="lw-preset ${d.prof === `new:${k}` ? "on" : ""}" data-action="lwadd-prof" data-v="new:${k}"><ha-icon icon="${x.icon}"></ha-icon><span><b>${x.name}</b><small>${x.text}</small></span></button>`).join("")}</div>`,
+        foot: `<button class="secondary" data-action="pop-close">Abbrechen</button><button class="primary" data-action="lwadd-save" ${d.pick.length ? "" : "disabled"}><ha-icon icon="mdi:plus"></ha-icon>${d.pick.length || ""} hinzufügen</button>`,
+      };
+    }
+    if (id === "lwgeneral") {
+      const luxIds = Object.keys(S).filter((e) => e.startsWith("sensor.") && S[e].attributes?.device_class === "illuminance");
+      return {
+        icon: "mdi:brightness-auto", c: "#6366f1", title: "Helligkeit & Hinweise", sub: "Lichtwerk · gilt für alle Profile",
+        body: `
+          <label class="field"><span><ha-icon icon="mdi:brightness-5"></ha-icon> Helligkeit draußen (für „unter … lx“)</span><select data-set="lw_lux_sensor" ${dis}><option value="">automatisch (erster Lux-Sensor)</option>${luxIds.map((e) => `<option value="${esc(e)}" ${p.lw_lux_sensor === e ? "selected" : ""}>${esc(this._entityName(e))} · ${esc(S[e].state)} lx</option>`).join("")}</select></label>
+          <p class="muted small">Je Profil lässt sich ein eigener Sensor wählen (z. B. im Raum). Sonnenstand, Anwesenheit, Urlaub und Arbeitstage kommen aus Hauswerk.</p>
+          <label class="field narrow"><span><ha-icon icon="mdi:home-alert-outline"></ha-icon> Hinweis, wenn Licht brennt und niemand zu Hause ist, nach</span>${minutes("lw_away_min", 30, 5, 720, 5)}</label>
+          <p class="muted small">Benachrichtigung „Licht an, niemand zu Hause“ und „Leuchte nicht erreichbar“ einstellen unter <button class="link inline" data-action="pop-open" data-pop="notify">Hauswerk › Benachrichtigungen</button>.</p>`,
+      };
+    }
+    if (id === "lwauto") {
+      const autos = this._data.lichtwerk?.automations || [];
+      return {
+        icon: "mdi:robot-confused-outline", c: "#64748b", title: "Bestehende Licht-Automationen", sub: "Lichtwerk · nach der Übernahme abschalten",
+        body: `<p class="muted small">Automationen, die vermutlich Licht schalten (nach dem Namen). Ist das Licht in Lichtwerk eingerichtet, sollten sie aus sein – sonst schalten zwei Stellen dasselbe Licht. Abschalten heißt nicht löschen: in Home Assistant jederzeit wieder einschaltbar.</p>
+          <div class="evlist">${autos.map((a) => `<div class="ev"><ha-icon icon="${a.state === "on" ? "mdi:robot-outline" : "mdi:robot-off-outline"}"></ha-icon><span class="grow"><b>${esc(a.name)}</b><small>${a.state === "on" ? "aktiv" : "aus"} · ${esc(a.entity_id)}</small></span>${a.state === "on" && this._admin ? `<button class="secondary small" data-action="lw-auto-off" data-id="${esc(a.entity_id)}">Abschalten</button>` : ""}</div>`).join("") || `<p class="muted">Keine gefunden.</p>`}</div>`,
+      };
+    }
+    return null;
+  }
+
+  /** Profil-Editor (eine Smart-Light-Automation). */
+  _lwpPop(pid, sec) {
+    const d = this._pop.draft;
+    const profiles = this._data.lichtwerk?.profiles || {};
+    if (!d.prof) {
+      d.pid = pid || null;
+      d.prof = clone(profiles[pid] || { ...(profiles.standard || Object.values(profiles)[0] || {}), name: "Neues Profil" });
+    }
+    const p = d.prof;
+    const dis = this._admin ? "" : "disabled";
+    const S = this._hass.states;
+    const row = (k, title, sub, ctl, text) => (text ? this._setRow(`lwp_${k}`, title, sub, ctl, text, true)
+      : `<div class="wxr ctl"><div class="wxr-l"><b>${title}</b>${sub ? `<small>${sub}</small>` : ""}</div><div class="wxr-v">${ctl}</div></div>`);
+    const num = (k, def, min, max, step, unit) => `<div class="unit"><input type="number" min="${min}" max="${max}" step="${step}" data-lwp="${k}" data-kind="num" value="${p[k] ?? ""}" placeholder="${def}" ${dis}><i>${unit}</i></div>`;
+    const time = (k, def) => `<input type="time" data-lwp="${k}" data-kind="time" value="${esc(p[k] || def)}" ${dis}>`;
+    const bool = (k, def = false) => `<label class="switch"><input type="checkbox" data-lwp="${k}" data-kind="bool" ${(p[k] ?? def) ? "checked" : ""} ${dis}><span></span></label>`;
+    const choice = (k, opts, def) => `<div class="segs small">${opts.map(([v, l, i]) => `<button class="seg ${String(p[k] ?? def) === String(v) ? "on" : ""}" data-action="lwp-set" data-k="${k}" data-v="${v}" ${dis}>${i ? `<ha-icon icon="${i}"></ha-icon>` : ""}${l}</button>`).join("")}</div>`;
+    const ent = (k, test, none = "keine") => {
+      const ids = Object.keys(S).filter((e) => test(e, S[e].attributes || {}) || e === p[k]).sort((a, b) => this._entityName(a).localeCompare(this._entityName(b), "de"));
+      return `<select class="rwsel" data-lwp="${k}" data-kind="entity" ${dis}><option value="">${none}</option>${ids.map((e) => `<option value="${esc(e)}" ${p[k] === e ? "selected" : ""}>${esc(this._entityName(e))}</option>`).join("")}</select>`;
+    };
+    const note = (t, icon = "mdi:information-outline") => `<p class="muted small"><ha-icon icon="${icon}"></ha-icon>${t}</p>`;
+    const stage = (icon, title, k, inner, def = false) => `<div class="rwstage"><div class="rwstage-h"><ha-icon icon="${icon}"></ha-icon><b>${title}</b>${bool(k, def)}</div>${(p[k] ?? def) ? inner : ""}</div>`;
+    const elev = this._lwStatus?.elevation;
+    let body = "";
+    switch (sec) {
+      case "on":
+        body = `${note("Wie im Blueprint „Smart Light“: ein Auslöser schaltet beim <b>Wechsel</b> ein – danach bleibt das Licht an, bis ein Ausschalt-Auslöser kommt. Mehrere Auslöser = jeder schaltet ein.", "mdi:lightbulb-on-outline")}
+          ${stage("mdi:weather-sunset-down", "Sonne sinkt", "on_sun", `<div class="wxrows">${row("so", "unter", `Sonnenhöhe abends${elev != null ? ` · jetzt ${fmt(elev, 1)}°` : ""}`, num("sun_on", -1, -18, 30, 0.5, "°"), "0° = Sonnenuntergang, −6° = Ende der Dämmerung. Positive Werte schalten früher, z. B. 3° für dunkle Räume.")}</div>`, true)}
+          ${stage("mdi:brightness-4", "Helligkeit fällt", "on_lux", `<div class="wxrows">${row("lo", "unter", "", num("lux_on", 30, 0, 100000, 5, "lx"))}${row("ls", "Sensor", "leer = allgemeiner Sensor", ent("lux_sensor", (e, a) => e.startsWith("sensor.") && a.device_class === "illuminance", "allgemein"))}</div>`)}
+          ${stage("mdi:clock-outline", "Uhrzeit", "on_time", `<div class="wxrows">${row("to", "um", "", time("time_on", "17:00"))}</div>`)}
+          ${stage("mdi:toggle-switch-outline", "Entität geht an", "on_entity", `<div class="wxrows">${row("en", "Entität", "z. B. Fernseher, Schalter, Tür", ent("entity", (e) => /^(binary_sensor|switch|input_boolean|media_player|light|remote|person|device_tracker)\./.test(e), "wählen"))}</div>`)}
+          ${stage("mdi:window-shutter", "Rollläden schließen", "on_covers", note("An, sobald abends alle Rollläden im selben Bereich wie das Licht zu sind (Rollwerk oder von Hand)."))}`;
+        break;
+      case "off":
+        body = `${stage("mdi:clock-end", "Spätestens um", "off_time", `<div class="wxrows">${row("tf", "Uhrzeit", "", time("time_off", "23:00"))}</div>`, true)}
+          ${stage("mdi:weather-sunset-up", "Sonne steigt", "off_sun", `<div class="wxrows">${row("sf", "über", "Sonnenhöhe morgens", num("sun_off", 1, -18, 30, 0.5, "°"))}</div>`, true)}
+          ${stage("mdi:brightness-7", "Helligkeit steigt", "off_lux", `<div class="wxrows">${row("lf", "über", "", num("lux_off", 80, 0, 100000, 5, "lx"), "Etwas über dem Einschaltwert, sonst schaltet das Licht seinen eigenen Sensor aus.")}</div>`)}
+          ${stage("mdi:toggle-switch-off-outline", "Entität geht aus", "off_entity", p.entity ? note(`${esc(this._entityName(p.entity))} – unter Einschalten gewählt`) : note("Erst unter „Einschalten“ eine Entität wählen."))}`;
+        break;
+      case "motion": {
+        const sensors = Object.keys(S).filter((e) => e.startsWith("binary_sensor.") && ["motion", "occupancy", "presence"].includes(S[e].attributes?.device_class));
+        body = `${note("Wie „Sensor Light“: Bewegung schaltet an, nach der Wartezeit ohne Bewegung wieder aus – zusätzlich zu den festen Auslösern.", "mdi:motion-sensor")}
+          <div class="pchips">${sensors.map((e) => { const on = (p.motion || []).includes(e); return `<button class="pchip ${on ? "on" : ""}" data-action="lwp-tog" data-k="motion" data-v="${esc(e)}" ${dis}><i></i>${esc(this._entityName(e))}</button>`; }).join("") || `<span class="muted small">Kein Bewegungs- oder Anwesenheitsmelder gefunden</span>`}</div>
+          ${(p.motion || []).length ? `<div class="wxrows">${row("mo", "Aus nach", "ohne Bewegung", num("motion_off", 3, 0.5, 240, 0.5, "Min."))}${row("md", "Nur wenn dunkel", "Sonne bzw. Helligkeit wie unter Einschalten", bool("motion_dark", true))}</div>` : ""}`;
+        break;
+      }
+      case "days":
+        body = `<div class="lbl">Wochentage</div><div class="daypills">${DAYS.map((x, i) => `<button class="dp ${(p.days ?? [0, 1, 2, 3, 4, 5, 6]).includes(i) ? "on" : ""}" data-action="lwp-tog" data-k="days" data-v="${i}" ${dis}>${x}</button>`).join("")}</div>
+          <div class="lbl">Arbeitstage-Kalender (Hauswerk)</div>${choice("day_mode", [["all", "Alle Tage"], ["workday", "Nur Arbeitstage"], ["free", "Nur freie Tage"]], "all")}
+          ${note("An nicht gewählten Tagen schaltet das Profil nicht ein – ausgeschaltet wird trotzdem.")}`;
+        break;
+      case "light":
+        body = `<div class="wxrows">${row("br", "Helligkeit", "", num("brightness", 80, 1, 100, 1, "%"))}${row("tn", "Übergang an", "nur Leuchten, die es können", num("transition_on", 1, 0, 300, 0.5, "s"))}${row("tf2", "Übergang aus", "", num("transition_off", 2, 0, 300, 0.5, "s"))}</div>
+          <div class="lbl">Farbe</div>${choice("color", [["keep", "Wie eingestellt"], ["temp", "Farbtemperatur", "mdi:thermometer"], ["rgb", "Farbe", "mdi:palette"]], "keep")}
+          ${p.color === "temp" ? `<div class="wxrows">${row("kv", "Farbtemperatur", "2200 warm … 6500 kalt", num("kelvin", 2700, 2000, 6500, 100, "K"))}</div>` : ""}
+          ${p.color === "rgb" ? `<label class="field narrow"><span>Farbe</span><input type="color" data-lwp="rgb" data-kind="text" value="${esc(p.rgb || "#ffb464")}" ${dis}></label>` : ""}`;
+        break;
+      case "dyn":
+        body = `${note("Helligkeit und Farbtemperatur passen sich an: nach der Sonnenhöhe (abends wärmer und gedimmt) oder nach der Helligkeit draußen.", "mdi:theme-light-dark")}
+          ${choice("dynamic", [["off", "Aus"], ["sun", "Nach Sonne", "mdi:white-balance-sunny"], ["lux", "Nach Helligkeit", "mdi:brightness-5"]], "off")}
+          ${(p.dynamic || "off") !== "off" ? `<div class="wxrows">${row("dl", "Helligkeit von", "", num("dyn_min", 35, 1, 100, 1, "%"))}${row("dh", "bis", "", num("dyn_max", 100, 1, 100, 1, "%"))}${row("dw", "warm", "", num("dyn_warm", 2200, 2000, 6500, 100, "K"))}${row("dc", "kalt", "", num("dyn_cold", 4000, 2000, 6500, 100, "K"))}</div>` : ""}`;
+        break;
+      case "night":
+        body = `${stage("mdi:weather-night", "Nachtlicht", "night", `<div class="wxrows">${row("nf", "von", "", time("night_from", "22:30"))}${row("nt", "bis", "", time("night_to", "06:00"))}${row("nb", "Helligkeit", "", num("night_brightness", 10, 1, 100, 1, "%"))}${row("nk", "Farbtemperatur", "wenn Farbe gewählt", num("night_kelvin", 2200, 2000, 6500, 100, "K"))}${row("na", "Bei Wechsel anpassen", "brennt das Licht schon, wird übergeblendet", bool("night_adjust", true))}</div>`)}
+          ${note("Im Nachtlicht-Zeitraum geht das Licht gedimmt an – ideal mit Bewegung im Flur.")}`;
+        break;
+      case "more":
+        body = `<div class="lbl">Von Hand geschaltet</div>${choice("manual_hold", [["next", "bis zum nächsten Wechsel"], ["hours", "für eine Zeit"]], "next")}
+          ${p.manual_hold === "hours" ? `<div class="wxrows">${row("mh", "Dauer", "", num("manual_hours", 2, 0.25, 48, 0.25, "Std."))}</div>` : ""}
+          <div class="lbl">Pause-Schalter (Bypass)</div><div class="wxrows">${row("bp", "Schalter", "an = Lichtwerk pausiert", ent("bypass", (e) => /^(input_boolean|switch|binary_sensor)\./.test(e), "keiner"))}</div>
+          ${p.bypass ? choice("bypass_action", [["keep", "so lassen"], ["on", "Licht an"], ["off", "Licht aus"]], "keep") : ""}
+          <div class="lbl">Niemand zu Hause</div>${choice("away", [["off", "Licht aus"], ["keep", "wie geplant"]], "off")}
+          <div class="wxrows">${row("sim", "Urlaub: Anwesenheit vortäuschen", "Zeiten zufällig ±30 Min., schaltet trotz Abwesenheit", bool("simulate"))}</div>`;
+        break;
+    }
+    const meta = LW_SECTIONS.find(([x]) => x === sec) || LW_SECTIONS[0];
+    const isNew = !d.pid;
+    const users = Object.entries(this._data.lichtwerk?.lights || {}).filter(([, c]) => (c.profile || "standard") === (d.pid || "")).map(([id]) => this._entityName(id));
+    return {
+      icon: meta[2], c: "#6366f1", title: isNew ? "Neues Profil" : esc(p.name || ""), sub: `Lichtwerk-Profil · ${meta[1]}`,
+      body: `${isNew ? `<div class="lw-presets small">${Object.entries(LW_PRESETS).map(([k, x]) => `<button class="lw-preset" data-action="lwp-preset" data-v="${k}"><ha-icon icon="${x.icon}"></ha-icon><span><b>${x.name}</b></span></button>`).join("")}</div>` : ""}
+        <label class="field rwname"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name des Profils</span><input type="text" data-lwp="name" data-kind="text" value="${esc(p.name || "")}" maxlength="60" placeholder="z. B. Außenlicht" ${dis}></label>
+        <p class="muted small lwsum">${esc(this._lwProfSum(p))}</p>
+        <div class="rwsecs">${LW_SECTIONS.map(([x, t, i]) => `<button class="rwsec ${x === sec ? "on" : ""}" data-action="lwp-sec" data-sec="${x}" style="--c:#6366f1"><ha-icon icon="${i}"></ha-icon>${t}</button>`).join("")}</div>${body}
+        ${d.pid ? note(users.length ? `Genutzt von: ${users.map(esc).join(", ")}` : "Noch kein Licht nutzt dieses Profil.", "mdi:lightbulb-outline") : ""}
+        ${d.confirm ? `<div class="rwdel"><b><ha-icon icon="mdi:delete-alert-outline"></ha-icon>Profil löschen? Lichter bekommen „${esc(this._lwProfiles().find((x) => x.id !== d.pid)?.name || "")}“.</b><div class="rwdel-b"><button class="secondary" data-action="lwp-del-no">Behalten</button><button class="primary danger-bg" data-action="lwp-del">Löschen</button></div></div>` : ""}`,
+      foot: `${this._admin && d.pid && this._lwProfiles().length > 1 ? `<button class="icon boxed danger" data-action="lwp-del" title="Profil löschen"><ha-icon icon="mdi:delete-outline"></ha-icon></button>` : ""}
+        <button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
+        ${this._admin ? `<button class="primary" data-action="lwp-save"><ha-icon icon="mdi:content-save-outline"></ha-icon>${isNew ? "Anlegen" : "Speichern"}</button>` : ""}`,
+    };
+  }
+
+  _areaOf(eid) {
+    const ent = this._hass?.entities?.[eid];
+    const dev = ent?.device_id ? this._hass?.devices?.[ent.device_id] : null;
+    const aid = ent?.area_id || dev?.area_id;
+    return aid ? this._hass?.areas?.[aid]?.name || aid : null;
+  }
+
+  /** Widget „Licht“. */
+  _w_light(w, z) {
+    const lights = this._lwLights();
+    if (!lights.length) return `<p class="muted small">Noch keine Lichter in Lichtwerk.</p>`;
+    const on = lights.filter((l) => l.st?.state === "on");
+    const nx = this._lwStatus?.next;
+    const head = `<div class="wbig"><span style="color:${on.length ? tint("#facc15") : "inherit"}">${on.length}<small>von ${lights.length} an</small></span></div>
+      ${nx ? `<small class="muted wnext">${nx.action === "on" ? "an" : "aus"} ${this._lwWhen(nx)} · ${esc(nx.reason)}</small>` : ""}`;
+    if (z === "s") return `${head}${on.length ? `<button class="secondary small" data-action="lw-cmd" data-ids="${on.map((l) => l.id).join(",")}" data-a="off"><ha-icon icon="mdi:lightbulb-off-outline"></ha-icon>Alle aus</button>` : ""}`;
+    const list = (z === "l" ? lights : on.length ? on : lights.slice(0, 4)).slice(0, z === "l" ? 12 : 5);
+    return `${head}<div class="wlist">${list.map((l) => {
+      const o = l.st?.state === "on";
+      const pct = this._lwPct(l);
+      return `<div class="wrow"><ha-icon icon="${o ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}" style="color:${this._lwColor(l)}"></ha-icon><span class="grow"><b>${esc(this._lwName(l))}</b><small>${esc(l.ls.cause || "")}</small></span><button class="sbtn" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${o ? "off" : "on"}" title="${o ? "Aus" : "An"}">${o ? (pct != null && pct < 100 ? `${pct} %` : "an") : "aus"}</button></div>`;
+    }).join("")}</div>`;
+  }
 
   // ------------------------------------------------------------ Kraftwerk
   /** Leistung eines Sensors in Watt (W, kW, MW), sonst null. */
@@ -6166,6 +6633,7 @@ class HauswerkPanel extends HTMLElement {
     const d = (iso) => new Date(iso).toLocaleDateString("de-DE", { day: "numeric", month: "short" });
     if (scope === "rw") return this._rwRows(p);
     if (scope === "kw") return this._kwRows(p);
+    if (scope === "lw") return this._lwRows(p);
     if (scope === "house") {
       const vac = {
         off: "Nur von Hand",
@@ -6199,12 +6667,12 @@ class HauswerkPanel extends HTMLElement {
           words: "design farbe akzent hell dunkel hintergrund tageszeit himmel uhr uhrzeit wetter kopfzeile größe tablet" },
         { g: "Darstellung", start: true, icon: "mdi:view-dashboard-edit-outline", c: "#2dd4bf", title: "Widgets der Startseite",
           sum: `${n} Widget${n === 1 ? "" : "s"} · für alle Benutzer gleich`, words: "start dashboard widget übersicht anpassen" },
-        ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => ["settings", "shutset", "kwset"].includes(v)) || m.views[0], icon: `logo:${m.logo}`,
-          c: { rollwerk: "#0ea5e9", kraftwerk: "#f59e0b" }[m.id] || "#fb923c", title: m.name,
-          sum: m.id === "rollwerk" ? `${(p.rw_covers || []).length} Rollläden · ${Object.keys(this._data.rollwerk?.profiles || {}).length} Profile`
+        ...MODULES.map((m) => ({ g: "Module", go: m.views.find((v) => ["settings", "shutset", "kwset", "lightset"].includes(v)) || m.views[0], icon: `logo:${m.logo}`,
+          c: { rollwerk: "#0ea5e9", kraftwerk: "#f59e0b", lichtwerk: "#6366f1" }[m.id] || "#fb923c", title: m.name,
+          sum: m.id === "lichtwerk" ? `${(p.lw_lights || []).length} Lichter · ${Object.keys(this._data.lichtwerk?.profiles || {}).length} Profile` : m.id === "rollwerk" ? `${(p.rw_covers || []).length} Rollläden · ${Object.keys(this._data.rollwerk?.profiles || {}).length} Profile`
             : m.id === "kraftwerk" ? (this._kwConfigured(p) ? [(p.kw_solar || []).length ? "Solar" : "", p.kw_grid ? "Netz" : "", p.kw_battery ? "Batterie" : "", (p.kw_consumers || []).length ? `${p.kw_consumers.length} Verbraucher` : ""].filter(Boolean).join(" · ") : "Noch nicht eingerichtet")
             : `${rooms.length} ${rooms.length === 1 ? "Raum" : "Räume"} · Heizpläne, Vorheizen, Saison und mehr`,
-          words: { rollwerk: "rollwerk rollladen rollo module", kraftwerk: "kraftwerk energie strom solar pv netz batterie module" }[m.id] || "heizen heizung räume module" })),
+          words: { lichtwerk: "lichtwerk licht lampe leuchte smart light module", rollwerk: "rollwerk rollladen rollo module", kraftwerk: "kraftwerk energie strom solar pv netz batterie module" }[m.id] || "heizen heizung räume module" })),
         ...COMING.map((m) => ({ g: "Module", soon: true, icon: m.icon, c: "#94a3b8", title: m.name, sum: "Kommt später", words: `${m.name.toLowerCase()} module` })),
         { g: "System", go: "log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll",
           sum: "Was wann warum entschieden wurde · 14 Tage", words: "protokoll log verlauf ereignisse warum debug" },
@@ -6333,7 +6801,7 @@ class HauswerkPanel extends HTMLElement {
           <div class="grow"><h2>Protokoll</h2><small>Was wann warum entschieden wurde · ${L.days || 14} Tage</small></div>
           <span class="lg-live ${L.live ? "on" : ""}" id="lg-live">${this._logLiveHtml()}</span>
         </div>
-        <div class="lg-chips">${[["", "Alles", "mdi:home-outline", "#94a3b8"], ["heizwerk", "Heizwerk & Haus", "logo:heizen", "#fb923c"], ["rollwerk", "Rollwerk", "logo:rollwerk", "#0ea5e9"], ["kraftwerk", "Kraftwerk", "logo:kraftwerk", "#f59e0b"]]
+        <div class="lg-chips">${[["", "Alles", "mdi:home-outline", "#94a3b8"], ["heizwerk", "Heizwerk & Haus", "logo:heizen", "#fb923c"], ["rollwerk", "Rollwerk", "logo:rollwerk", "#0ea5e9"], ["kraftwerk", "Kraftwerk", "logo:kraftwerk", "#f59e0b"], ["lichtwerk", "Lichtwerk", "logo:lichtwerk", "#6366f1"]]
           .map(([id, name, icon, c]) => `<button class="lg-cat lg-mod ${(this._logMod || "") === id ? "on" : ""}" style="--c:${c}" data-action="log-mod" data-id="${id}">${String(icon).startsWith("logo:") ? `<span class="lg-logo">${modIcon(icon)}</span>` : `<ha-icon icon="${icon}"></ha-icon>`}${name}</button>`)
           .join("")}</div>
         <div class="lg-chips">${[["", "Alle Räume", "#94a3b8"], ...rooms.map((r) => [r.id, r.name, this._roomColor(r.id)])]
@@ -6378,8 +6846,8 @@ class HauswerkPanel extends HTMLElement {
       const e = L.entries[i];
       if (!cats.has(e.cat) && LOG_CATS[e.cat]) continue;
       if (room && e.room !== room) continue;
-      if (["rollwerk", "kraftwerk"].includes(this._logMod) && e.mod !== this._logMod) continue;
-      if (this._logMod === "heizwerk" && ["rollwerk", "kraftwerk"].includes(e.mod)) continue;
+      if (["rollwerk", "kraftwerk", "lichtwerk"].includes(this._logMod) && e.mod !== this._logMod) continue;
+      if (this._logMod === "heizwerk" && ["rollwerk", "kraftwerk", "lichtwerk"].includes(e.mod)) continue;
       if (q && !`${e.title} ${e.why || ""} ${roomName(e)} ${LOG_CATS[e.cat]?.name || ""}`.toLowerCase().includes(q)) continue;
       hits.push(e);
     }
@@ -6406,7 +6874,7 @@ class HauswerkPanel extends HTMLElement {
           <time>${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</time>
           <span class="lg-i" style="--c:${def.c}" title="${esc(def.name || "")}"><ha-icon icon="${def.icon}"></ha-icon></span>
           <div class="lg-b">
-            <div class="lg-t">${e.mod === "rollwerk" ? `<span class="lg-badge" style="--c:#0ea5e9">Rollwerk</span>` : ""}${rn ? `<span class="lg-badge" style="--c:${rc}">${esc(rn)}</span>` : ""}<b>${esc(e.title)}</b></div>
+            <div class="lg-t">${e.mod === "rollwerk" ? `<span class="lg-badge" style="--c:#0ea5e9">Rollwerk</span>` : e.mod === "lichtwerk" ? `<span class="lg-badge" style="--c:#6366f1">Lichtwerk</span>` : ""}${rn ? `<span class="lg-badge" style="--c:${rc}">${esc(rn)}</span>` : ""}<b>${esc(e.title)}</b></div>
             ${e.why ? `<p><b>${lead}:</b> ${esc(e.why)}</p>` : ""}
           </div>
         </div>`;
@@ -6449,7 +6917,7 @@ class HauswerkPanel extends HTMLElement {
       <ha-icon class="xc-ic" icon="mdi:school-outline"></ha-icon></button>`;
   }
 
-  _settingsList(scope = this._tab === "house" ? "house" : this._tab === "shutset" ? "rw" : this._tab === "kwset" ? "kw" : "heat") {
+  _settingsList(scope = this._tab === "house" ? "house" : this._tab === "shutset" ? "rw" : this._tab === "kwset" ? "kw" : this._tab === "lightset" ? "lw" : "heat") {
     const q = (this._setQuery || "").toLowerCase().trim();
     const ex = this._expertOn(EXPERT_MOD[scope] || "haus");
     const rows = this._settingRows(scope).filter((r) => (!r.x || ex) && (!q || `${r.g} ${r.title} ${r.sum} ${r.words}`.toLowerCase().includes(q)));
@@ -6652,11 +7120,16 @@ class HauswerkPanel extends HTMLElement {
       for (const c of this._rwCovers()) add("Rollläden", "mdi:window-shutter", "#0ea5e9", this._entityName(c.id), `${this._rwProfName(c.cfg.profile || "standard")}${c.rs.reason ? ` · ${c.rs.reason}` : ""}`, `rollladen rollo ${c.id}`, a("pop-open", { pop: `rwc:${c.id}` }));
       for (const p of this._rwProfiles()) add("Profile", "mdi:tune-variant", "#0ea5e9", p.name, "Rollwerk-Profil", "profil rollwerk", a("pop-open", { pop: `rwp:${p.id}:tag` }));
     }
+    // Lichtwerk
+    if (this._data.lichtwerk) {
+      for (const l of this._lwLights()) add("Licht", "mdi:lightbulb-outline", "#6366f1", this._lwName(l), `${this._lwProfName(l.cfg.profile)}${l.ls.cause ? ` · ${l.ls.cause}` : ""}`, `licht lampe leuchte ${l.id} ${l.ls.area || ""}`, a("pop-open", { pop: `lwbri:${l.id}` }));
+      for (const p of this._lwProfiles()) add("Profile", "mdi:tune-variant", "#6366f1", p.name, "Lichtwerk-Profil", "profil lichtwerk licht", a("pop-open", { pop: `lwp:${p.id}:on` }));
+    }
     // Kraftwerk
     const kp = this._data.settings;
     for (const id of kp.kw_consumers || []) add("Geräte", this._kwConsIcon(id, kp), "#0ea5e9", this._kwConsName(id, kp), `Verbraucher · ${this._kwFmt(this._kwW(id))}`, `kraftwerk strom ${id}`, a("pop-open", { pop: "kwcons" }));
     // Einstellungen aller Module
-    const scopes = [["house", "Hauswerk"], ["heat", "Heizwerk"], ...(this._data.rollwerk ? [["rw", "Rollwerk"]] : []), ["kw", "Kraftwerk"]];
+    const scopes = [["house", "Hauswerk"], ["heat", "Heizwerk"], ...(this._data.rollwerk ? [["rw", "Rollwerk"]] : []), ["kw", "Kraftwerk"], ...(this._data.lichtwerk ? [["lw", "Lichtwerk"]] : [])];
     for (const [scope, label] of scopes) {
       let rows = [];
       try {
@@ -6676,7 +7149,7 @@ class HauswerkPanel extends HTMLElement {
   _gsList(q) {
     const words = this._gsNorm(q).split(/\s+/).filter(Boolean);
     if (!words.length) {
-      const recent = [["mdi:door", "Räume", "overview"], ["mdi:window-shutter", "Rollläden", "shutters"], ["mdi:transmission-tower", "Energiefluss", "kwflow"], ["mdi:chart-box-outline", "Bericht", "report"]];
+      const recent = [["mdi:door", "Räume", "overview"], ["mdi:window-shutter", "Rollläden", "shutters"], ["mdi:lightbulb-group-outline", "Licht", "lights"], ["mdi:transmission-tower", "Energiefluss", "kwflow"], ["mdi:chart-box-outline", "Bericht", "report"]];
       return `<p class="muted small">Tippe, um zu suchen. Auf dem Computer öffnet <kbd>/</kbd> die Suche.</p>
         <div class="gs-quick">${recent.map(([i, l, t]) => `<button class="chip" data-action="tab" data-tab="${t}" data-gs="1"><ha-icon icon="${i}"></ha-icon>${l}</button>`).join("")}</div>`;
     }
@@ -6785,6 +7258,8 @@ class HauswerkPanel extends HTMLElement {
     if (String(id).startsWith("rwc:")) return this._rwcPop(id.slice(4));
     if (String(id).startsWith("rwpos:")) return this._rwPosPop(id.slice(6));
     if (String(id).startsWith("kwapp:")) return this._kwAppPop(id.slice(6));
+    if (String(id).startsWith("lwp:")) { const [, pid, sec] = String(id).split(":"); return this._lwpPop(pid, LW_SECTIONS.some(([x]) => x === sec) ? sec : "on"); }
+    if (String(id).startsWith("lwbri:") || String(id).startsWith("lwl:") || LW_POPS.includes(id)) return this._lwPop(id);
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (KW_POPS.includes(id)) return this._kwPop(id);
     if (id === "setup") return this._setupPop();
@@ -8446,6 +8921,24 @@ class HauswerkPanel extends HTMLElement {
       this._pop.draft.replace = t.value;
       return;
     }
+    if (t.dataset.lwp && this._pop?.draft?.prof) {
+      const k = t.dataset.lwp, kind = t.dataset.kind;
+      this._pop.draft.prof[k] = kind === "bool" ? t.checked : kind === "num" ? (t.value === "" ? null : Number(t.value)) : t.value || null;
+      if ((kind === "bool" || kind === "entity") && isChange) this._renderPop();
+      return;
+    }
+    if (t.dataset.lwl && this._pop?.draft?.cfg) {
+      this._pop.draft.cfg[t.dataset.lwl] = t.type === "checkbox" ? t.checked : t.value || null;
+      return;
+    }
+    if (t.dataset.lwbri !== undefined && this._pop?.draft) {
+      this._pop.draft.v = Number(t.value);
+      const v = this.shadowRoot.getElementById("lwbri-v");
+      if (v) v.textContent = `${t.value} %`;
+      const b = this.shadowRoot.querySelector('#pop [data-action="lw-bri-apply"]');
+      if (b) b.lastChild.textContent = `${t.value} % übernehmen`;
+      return;
+    }
     if (t.dataset.rwp && this._pop?.draft?.prof) {
       const k = t.dataset.rwp, kind = t.dataset.kind;
       this._pop.draft.prof[k] = kind === "bool" ? t.checked : kind === "num" ? (t.value === "" ? null : Number(t.value)) : t.value || null;
@@ -9523,6 +10016,138 @@ class HauswerkPanel extends HTMLElement {
         this._renderPop();
         break;
       }
+      case "lw-cmd": {
+        const ids = el.dataset.ids.split(",").filter(Boolean);
+        await this._ws({ type: "hauswerk/lichtwerk/command", entity_ids: ids, action: el.dataset.a });
+        if (this._pop?.id?.startsWith("lwbri:")) this._closePop();
+        break;
+      }
+      case "lw-pre": {
+        const v = el.dataset.v;
+        await this._ws(v === "off" ? { type: "hauswerk/lichtwerk/command", entity_ids: [el.dataset.ids], action: "off" }
+          : { type: "hauswerk/lichtwerk/command", entity_ids: [el.dataset.ids], action: "on", brightness: Math.max(1, Math.min(100, Number(v))) });
+        this._closePop();
+        break;
+      }
+      case "lw-bri-apply":
+        await this._ws({ type: "hauswerk/lichtwerk/command", entity_ids: [el.dataset.ids], action: "on", brightness: Number(this._pop.draft.v) });
+        this._closePop();
+        break;
+      case "lw-view":
+        try { localStorage.setItem("hauswerk_lw_view", el.dataset.v); } catch (err) { /* ohne Speicher */ }
+        this._renderMain();
+        break;
+      case "lw-log":
+        this._logMod = "lichtwerk";
+        this._logRoom = "";
+        this._setView("log");
+        break;
+      case "lw-auto-off": {
+        const res = await this._ws({ type: "hauswerk/lichtwerk/automation/off", entity_id: el.dataset.id });
+        this._data.lichtwerk.automations = res.automations;
+        this._renderPop();
+        this._toast("Automation abgeschaltet");
+        break;
+      }
+      case "lwl-save": {
+        const cfg = this._pop.draft.cfg;
+        const res = await this._ws({ type: "hauswerk/lichtwerk/light/save", entity_id: el.dataset.id, light: { profile: cfg.profile || "standard", auto: cfg.auto !== false, name: cfg.name || null } });
+        this._data.lichtwerk.lights = res.lights;
+        this._data.settings = res.settings;
+        this._closePop();
+        this._renderMain();
+        this._toast("Gespeichert");
+        break;
+      }
+      case "lwl-remove": {
+        const res = await this._ws({ type: "hauswerk/lichtwerk/light/remove", entity_id: el.dataset.id });
+        this._data.lichtwerk.lights = res.lights;
+        this._data.settings = res.settings;
+        this._closePop();
+        this._renderMain();
+        this._toast("Aus Lichtwerk entfernt");
+        break;
+      }
+      case "lwadd-tog": {
+        const d = this._pop.draft;
+        d.pick = d.pick.includes(el.dataset.id) ? d.pick.filter((x) => x !== el.dataset.id) : [...d.pick, el.dataset.id];
+        this._renderPop();
+        break;
+      }
+      case "lwadd-prof":
+        this._pop.draft.prof = el.dataset.v;
+        this._renderPop();
+        break;
+      case "lwadd-save": {
+        const d = this._pop.draft;
+        let pid = d.prof || "standard";
+        if (pid.startsWith("new:")) {
+          const pre = LW_PRESETS[pid.slice(4)];
+          const base = this._data.lichtwerk.profiles?.standard || {};
+          const res = await this._ws({ type: "hauswerk/lichtwerk/profile/save", profile_id: null, profile: { ...base, ...pre.prof, name: pre.name, motion: pre.prof.motion ?? [] } });
+          this._data.lichtwerk.profiles = res.profiles;
+          pid = res.profile_id;
+        }
+        let res = null;
+        for (const eid of d.pick) res = await this._ws({ type: "hauswerk/lichtwerk/light/save", entity_id: eid, light: { profile: pid, auto: true } });
+        if (res) { this._data.lichtwerk.lights = res.lights; this._data.settings = res.settings; }
+        this._closePop();
+        this._setView("lights");
+        this._toast(`${d.pick.length} ${d.pick.length === 1 ? "Licht" : "Lichter"} hinzugefügt – Profil „${this._lwProfName(pid)}“`);
+        break;
+      }
+      case "lwp-sec": {
+        const [, pid] = this._pop.id.split(":");
+        this._pop.id = `lwp:${pid}:${el.dataset.sec}`;
+        this._pop.keep = false;
+        this._renderPop();
+        break;
+      }
+      case "lwp-set":
+        this._pop.draft.prof[el.dataset.k] = el.dataset.v;
+        this._renderPop();
+        break;
+      case "lwp-tog": {
+        const p = this._pop.draft.prof, k = el.dataset.k;
+        const v = k === "days" ? Number(el.dataset.v) : el.dataset.v;
+        const cur = [...(p[k] ?? (k === "days" ? [0, 1, 2, 3, 4, 5, 6] : []))];
+        p[k] = cur.includes(v) ? cur.filter((x) => x !== v) : [...cur, v].sort((a, b) => (typeof a === "number" ? a - b : 0));
+        this._renderPop();
+        break;
+      }
+      case "lwp-preset": {
+        const pre = LW_PRESETS[el.dataset.v];
+        Object.assign(this._pop.draft.prof, pre.prof, { name: pre.name });
+        this._renderPop();
+        break;
+      }
+      case "lwp-save": {
+        const d = this._pop.draft;
+        d.prof.name = String(d.prof.name || "").trim();
+        if (!d.prof.name) { this._toast("Bitte einen Namen eingeben."); return; }
+        if (this._lwProfiles().some((x) => x.id !== d.pid && x.name.toLowerCase() === d.prof.name.toLowerCase())) { this._toast(`Ein Profil „${d.prof.name}“ gibt es schon.`); return; }
+        const res = await this._ws({ type: "hauswerk/lichtwerk/profile/save", profile_id: d.pid, profile: d.prof });
+        this._data.lichtwerk.profiles = res.profiles;
+        this._closePop();
+        this._renderMain();
+        this._toast(d.pid ? "Gespeichert" : "Profil angelegt");
+        break;
+      }
+      case "lwp-del": {
+        const d = this._pop.draft;
+        if (!d.confirm) { d.confirm = true; this._pop.keep = false; this._renderPop(); return; }
+        const res = await this._ws({ type: "hauswerk/lichtwerk/profile/delete", profile_id: d.pid, replace_with: this._lwProfiles().find((x) => x.id !== d.pid)?.id || null });
+        this._data.lichtwerk.profiles = res.profiles;
+        this._data.lichtwerk.lights = res.lights;
+        this._closePop();
+        this._renderMain();
+        this._toast("Profil gelöscht");
+        break;
+      }
+      case "lwp-del-no":
+        this._pop.draft.confirm = false;
+        this._renderPop();
+        break;
       case "rw-log":
         this._logMod = "rollwerk";
         this._logRoom = "";
@@ -9882,6 +10507,7 @@ function morph(target, html) {
 }
 
 const EXPERT_MOD = { house: "haus", heat: "heizen", rw: "rollwerk", kw: "kraftwerk" };
+const LW_POPS = ["lwadd", "lwgeneral", "lwauto"];
 const MODULE_LOGOS = {
   heizen: `<svg viewBox="0 0 48 48" aria-hidden="true">
   <defs><linearGradient id="hwlg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fdba74"/><stop offset="1" stop-color="#c2410c"/></linearGradient></defs>
@@ -9908,6 +10534,14 @@ MODULE_LOGOS.kraftwerk = `<svg viewBox="0 0 48 48" aria-hidden="true">
   <path d="M10.5 23.5 24 11.5l13.5 12" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M14.8 21.8V34.2a2.8 2.8 0 0 0 2.8 2.8h12.8a2.8 2.8 0 0 0 2.8-2.8V21.8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M25.6 20.5 19.8 29h4.4l-1.8 6.6 6-8.8h-4.5z" fill="#fff" stroke="#fff" stroke-width="1" stroke-linejoin="round"/>
+</svg>`;
+MODULE_LOGOS.lichtwerk = `<svg viewBox="0 0 48 48" aria-hidden="true">
+  <defs><linearGradient id="lwlg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a5b4fc"/><stop offset="1" stop-color="#4338ca"/></linearGradient></defs>
+  <rect width="48" height="48" rx="13" fill="url(#lwlg)"/>
+  <path d="M10.5 23.5 24 11.5l13.5 12" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M14.8 21.8V34.2a2.8 2.8 0 0 0 2.8 2.8h12.8a2.8 2.8 0 0 0 2.8-2.8V21.8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="24" cy="26.6" r="4.6" fill="#fde047"/>
+  <rect x="21.9" y="31" width="4.2" height="2.6" rx="1" fill="#fff"/>
 </svg>`;
 /** ha-icon oder – bei „logo:<modul>“ – das eigene Symbol des Moduls. */
 // Jede Kopie bekommt eigene IDs für den Farbverlauf: sonst bleibt sie leer, wenn die erste Kopie verborgen ist.
@@ -11629,9 +12263,11 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .brief.br-mod-heat { --mc:#ea580c; --mc2:#fdba74; }
 .brief.br-mod-rw { --mc:#0284c7; --mc2:#7dd3fc; }
 .brief.br-mod-kw { --mc:#d97706; --mc2:#fde047; }
+.brief.br-mod-lw { --mc:#4f46e5; --mc2:#a5b4fc; }
 :host([dark]) .brief.br-mod-heat { --mc:#fb923c; }
 :host([dark]) .brief.br-mod-rw { --mc:#38bdf8; }
 :host([dark]) .brief.br-mod-kw { --mc:#fbbf24; }
+:host([dark]) .brief.br-mod-lw { --mc:#a5b4fc; }
 .brief[class*="br-mod-"] { background:
     radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--mc2) 26%, transparent), transparent 60%),
     linear-gradient(135deg, color-mix(in srgb, var(--mc) 9%, var(--card)), var(--card) 70%) !important;
@@ -11777,6 +12413,36 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .rs-why ha-icon { --mdc-icon-size:15px; flex:none; }
 .rq-why { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:12px; background:var(--card2); margin:8px 0; }
 .rq-why b { display:block; font-size:13px; } .rq-why small { display:block; font-size:12.5px; }
+.lw-c.on { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--lc) 45%, transparent); }
+.lw-bulb { width:46px; height:46px; flex:none; border-radius:14px; border:none; display:grid; place-items:center; cursor:pointer; background:var(--card2); color:var(--muted); }
+.lw-bulb ha-icon { --mdc-icon-size:26px; }
+.lw-bulb.on { background:color-mix(in srgb, var(--lc) 26%, var(--card2)); color:var(--lc); box-shadow:0 0 18px color-mix(in srgb, var(--lc) 45%, transparent); }
+.lw-name { all:unset; cursor:pointer; min-width:0; display:block; }
+.lw-name b { display:block; font-size:15px; } .lw-name small { display:block; color:var(--muted); font-size:12.5px; }
+.lw-dim { display:flex; align-items:center; gap:8px; margin-top:6px; }
+.lw-dim > ha-icon { color:var(--muted); --mdc-icon-size:18px; }
+.lw-dim b { font-size:13px; min-width:44px; text-align:right; }
+.lw-meter { flex:1; height:8px; border-radius:6px; background:var(--card2); overflow:hidden; }
+.lw-meter i { display:block; height:100%; border-radius:6px; background:linear-gradient(90deg, color-mix(in srgb, var(--lc) 50%, transparent), var(--lc)); }
+.lw-m .lw-mi { --mdc-icon-size:26px; color:var(--lc); }
+.lwbar { position:relative; height:12px; border-radius:7px; overflow:hidden; margin:4px 0 2px; }
+.lwbar.small { height:10px; }
+.lwtrack { position:absolute; inset:0; background:color-mix(in srgb, #6366f1 10%, var(--card2)); }
+.lwseg { position:absolute; top:0; bottom:0; background:linear-gradient(180deg, #fde047, #facc15); }
+.lwseg.night { background:repeating-linear-gradient(135deg, rgba(99,102,241,.55) 0 3px, rgba(99,102,241,.25) 3px 7px); }
+.lwbar .now { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--text); border-radius:1px; }
+.lw-slider { display:flex; align-items:center; gap:12px; margin:10px 0; }
+.lw-slider input { flex:1; accent-color:#6366f1; height:32px; }
+.lw-slider b { font-size:18px; min-width:56px; text-align:right; }
+.lw-pre { flex-wrap:wrap; }
+.lw-presets { display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:8px; margin:6px 0 10px; }
+.lw-presets.small { grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
+.lw-preset { display:flex; gap:10px; align-items:center; text-align:left; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--card); cursor:pointer; color:inherit; font:inherit; }
+.lw-preset.on { border-color:#6366f1; box-shadow:0 0 0 1px #6366f1 inset; }
+.lw-preset ha-icon { color:#6366f1; --mdc-icon-size:22px; flex:none; }
+.lw-preset b { display:block; font-size:13.5px; } .lw-preset small { display:block; color:var(--muted); font-size:12px; }
+.lwsum { margin:-4px 0 8px; }
+.wnext { display:block; margin:-4px 0 6px; }
 .lg-colors { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px 12px; margin:4px 0 12px; }
 .lg-c { display:grid; grid-template-columns:14px 1fr; column-gap:8px; align-items:center; align-content:start; font-size:13px; }
 .lg-c b { font-size:13px; }

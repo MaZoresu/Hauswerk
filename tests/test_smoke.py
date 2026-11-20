@@ -96,7 +96,7 @@ def hw(tmp_path_factory):
     pkg = root / "hw"
     pkg.mkdir()
     _mod("homeassistant.config_entries", ConfigEntry=object)
-    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py"):
+    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py"):
         shutil.copy(SRC / name, pkg / name)
     (pkg / "__init__.py").write_text("")
     sys.path.insert(0, str(root))
@@ -107,6 +107,8 @@ def hw(tmp_path_factory):
         Rollwerk=importlib.import_module("hw.rollwerk").Rollwerk,
         rename=importlib.import_module("hw.rename"),
         Kraftwerk=importlib.import_module("hw.kraftwerk").Kraftwerk,
+        Lichtwerk=importlib.import_module("hw.lichtwerk").Lichtwerk,
+        light=importlib.import_module("hw.light_logic"),
         const=importlib.import_module("hw.const"),
     )
 
@@ -1485,5 +1487,146 @@ def test_heizplan_ueberfuehren_und_ursache(hw):
         await ctl.async_set_override("wz", 23.0, 1)
         res = ctl.status()["rooms"]["wz"]
         assert res["mode"] == "manuell" and res["cause"].startswith("Von Hand bis ") and res["plan_target"] == 22.0
+
+    asyncio.run(run())
+
+
+def test_lichtwerk_logik(hw):
+    """Smart-Light-Regeln: Sonne/Uhrzeit als Wechsel, Stand über Mitternacht, Tage, Nachtlicht, Dynamik, Vorrang."""
+    L = hw.light
+    import math
+    elev = lambda m: 40 * math.sin((m - 360) / 720 * math.pi)  # noqa: E731 - Sonne 06:00 auf, 18:00 unter
+    prof = {**L.LW_PROFILE_DEFAULTS, "on_sun": True, "sun_on": -1, "off_sun": True, "sun_off": 1, "off_time": True, "time_off": "23:00"}
+    ev = L.day_events(prof, elev)
+    assert [(round(m), a) for m, a, _ in ev] == [(359, "off"), (1083, "on"), (1380, "off")] or [a for _, a, _ in ev] == ["off", "on", "off"]
+    # 05:00: noch dunkel, aber um 23:00 aus → bleibt aus (Wechsel zählt, nicht der Zustand)
+    assert L.latched_at(ev, ev, 300)[0] is False
+    assert L.latched_at(ev, ev, 1200) == (True, "Sonne unter -1°", ev[1][0])
+    plan = L.day_plan(ev, ev)
+    assert len(plan) == 1 and plan[0]["end"] == 1380 and plan[0]["reason"] == "Sonne unter -1°"
+    # ohne Ausschaltzeit: an über Mitternacht bis Sonnenaufgang
+    p2 = {**prof, "off_time": False}
+    ev2 = L.day_events(p2, elev)
+    assert L.latched_at(ev2, ev2, 120)[0] is True and L.day_plan(ev2, ev2)[0]["start"] == 0
+    # Tage: am nicht erlaubten Tag nur Ausschalten
+    assert [a for _, a, _ in L.day_events({**prof, "days": [0, 1]}, elev, allowed=False)] == ["off", "off"]
+    assert L.day_allowed({"days": [0, 1, 2, 3, 4], "day_mode": "workday"}, 2, True) is False
+    # Nachtlicht und Dynamik
+    n = {**prof, "night": True, "night_from": "22:30", "night_to": "06:00", "night_brightness": 10, "color": "temp"}
+    assert L.light_params(n, 23 * 60)["brightness"] == 10 and L.light_params(n, 23 * 60)["night"]
+    assert L.light_params(n, 20 * 60)["brightness"] == 80 and L.light_params(n, 20 * 60)["kelvin"] == 2700
+    d = L.light_params({**prof, "dynamic": "sun"}, 1000, elev=-6)
+    assert d["brightness"] == 35 and d["kelvin"] == 2200
+    # Vorrang
+    assert L.decide(auto=False, latched=True)[0] is None
+    assert L.decide(manual=True, latched=True) == (None, "Von Hand geschaltet – Automatik wartet")
+    assert L.decide(away=True, latched=True) == ("off", "Niemand zu Hause")
+    assert L.decide(away=True, simulating=True, latched=True, latched_reason="Uhrzeit")[0] == "on"
+    assert L.decide(bypass_on=True, bypass_action="off", latched=True)[0] == "off"
+    assert L.decide(motion_on=True) == ("on", "Bewegung")
+
+
+def test_lichtwerk(hw):
+    """Ablauf: Uhrzeit an/aus, von Hand (Automatik wartet bis zum Wechsel), Neustart, Bewegung mit Nachtlicht,
+    niemand zu Hause, Benachrichtigung, Status mit Tagesplan und nächster Schaltung."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 16, 15, 0, tzinfo=timezone.utc)  # Mo 16:00 Ortszeit
+        hass = Hass()
+        hass.set("light.wz", "off", {"supported_color_modes": ["color_temp"], "supported_features": 32}, "Wohnzimmer")
+        hass.set("light.flur", "off", {"supported_color_modes": ["brightness"]}, "Flur")
+        hass.set("binary_sensor.flur_bewegung", "off", {"device_class": "motion"}, "Flur Bewegung")
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"notify_channels": ["svc:mobile_app_pixel"], "notify_quiet": False})
+        lw = hw.Lichtwerk(hass, log, haus)
+        await lw.async_load()
+        lw._sun_fn = lambda offset=0: None  # ohne Standort: nur Uhrzeit-Auslöser
+        await lw.async_save_profile("standard", {"name": "Abendlicht", "on_sun": False, "off_sun": False,
+                                                 "on_time": True, "time_on": "17:00", "off_time": True, "time_off": "23:00"})
+        fid = await lw.async_save_profile(None, {"name": "Flur", "on_sun": False, "off_sun": False, "on_time": False, "off_time": False,
+                                                 "motion": ["binary_sensor.flur_bewegung"], "motion_off": 3, "motion_dark": True,
+                                                 "night": True, "night_from": "22:30", "night_to": "06:00", "night_brightness": 10})
+        await lw.async_save_settings({"lw_lights": ["light.wz", "light.flur"]})
+        await lw.async_save_light("light.flur", {"profile": fid})
+        st = lw.status()["lights"]["light.wz"]
+        assert st["want"] == "off" and st["plan"] == [{"start": 1020, "end": 1380, "reason": "Uhrzeit 17:00", "until": "spätestens 23:00"}]
+        assert st["next"] == {"day": 0, "min": 1020, "action": "on", "reason": "Uhrzeit 17:00"}
+
+        def ours(eid, state):
+            old = hass.st[eid]
+            hass.set(eid, state, old.attributes, old.name)
+            hass.st[eid].context.id = lw._ctx[-1]
+            lw._on_change(types.SimpleNamespace(data={"entity_id": eid, "old_state": old, "new_state": hass.st[eid]}))
+
+        def manual(eid, state):
+            old = hass.st[eid]
+            hass.set(eid, state, old.attributes, old.name)
+            lw._on_change(types.SimpleNamespace(data={"entity_id": eid, "old_state": old, "new_state": hass.st[eid]}))
+
+        # 17:01 – Uhrzeit: an
+        NOW[0] = datetime(2026, 11, 16, 16, 1, tzinfo=timezone.utc)
+        await lw.async_evaluate()
+        call = [c for c in hass.calls if c[0] == "light"][-1]
+        assert call == ("light", "turn_on", {"entity_id": "light.wz", "brightness_pct": 80, "transition": 1.0})
+        ours("light.wz", "on")
+        assert lw.status()["lights"]["light.wz"]["manual"] is None
+        assert any(e["title"] == "Wohnzimmer an" and e["why"].startswith("Uhrzeit 17:00") for e in log.entries)
+        # 18:00 von Hand aus → Automatik wartet
+        NOW[0] = datetime(2026, 11, 16, 17, 0, tzinfo=timezone.utc)
+        manual("light.wz", "off")
+        n = len(hass.calls)
+        await lw.async_evaluate()
+        st = lw.status()["lights"]["light.wz"]
+        assert st["manual"] and st["cause"].startswith("Von Hand") and len(hass.calls) == n
+        # Neustart um 20:00: Stand aus der Vorausrechnung (an), von Hand bleibt gemerkt
+        await lw.async_stop()
+        lw2 = hw.Lichtwerk(hass, log, haus)
+        await lw2.async_load()
+        lw2._sun_fn = lambda offset=0: None
+        NOW[0] = datetime(2026, 11, 16, 19, 0, tzinfo=timezone.utc)
+        await lw2.async_evaluate()
+        assert lw2.status()["lights"]["light.wz"]["manual"] and lw2.status()["lights"]["light.wz"]["latch"] is True
+        # 23:00 – Wechsel „aus“ beendet „von Hand“
+        NOW[0] = datetime(2026, 11, 16, 22, 0, tzinfo=timezone.utc)
+        await lw2.async_evaluate()
+        NOW[0] = datetime(2026, 11, 16, 22, 1, tzinfo=timezone.utc)
+        await lw2.async_evaluate()
+        st = lw2.status()["lights"]["light.wz"]
+        assert st["manual"] is None and st["want"] == "off" and st["cause"] == "spätestens 23:00"
+        # Bewegung im Flur um 23:01 → Nachtlicht 10 %
+        lw = lw2
+        hass.set("binary_sensor.flur_bewegung", "on", {"device_class": "motion"}, "Flur Bewegung")
+        await lw.async_evaluate()
+        call = [c for c in hass.calls if c[0] == "light"][-1]
+        assert call == ("light", "turn_on", {"entity_id": "light.flur", "brightness_pct": 10})
+        assert lw.status()["lights"]["light.flur"]["cause"] == "Bewegung · Nachtlicht"
+        ours("light.flur", "on")
+        hass.set("binary_sensor.flur_bewegung", "off", {"device_class": "motion"}, "Flur Bewegung")
+        NOW[0] = datetime(2026, 11, 16, 22, 3, tzinfo=timezone.utc)
+        await lw.async_evaluate()
+        assert lw.status()["lights"]["light.flur"]["want"] == "on"
+        NOW[0] = datetime(2026, 11, 16, 22, 6, tzinfo=timezone.utc)
+        await lw.async_evaluate()
+        assert [c for c in hass.calls if c[0] == "light"][-1] == ("light", "turn_off", {"entity_id": "light.flur"})
+        ours("light.flur", "off")
+        # Dienstag 17:30 – niemand zu Hause: aus statt an; Licht brennt (von Hand) → Nachricht nach 30 Min.
+        NOW[0] = datetime(2026, 11, 17, 16, 30, tzinfo=timezone.utc)
+        haus.settings["presence_force"] = "away"
+        haus.update()
+        await lw.async_evaluate()
+        st = lw.status()["lights"]["light.wz"]
+        assert st["want"] == "off" and st["cause"] == "Niemand zu Hause"
+        manual("light.flur", "on")
+        await lw.async_evaluate()
+        NOW[0] = datetime(2026, 11, 17, 17, 5, tzinfo=timezone.utc)
+        await lw.async_evaluate()
+        await asyncio.sleep(0)
+        assert "Licht an, niemand zu Hause" in hass.sent()
+        # Panel: von Hand an (Helligkeit) und „Automatik übernimmt“
+        await lw.async_command(["light.wz"], "on", 40)
+        assert hass.calls[-1] == ("light", "turn_on", {"entity_id": "light.wz", "brightness_pct": 40})
+        await lw.async_command(["light.wz"], "resume")
+        assert lw.status()["lights"]["light.wz"]["manual"] is None
 
     asyncio.run(run())

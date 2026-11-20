@@ -13,7 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
-from .const import DOMAIN, MODULE_HEATING, MODULE_HOUSE, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
+from .const import DOMAIN, MODULE_HEATING, MODULE_HOUSE, MODULE_LIGHT, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
 
 TO_REDACT = {"notify_targets", "latitude", "longitude", "gps_accuracy", "user_id", "entity_picture"}
 LOG_ENTRIES = 1500
@@ -65,6 +65,11 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
         out["rollwerk"] = {"settings": shutters.settings, "covers": shutters.covers, "profiles": shutters.profiles, "status": shutters.status()}
         _entities(shutters.covers, found)
         _entities(shutters.settings, found)
+    lights = data.get(MODULE_LIGHT)
+    if lights:
+        out["lichtwerk"] = {"settings": lights.settings, "lights": lights.lights, "profiles": lights.profiles, "status": lights.status()}
+        _entities(lights.lights, found)
+        _entities(lights.settings, found)
     if power is not None:
         out["kraftwerk"] = {"settings": power.settings}
         found.update(power.entities())

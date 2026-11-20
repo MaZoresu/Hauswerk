@@ -17,6 +17,10 @@ SHUTTER_STORAGE_KEY = f"{DOMAIN}.{MODULE_SHUTTER}"
 MODULE_POWER = "kraftwerk"
 POWER_STORAGE_KEY = f"{DOMAIN}.{MODULE_POWER}"
 
+# Modul Lichtwerk (Licht): hass.data[DOMAIN][MODULE_LIGHT], Speicher hauswerk.lichtwerk
+MODULE_LIGHT = "lichtwerk"
+LIGHT_STORAGE_KEY = f"{DOMAIN}.{MODULE_LIGHT}"
+
 STORAGE_KEY = f"{DOMAIN}.{MODULE_HEATING}"
 STORAGE_VERSION = 1
 # Speicher der früheren Einzel-Integration „Heizwerk“, wird beim ersten Start übernommen
@@ -53,7 +57,7 @@ SETTING_LABELS = {
     "notify_battery": "Benachrichtigungen", "notify_quiet": "Ruhezeit", "notify_quiet_from": "Ruhezeit", "notify_quiet_to": "Ruhezeit",
     "battery_low": "Batterie-Warnung", "preheat_weather": "Vorheizen nach Wetter", "workday_entity": "Arbeitstag-Sensor",
     "workday_as": "Feiertage wie", "vent_rh": "Lüften-Hinweis", "sun_entity": "Sonne",
-    "notify_ha": "Mitteilung in Home Assistant", "notify_channels": "Benachrichtigungen an", "notify_routes": "Benachrichtigungen je Anlass", "notify_storm": "Benachrichtigungen", "notify_cover": "Benachrichtigungen", "notify_hours": "Benachrichtigungen je Kanal", "notify_voice_away": "Benachrichtigungen", "notify_bundle": "Benachrichtigungen bündeln", "notify_cold": "Benachrichtigungen", "notify_vent": "Benachrichtigungen", "notify_vent_done": "Benachrichtigungen", "vent_morning": "Lüften", "vent_co2": "Lüften", "vent_cool": "Lüften", "vent_long_min": "Lüften",
+    "notify_ha": "Mitteilung in Home Assistant", "notify_channels": "Benachrichtigungen an", "notify_routes": "Benachrichtigungen je Anlass", "notify_storm": "Benachrichtigungen", "notify_light_away": "Benachrichtigungen", "notify_light_offline": "Benachrichtigungen", "notify_cover": "Benachrichtigungen", "notify_hours": "Benachrichtigungen je Kanal", "notify_voice_away": "Benachrichtigungen", "notify_bundle": "Benachrichtigungen bündeln", "notify_cold": "Benachrichtigungen", "notify_vent": "Benachrichtigungen", "notify_vent_done": "Benachrichtigungen", "vent_morning": "Lüften", "vent_co2": "Lüften", "vent_cool": "Lüften", "vent_long_min": "Lüften",
     "demand_entity": "Wärmeanforderung", "demand_action": "Wärmeanforderung", "demand_low": "Wärmeanforderung",
     "demand_valve": "Wärmeanforderung", "rw_covers": "Rollwerk: Rollläden", "rw_storm": "Rollwerk: Sturmschutz", "rw_wind_entity": "Rollwerk: Sturmschutz", "rw_recovery": "Rollwerk: Nach Neustart", "demand_hold": "Wärmeanforderung", "demand_preheat": "Wärmeanforderung",
     "kw_solar": "Kraftwerk: Solar", "kw_grid": "Kraftwerk: Netz", "kw_grid_export": "Kraftwerk: Netz", "kw_grid_invert": "Kraftwerk: Netz",
@@ -140,6 +144,8 @@ HOUSE_DEFAULTS = {
     "notify_vent_done": "normal", # genug gelüftet – Fenster schließen
     "notify_storm": "normal",     # Rollwerk: Sturmschutz fährt alle Rollläden hoch
     "notify_cover": "normal",     # Rollwerk: Rollladen nicht erreichbar (seit notify_offline_min)
+    "notify_light_away": "normal",  # Lichtwerk: Licht brennt, obwohl niemand zu Hause ist
+    "notify_light_offline": "log",  # Lichtwerk: Leuchte nicht erreichbar
     "notify_hours": {},           # je Kanal aktiv von–bis: {"tts:…": ["08:00", "21:00"]}; außerhalb nur Wichtiges
     "notify_voice_away": True,    # Ansagen nur, wenn jemand zu Hause ist (außer Wichtiges)
     "notify_bundle": [],          # Kanäle, an die Meldungen binnen 5 Min. gebündelt gehen

@@ -6,7 +6,8 @@ Module:
 - Protokoll: was wann warum entschieden wurde (für alle Module)
 - Rollwerk (intern „rollwerk“): Rollläden mit Profilen nach dem Vorbild der Cover Control Automation
 - Kraftwerk (intern „kraftwerk“): Energiefluss – Solar, Netz, Batterie, Verbrauch
-- Licht, Garten: geplant
+- Lichtwerk (intern „lichtwerk“): Licht nach dem Vorbild des Blueprints „Smart Light“
+- Garten: geplant
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from .const import (
     DOMAIN,
     MODULE_HEATING,
     MODULE_HOUSE,
+    MODULE_LIGHT,
     MODULE_LOG,
     MODULE_POWER,
     MODULE_SHUTTER,
@@ -36,6 +38,7 @@ from .const import (
 from .controller import Heizen
 from .core import Haus
 from .kraftwerk import Kraftwerk
+from .lichtwerk import Lichtwerk
 from .log import Protokoll
 from .rename import async_track_renames
 from .rollwerk import Rollwerk
@@ -91,7 +94,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     power = Kraftwerk(hass, log, haus)
     await power.async_load()
     power.appliances.subscribe(heating.push)
-    hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HOUSE: haus, MODULE_HEATING: heating, MODULE_SHUTTER: shutters, MODULE_POWER: power}
+    lights = Lichtwerk(hass, log, haus)
+    await lights.async_load()
+    hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HOUSE: haus, MODULE_HEATING: heating, MODULE_SHUTTER: shutters, MODULE_POWER: power,
+                         MODULE_LIGHT: lights}
 
     api.async_register(hass)
     entry.async_on_unload(async_track_renames(hass, entry))
@@ -101,6 +107,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await heating.async_start()
     await shutters.async_start()
     await power.async_start()
+    await lights.async_start()
     return True
 
 

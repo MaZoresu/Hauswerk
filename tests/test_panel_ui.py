@@ -730,7 +730,7 @@ def test_schoner_module_als_symbole(tablet):
     p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
     p.js(f"{EL}._saverShow()")
     mods = p.js(f"[...{EL}.shadowRoot.querySelectorAll('#saver .sv-mod')].map((m) => [m.querySelector('.sv-logo svg') != null, m.querySelectorAll('.sv-i').length, m.innerText])")
-    assert len(mods) == 3 and all(m[0] and m[1] >= 1 for m in mods), mods
+    assert len(mods) == 4 and all(m[0] and m[1] >= 1 for m in mods), mods  # Heizwerk, Rollwerk, Kraftwerk, Lichtwerk
     text = p.js(f"{EL}.shadowRoot.getElementById('saver').innerText")
     assert "Raum heizt" not in text and "Rollläden:" not in text and "Solar " not in text
 
@@ -813,7 +813,7 @@ def test_neue_widgets_lage_ereignisse_termine(panel):
     panel.wait(400)
     panel.js(f"{EL}._renderMain()")
     lage = panel.js(f"[...{EL}.shadowRoot.querySelectorAll('.wl')].map((x) => x.dataset.tab)")
-    assert lage == ["overview", "shutters", "kwflow"], lage
+    assert lage == ["overview", "shutters", "kwflow", "lights"], lage
     assert "Restmüll" in panel.js(f"{EL}.shadowRoot.querySelector('.wcal').innerText")
     assert "Papier" in panel.js(f"{EL}.shadowRoot.querySelector('.wcal').innerText")
     ev = panel.js(f"{EL}.shadowRoot.querySelector('.wev').innerText")
@@ -1280,3 +1280,73 @@ def test_heizplan_editor(panel):
     p.wait(300)
     saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/room/save"][-1]["room"]["schedule"]
     assert LG.block_conflicts(saved) == [] and any(b.get("kind") == "eco" for b in saved)
+
+
+def test_lichtwerk(panel):
+    """Lichtwerk: Kopfkachel, Kacheln nach Raum mit Ursache und Tagesleiste, Schalten, Helligkeit, von Hand,
+    Einstellungen, Profil-Editor (alle Abschnitte), Assistent mit Vorlage – alles gegen die Backend-Schemas."""
+    p = panel
+    p.view("lights")
+    p.wait()
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    for t in ("Lichtwerk", "1/4 an", "Wohnzimmer", "Sonne unter 2°", "Flur OG", "von Hand", "nicht erreichbar", "Um 23:00 aus"):
+        assert t in txt, t
+    assert p.has('.lw-c .lwbar .lwseg')
+    p.click('[data-action="lw-cmd"][data-ids="light.flur_og"][data-a="on"]')
+    p.wait(150)
+    assert [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/command"][-1] == {"type": "hauswerk/lichtwerk/command", "entity_ids": ["light.flur_og"], "action": "on"}
+    p.click('.lw-c [data-action="lw-cmd"][data-ids="light.eingang"][data-a="resume"]')
+    p.wait(150)
+    assert [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/command"][-1]["action"] == "resume"
+    # Helligkeit
+    p.js(f"() => {{ {EL}._openPop('lwbri:light.wohnzimmer'); }}")
+    p.wait()
+    assert "Sonne unter 2°" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    p.js(f"""() => {{ const i = {EL}.shadowRoot.querySelector('#pop [data-lwbri]'); i.value = 35; i.dispatchEvent(new Event('input', {{ bubbles: true, composed: true }})); }}""")
+    p.click('#pop [data-action="lw-bri-apply"]')
+    p.wait(150)
+    assert [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/command"][-1] == {"type": "hauswerk/lichtwerk/command", "entity_ids": ["light.wohnzimmer"], "action": "on", "brightness": 35}
+    # kompakt
+    p.click('[data-action="lw-view"][data-v="compact"]')
+    assert p.has('.lw-m')
+    p.click('[data-action="lw-view"][data-v="detail"]')
+    # Einstellungen: jede Zeile öffnet sich
+    p.view("lightset")
+    p.wait()
+    for pop in p.js(f"[...{EL}.shadowRoot.querySelectorAll('#set-list [data-action=\"pop-open\"]')].map((b) => b.dataset.pop)"):
+        p.js(f"(id) => {{ {EL}._openPop(id); }}", pop)
+        p.wait(60)
+        p.ok(f"Lichtwerk › {pop}")
+        p.js(f"{EL}._closePop()")
+    # Profil-Editor: alle Abschnitte, Bewegung wählen, speichern
+    p.js(f"() => {{ {EL}._openPop('lwp:flur:on'); }}")
+    p.wait()
+    for sec in ("off", "motion", "days", "light", "dyn", "night", "more", "on"):
+        p.click(f'#pop [data-action="lwp-sec"][data-sec="{sec}"]')
+        p.ok(f"Profil › {sec}")
+    p.click('#pop [data-action="lwp-sec"][data-sec="days"]')
+    p.click('#pop [data-action="lwp-tog"][data-k="days"][data-v="6"]')
+    p.click('#pop [data-action="lwp-sec"][data-sec="dyn"]')
+    p.click('#pop [data-action="lwp-set"][data-k="dynamic"][data-v="sun"]')
+    p.click('#pop [data-action="lwp-save"]')
+    p.wait(200)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/profile/save"][-1]
+    assert saved["profile_id"] == "flur" and 6 not in saved["profile"]["days"] and saved["profile"]["dynamic"] == "sun"
+    # Assistent: Stehlampe mit Vorlage „Fernsehlicht“
+    p.js(f"() => {{ {EL}._openPop('lwadd'); }}")
+    p.wait()
+    p.click('#pop [data-action="lwadd-tog"][data-id="light.stehlampe"]')
+    p.click('#pop [data-action="lwadd-prof"][data-v="new:tv"]')
+    p.click('#pop [data-action="lwadd-save"]')
+    p.wait(300)
+    prof = [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/profile/save"][-1]["profile"]
+    assert prof["name"] == "Fernsehlicht" and prof["on_entity"] is True
+    light = [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/light/save"][-1]
+    assert light["entity_id"] == "light.stehlampe" and light["light"]["profile"].startswith("neu")
+    # Automation abschalten
+    p.view("lightset")
+    p.js(f"() => {{ {EL}._openPop('lwauto'); }}")
+    p.wait()
+    p.click('#pop [data-action="lw-auto-off"][data-id="automation.nachtlicht"]')
+    p.wait(150)
+    assert [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/automation/off"]

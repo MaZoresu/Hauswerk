@@ -10,7 +10,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_HEATING, MODULE_HOUSE, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
+from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_HEATING, MODULE_HOUSE, MODULE_LIGHT, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
 from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, block_conflicts, parse_hm
 
 
@@ -141,7 +141,7 @@ ROOM_SCHEMA = vol.Schema(
     extra=vol.REMOVE_EXTRA,
 )
 
-WIDGET_TYPES = ["vent", "heat", "presence", "weather", "rooms", "shortcuts", "windows", "schedule", "report", "values", "forecast",
+WIDGET_TYPES = ["vent", "light", "heat", "presence", "weather", "rooms", "shortcuts", "windows", "schedule", "report", "values", "forecast",
                 "hints", "power", "shutters", "rwnext", "energy", "lage", "events", "calendar"]
 WIDGET_SCHEMA = vol.Schema(
     {
@@ -228,6 +228,12 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_bundle"): CHANNELS,
         vol.Optional("notify_storm"): NOTIFY_MODE,
         vol.Optional("notify_cover"): NOTIFY_MODE,
+        vol.Optional("notify_light_away"): NOTIFY_MODE,
+        vol.Optional("notify_light_offline"): NOTIFY_MODE,
+        # Lichtwerk
+        vol.Optional("lw_lights"): vol.All([vol.All(str, vol.Match(r"^(light|switch|input_boolean)\.[a-z0-9_]+$"))], vol.Length(max=80)),
+        vol.Optional("lw_lux_sensor"): _opt(SENSOR),
+        vol.Optional("lw_away_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=720)),
         vol.Optional("notify_window"): NOTIFY_MODE,
         vol.Optional("notify_window_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=720)),
         vol.Optional("notify_offline"): NOTIFY_MODE,
@@ -322,10 +328,15 @@ def _kw(hass: HomeAssistant):
     return (hass.data.get(DOMAIN) or {}).get(MODULE_POWER)
 
 
+def _lw(hass: HomeAssistant):
+    return (hass.data.get(DOMAIN) or {}).get(MODULE_LIGHT)
+
+
 def _settings(hass: HomeAssistant) -> dict:
     """Alle Einstellungen, wie das Panel sie sieht: zentral (Kern), Heizwerk, Rollwerk (rw_…) und Kraftwerk (kw_…)."""
-    haus, ctl, rw, kw = _haus(hass), _ctl(hass), _rw(hass), _kw(hass)
-    return {**(haus.settings if haus else {}), **(ctl.settings if ctl else {}), **(rw.settings if rw else {}), **(kw.settings if kw else {})}
+    haus, ctl, rw, kw, lw = _haus(hass), _ctl(hass), _rw(hass), _kw(hass), _lw(hass)
+    return {**(haus.settings if haus else {}), **(ctl.settings if ctl else {}), **(rw.settings if rw else {}),
+            **(kw.settings if kw else {}), **(lw.settings if lw else {})}
 
 
 def _log(hass: HomeAssistant):
@@ -390,6 +401,8 @@ def ws_get(hass: HomeAssistant, connection, msg) -> None:
             },
             "status": ctl.status(),
             "rollwerk": {"covers": _rw(hass).covers, "profiles": _rw(hass).profiles, "status": _rw(hass).status()} if _rw(hass) else None,
+            "lichtwerk": {"lights": _lw(hass).lights, "profiles": _lw(hass).profiles, "status": _lw(hass).status(),
+                          "automations": _lw(hass).automations()} if _lw(hass) else None,
             "defaults": TYPE_DEFAULTS,
             "modes": MODES,
             "is_admin": _may_edit(hass, connection),
@@ -482,7 +495,10 @@ async def ws_settings_save(hass: HomeAssistant, connection, msg) -> None:
     house = {k: v for k, v in settings.items() if k in HOUSE_KEYS}
     shutter = {k: v for k, v in settings.items() if k.startswith("rw_")}
     power = {k: v for k, v in settings.items() if k.startswith("kw_")}
-    heat = {k: v for k, v in settings.items() if k not in HOUSE_KEYS and not k.startswith(("rw_", "kw_"))}
+    light = {k: v for k, v in settings.items() if k.startswith("lw_")}
+    heat = {k: v for k, v in settings.items() if k not in HOUSE_KEYS and not k.startswith(("rw_", "kw_", "lw_"))}
+    if light and _lw(hass):
+        await _lw(hass).async_save_settings(light, by=_who(connection))
     if shutter and _rw(hass):
         await _rw(hass).async_save_settings(shutter, by=_who(connection))
     if power and _kw(hass):
@@ -786,6 +802,137 @@ async def ws_rw_command(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"])
 
 
+# ---------------------------------------------------------------- Lichtwerk
+def _lw_profile_schema() -> vol.Schema:
+    from .light_logic import LW_PROFILE_SPEC
+
+    kinds = {
+        "bool": bool,
+        "num": _opt(vol.All(vol.Coerce(float), vol.Range(min=-100000, max=200000))),
+        "time": _hm,
+        "text": vol.All(str, vol.Length(max=60)),
+        "entity": _opt(ENTITY),
+        "list": vol.All([vol.Any(vol.All(str, vol.Length(max=80)), vol.All(vol.Coerce(int), vol.Range(min=0, max=6)))], vol.Length(max=20)),
+        "choice": vol.All(str, vol.Length(max=20)),
+    }
+    return vol.Schema({vol.Optional(k): kinds[kind] for k, (_d, kind) in LW_PROFILE_SPEC.items()}, extra=vol.REMOVE_EXTRA)
+
+
+LIGHT_ID = vol.All(str, vol.Match(r"^(light|switch|input_boolean)\.[a-z0-9_]+$"))
+LIGHT_SCHEMA = vol.Schema({
+    vol.Optional("profile"): vol.All(str, vol.Length(max=40)),
+    vol.Optional("auto"): bool,
+    vol.Optional("name"): vol.Any(None, vol.All(str, vol.Length(max=40))),
+}, extra=vol.REMOVE_EXTRA)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/lichtwerk/subscribe"})
+@callback
+def ws_lw_subscribe(hass: HomeAssistant, connection, msg) -> None:
+    lw = _lw(hass)
+    if lw is None:
+        return _not_ready(connection, msg)
+
+    @callback
+    def forward(status: dict) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], status))
+
+    connection.subscriptions[msg["id"]] = lw.subscribe(forward)
+    connection.send_result(msg["id"])
+    forward(lw.status())
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "hauswerk/lichtwerk/profile/save",
+    vol.Optional("profile_id"): vol.Any(None, vol.All(str, vol.Length(max=40))),
+    vol.Required("profile"): dict,
+})
+@require_editor
+@websocket_api.async_response
+async def ws_lw_profile_save(hass: HomeAssistant, connection, msg) -> None:
+    lw = _lw(hass)
+    if lw is None:
+        return _not_ready(connection, msg)
+    try:
+        prof = _lw_profile_schema()(msg["profile"])
+    except vol.Invalid as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    pid = await lw.async_save_profile(msg.get("profile_id"), prof, by=_who(connection))
+    connection.send_result(msg["id"], {"profile_id": pid, "profiles": lw.profiles})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "hauswerk/lichtwerk/profile/delete",
+    vol.Required("profile_id"): vol.All(str, vol.Length(max=40)),
+    vol.Optional("replace_with"): vol.Any(None, vol.All(str, vol.Length(max=40))),
+})
+@require_editor
+@websocket_api.async_response
+async def ws_lw_profile_delete(hass: HomeAssistant, connection, msg) -> None:
+    lw = _lw(hass)
+    if lw is None:
+        return _not_ready(connection, msg)
+    await lw.async_delete_profile(msg["profile_id"], msg.get("replace_with"), by=_who(connection))
+    connection.send_result(msg["id"], {"profiles": lw.profiles, "lights": lw.lights})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/lichtwerk/light/save", vol.Required("entity_id"): LIGHT_ID,
+                                  vol.Required("light"): dict})
+@require_editor
+@websocket_api.async_response
+async def ws_lw_light_save(hass: HomeAssistant, connection, msg) -> None:
+    lw = _lw(hass)
+    if lw is None:
+        return _not_ready(connection, msg)
+    try:
+        cfg = LIGHT_SCHEMA(msg["light"])
+    except vol.Invalid as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    await lw.async_save_light(msg["entity_id"], cfg, by=_who(connection))
+    connection.send_result(msg["id"], {"lights": lw.lights, "settings": _settings(hass)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/lichtwerk/light/remove", vol.Required("entity_id"): LIGHT_ID})
+@require_editor
+@websocket_api.async_response
+async def ws_lw_light_remove(hass: HomeAssistant, connection, msg) -> None:
+    lw = _lw(hass)
+    if lw is None:
+        return _not_ready(connection, msg)
+    await lw.async_remove_light(msg["entity_id"], by=_who(connection))
+    connection.send_result(msg["id"], {"lights": lw.lights, "settings": _settings(hass)})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "hauswerk/lichtwerk/command",
+    vol.Required("entity_ids"): vol.All([LIGHT_ID], vol.Length(min=1, max=80)),
+    vol.Required("action"): vol.In(["on", "off", "resume"]),
+    vol.Optional("brightness"): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+})
+@websocket_api.async_response
+async def ws_lw_command(hass: HomeAssistant, connection, msg) -> None:
+    """Licht von Hand schalten (dürfen alle Benutzer)."""
+    lw = _lw(hass)
+    if lw is None:
+        return _not_ready(connection, msg)
+    await lw.async_command(msg["entity_ids"], msg["action"], msg.get("brightness"), by=_who(connection))
+    connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/lichtwerk/automation/off",
+                                  vol.Required("entity_id"): vol.All(str, vol.Match(r"^automation\.[a-z0-9_]+$"))})
+@require_editor
+@websocket_api.async_response
+async def ws_lw_automation_off(hass: HomeAssistant, connection, msg) -> None:
+    lw = _lw(hass)
+    if lw is None:
+        return _not_ready(connection, msg)
+    await lw.async_automation_off(msg["entity_id"], by=_who(connection))
+    connection.send_result(msg["id"], {"automations": lw.automations()})
+
+
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/log/get"})
 @callback
 def ws_log_get(hass: HomeAssistant, connection, msg) -> None:
@@ -829,6 +976,13 @@ COMMANDS = (
     ws_rw_subscribe,
     ws_rw_cover_save,
     ws_rw_command,
+    ws_lw_subscribe,
+    ws_lw_profile_save,
+    ws_lw_profile_delete,
+    ws_lw_light_save,
+    ws_lw_light_remove,
+    ws_lw_command,
+    ws_lw_automation_off,
     ws_rw_profile_save,
     ws_rw_profile_delete,
     ws_log_get,

@@ -10,7 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, MODULE_HEATING, MODULE_HOUSE, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
+from .const import DOMAIN, MODULE_HEATING, MODULE_HOUSE, MODULE_LIGHT, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,8 +20,9 @@ RENAME_ATTRS: dict[str, tuple[str, ...]] = {
     MODULE_HEATING: ("settings", "rooms", "plans", "turned_off", "heat_rates"),
     MODULE_SHUTTER: ("settings", "covers", "profiles", "_persist"),
     MODULE_POWER: ("settings",),
+    MODULE_LIGHT: ("settings", "lights", "profiles"),
 }
-MODULE_NAMES = {MODULE_HOUSE: "Hauswerk", MODULE_HEATING: "Heizwerk", MODULE_SHUTTER: "Rollwerk", MODULE_POWER: "Kraftwerk"}
+MODULE_NAMES = {MODULE_HOUSE: "Hauswerk", MODULE_HEATING: "Heizwerk", MODULE_SHUTTER: "Rollwerk", MODULE_POWER: "Kraftwerk", MODULE_LIGHT: "Lichtwerk"}
 
 
 def swap(obj: Any, old: str, new: str) -> tuple[Any, bool]:
