@@ -91,6 +91,7 @@ from .logic import (
     window_paused,
 )
 from .core import Haus, async_calendar_events, parse_when
+from .hmlinks import HmLinks, analyze_room, findings as link_findings, peer_kind
 from .log import Protokoll, log_settings
 
 _LOGGER = logging.getLogger(__name__)
@@ -163,6 +164,11 @@ class Heizen:
         self._refs_at = 0.0
         # Art des Thermostats (wall/trv/None) und Duty-Cycle-Melder am Gerät
         self._kinds: dict[str, str | None] = {}
+        # Direktverknüpfungen der Homematic-CCU (nur lesen): Raum → Analyse, Hinweise
+        self.hmlinks = HmLinks(hass)
+        self._links: dict[str, dict] = {}
+        self._link_findings: list[dict] = []
+        self._links_next = 0.0
         self._dev_duty: dict[str, list[str]] = {}
         # Gesendete Befehle (Zeitpunkte) für die Funk-Anzeige
         self._sent_at: list[float] = []
@@ -504,6 +510,57 @@ class Heizen:
             self._kinds[entity_id] = thermostat_kind(model, entity_id, state.name if state is not None else None)
         return self._kinds[entity_id]
 
+    # ------------------------------------------------------------ Homematic: Direktverknüpfungen
+    async def async_refresh_links(self, by: str | None = None) -> dict:
+        """Verknüpfungen aus der CCU lesen (alle 6 Std. und auf Wunsch) und auswerten."""
+        self._links_next = dt_util.utcnow().timestamp() + 6 * 3600
+        if not self.hmlinks.available:
+            self._links, self._link_findings = {}, []
+            return self.links_status()
+        ids = sorted({e for r in self.rooms.values() for e in (r.get("climates") or []) + (r.get("windows") or [])})
+        await self.hmlinks.async_refresh(ids)
+        self._analyze_links()
+        if by:
+            self.log.add("settings", "Homematic-Verknüpfungen gelesen",
+                         f"{sum(len(i['walls']) for i in self._links.values())} Wandthermostate · {len(self._link_findings)} Hinweise · {by}")
+        await self.async_evaluate()
+        return self.links_status()
+
+    def _analyze_links(self) -> None:
+        old = {f["text"] for f in self._link_findings}
+        kinds = lambda e: self._kind(e)  # noqa: E731
+        self._links = {}
+        for room_id, room in self.rooms.items():
+            info = analyze_room(room, kinds, self.hmlinks.addr, self.hmlinks.peers, self.hmlinks.devices)
+            if info is not None:
+                self._links[room_id] = info
+        fal = [(p["address"], p["channel"]) for i in self._links.values() for p in i["fal"]]
+        self._link_findings = link_findings(self.rooms, self._links, self._name, self.hmlinks.devices, fal)
+        for f in self._link_findings:
+            if f["text"] not in old:
+                room = self.rooms.get(f.get("room") or "") or {}
+                self.log.add("health", "Homematic-Verknüpfung", f["text"], f.get("room"), room.get("name"))
+
+    def links_status(self) -> dict:
+        devices = self.hmlinks.devices
+        return {"available": self.hmlinks.available, "at": self.hmlinks.at, "error": self.hmlinks.error,
+                "rooms": self._links, "findings": self._link_findings,
+                "devices": {a: {**d, "kind": peer_kind(d.get("model"))} for a, d in devices.items()
+                            if any(a == p["address"] for i in self._links.values() for w in i["walls"] for p in w["peers"])}}
+
+    def _window_ccu(self, room: dict, result: dict, virtual: bool) -> list[str]:
+        """Fensterpause, die die CCU schon selbst macht: alle offenen Fenster sind direkt mit dem Thermostat
+        verknüpft. Dann sendet Hauswerk den verknüpften Thermostaten keine Fenster-Befehle (spart Funk).
+        Rückgabe: Thermostate, denen Hauswerk nichts schickt (leer = Hauswerk macht die Pause selbst)."""
+        links = self._links.get(room.get("id") or "")
+        if result.get("mode") != "fenster" or virtual or not links or room.get("window_ccu") is False:
+            return []
+        open_ = [w for w in room.get("windows") or []
+                 if (st := self.hass.states.get(w)) is not None and st.state.lower() in WINDOW_OPEN_STATES]
+        if not open_ or any(w not in links["windows_ccu"] for w in open_):
+            return []
+        return [w["entity"] for w in links["walls"]] + list(links["linked_trvs"])
+
     def _followers(self, room: dict, rt: dict, now: float) -> set[str]:
         """Heizkörper-Thermostate, die dem Wandthermostat folgen und deshalb nicht selbst gestellt werden.
 
@@ -517,6 +574,10 @@ class Heizen:
         climates = [c for c in room.get("climates") or [] if c not in assist]
         walls = [c for c in climates if self._kind(c) == "wall"]
         trvs = [c for c in climates if self._kind(c) == "trv"]
+        links = self._links.get(room.get("id") or "")
+        if links is not None:
+            # Verknüpfungen aus der CCU bekannt: nur verknüpfte Heizkörper folgen dem Wandthermostat
+            trvs = [t for t in trvs if t in links["linked_trvs"]]
         if not walls or not trvs:
             return set()
         broken = rt.setdefault("pair_broken", {})
@@ -681,6 +742,9 @@ class Heizen:
         self.rooms[room_id] = room
         self._save()
         self._track_entities()
+        self._links_next = 0.0  # Geräte des Raums können sich geändert haben: Verknüpfungen beim nächsten Takt neu lesen
+        if self.hmlinks.peers:
+            self._analyze_links()
         if is_new:
             async_dispatcher_send(self.hass, SIGNAL_ROOMS)
         self.log.add("settings", "Raum angelegt" if is_new else "Raum geändert", f"Panel{self._by(by)}", room_id, room.get("name"))
@@ -871,6 +935,7 @@ class Heizen:
         return {
             **self.haus.status(),
             "rooms": out,
+            "hm_links": self.links_status(),
             "outside_mean": None if self._outside_mean is None else round(self._outside_mean, 1),
             "plan_events": {
                 pid: [
@@ -1019,6 +1084,8 @@ class Heizen:
         await self.async_evaluate()
 
     async def _async_tick(self, _now=None) -> None:
+        if dt_util.utcnow().timestamp() >= self._links_next:
+            await self.async_refresh_links()
         await self._async_refresh_plan_calendars()
         await self.async_evaluate()
         self._record_stats()
@@ -1367,6 +1434,9 @@ class Heizen:
                                       rt.get("cold_run"), now)
             rt["cold_run"] = run
             self._assist(room, rt, result, room_temp)
+            rt["window_ccu"] = self._window_ccu(room, result, virtual)
+            if rt["window_ccu"]:
+                result["cause"] = "Fenster offen – die CCU senkt über die Direktverknüpfung ab (Hauswerk sendet nichts)"
             fire = self._fireplace(room_id, room, rt, result, room_temp, valve_all, now)
             self._learn(room_id, rt, result, room_temp, now)
             result.update(
@@ -1399,6 +1469,8 @@ class Heizen:
                 **self._air(room_id, room, rt, room_temp, humidity, out_temp, out_rh, open_since, now),
                 battery_low=self._battery_low(room_id),
                 followers=sorted(rt["followers"]),
+                links=self._links.get(room_id),
+                window_ccu=bool(rt.get("window_ccu")),
                 pair_broken=sorted(rt.get("pair_broken") or {}),
                 conflicts=self._conflicts(room, now),
                 duty_blocked=[c for c in room.get("climates") or [] if self._duty_blocked(c)],
@@ -1723,9 +1795,12 @@ class Heizen:
                     await self._restore_mode(entity_id, room)
             return
         followers = rt.get("followers") or set()
+        ccu = set(rt.get("window_ccu") or [])
         for entity_id in room.get("climates") or []:
             if self._duty_blocked(entity_id):
                 continue  # Gerät darf gerade nicht funken
+            if entity_id in ccu:
+                continue  # Fensterpause macht die CCU über die Direktverknüpfung
             if entity_id in followers:
                 if entity_id in self.turned_off and not result["hvac_off"]:
                     await self._restore_mode(entity_id, room)  # von früher (vor der Kopplung) noch aus

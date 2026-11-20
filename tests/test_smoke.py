@@ -62,7 +62,7 @@ def _stub_homeassistant():
     _mod("homeassistant.core", Event=object, HomeAssistant=object, State=object, Context=Context, callback=lambda f: f)
     helpers = _mod("homeassistant.helpers")
     helpers.device_registry = _mod("homeassistant.helpers.device_registry",
-                                   async_get=lambda hass: types.SimpleNamespace(async_get=DEVS.get))
+                                   async_get=lambda hass: types.SimpleNamespace(async_get=DEVS.get, devices=DEVS))
     helpers.entity_registry = _mod("homeassistant.helpers.entity_registry",
          async_get=lambda hass: types.SimpleNamespace(async_get=REG.get), EVENT_ENTITY_REGISTRY_UPDATED="entity_registry_updated",
          async_entries_for_device=lambda r, d: [e for e in REG.values() if e.device_id == d],
@@ -96,7 +96,7 @@ def hw(tmp_path_factory):
     pkg = root / "hw"
     pkg.mkdir()
     _mod("homeassistant.config_entries", ConfigEntry=object)
-    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py"):
+    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py", "hmlinks.py"):
         shutil.copy(SRC / name, pkg / name)
     (pkg / "__init__.py").write_text("")
     sys.path.insert(0, str(root))
@@ -141,6 +141,8 @@ class Hass:
             cb(types.SimpleNamespace(data={"domain": domain, "service": service, "service_data": data}, context=ctx))
         if (domain, service) == ("calendar", "get_events"):
             return {data["entity_id"]: {"events": getattr(self, "events", {}).get(data["entity_id"], [])}}
+        if (domain, service) == ("homematicip_local", "get_link_peers"):
+            return {data["device_address"]: getattr(self, "links", {}).get(data["device_address"], [])}
         if (domain, service) == ("weather", "get_forecasts"):
             return {data["entity_id"]: {"forecast": self.forecast or []}}
         return None
@@ -1646,5 +1648,65 @@ def test_lichtwerk(hw):
         assert any(e["title"] == "Wohnzimmer: Profil „Abendlicht“ aus" for e in log.entries)
         await lw.async_save_light("light.wz", {"auto": True})
         assert lw.status()["lights"]["light.wz"]["auto"] is True
+
+    asyncio.run(run())
+
+
+def test_homematic_verknuepfungen(hw):
+    """CCU-Direktverknüpfungen: Kopplung nur für verknüpfte Heizkörper, Fensterpause macht die CCU, Hinweise
+    (Wandthermostat ohne Verknüpfung, Heizkörper ohne Wandthermostat, freier Aktor-Kanal)."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        DEVS.clear()
+        NOW[0] = datetime(2026, 11, 20, 12, 0, tzinfo=timezone.utc)
+        hass = Hass()
+
+        def dev(eid, did, addr, model, name, state="heat", attrs=None):
+            DEVS[did] = types.SimpleNamespace(id=did, model=model, name=name, name_by_user=None, area_id=None,
+                                              identifiers={("homematicip_local", f"{addr}@ccu3-webui-HmIP-RF")})
+            if eid:
+                REG[eid] = types.SimpleNamespace(entity_id=eid, device_id=did, domain=eid.split(".")[0], disabled_by=None, platform="homematicip_local")
+                hass.set(eid, state, attrs or {"temperature": 21.0, "current_temperature": 20.5}, name)
+
+        dev("climate.wth_wz", "d1", "WTHWZ", "HmIP-WTH-2", "WTH Wohnzimmer")
+        dev("climate.trv_wz", "d2", "TRVWZ", "HMIP-eTRV", "Heizkörper Wohnzimmer")
+        dev("climate.trv_wz2", "d3", "TRVWZ2", "HMIP-eTRV", "Heizkörper Wohnzimmer Fenster")
+        dev("binary_sensor.fenster_wz", "d4", "SWDOWZ", "HMIP-SWDO", "Fenster Wohnzimmer", "off", {})
+        dev("climate.wth_jonte", "d5", "WTHJ", "HmIP-WTH-2", "WTH Jonte")
+        dev(None, "d6", "FAL", "HmIP-FAL230-C6", "A_Fußbodenheizung")
+        hass.links = {"WTHWZ": ["TRVWZ:6", "TRVWZ:5", "TRVWZ:3", "SWDOWZ:1", "FAL:1", "FAL:2"], "TRVWZ": ["WTHWZ:1"], "WTHJ": []}
+        log, haus, ctl = await _setup(hw, hass)
+        await ctl.async_save_room({"id": "wz", "name": "Wohnzimmer", "type": "heizkoerper", "comfort": 21, "eco": 18, "enabled": True,
+                                   "climates": ["climate.wth_wz", "climate.trv_wz", "climate.trv_wz2"], "windows": ["binary_sensor.fenster_wz"],
+                                   "schedule": [{"start": "00:00", "end": "24:00", "days": [0, 1, 2, 3, 4, 5, 6]}]})
+        await ctl.async_save_room({"id": "jo", "name": "Jonte", "type": "flaeche", "comfort": 21, "eco": 18, "enabled": True,
+                                   "climates": ["climate.wth_jonte"], "schedule": []})
+        st = await ctl.async_refresh_links(by="Test")
+        info = st["rooms"]["wz"]
+        assert info["linked_trvs"] == ["climate.trv_wz"] and info["unlinked_trvs"] == ["climate.trv_wz2"]
+        assert info["windows_ccu"] == ["binary_sensor.fenster_wz"]
+        peers = {p["name"]: p for p in info["walls"][0]["peers"]}
+        assert peers["Heizkörper Wohnzimmer"]["channels"] == [3, 5, 6] and peers["Heizkörper Wohnzimmer"]["kind"] == "trv"
+        texts = [f["text"] for f in st["findings"]]
+        assert "WTH Jonte ist in der CCU mit keinem Gerät verknüpft – steuert es dort etwas?" in texts
+        assert "Heizkörper Wohnzimmer Fenster ist nicht mit dem Wandthermostat verknüpft – Hauswerk stellt ihn selbst" in texts
+        assert "A_Fußbodenheizung: Kanal 3, 4, 5, 6 ist keinem Wandthermostat zugeordnet – Heizkreis ohne Regelung?" in texts
+        # Kopplung: nur der verknüpfte Heizkörper folgt
+        assert ctl.status()["rooms"]["wz"]["followers"] == ["climate.trv_wz"]
+        # Fenster auf: Pause macht die CCU – Hauswerk sendet den verknüpften Thermostaten nichts, dem anderen schon
+        hass.set("binary_sensor.fenster_wz", "on", {}, "Fenster Wohnzimmer")
+        hass.st["binary_sensor.fenster_wz"].last_changed = NOW[0] - timedelta(minutes=5)
+        n = len(hass.calls)
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["wz"]
+        assert res["mode"] == "fenster" and res["window_ccu"] and "CCU senkt" in res["cause"]
+        sent = [c[2].get("entity_id") for c in hass.calls[n:] if c[0] == "climate"]
+        assert "climate.wth_wz" not in sent and "climate.trv_wz" not in sent and "climate.trv_wz2" in sent
+        # Raum-Einstellung aus: Hauswerk macht die Pause selbst
+        await ctl.async_save_room({**ctl.rooms["wz"], "window_ccu": False})
+        n = len(hass.calls)
+        await ctl.async_evaluate()
+        assert not ctl.status()["rooms"]["wz"]["window_ccu"]
 
     asyncio.run(run())

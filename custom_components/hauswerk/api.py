@@ -126,6 +126,8 @@ ROOM_SCHEMA = vol.Schema(
         vol.Optional("vent_morning"): _opt(bool),
         # Kamin im Raum: vorhanden; optional ein Signal „in Betrieb“ (Schalter, Binärsensor, Ofen-/Rohrtemperatur, Leistung)
         vol.Optional("fireplace"): _opt(bool),
+        # Fensterpause der CCU überlassen, wenn der Fensterkontakt direkt mit dem Thermostat verknüpft ist (Standard an)
+        vol.Optional("window_ccu"): _opt(bool),
         vol.Optional("fireplace_entity"): _opt(ENTITY),
         vol.Optional("shower_rise"): _opt(vol.All(vol.Coerce(float), vol.Range(min=3, max=40))),
         # Weitere Geräte nur zur Anzeige (z. B. Heizkörper-Thermostat oder Stellantrieb neben dem Wandthermostat)
@@ -532,6 +534,17 @@ async def ws_override(hass: HomeAssistant, connection, msg) -> None:
         return
     await ctl.async_set_override(msg["room_id"], msg.get("temp"), msg.get("hours"), msg["boost"], by=_who(connection))
     connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/heizen/links/refresh"})
+@require_editor
+@websocket_api.async_response
+async def ws_links_refresh(hass: HomeAssistant, connection, msg) -> None:
+    """Direktverknüpfungen der Homematic-CCU neu lesen (nur lesen)."""
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    connection.send_result(msg["id"], await ctl.async_refresh_links(by=_who(connection)))
 
 
 @websocket_api.websocket_command(
@@ -968,6 +981,7 @@ COMMANDS = (
     ws_settings_save,
     ws_override,
     ws_fireplace,
+    ws_links_refresh,
     ws_report,
     ws_preheat_reset,
     ws_plan_save,

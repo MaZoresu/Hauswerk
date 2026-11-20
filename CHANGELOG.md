@@ -2,6 +2,16 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.64.0 – 2026-11-20
+
+### Neu – Heizwerk liest die Direktverknüpfungen der Homematic-CCU
+- Über die Integration „Homematic(IP) Local“ (Aktion „Get link peers“, **nur lesen**, alle 6 Stunden und auf Wunsch) kennt Heizwerk jetzt, welche Geräte in der CCU direkt verknüpft sind: Wandthermostat → Heizkörper, Fensterkontakt, Kanal des Fußbodenheizungs-Aktors.
+- **Raum › Geräte:** Abschnitt „Direktverknüpfungen in der CCU“ mit allen Gegenstellen (Aktor mit Kanal) und welche Heizkörper nicht verknüpft sind.
+- **Kopplung aus der CCU statt geraten:** Nur Heizkörper, die wirklich mit dem Wandthermostat verknüpft sind, folgen ihm – Hauswerk stellt dann nur das Wandthermostat. Nicht verknüpfte stellt Hauswerk selbst.
+- **Fensterpause der CCU überlassen:** Ist jeder offene Fensterkontakt direkt mit dem Thermostat verknüpft, senkt die CCU selbst ab; Hauswerk zeigt die Pause nur an („Fenster offen – die CCU senkt über die Direktverknüpfung ab“) und sendet nichts – spart Funk. Je Raum abschaltbar.
+- **Hinweise unter der Glocke** und im Protokoll: Wandthermostat ohne Verknüpfung, Heizkörper nicht mit dem Wandthermostat verknüpft (außer Zusatzheizung im Mischbetrieb), Kanäle eines Fußbodenheizungs-Aktors, die kein Wandthermostat nutzt.
+- **Übersicht** unter Heizwerk › Einstellungen › Homematic-Verknüpfungen: je Raum Wandthermostat → Gegenstellen, Hinweise und „Neu lesen“.
+
 ## 0.63.2 – 2026-11-20
 
 ### Geändert (Benachrichtigungen)

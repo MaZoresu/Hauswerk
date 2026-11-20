@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.63.2";
+const VERSION = "0.64.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1137,6 +1137,10 @@ class HauswerkPanel extends HTMLElement {
     }
     if ((s.cold_rooms || []).length >= 2) add("warn", "mdi:water-boiler-alert", "Mehrere Heizkörper bleiben kalt", `${s.cold_rooms.map((id) => this._data.rooms[id]?.name || id).join(", ")} – liefert die Heizung Wärme? Vorlauf, Wasserdruck und Pumpe prüfen`, "settings-go", { sub: "demand", heat: true });
     if (s.demand?.error) add("warn", "mdi:water-boiler-off", "Wärmeerzeuger nicht erreichbar", `${this._entityName(this._data.settings.demand_entity)} – Wärmeanforderung pausiert`, "settings-go", { sub: "demand", heat: true });
+    for (const f of s.hm_links?.findings || []) {
+      const room = f.room ? this._data.rooms?.[f.room] : null;
+      add(f.level === "warn" ? "warn" : "info", "mdi:link-variant-off", f.text.split(" – ")[0], `${room ? `${room.name} · ` : ""}${f.text.split(" – ")[1] || "Homematic-Verknüpfung"}`, "settings-go", { sub: "hmlinks" });
+    }
     if (s.radio?.busy) add("warn", "mdi:access-point-network", `Funk ausgelastet · ${fmt(s.radio.level, 0)} %`, `${this._entityName(s.radio.entity)} · Hauswerk sendet nur wichtige Änderungen`, "settings-go", { sub: "radio" });
     if (s.vacation_calendar_error) add("warn", "mdi:calendar-alert", "Urlaubskalender nicht lesbar", s.vacation_calendar_error, "settings-go", { sub: "vacation" });
     for (const [pid, err] of Object.entries(s.plan_errors || {})) add("warn", "mdi:calendar-alert", `Kalender von Plan „${this._data.plans?.[pid]?.name || pid}“ nicht lesbar`, err, "plan-sel", { kind: "plan", id: pid });
@@ -6717,6 +6721,9 @@ class HauswerkPanel extends HTMLElement {
         sum: `Abwesend: ${away} · Urlaub: ${fmt(p.vacation_temp)} °C${Number(p.long_away_days) > 0 ? ` · nach ${p.long_away_days} Tagen Frostschutz` : ""}`,
         on: s.vacation || s.away, words: "abwesend urlaub absenken temperatur frostschutz lange" },
       { g: "Heizen", id: "season", icon: s.summer ? "mdi:weather-sunny" : "mdi:snowflake-thermometer", c: "#facc15", title: "Saison", sum: season + (s.summer ? " · gerade Sommerpause" : ""), words: "sommer sommerpause heizperiode außentemperatur" },
+      ...(s.hm_links?.available ? [{ g: "System", id: "hmlinks", icon: "mdi:link-variant", c: (s.hm_links.findings || []).some((f) => f.level === "warn") ? "#f97316" : "#0ea5e9", title: "Homematic-Verknüpfungen",
+        sum: s.hm_links.at ? `${Object.values(s.hm_links.rooms || {}).reduce((n, r) => n + r.walls.length, 0)} Wandthermostate aus der CCU · ${(s.hm_links.findings || []).length ? `${s.hm_links.findings.length} Hinweis${s.hm_links.findings.length > 1 ? "e" : ""}` : "alles verknüpft"}` : "noch nicht gelesen",
+        warn: (s.hm_links.findings || []).some((f) => f.level === "warn"), words: "homematic ccu direktverknüpfung verknüpfung link peers wandthermostat heizkörper fensterkontakt fußbodenheizung kanal" }] : []),
       { g: "Heizen", id: "plans", icon: "mdi:calendar-clock", c: "#60a5fa", title: "Heizpläne",
         sum: plans.length ? `${plans.length} gemeinsame${plans.length === 1 ? "r Plan" : " Pläne"} · ${shared} von ${rooms.length} Räumen nutzen sie` : "Noch kein gemeinsamer Plan", go: "plans", words: "zeitplan komfortzeit kalender import vorlage" },
       { g: "Heizen", id: "preheat", icon: "mdi:clock-fast", c: "#fb923c", title: "Vorheizen", sum: pre + (own ? ` · ${own} ${own > 1 ? "Räume" : "Raum"} mit eigener Einstellung` : ""), words: "lernen lernend fest aus vorlauf aufheizen" },
@@ -7589,6 +7596,24 @@ class HauswerkPanel extends HTMLElement {
         };
       }
 
+      case "hmlinks": {
+        const L = s.hm_links || {};
+        const KI = { trv: "mdi:radiator", window: "mdi:window-closed-variant", fal: "mdi:heating-coil", wall: "mdi:thermostat", other: "mdi:link-variant" };
+        const rooms = Object.entries(L.rooms || {}).map(([id, info]) => [this._data.rooms[id], info]).filter(([r]) => r).sort((a, b) => a[0].name.localeCompare(b[0].name, "de"));
+        const peer = (x) => `<span class="hl-p ${x.in_room ? "" : "out"}" title="${esc(x.model || "")}${x.in_room ? "" : " · nicht in diesem Raum eingetragen"}"><ha-icon icon="${KI[x.kind] || KI.other}"></ha-icon>${esc(x.name)}${x.kind === "fal" && x.channels.length ? ` · Kanal ${x.channels.join(", ")}` : ""}</span>`;
+        return {
+          icon: "mdi:link-variant", c: "#0ea5e9", title: "Homematic-Verknüpfungen", sub: `Heizwerk · Direktverknüpfungen aus der CCU${L.at ? ` · gelesen ${new Date(L.at).toLocaleString("de-DE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}`,
+          body: `
+            <p class="muted small">Was die CCU direkt verknüpft hat, arbeitet ohne Home Assistant. Heizwerk liest das (nur lesen, alle 6 Stunden) und nutzt es: Heizkörper, die mit dem Wandthermostat verknüpft sind, folgen ihm – Hauswerk stellt dann nur das Wandthermostat. Ist ein Fensterkontakt direkt verknüpft, senkt die CCU beim Lüften selbst ab und Hauswerk sendet nichts (spart Funk).</p>
+            ${L.error ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>${esc(L.error)}</p>` : ""}
+            ${(L.findings || []).length ? `<div class="lbl">Hinweise</div><div class="evlist">${L.findings.map((f) => `<div class="ev"><ha-icon icon="mdi:link-variant-off" style="color:${f.level === "warn" ? "#f97316" : "#0ea5e9"}"></ha-icon><span class="grow"><b>${esc(f.text.split(" – ")[0])}</b><small>${esc([f.room ? this._data.rooms?.[f.room]?.name : "", f.text.split(" – ")[1] || ""].filter(Boolean).join(" · "))}</small></span></div>`).join("")}</div>` : ""}
+            <div class="lbl">Je Raum</div>
+            <div class="hl-list">${rooms.map(([r, info]) => `<div class="hl-room"><b>${esc(r.name)}</b>${info.walls.map((w) => `<div class="hl-w"><span class="hl-wn"><ha-icon icon="mdi:thermostat"></ha-icon>${esc(this._entityName(w.entity))}</span><ha-icon class="hl-arrow" icon="mdi:arrow-right"></ha-icon><span class="hl-ps">${w.peers.length ? w.peers.map(peer).join("") : `<em class="hl-none">keine Verknüpfung</em>`}</span></div>`).join("")}
+              ${info.windows_ccu.length ? `<small class="muted"><ha-icon icon="mdi:window-open-variant"></ha-icon>Fensterpause macht die CCU${r.window_ccu === false ? " – im Raum abgeschaltet, Hauswerk macht sie selbst" : ""}</small>` : ""}</div>`).join("") || `<p class="muted">Noch nichts gelesen – „Neu lesen“ tippen.</p>`}</div>`,
+          foot: `<button class="secondary" data-action="pop-close">Schließen</button>${this._admin ? `<button class="primary" data-action="hmlinks-refresh"><ha-icon icon="mdi:refresh"></ha-icon>Neu lesen</button>` : ""}`,
+        };
+      }
+
       case "radio": {
         const rd = this._status?.radio || {};
         const ids = rd.entities || [];
@@ -8264,6 +8289,16 @@ class HauswerkPanel extends HTMLElement {
           <label class="field"><span>Morgens lüften</span><select data-room="vent_morning">${[["", "Automatisch (Schlaf-/Kinderzimmer)"], ["1", "Ja"], ["0", "Nein"]].map(([v, l]) => `<option value="${v}" ${(r.vent_morning == null ? "" : r.vent_morning ? "1" : "0") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
           <div class="field"><span><ha-icon icon="mdi:molecule-co2"></ha-icon> CO₂-Sensor <span class="muted small">· optional</span></span>${this._picker("co2_sensor", r.co2_sensor ? [r.co2_sensor] : [])}</div>
         </div>
+        ${(() => {
+          const info = this._status?.rooms?.[r.id]?.links;
+          if (!info) return "";
+          const KI = { trv: "mdi:radiator", window: "mdi:window-closed-variant", fal: "mdi:heating-coil", wall: "mdi:thermostat", other: "mdi:link-variant" };
+          return `<div class="sub-h"><ha-icon icon="mdi:link-variant"></ha-icon>Direktverknüpfungen in der CCU</div>
+            ${info.walls.map((w) => `<div class="hl-w"><span class="hl-wn"><ha-icon icon="mdi:thermostat"></ha-icon>${esc(this._entityName(w.entity))}</span><ha-icon class="hl-arrow" icon="mdi:arrow-right"></ha-icon><span class="hl-ps">${w.peers.length ? w.peers.map((x) => `<span class="hl-p ${x.in_room ? "" : "out"}" title="${esc(x.model || "")}"><ha-icon icon="${KI[x.kind] || KI.other}"></ha-icon>${esc(x.name)}${x.kind === "fal" && x.channels.length ? ` · Kanal ${x.channels.join(", ")}` : ""}</span>`).join("") : `<em class="hl-none">keine Verknüpfung</em>`}</span></div>`).join("")}
+            ${info.unlinked_trvs.length ? `<p class="muted small"><ha-icon icon="mdi:link-variant-off"></ha-icon>Nicht mit dem Wandthermostat verknüpft: ${info.unlinked_trvs.map((e) => esc(this._entityName(e))).join(", ")} – Hauswerk stellt ${info.unlinked_trvs.length > 1 ? "sie" : "ihn"} selbst${(r.assist_entities || []).some((e) => info.unlinked_trvs.includes(e)) ? " (Zusatzheizung im Mischbetrieb)" : ""}.</p>` : ""}
+            ${info.windows_ccu.length ? check("window_ccu", "mdi:window-open-variant", "Fensterpause der CCU überlassen", `${info.windows_ccu.map((e) => esc(this._entityName(e))).join(", ")} ${info.windows_ccu.length > 1 ? "sind" : "ist"} direkt mit dem Thermostat verknüpft – die CCU senkt beim Lüften selbst ab. Hauswerk zeigt die Pause dann nur an und sendet nichts (spart Funk). Aus: Hauswerk schickt die Fenster-Temperatur zusätzlich.`, { on: r.window_ccu !== false }) : ""}
+            <p class="muted small">Gelesen aus der CCU (nur lesen) · Übersicht unter Heizwerk › Einstellungen › Homematic-Verknüpfungen.</p>`;
+        })()}
         <div class="sub-h"><ha-icon icon="mdi:fireplace"></ha-icon>Kamin</div>
         ${check("fireplace", "mdi:fireplace", "Kamin im Raum vorhanden", "Wird der Raum wärmer, ohne dass geheizt wird, rechnet Heizwerk mit einer zusätzlichen Wärmequelle: Diese Zeit zählt nicht für die Bewertung der Heizleistung und nicht fürs Lernen der Aufheizzeit.")}
         ${r.fireplace ? `
@@ -9904,6 +9939,13 @@ class HauswerkPanel extends HTMLElement {
             this._toast("Heizplan gespeichert");
           }
         }
+        break;
+      }
+      case "hmlinks-refresh": {
+        const res = await this._ws({ type: "hauswerk/heizen/links/refresh" });
+        if (res && this._status) this._status.hm_links = res;
+        this._renderPop();
+        this._toast("Verknüpfungen aus der CCU gelesen");
         break;
       }
       case "settings-go":
@@ -12489,6 +12531,18 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .lw-preset b { display:block; font-size:13.5px; } .lw-preset small { display:block; color:var(--muted); font-size:12px; }
 .lwsum { margin:-4px 0 8px; }
 .wnext { display:block; margin:-4px 0 6px; }
+.hl-list { display:flex; flex-direction:column; gap:10px; }
+.hl-room { border:1px solid var(--line); border-radius:12px; padding:10px 12px; display:flex; flex-direction:column; gap:6px; }
+.hl-room > b { font-size:14px; }
+.hl-w { display:flex; align-items:flex-start; gap:8px; flex-wrap:wrap; margin:4px 0; }
+.hl-wn { display:inline-flex; align-items:center; gap:6px; font-weight:600; font-size:13px; }
+.hl-wn ha-icon, .hl-p ha-icon { --mdc-icon-size:16px; }
+.hl-arrow { --mdc-icon-size:16px; color:var(--muted); margin-top:2px; }
+.hl-ps { display:flex; flex-wrap:wrap; gap:6px; flex:1; min-width:0; }
+.hl-p { display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:9px; font-size:12.5px; background:color-mix(in srgb, #0ea5e9 12%, transparent); }
+.hl-p.out { background:var(--card2); color:var(--muted); }
+.hl-none { font-style:normal; color:#f97316; font-size:12.5px; font-weight:600; }
+@media (max-width:560px) { .hl-arrow { display:none; } .hl-ps { flex-basis:100%; padding-left:22px; } }
 .lg-colors { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px 12px; margin:4px 0 12px; }
 .lg-c { display:grid; grid-template-columns:14px 1fr; column-gap:8px; align-items:center; align-content:start; font-size:13px; }
 .lg-c b { font-size:13px; }

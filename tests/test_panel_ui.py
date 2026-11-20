@@ -1383,3 +1383,34 @@ def test_lichtwerk_profil_aus(panel):
     assert [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/light/save"][-1]["light"] == {"auto": True}
     p.view("lightset")
     assert "PROFIL AUS" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+
+
+def test_homematic_verknuepfungen(panel):
+    """CCU-Direktverknüpfungen: im Raum › Geräte, Übersicht unter Heizwerk › Einstellungen (Neu lesen), Hinweise."""
+    p = panel
+    hints = [h["text"] for h in p.js(f"{EL}._hints()")]
+    assert any("WTH Kinderzimmer Jonte ist in der CCU mit keinem Gerät verknüpft" in h for h in hints)
+    p.js(f"(id) => {EL}._openRoom({EL}._data.rooms[id])", "a1")
+    p.wait()
+    p.click('#dialog [data-action="dialog-tab"][data-tab="devices"]')
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#dialog').textContent")
+    assert "Direktverknüpfungen in der CCU" in txt and "Heizkörper Wohnzimmer" in txt and "Hauswerk stellt ihn selbst" in txt
+    # Fensterkontakt direkt verknüpft: Schalter „Fensterpause der CCU überlassen“, Speichern gegen das Schema
+    p.js(f"() => {{ {EL}._status.rooms.a1.links.windows_ccu = ['binary_sensor.wohnzimmer_fenster']; {EL}._renderDialog(); }}")
+    p.wait()
+    assert "Fensterpause der CCU überlassen" in p.js(f"{EL}.shadowRoot.querySelector('#dialog').textContent")
+    p.js(f"""() => {{ const i = {EL}.shadowRoot.querySelector('#dialog [data-room="window_ccu"]'); i.click(); }}""")
+    p.click('#dialog [data-action="room-save"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/room/save"][-1]["room"]
+    assert saved["window_ccu"] is False
+    p.view("settings")
+    p.wait()
+    assert "Homematic-Verknüpfungen" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+    p.js(f"() => {{ {EL}._openPop('hmlinks'); }}")
+    p.wait()
+    body = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    assert "Kanal 6 ist keinem Wandthermostat zugeordnet" in body and "Wohnzimmer" in body
+    p.click('#pop [data-action="hmlinks-refresh"]')
+    p.wait(200)
+    assert [m for m in p.sent() if m["type"] == "hauswerk/heizen/links/refresh"]
