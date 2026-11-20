@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.65.3";
+const VERSION = "0.65.4";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4182,7 +4182,7 @@ class HauswerkPanel extends HTMLElement {
     const s = this._lwStatus || {};
     const on = lights.filter((l) => l.st?.state === "on");
     const manual = lights.filter((l) => l.ls.manual && !l.ls.ccu && l.cfg.auto !== false);
-    const hmip = lights.filter((l) => l.ls.ccu && l.cfg.auto !== false);
+    const hmip = lights.filter((l) => l.ls.ccu);
     const motion = lights.filter((l) => l.ls.motion);
     const bad = lights.filter((l) => !l.st || ["unavailable", "unknown"].includes(l.st.state));
     const act = (l) => `data-action="pop-open" data-pop="lwbri:${esc(l.id)}"`;
@@ -4245,8 +4245,8 @@ class HauswerkPanel extends HTMLElement {
       const flags = [];
       const mot = this._lwMotion(l);
       const ccuMotion = this._lwLinkPeers(l).some((x) => x.name === l.ls.ccu && x.kind === "motion");
-      if (l.cfg.auto === false) { /* Profil aus: keine Angaben */ } else if (l.ls.ccu) flags.push([ccuMotion ? "mdi:motion-sensor" : "mdi:link-variant", `HmIP · ${l.ls.ccu}`, "#0ea5e9"]);
-      else if (l.ls.manual) flags.push(["mdi:hand-back-right-outline", "von Hand – Automatik wartet", C.hand]);
+      if (l.ls.ccu) flags.push([ccuMotion ? "mdi:motion-sensor" : "mdi:link-variant", `HmIP · ${l.ls.ccu}`, "#0ea5e9"]);
+      else if (l.ls.manual && l.cfg.auto !== false) flags.push(["mdi:hand-back-right-outline", "von Hand – Automatik wartet", C.hand]);
       if (l.ls.motion) flags.push(["mdi:motion-sensor", "Bewegung", C.ok]);
       if (on && l.ls.night) flags.push(["mdi:weather-night", "Nachtlicht", "#6366f1"]);
       const nx = l.ls.next;
@@ -4274,7 +4274,7 @@ class HauswerkPanel extends HTMLElement {
       const on = l.st?.state === "on";
       const pct = this._lwPct(l);
       const mot = this._lwMotion(l);
-      const flag = l.cfg.auto === false ? null : l.ls.ccu ? [this._lwLinkPeers(l).some((x) => x.name === l.ls.ccu && x.kind === "motion") ? "mdi:motion-sensor" : "mdi:link-variant", "#0ea5e9"] : l.ls.manual ? ["mdi:hand-back-right-outline", C.hand] : l.ls.motion ? ["mdi:motion-sensor", C.ok] : on && l.ls.night ? ["mdi:weather-night", "#6366f1"] : mot ? ["mdi:motion-sensor", "var(--muted)"] : null;
+      const flag = l.ls.ccu ? [this._lwLinkPeers(l).some((x) => x.name === l.ls.ccu && x.kind === "motion") ? "mdi:motion-sensor" : "mdi:link-variant", "#0ea5e9"] : l.cfg.auto === false ? (mot ? ["mdi:motion-sensor", "var(--muted)"] : null) : l.ls.manual ? ["mdi:hand-back-right-outline", C.hand] : l.ls.motion ? ["mdi:motion-sensor", C.ok] : on && l.ls.night ? ["mdi:weather-night", "#6366f1"] : mot ? ["mdi:motion-sensor", "var(--muted)"] : null;
       return `
         <article class="card rw-m lw-m ${bad ? "bad" : ""}" style="--lc:${this._lwColor(l)}" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" role="button" tabindex="0" title="Helligkeit">
           <div class="rwm-top"><b>${esc(this._lwName(l))}</b>${flag ? `<ha-icon icon="${flag[0]}" style="color:${flag[1]}"></ha-icon>` : ""}</div>
@@ -4325,8 +4325,8 @@ class HauswerkPanel extends HTMLElement {
 
   /** Bewegungsmelder einer Leuchte: aus dem Profil und aus HmIP-Direktverknüpfungen (nicht bei Profil aus). */
   _lwMotion(l) {
-    if (l.cfg.auto === false) return null;
-    const prof = this._data.lichtwerk?.profiles?.[l.cfg.profile || "standard"] || {};
+    // Profil aus: nur die HmIP-Melder – die schalten in der CCU auch ohne Lichtwerk
+    const prof = l.cfg.auto === false ? {} : this._data.lichtwerk?.profiles?.[l.cfg.profile || "standard"] || {};
     const names = [...(prof.motion || []).map((e) => this._entityName(e)), ...(this._lwLinkPeers(l).filter((x) => x.kind === "motion").map((x) => `${x.name} (HmIP)`))];
     return names.length ? [...new Set(names)] : null;
   }
@@ -4376,7 +4376,7 @@ class HauswerkPanel extends HTMLElement {
         icon: "mdi:lightbulb-outline", c: "#6366f1", title: esc(this._lwName(l)), sub: `Lichtwerk · ${l.st?.state === "on" ? `an${pct != null ? ` · ${pct} %` : ""}` : "aus"}`, open: true,
         body: `
           ${l.ls.cause && l.cfg.auto !== false ? `<div class="rq-why"><ha-icon icon="mdi:help-circle-outline"></ha-icon><span><b>Automatik</b><small>${esc(l.ls.cause)}</small>${l.ls.next ? `<small class="muted">Als Nächstes: ${l.ls.next.action === "on" ? "an" : "aus"} ${this._lwWhen(l.ls.next)} (${esc(l.ls.next.reason)})</small>` : ""}</span></div>` : ""}
-          ${l.ls.ccu && l.cfg.auto !== false ? `<div class="room-note"><ha-icon icon="mdi:link-variant"></ha-icon>HmIP · ${esc(l.ls.ccu)} – Lichtwerk wartet, bis die Direktverknüpfung ausschaltet</div>` : ""}
+          ${l.ls.ccu ? `<div class="room-note"><ha-icon icon="mdi:link-variant"></ha-icon>HmIP · ${esc(l.ls.ccu)}${l.cfg.auto !== false ? " – Lichtwerk wartet, bis die Direktverknüpfung ausschaltet" : ""}</div>` : ""}
           ${l.ls.manual && !l.ls.ccu && l.cfg.auto !== false ? `<div class="room-note"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>Von Hand – Automatik wartet<span class="grow"></span><button class="link" data-action="lw-cmd" data-ids="${esc(eid)}" data-a="resume">Automatik übernimmt</button></div>` : ""}
           ${dim ? `<div class="lw-slider"><input type="range" min="1" max="100" step="1" value="${d.v}" data-lwbri><b id="lwbri-v">${d.v} %</b></div>` : ""}
           <div class="rq-quick lw-pre">${presets.map(([v, t, i]) => `<button class="pill" data-action="lw-pre" data-ids="${esc(eid)}" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${t}${v !== "off" && dim ? ` · ${v} %` : ""}</button>`).join("")}</div>

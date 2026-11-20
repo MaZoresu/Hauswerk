@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.65.4 – 2026-11-20
+
+### Geändert (Lichtwerk)
+- **HmIP auch bei abgeschaltetem Profil:** Eine Direktverknüpfung in der CCU schaltet unabhängig von Lichtwerk. Deshalb zeigen auch Leuchten ohne aktives Profil das Melder-Symbol ihrer HmIP-Bewegungsmelder und „HmIP · …“, wenn die CCU sie geschaltet hat (Kachel, kompakte Ansicht, Kopfkachel, Helligkeitsfenster). Melder aus dem Profil, „von Hand“ und Ursachen bleiben bei Profil aus weiter weg.
+
 ## 0.65.3 – 2026-11-20
 
 ### Neu (Lichtwerk)

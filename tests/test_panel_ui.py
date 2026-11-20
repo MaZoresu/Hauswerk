@@ -1458,3 +1458,15 @@ def test_lichtwerk_bewegungsmelder_symbol(panel):
     assert "light.flur_og" in ids and "light.eingang" in ids and "light.kuche" not in ids and "light.wohnzimmer" not in ids, ids
     txt = p.js(f"{EL}.shadowRoot.querySelector('.lw-bulb[data-ids=\"light.eingang\"]').closest('.lw-c').innerText")
     assert "S_Bewegung:Vorgarten" in txt
+
+
+def test_lichtwerk_hmip_bei_profil_aus(panel):
+    """Profil aus: HmIP-Melder-Symbol und „HmIP · …“ erscheinen trotzdem, „von Hand“ und Profil-Melder nicht."""
+    p = panel
+    p.js(f"""() => {{ const s = {EL}._lwStatus; s.links.lights['light.wohnzimmer'] = {{ own: true, peers: [{{ address: 'SPI2', name: 'S_Bewegung:Windfang', model: 'HmIP-SPI', kind: 'motion', channels: [1], entities: [] }}] }};
+      {EL}._data.lichtwerk.lights['light.wohnzimmer'].auto = false; Object.assign(s.lights['light.wohnzimmer'], {{ auto: false, ccu: 'S_Bewegung:Windfang', manual: {{ since: new Date().toISOString() }} }}); }}""")
+    p.view("lights")
+    p.wait()
+    card = p.js(f"{EL}.shadowRoot.querySelector('.lw-bulb[data-ids=\"light.wohnzimmer\"]').closest('.lw-c').innerText")
+    assert "HmIP · S_Bewegung:Windfang" in card and "von Hand" not in card and "Automatik übernimmt" not in card, card
+    assert p.js(f"!!{EL}.shadowRoot.querySelector('.lw-bulb[data-ids=\"light.wohnzimmer\"] .lw-mot')")
