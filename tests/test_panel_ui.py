@@ -1539,3 +1539,30 @@ def test_lichtwerk_raumansicht(panel):
     m = [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/light/save"][-1]
     assert m["entity_id"] == "light.eingang" and m["light"] == {"profile": "flur", "auto": True}
     p.js("localStorage.removeItem('hauswerk_lw_view')")
+
+
+def test_lichtwerk_bericht(panel):
+    """Lichtwerk › Bericht: Vorschläge mit Profil öffnen, Gerätezustand, 7 Tage je Leuchte; Hinweise; Leistung eintragen."""
+    p = panel
+    hints = p.js(f"{EL}._hints()")
+    assert any(h["text"] == "Batterie schwach · Flur OG" for h in hints)
+    assert any("20 Min. früher einschalten" in h["sub"] for h in hints)
+    p.view("lwrep")
+    p.wait()
+    main = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    for t in ("Vorschläge", "Gerätezustand", "Letzte 7 Tage", "Funk schwach (-91 dBm)", "Batterie 12 %", "0,38 kWh", "Leistung eintragen", "4× von Hand"):
+        assert t in main, t
+    p.click('#main [data-pop="lwp:standard:on"]')
+    p.wait()
+    assert "Einschalten" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    p.js(f"{EL}._closePop()")
+    p.js(f"() => {{ {EL}._openPop('lwl:light.eingang'); }}")
+    p.wait()
+    p.js(f"""() => {{ const i = {EL}.shadowRoot.querySelector('#pop [data-lwl="watt"]'); i.value = '9'; i.dispatchEvent(new Event('input', {{ bubbles: true, composed: true }})); }}""")
+    p.click('#pop [data-action="lwl-save"]')
+    p.wait(300)
+    m = [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/light/save"][-1]
+    assert m["light"]["watt"] == 9
+    p.view("lights")
+    p.wait()
+    assert "Batterie 12 %" in p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")

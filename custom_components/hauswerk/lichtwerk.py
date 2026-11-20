@@ -26,7 +26,8 @@ from homeassistant.util import dt as dt_util
 from .const import LIGHT_STORAGE_KEY
 from .core import Haus
 from .hmlinks import HmLinks, sensor_kind, split_peer
-from .light_logic import LW_PROFILE_DEFAULTS, LW_PROFILE_SPEC, day_allowed, day_events, day_plan, decide, latched_at, light_params
+from .light_logic import (LW_PROFILE_DEFAULTS, LW_PROFILE_SPEC, day_allowed, day_events, day_plan, decide, latched_at, light_params,
+                          manual_suggestions, plan_offset)
 from .log import Protokoll, log_settings
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,6 +73,11 @@ class Lichtwerk:
         self._sensor_seen: dict[str, float] = {}
         # gelernt: wie lange nach dem letzten Melden die CCU wirklich ausschaltet (Leuchte → Sender-Adresse → Sekunden)
         self._learn: dict[str, dict[str, list[float]]] = {}
+        # Bericht: Brenndauer/Energie je Tag und Leuchte, Schaltungen von Hand (für Vorschläge), Gerätezustand
+        self._stats: dict[str, dict[str, dict[str, float]]] = {}
+        self._manual_ev: list[dict] = []
+        self._last_tick: float | None = None
+        self._dev_cache: tuple[float, dict] | None = None
 
     # ------------------------------------------------------------ Speicher
     async def async_load(self) -> None:
@@ -80,6 +86,8 @@ class Lichtwerk:
         self.lights = stored.get("lights") or {}
         self.profiles = stored.get("profiles") or {}
         self._learn = stored.get("learn") or {}
+        self._stats = stored.get("stats") or {}
+        self._manual_ev = stored.get("manual_ev") or []
         for eid, rt in (stored.get("rt") or {}).items():
             self._rt[eid] = {k: v for k, v in rt.items() if k in ("latch", "latch_reason", "latch_at", "manual", "ours")}
         if not self.profiles:
@@ -87,7 +95,8 @@ class Lichtwerk:
 
     def _data(self) -> dict[str, Any]:
         rt = {eid: {k: r.get(k) for k in ("latch", "latch_reason", "latch_at", "manual", "ours")} for eid, r in self._rt.items()}
-        return {"settings": self.settings, "lights": self.lights, "profiles": self.profiles, "rt": rt, "learn": self._learn}
+        return {"settings": self.settings, "lights": self.lights, "profiles": self.profiles, "rt": rt, "learn": self._learn,
+                "stats": self._stats, "manual_ev": self._manual_ev}
 
     def _save(self, delay: float = 2) -> None:
         self._store.async_delay_save(self._data, delay)
@@ -189,6 +198,12 @@ class Lichtwerk:
             until = dt_util.utcnow().timestamp() + float(prof.get("manual_hours") or 2) * 3600
         rt["manual"] = {"since": dt_util.utcnow().timestamp(), "until": until, "state": new.state}
         rt["ours"] = False
+        if new.state in ("on", "off") and old.state != new.state and (self.lights.get(eid) or {}).get("auto", True) is not False:
+            loc = dt_util.as_local(dt_util.utcnow())
+            self._manual_ev.append({"t": round(now), "e": eid, "a": new.state, "p": (self.lights.get(eid) or {}).get("profile") or "standard",
+                                    "d": plan_offset(rt.get("plan") or [], loc.hour * 60 + loc.minute, new.state)})
+            cut = now - 30 * 86400
+            self._manual_ev = [e for e in self._manual_ev if e.get("t", 0) >= cut][-500:]
         if (self._links.get(eid) or {}).get("peers"):
             # Meldung des Senders kann kurz nach der Leuchte kommen: in 3 s nachsehen, ob es doch die CCU war
             async_call_later(self.hass, 3, lambda _n, eid=eid, st=new.state, t=now: self._recheck_ccu(eid, st, t))
@@ -196,6 +211,26 @@ class Lichtwerk:
                      "Automatik wartet " + (f"bis {dt_util.as_local(dt_util.utc_from_timestamp(until)).strftime('%H:%M')}"
                                             if until else "bis zum nächsten Wechsel"), module="lichtwerk")
         self._save()
+
+    @callback
+    def _check_switched(self, eid: str, on: bool) -> None:
+        """30 s nach einem Befehl: hat die Leuchte geschaltet? Sonst merken und melden (einmal je Störung)."""
+        rt = self._rt.setdefault(eid, {})
+        st = self.hass.states.get(eid)
+        if st is None or st.state in BAD:
+            return
+        if (st.state == "on") == on:
+            if rt.pop("fail", None):
+                self.log.add("health", f"{self._name(eid)} schaltet wieder", "Befehl ausgeführt", module="lichtwerk")
+                self._save()
+            return
+        if rt.get("manual"):
+            return  # in der Zwischenzeit von Hand bzw. über HmIP geschaltet
+        first = not rt.get("fail")
+        rt["fail"] = {"at": dt_util.utcnow().isoformat(), "want": "on" if on else "off", "n": int((rt.get("fail") or {}).get("n", 0)) + 1}
+        if first:
+            self.log.add("health", f"{self._name(eid)} schaltet nicht", f"Lichtwerk wollte {'an' if on else 'aus'}, die Leuchte blieb {st.state}"
+                         " – Funk, Strom oder Schalter prüfen", module="lichtwerk")
 
     def _learn_off(self, eid: str, peer: dict, now: float) -> None:
         """CCU hat ausgeschaltet: Abstand zum letzten Melden des Melders merken (letzte 10, Median zählt)."""
@@ -222,6 +257,7 @@ class Lichtwerk:
         if sender is None or not rt.get("manual") or rt["manual"].get("since", 0) < at - 1:
             return
         rt["manual"] = {"since": at, "until": None, "state": state, "ccu": sender["name"]} if state == "on" else None
+        self._manual_ev = [e for e in self._manual_ev if not (e.get("e") == eid and abs(e.get("t", 0) - at) <= 2)]  # doch HmIP: zählt nicht als von Hand
         self.log.add("light", f"{self._name(eid)}: HmIP {'an' if state == 'on' else 'aus'}",
                      f"Direktverknüpfung {sender['name']} – doch nicht von Hand" + (" · Lichtwerk wartet, bis sie wieder ausschaltet" if state == "on" else ""), module="lichtwerk")
         self._save()
@@ -231,7 +267,124 @@ class Lichtwerk:
         self._pending = None
         await self.async_evaluate()
 
+    def _count_usage(self) -> None:
+        """Brenndauer und Energie je Leuchte für den Bericht (jede Minute, 35 Tage)."""
+        now = dt_util.utcnow().timestamp()
+        last, self._last_tick = self._last_tick, now
+        if last is None:
+            return
+        dt = min(max(now - last, 0), 180)
+        day = dt_util.as_local(dt_util.utcnow()).date().isoformat()
+        bucket = self._stats.setdefault(day, {})
+        for eid in self.settings.get("lw_lights") or []:
+            st = self.hass.states.get(eid)
+            if st is None or st.state != "on":
+                continue
+            x = bucket.setdefault(eid, {"s": 0.0, "wh": 0.0})
+            x["s"] = round(x.get("s", 0) + dt, 1)
+            w = self._power(eid)
+            if w is not None:
+                x["wh"] = round(x.get("wh", 0) + w * dt / 3600, 3)
+        for old in sorted(self._stats)[:-35]:
+            self._stats.pop(old, None)
+
+    def _power(self, eid: str) -> float | None:
+        """Leistung der Leuchte: Messung am Gerät (W) oder eingetragene Leistung."""
+        sensor = (self._device_sensors(eid) or {}).get("power")
+        if sensor:
+            st = self.hass.states.get(sensor)
+            try:
+                v = float(st.state) if st is not None else None
+            except (TypeError, ValueError):
+                v = None
+            if v is not None:
+                return v * 1000 if (st.attributes.get("unit_of_measurement") or "").lower() == "kw" else v
+        w = (self.lights.get(eid) or {}).get("watt")
+        return float(w) if w else None
+
+    def _device_sensors(self, eid: str) -> dict:
+        """Batterie, Funk und Leistung am Gerät der Leuchte (alle 10 Minuten neu gesucht)."""
+        now = dt_util.utcnow().timestamp()
+        if self._dev_cache is None or now - self._dev_cache[0] > 600:
+            self._dev_cache = (now, {})
+        found = self._dev_cache[1].get(eid)
+        if found is None:
+            found = {"battery": None, "signal": None, "power": None}
+            reg = er.async_get(self.hass)
+            entry = reg.async_get(eid)
+            if entry is not None and getattr(entry, "device_id", None):
+                for e in er.async_entries_for_device(reg, entry.device_id):
+                    if e.domain not in ("sensor", "binary_sensor") or e.disabled_by is not None:
+                        continue
+                    dc = getattr(e, "device_class", None) or getattr(e, "original_device_class", None)
+                    if dc == "battery" or (dc is None and ("battery" in e.entity_id or e.entity_id.endswith("low_bat"))):
+                        found["battery"] = found["battery"] or e.entity_id
+                    elif e.domain == "sensor" and (dc == "signal_strength" or e.entity_id.endswith(("_rssi", "_rssi_device", "_signal_strength", "_linkquality"))):
+                        found["signal"] = found["signal"] or e.entity_id
+                    elif e.domain == "sensor" and dc == "power":
+                        found["power"] = found["power"] or e.entity_id
+            self._dev_cache[1][eid] = found
+        return found
+
+    def _health(self, eid: str) -> dict:
+        found = self._device_sensors(eid)
+        out: dict[str, Any] = {}
+        if found.get("battery"):
+            st = self.hass.states.get(found["battery"])
+            if st is not None:
+                try:
+                    out["battery"] = round(float(st.state))
+                    out["battery_low"] = out["battery"] <= 20
+                except (TypeError, ValueError):
+                    out["battery_low"] = st.state == "on"  # binärer Sensor „Batterie schwach“
+        if found.get("signal"):
+            st = self.hass.states.get(found["signal"])
+            try:
+                val = float(st.state) if st is not None else None
+            except (TypeError, ValueError):
+                val = None
+            if val is not None:
+                unit = (st.attributes.get("unit_of_measurement") or "").lower()
+                out["signal"] = round(val)
+                out["weak"] = val < -85 if "db" in unit or val < 0 else val < 30
+        fail = (self._rt.get(eid) or {}).get("fail")
+        if fail:
+            out["fail"] = fail
+        return out
+
+    def report(self) -> dict:
+        """Wochenbericht: Brenndauer, Energie, von Hand je Leuchte; Tage; Vorschläge für die Profile."""
+        today = dt_util.as_local(dt_util.utcnow()).date()
+        days = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+        lights = {}
+        for eid in self.settings.get("lw_lights") or []:
+            secs = [((self._stats.get(d) or {}).get(eid) or {}).get("s", 0) for d in days]
+            wh = sum(((self._stats.get(d) or {}).get(eid) or {}).get("wh", 0) for d in days)
+            cut = (dt_util.utcnow() - timedelta(days=7)).timestamp()
+            evs = [e for e in self._manual_ev if e.get("e") == eid and e.get("t", 0) >= cut]
+            lights[eid] = {"hours": [round(x / 3600, 2) for x in secs], "week_h": round(sum(secs) / 3600, 1),
+                           "today_h": round(secs[-1] / 3600, 1), "kwh": round(wh / 1000, 2) if wh else None,
+                           "power": self._power(eid), "power_src": "sensor" if (self._device_sensors(eid) or {}).get("power") else ("set" if (self.lights.get(eid) or {}).get("watt") else None),
+                           "manual": sum(1 for e in evs), "manual_on": sum(1 for e in evs if e.get("a") == "on"),
+                           "manual_off": sum(1 for e in evs if e.get("a") == "off")}
+        cut14 = (dt_util.utcnow() - timedelta(days=14)).timestamp()
+        sugg = []
+        for x in manual_suggestions([e for e in self._manual_ev if e.get("t", 0) >= cut14]):
+            name = (self.profiles.get(x["profile"]) or {}).get("name") or x["profile"]
+            sugg.append({**x, "kind": "manual", "profile_name": name,
+                         "text": f"Profil „{name}“: {x['count']}× von Hand {'eingeschaltet' if x['action'] == 'on' else 'ausgeschaltet'}, "
+                                 f"im Mittel {x['minutes']} Min. vor dem Plan – {x['minutes']} Min. früher {'einschalten' if x['action'] == 'on' else 'ausschalten'}?"})
+        for eid, r in lights.items():
+            prof = self.profile(eid)
+            has_motion = bool(prof.get("motion")) or any(p.get("kind") == "motion" for p in (self._links.get(eid) or {}).get("peers", []))
+            if r["week_h"] / 7 >= 5 and not has_motion and (self.lights.get(eid) or {}).get("auto", True) is not False:
+                sugg.append({"kind": "usage", "light": eid, "profile": (self.lights.get(eid) or {}).get("profile") or "standard",
+                             "text": f"{self._name(eid)} brennt im Mittel {r['week_h'] / 7:.1f} Std. am Tag – Bewegungsmelder oder früher aus statt Dauerlicht?".replace(".", ",", 1)})
+        return {"days": days, "lights": lights, "suggestions": sugg,
+                "health": {eid: h for eid in self.settings.get("lw_lights") or [] if (h := self._health(eid))}}
+
     async def _async_tick(self, _now=None) -> None:
+        self._count_usage()
         if dt_util.utcnow().timestamp() >= self._links_next:
             await self.async_refresh_links()
         await self.async_evaluate()
@@ -575,6 +728,7 @@ class Lichtwerk:
         else:
             await self.hass.services.async_call(domain if domain in ("switch", "input_boolean") else "homeassistant",
                                                 "turn_on" if on else "turn_off", {"entity_id": eid}, context=ctx)
+        async_call_later(self.hass, 30, lambda _n, eid=eid, on=on: self._check_switched(eid, on))
         rt["ours"] = on
         rt["sent"] = {"on": on, "brightness": params.get("brightness"), "kelvin": params.get("kelvin"), "night": params.get("night"), "scene": params.get("scene")}
         rt["switched_at"] = dt_util.utcnow().timestamp()
@@ -644,6 +798,7 @@ class Lichtwerk:
                            if rt.get("manual") else None),
                 "motion": bool(rt.get("motion")), "night": bool((rt.get("params") or {}).get("night")),
                 "links": self._links.get(eid), "ccu": (rt.get("manual") or {}).get("ccu"),
+                "health": self._health(eid) or None, "power": self._power(eid),
                 "params": rt.get("params"), "plan": rt.get("plan") or [],
                 "night_window": [prof.get("night_from"), prof.get("night_to")] if prof.get("night") else None,
                 "next": self._next(eid, prof, now_min),
@@ -658,7 +813,7 @@ class Lichtwerk:
                 "next": ({**lights[nxt[0][2]]["next"], "entity_id": nxt[0][2],
                           "count": sum(1 for n in nxt if n[:2] == nxt[0][:2])} if nxt else None),
                 "manual": sum(1 for x in lights.values() if x["manual"] and not x["ccu"]), "away": bool(self.haus.away),
-                "links": self.links_status()}
+                "links": self.links_status(), "report": self.report()}
 
     def _off_timer(self, eid: str, x: dict) -> dict | None:
         """Wann geht die Leuchte wieder aus? Bewegung im Profil (Nachlaufzeit) oder HmIP-Verknüpfung (Einschaltdauer der CCU).

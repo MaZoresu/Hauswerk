@@ -2,6 +2,17 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.68.0 – 2026-11-20
+
+### Neu (Lichtwerk)
+- **Bericht** – neuer Reiter Lichtwerk › Bericht:
+  - **Letzte 7 Tage je Leuchte:** Brenndauer mit Tagesbalken, heute, Energie in kWh und wie oft von Hand geschaltet; oben die Summen.
+  - **Energie:** aus einer Leistungsmessung am Gerät (automatisch erkannt) oder einer eingetragenen Leistung (Leuchte › Einstellungen › Leistung in W). Ohne beides nur die Brenndauer.
+  - **Vorschläge aus dem Alltag:** Wird ein Profil an mindestens drei Tagen in 14 Tagen deutlich vor dem Plan von Hand ein- bzw. ausgeschaltet, schlägt Lichtwerk vor, es entsprechend früher zu tun („Profil „Abendlicht“: 4× von Hand eingeschaltet, im Mittel 20 Min. vor dem Plan – 20 Min. früher einschalten?“) – mit „Profil öffnen“. Brennt eine Leuchte ohne Bewegungsmelder im Mittel 5 Std. und mehr am Tag, kommt der Hinweis auf Bewegungsmelder oder früheres Ausschalten. HmIP-Schaltungen zählen nicht als von Hand.
+- **Gerätezustand:**
+  - **Schaltet nicht:** 30 s nach jedem Befehl prüft Lichtwerk, ob die Leuchte geschaltet hat. Wenn nicht: Hinweis an der Kachel, unter der Glocke und im Protokoll („Funk, Strom oder Schalter prüfen“); verschwindet, sobald sie wieder schaltet.
+  - **Batterie schwach** (z. B. Smartkerze, ab 20 % oder Meldung „Batterie schwach“) und **Funk schwach** (unter −85 dBm) an der Kachel und im Bericht; Batterie auch unter der Glocke.
+
 ## 0.67.0 – 2026-11-20
 
 ### Neu (Lichtwerk)

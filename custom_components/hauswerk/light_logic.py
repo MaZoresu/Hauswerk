@@ -281,3 +281,36 @@ def decide(*, auto: bool = True, bypass_on: bool = False, bypass_action: str = "
     if latched:
         return "on", latched_reason or "Profil"
     return "off", latched_reason or "kein Auslöser aktiv"
+
+
+def plan_offset(plan: list[dict], minute: float, action: str) -> float | None:
+    """Wie viele Minuten vor dem Plan wurde von Hand geschaltet? „on“: nächster Einschalt-Beginn (höchstens 3 Std. später),
+    „off“: Ende des laufenden Zeitraums (höchstens 3 Std. später, nicht Mitternacht). None = nicht vergleichbar."""
+    for seg in plan or []:
+        start, end = float(seg.get("start", 0)), float(seg.get("end", 0))
+        if action == "on" and minute < start <= minute + 180:
+            return round(start - minute)
+        if action == "off" and start <= minute < end < 1440 and end - minute <= 180:
+            return round(end - minute)
+    return None
+
+
+def manual_suggestions(events: list[dict], min_count: int = 3, min_minutes: float = 10) -> list[dict]:
+    """Vorschläge aus „von Hand“-Schaltungen je Profil: oft früher an bzw. aus als geplant → Profil anpassen.
+    events: {"p": Profil-ID, "a": "on"|"off", "d": Minuten vor dem Plan, "e": Leuchte}."""
+    out = []
+    for action in ("on", "off"):
+        by: dict[str, list[dict]] = {}
+        for ev in events:
+            if ev.get("a") == action and ev.get("d") is not None:
+                by.setdefault(ev.get("p") or "standard", []).append(ev)
+        for pid, evs in by.items():
+            if len(evs) < min_count:
+                continue
+            ds = sorted(float(e["d"]) for e in evs)
+            med = ds[len(ds) // 2]
+            if med < min_minutes:
+                continue
+            out.append({"profile": pid, "action": action, "count": len(evs), "minutes": int(round(med / 5) * 5) or 5,
+                        "lights": sorted({e.get("e") for e in evs if e.get("e")})})
+    return out

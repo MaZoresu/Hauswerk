@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.67.0";
+const VERSION = "0.68.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -449,6 +449,7 @@ const SHUT_VIEWS = [
 ];
 const LW_VIEWS = [
   { id: "lights", slug: "licht", name: "Licht", icon: "mdi:lightbulb-group-outline" },
+  { id: "lwrep", slug: "bericht", name: "Bericht", icon: "mdi:chart-bar" },
   { id: "lightset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
 ];
 // Abschnitte des Lichtwerk-Profils (wie die Bereiche des Blueprints „Smart Light“)
@@ -1153,6 +1154,15 @@ class HauswerkPanel extends HTMLElement {
       const room = f.room ? this._data.rooms?.[f.room] : null;
       add(f.level === "warn" ? "warn" : "info", "mdi:link-variant-off", f.text.split(" – ")[0], `${room ? `${room.name} · ` : ""}${f.text.split(" – ")[1] || "Homematic-Verknüpfung"}`, "settings-go", { sub: "hmlinks" });
     }
+    {
+      const R = this._lwStatus?.report;
+      const nm = (id) => this._lwLights().find((x) => x.id === id) ? this._lwName(this._lwLights().find((x) => x.id === id)) : this._entityName(id);
+      for (const [id, h] of Object.entries(R?.health || {})) {
+        if (h.fail) add("warn", "mdi:lightbulb-alert-outline", `${nm(id)} schaltet nicht`, `Lichtwerk wollte ${h.fail.want === "on" ? "an" : "aus"} – Funk, Strom oder Schalter prüfen`, "tab", { tab: "lwrep" });
+        if (h.battery_low) add("warn", "mdi:battery-alert-variant-outline", `Batterie schwach · ${nm(id)}`, h.battery != null ? `${h.battery} % – bald wechseln` : "bald wechseln", "tab", { tab: "lwrep" });
+      }
+      for (const sg of R?.suggestions || []) add("info", "mdi:lightbulb-question-outline", sg.text.split(" – ")[0], `Lichtwerk · ${sg.text.split(" – ")[1] || ""}`, "tab", { tab: "lwrep" });
+    }
     for (const f of this._lwStatus?.links?.findings || []) add(f.level === "warn" ? "warn" : "info", "mdi:link-variant-off", f.text.split(" – ")[0], `Lichtwerk · ${f.text.split(" – ")[1] || "Homematic-Verknüpfung"}`, "settings-go", { sub: "lwlinks" });
     if (s.radio?.busy) add("warn", "mdi:access-point-network", `Funk ausgelastet · ${fmt(s.radio.level, 0)} %`, `${this._entityName(s.radio.entity)} · Hauswerk sendet nur wichtige Änderungen`, "settings-go", { sub: "radio" });
     if (s.vacation_calendar_error) add("warn", "mdi:calendar-alert", "Urlaubskalender nicht lesbar", s.vacation_calendar_error, "settings-go", { sub: "vacation" });
@@ -1247,7 +1257,7 @@ class HauswerkPanel extends HTMLElement {
     const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, vent: this._viewVent, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom,
       shutters: this._viewShutters, shutset: () => this._settingsPage("rw"),
       kwflow: this._viewKwFlow, kwdev: this._viewKwDev, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw"),
-      lights: this._viewLights, lightset: () => this._settingsPage("lw") }[this._tab] || this._viewStart;
+      lights: this._viewLights, lwrep: this._viewLwRep, lightset: () => this._settingsPage("lw") }[this._tab] || this._viewStart;
     let html;
     try {
       html = view.call(this);
@@ -4276,6 +4286,10 @@ class HauswerkPanel extends HTMLElement {
       if (l.ls.motion) flags.push(["mdi:motion-sensor", "Bewegung", C.ok]);
       if (on && l.ls.night) flags.push(["mdi:weather-night", "Nachtlicht", "#6366f1"]);
       if (on && l.ls.off) flags.push(["mdi:timer-outline", this._lwOffTxt(l.ls.off), C.ok]);
+      const hl = l.ls.health || {};
+      if (hl.fail) flags.push(["mdi:alert-circle-outline", `schaltet nicht (sollte ${hl.fail.want === "on" ? "an" : "aus"})`, C.alert]);
+      if (hl.battery_low) flags.push(["mdi:battery-alert-variant-outline", hl.battery != null ? `Batterie ${hl.battery} %` : "Batterie schwach", C.alert]);
+      if (hl.weak) flags.push(["mdi:wifi-strength-1-alert", `Funk schwach${hl.signal != null ? ` · ${hl.signal} dBm` : ""}`, C.sun]);
       const nx = l.ls.next;
       const info = [
         ...(on && l.ls.since ? [["mdi:clock-outline", `an seit ${new Date(l.ls.since).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`]] : []),
@@ -4320,6 +4334,28 @@ class HauswerkPanel extends HTMLElement {
     // meist nur ein Licht je Raum: ein gemeinsames Raster, der Raum steht in der Kachel (statt fast leerer Zeilen)
     if (!compact && lights.length / groups.size < 1.6) return head + tog + `<div class="rw-grid">${sorted.map(([area, list]) => list.map((l) => tile(l, area)).join("")).join("")}</div>`;
     return head + tog + sorted.map(([area, list]) => `<div class="rw-area ${compact ? "compact" : ""}"><h3>${esc(area)}</h3><div class="rw-grid ${compact ? "compact" : ""}">${list.map((l) => (compact ? mini(l) : tile(l))).join("")}</div></div>`).join("");
+  }
+
+  /** Lichtwerk › Bericht: Vorschläge, Gerätezustand, Brenndauer und Energie der letzten 7 Tage, von Hand. */
+  _viewLwRep() {
+    const R = this._lwStatus?.report;
+    if (!R) return `<section class="card empty"><ha-icon icon="mdi:chart-bar"></ha-icon><h2>Noch kein Bericht</h2><p>Lichtwerk sammelt ab jetzt Brenndauer, Energie und Schaltungen von Hand.</p></section>`;
+    const lights = this._lwLights();
+    const name = (id) => { const l = lights.find((x) => x.id === id); return l ? this._lwName(l) : this._entityName(id); };
+    const rows = Object.entries(R.lights || {}).sort((a, b) => b[1].week_h - a[1].week_h);
+    const tot = rows.reduce((a, [, r]) => ({ h: a.h + r.week_h, kwh: a.kwh + (r.kwh || 0), m: a.m + r.manual }), { h: 0, kwh: 0, m: 0 });
+    const dayNames = (R.days || []).map((d) => new Date(`${d}T12:00`).toLocaleDateString("de-DE", { weekday: "short" }).slice(0, 2));
+    const maxH = Math.max(1, ...rows.flatMap(([, r]) => r.hours));
+    const sugg = R.suggestions || [];
+    const health = Object.entries(R.health || {}).filter(([, h]) => h.fail || h.battery_low || h.weak);
+    const sCard = sugg.length ? `<section class="card"><div class="shead"><ha-icon icon="mdi:lightbulb-question-outline"></ha-icon><h3>Vorschläge</h3></div><div class="evlist">${sugg.map((x) => `<div class="ev"><ha-icon icon="${x.kind === "usage" ? "mdi:motion-sensor" : x.action === "on" ? "mdi:lightbulb-on-outline" : "mdi:lightbulb-off-outline"}" style="color:#6366f1"></ha-icon><span class="grow"><b>${esc(x.text.split(" – ")[0])}</b><small>${esc(x.text.split(" – ")[1] || "")}${x.lights?.length ? ` · ${x.lights.map(name).map(esc).join(", ")}` : ""}</small></span>${this._admin ? `<button class="secondary small" data-action="pop-open" data-pop="lwp:${esc(x.profile)}:${x.kind === "usage" ? "motion" : x.action === "on" ? "on" : "off"}">Profil öffnen</button>` : ""}</div>`).join("")}</div></section>` : "";
+    const hCard = health.length ? `<section class="card"><div class="shead"><ha-icon icon="mdi:heart-pulse"></ha-icon><h3>Gerätezustand</h3></div><div class="evlist">${health.map(([id, h]) => `<div class="ev"><ha-icon icon="${h.fail ? "mdi:lightbulb-alert-outline" : h.battery_low ? "mdi:battery-alert-variant-outline" : "mdi:wifi-strength-1-alert"}" style="color:${C.alert}"></ha-icon><span class="grow"><b>${esc(name(id))}</b><small>${[h.fail ? `schaltet nicht – Lichtwerk wollte ${h.fail.want === "on" ? "an" : "aus"} (${new Date(h.fail.at).toLocaleString("de-DE", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })})` : "", h.battery_low ? `Batterie ${h.battery != null ? `${h.battery} %` : "schwach"}` : "", h.weak ? `Funk schwach${h.signal != null ? ` (${h.signal} dBm)` : ""}` : ""].filter(Boolean).map(esc).join(" · ")}</small></span></div>`).join("")}</div></section>` : "";
+    const table = `<section class="card"><div class="shead"><ha-icon icon="mdi:chart-bar"></ha-icon><h3>Letzte 7 Tage</h3><span class="grow"></span><small class="muted">${fmt(tot.h, 1)} Std.${tot.kwh ? ` · ${fmt(tot.kwh, 2)} kWh` : ""} · ${tot.m}× von Hand</small></div>
+      <div class="lwrep">${rows.map(([id, r]) => `<div class="lwrep-r">
+        <button class="lwrep-n" data-action="pop-open" data-pop="${this._admin ? `lwl:${esc(id)}` : `lwbri:${esc(id)}`}"><b>${esc(name(id))}</b><small>${fmt(r.week_h, 1)} Std. · heute ${fmt(r.today_h, 1)} Std.${r.kwh != null ? ` · ${fmt(r.kwh, 2)} kWh` : r.power ? "" : " · Leistung eintragen"}${r.manual ? ` · ${r.manual}× von Hand` : ""}</small></button>
+        <div class="lwrep-b" title="${esc(r.hours.map((h, i) => `${dayNames[i]} ${fmt(h, 1)} Std.`).join(" · "))}">${r.hours.map((h, i) => `<span><i style="height:${Math.max(h > 0 ? 6 : 0, (h / maxH) * 100)}%"></i><small>${dayNames[i]}</small></span>`).join("")}</div></div>`).join("") || `<p class="muted">Noch keine Lichter.</p>`}</div>
+      <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Energie aus der Messung am Gerät oder der eingetragenen Leistung (Leuchte › Einstellungen). „Von Hand“ zählt nur Leuchten mit aktivem Profil; HmIP-Schaltungen zählen nicht.</p></section>`;
+    return this._lwBriefHtml() + sCard + hCard + table;
   }
 
   /** Raumkachel: alle Leuchten eines Raums – alle an/aus, je Leuchte Zeile mit Zustand, HmIP/von Hand, Ablauftimer. */
@@ -4470,6 +4506,8 @@ class HauswerkPanel extends HTMLElement {
         icon: "mdi:lightbulb-outline", c: "#6366f1", title: esc(this._entityName(eid)), sub: `Lichtwerk · ${esc(eid)}`,
         body: `
           <label class="field"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name (leer = aus Home Assistant)</span><input type="text" maxlength="40" data-lwl="name" value="${esc(d.cfg.name || "")}" placeholder="${esc(this._entityName(eid))}" ${dis}></label>
+          ${(this._lwStatus?.report?.lights?.[eid]?.power_src === "sensor") ? `<p class="muted small"><ha-icon icon="mdi:flash-outline"></ha-icon>Leistung gemessen am Gerät: ${fmt(this._lwStatus.report.lights[eid].power ?? 0, 1)} W</p>`
+            : `<label class="field"><span><ha-icon icon="mdi:flash-outline"></ha-icon> Leistung (für den Bericht, leer = nur Brenndauer)</span><div class="unit"><input type="number" min="0" max="5000" step="0.5" data-lwl="watt" value="${d.cfg.watt ?? ""}" placeholder="z. B. 9" ${dis}><i>W</i></div></label>`}
           <label class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Profil</span><select data-lwl="profile" ${dis}>${profs.map((x) => `<option value="${esc(x.id)}" ${(d.cfg.profile || "standard") === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
           ${d.cfg.auto === false ? `<p class="note"><ha-icon icon="mdi:robot-off-outline"></ha-icon>Das Profil ist an dieser Leuchte aus – Lichtwerk zeigt sie nur an.</p>` : ""}
           <p class="muted small">${esc(this._lwProfSum(profs.find((x) => x.id === (d.cfg.profile || "standard")) || {}))} · <button class="link inline" data-action="pop-open" data-pop="lwp:${esc(d.cfg.profile || "standard")}:on">Profil bearbeiten</button></p>
@@ -10348,7 +10386,7 @@ class HauswerkPanel extends HTMLElement {
       }
       case "lwl-save": {
         const cfg = this._pop.draft.cfg;
-        const res = await this._ws({ type: "hauswerk/lichtwerk/light/save", entity_id: el.dataset.id, light: { profile: cfg.profile || "standard", auto: cfg.auto !== false, name: cfg.name || null } });
+        const res = await this._ws({ type: "hauswerk/lichtwerk/light/save", entity_id: el.dataset.id, light: { profile: cfg.profile || "standard", auto: cfg.auto !== false, name: cfg.name || null, watt: cfg.watt === "" || cfg.watt == null ? null : Number(cfg.watt) } });
         this._data.lichtwerk.lights = res.lights;
         this._data.settings = res.settings;
         this._closePop();
@@ -12741,6 +12779,16 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .lw-room .lwr .lwr-n small { color:var(--muted); font-size:12px; }
 .lw-room .lwr .lwr-f { display:inline-flex; gap:4px; align-items:center; color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
 .lw-room .lwr .lwr-f ha-icon { --mdc-icon-size:15px; }
+.lwrep { display:flex; flex-direction:column; }
+.lwrep-r { display:flex; align-items:center; gap:12px; padding:8px 0; border-top:1px solid var(--line); }
+.lwrep-r:first-child { border-top:none; }
+.lwrep-n { all:unset; cursor:pointer; flex:1; min-width:0; display:flex; flex-direction:column; }
+.lwrep-n b { font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lwrep-n small { color:var(--muted); font-size:12px; }
+.lwrep-b { display:flex; gap:3px; height:40px; align-items:stretch; flex:none; }
+.lwrep-b span { width:14px; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:2px; }
+.lwrep-b i { width:100%; background:#6366f1; border-radius:3px 3px 1px 1px; }
+.lwrep-b small { font-size:9px; color:var(--muted); line-height:1; }
 .lw-offm { margin-left:auto; font-variant-numeric:tabular-nums; color:#22c55e; font-weight:600; }
 .lw-mot { position:absolute; right:-5px; bottom:-5px; width:20px; height:20px; border-radius:50%; display:grid; place-items:center; background:var(--card); border:1.5px solid var(--line, var(--card2)); color:#22c55e; }
 .lw-mot ha-icon { --mdc-icon-size:13px !important; }

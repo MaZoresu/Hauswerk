@@ -227,6 +227,8 @@ Licht mit **Profilen** nach dem Vorbild des Blueprints [🔆 Smart Light](https:
 - **Licht:** Helligkeit, Übergang, Farbtemperatur oder Farbe; **dynamisch** nach Sonnenhöhe oder Helligkeit; **Nachtlicht** mit eigener Helligkeit und Überblenden.
 - **Tageszeiten:** je Profil Szenen ab Uhrzeit mit eigener Helligkeit und Farbtemperatur (z. B. Morgen kühl, Abend warm, Nacht gedimmt) – in der Tagesleiste farbig; beim Wechsel wird übergeblendet.
 - **Ansicht „Räume“:** je Raum eine Kachel mit allen an/aus, den Leuchten als Zeilen und einem gemeinsamen Profil für den Raum.
+- **Bericht** (Lichtwerk › Bericht): Brenndauer je Leuchte und Tag (7 Tage), Energie aus der Messung am Gerät oder der eingetragenen Leistung, wie oft von Hand geschaltet; **Vorschläge** wie „Profil „Abendlicht“: 4× von Hand eingeschaltet, im Mittel 20 Min. vor dem Plan – früher einschalten?“ oder „brennt 6 Std. am Tag – Bewegungsmelder?“.
+- **Gerätezustand:** Batterie schwach, Funk schwach und „schaltet nicht“ (Lichtwerk prüft 30 s nach jedem Befehl) – an der Kachel, unter der Glocke und im Protokoll.
 - **Ablauftimer:** Licht über Bewegungsmelder zeigt „aus in 0:42“ – bei HmIP-Direktverknüpfungen mit der Einschaltdauer aus der CCU, nach einigen Schaltungen mit der gelernten tatsächlichen Zeit.
 - **Vorrang:** Automatik aus › Pause-Schalter › von Hand (Automatik wartet bis zum nächsten Wechsel oder eine feste Zeit) › niemand zu Hause (aus; im Urlaub optional Anwesenheits-Simulation mit zufälligen Zeiten) › Bewegung › Profil. Die Ursache steht an jeder Kachel.
 - **Vorlagen:** Abendlicht, Außenlicht, Flur mit Bewegung, Fernsehlicht, Deko/Weihnachten, Morgenlicht.

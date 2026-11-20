@@ -171,11 +171,20 @@ const lwLinks = { available: true, at: new Date(Date.now() - 50 * 60e3).toISOStr
     "light.wohnzimmer": { own: true, peers: [] } },
   findings: [{ level: "warn", light: "light.flur_og", text: "Flur OG: Bewegung Flur OG schaltet schon in der CCU – Lichtwerk schaltet bei Bewegung doppelt" },
     { level: "info", light: "light.eingang", text: "Eingang wird in der CCU direkt von S_Bewegung:Vorgarten geschaltet – zusätzlich zum Profil „Standard“" }] };
-const lwStatus = { on: 1, total: 4, elevation: -3.2, manual: 1, away: false, links: lwLinks,
+const lwDays = [...Array(7)].map((_, i) => new Date(Date.now() - (6 - i) * 864e5).toISOString().slice(0, 10));
+const lwReport = { days: lwDays,
+  lights: { "light.wohnzimmer": { hours: [4.5, 5, 4.2, 5.5, 6, 4, 2.1], week_h: 31.3, today_h: 2.1, kwh: 0.38, power: 12, power_src: "set", manual: 4, manual_on: 3, manual_off: 1 },
+    "light.eingang": { hours: [7, 7.5, 6.8, 7.2, 7, 6.9, 1.5], week_h: 43.9, today_h: 1.5, kwh: null, power: null, power_src: null, manual: 1, manual_on: 1, manual_off: 0 },
+    "light.flur_og": { hours: [0.3, 0.4, 0.2, 0.5, 0.3, 0.2, 0.1], week_h: 2, today_h: 0.1, kwh: 0.02, power: 8.5, power_src: "sensor", manual: 0, manual_on: 0, manual_off: 0 },
+    "light.kuche": { hours: [0, 0, 0, 0, 0, 0, 0], week_h: 0, today_h: 0, kwh: null, power: null, power_src: null, manual: 0, manual_on: 0, manual_off: 0 } },
+  suggestions: [{ kind: "manual", profile: "standard", action: "on", count: 4, minutes: 20, lights: ["light.wohnzimmer"], text: "Profil „Abendlicht“: 4× von Hand eingeschaltet, im Mittel 20 Min. vor dem Plan – 20 Min. früher einschalten?" },
+    { kind: "usage", light: "light.eingang", profile: "standard", text: "Eingang brennt im Mittel 6,3 Std. am Tag – Bewegungsmelder oder früher aus statt Dauerlicht?" }],
+  health: { "light.flur_og": { battery: 12, battery_low: true }, "light.eingang": { signal: -91, weak: true } } };
+const lwStatus = { on: 1, total: 4, elevation: -3.2, manual: 1, away: false, links: lwLinks, report: lwReport,
   next: { day: 0, min: 1380, action: "off", reason: "spätestens 23:00", entity_id: "light.wohnzimmer", count: 2 },
   lights: {
     "light.wohnzimmer": { name: "Wohnzimmer", area: "Wohnzimmer", profile: "standard", state: "on", brightness: 80, modes: ["color_temp"], auto: true, want: "on", cause: "Sonne unter 2°", latch: true, manual: null, motion: false, night: false, plan: lwPlan, night_window: null, next: { day: 0, min: 1380, action: "off", reason: "spätestens 23:00" }, since: new Date(Date.now() - 42 * 60e3).toISOString() },
-    "light.flur_og": { name: "Flur OG", area: "Flur OG", profile: "flur", state: "off", ccu: null, off: null, modes: ["color_temp"], auto: true, want: "off", cause: "kein Auslöser aktiv", latch: false, manual: null, motion: false, night: false, plan: [], night_window: ["22:30", "06:00"], next: null },
+    "light.flur_og": { name: "Flur OG", area: "Flur OG", profile: "flur", state: "off", ccu: null, off: null, health: { battery: 12, battery_low: true }, modes: ["color_temp"], auto: true, want: "off", cause: "kein Auslöser aktiv", latch: false, manual: null, motion: false, night: false, plan: [], night_window: ["22:30", "06:00"], next: null },
     "light.eingang": { name: "Eingang", area: "Vorgarten", profile: "standard", state: "off", modes: ["onoff"], auto: true, want: null, cause: "Von Hand geschaltet – Automatik wartet", latch: true, manual: { since: new Date(Date.now() - 15 * 60e3).toISOString(), until: null }, motion: false, night: false, plan: lwPlan, night_window: null, next: { day: 0, min: 1380, action: "off", reason: "spätestens 23:00" } },
     "light.kuche": { name: "Decke Küche", area: "Küche", profile: "standard", state: "unavailable", unavailable: true, auto: false, plan: lwPlan, next: null },
   } };

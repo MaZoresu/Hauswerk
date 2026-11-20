@@ -1892,3 +1892,57 @@ def test_lichtwerk_ausschaltzeit_lernen(hw):
         assert lw._data()["learn"]["light.windfang"]["SPI1"]
 
     asyncio.run(run())
+
+
+def test_lichtwerk_bericht_gesundheit(hw):
+    """Bericht: Brenndauer und Energie, von Hand früher als geplant → Vorschlag; Leuchte schaltet nicht → Hinweis; Batterie."""
+    L = hw.light
+    plan = [{"start": 17 * 60, "end": 23 * 60}]
+    assert L.plan_offset(plan, 16 * 60 + 40, "on") == 20 and L.plan_offset(plan, 13 * 60, "on") is None
+    assert L.plan_offset(plan, 22 * 60 + 30, "off") == 30 and L.plan_offset(plan, 18 * 60, "off") is None
+    evs = [{"p": "standard", "a": "on", "d": d, "e": "light.wz"} for d in (20, 25, 15)] + [{"p": "flur", "a": "on", "d": 30, "e": "light.f"}]
+    assert L.manual_suggestions(evs) == [{"profile": "standard", "action": "on", "count": 3, "minutes": 20, "lights": ["light.wz"]}]
+
+    async def run():
+        STORES.clear()
+        REG.clear()
+        DEVS.clear()
+        NOW[0] = datetime(2026, 11, 20, 15, 0, tzinfo=timezone.utc)  # 16:00
+        hass = Hass()
+        hass.set("light.wz", "off", {"supported_color_modes": ["brightness"]}, "Wohnzimmer")
+        log, haus, ctl = await _setup(hw, hass)
+        lw = hw.Lichtwerk(hass, log, haus)
+        await lw.async_load()
+        lw._sun_fn = lambda offset=0: None
+        await lw.async_save_profile("standard", {"name": "Abendlicht", "on_sun": False, "off_sun": False, "on_time": True,
+                                                 "time_on": "17:00", "off_time": True, "time_off": "23:00"})
+        await lw.async_save_settings({"lw_lights": ["light.wz"]})
+        await lw.async_save_light("light.wz", {"watt": 12})
+        await lw.async_evaluate()
+        # 16:40 von Hand an (20 Min. vor dem Plan)
+        NOW[0] += timedelta(minutes=40)
+        old = hass.st["light.wz"]
+        hass.set("light.wz", "on", {"supported_color_modes": ["brightness"], "brightness": 200}, "Wohnzimmer")
+        lw._on_change(types.SimpleNamespace(data={"entity_id": "light.wz", "old_state": old, "new_state": hass.st["light.wz"]}))
+        assert lw._manual_ev[-1]["d"] == 20 and lw._manual_ev[-1]["a"] == "on"
+        # Brenndauer: 2 Std. zählen
+        lw._count_usage()
+        for _ in range(120):
+            NOW[0] += timedelta(minutes=1)
+            lw._count_usage()
+        r = lw.report()["lights"]["light.wz"]
+        assert r["today_h"] == 2.0 and r["kwh"] == 0.02 and r["power"] == 12 and r["power_src"] == "set" and r["manual_on"] == 1
+        # zwei weitere Tage früher eingeschaltet → Vorschlag
+        lw._manual_ev += [{"t": NOW[0].timestamp(), "e": "light.wz", "a": "on", "p": "standard", "d": d} for d in (25, 15)]
+        assert any(s["kind"] == "manual" and "20 Min. früher einschalten" in s["text"] for s in lw.report()["suggestions"])
+        # Lichtwerk schaltet, Leuchte reagiert nicht → „schaltet nicht“
+        lw._rt["light.wz"]["manual"] = None
+        await lw._switch("light.wz", False, {"brightness": 80}, lw.profile("light.wz"), "Test")
+        lw._check_switched("light.wz", False)
+        assert lw._health("light.wz")["fail"]["want"] == "off"
+        assert any(e["title"] == "Wohnzimmer schaltet nicht" for e in log.entries)
+        hass.set("light.wz", "off", {"supported_color_modes": ["brightness"]}, "Wohnzimmer")
+        lw._check_switched("light.wz", False)
+        assert not lw._health("light.wz").get("fail")
+
+    asyncio.run(run())
