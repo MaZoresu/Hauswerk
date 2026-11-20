@@ -125,6 +125,7 @@ class Haus:
         self.radio_entity: str | None = None
         self.radio_busy = False
         self._listeners: set[Callable[[], None]] = set()
+        self.extra_status: dict[str, Callable[[], Any]] = {}  # weitere Module (z. B. Kraftwerk-Geräte)
         self._unsubs: list[Callable[[], None]] = []
         self._state_unsub: Callable[[], None] | None = None
 
@@ -802,6 +803,7 @@ class Haus:
 
     def status(self) -> dict[str, Any]:
         return {
+            **{k: fn() for k, fn in self.extra_status.items()},
             "away": self.away,
             "approaching": self.approaching,
             "presence_force": self.settings.get("presence_force"),

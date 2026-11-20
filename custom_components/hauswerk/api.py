@@ -228,6 +228,18 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("kw_home"): _opt(SENSOR),
         vol.Optional("kw_consumers"): vol.All([SENSOR], vol.Length(max=20)),
         vol.Optional("kw_names"): vol.All(dict, vol.Length(max=20), {SENSOR: vol.All(str, vol.Length(max=40))}),
+        vol.Optional("kw_appliances"): vol.All([vol.Schema({
+            vol.Required("id"): vol.All(str, vol.Match(r"^[a-z0-9_]{1,40}$")),
+            vol.Required("name"): vol.All(str, vol.Length(min=1, max=40)),
+            vol.Required("type"): vol.In(["waschmaschine", "trockner", "geschirrspueler", "sonstiges"]),
+            vol.Required("power"): SENSOR,
+            vol.Optional("door"): _opt(vol.All(str, vol.Match(r"^binary_sensor\.[a-z0-9_]+$"))),
+            vol.Optional("status"): _opt(vol.All(str, vol.Match(r"^[a-z_]+\.[a-z0-9_]+$"))),
+            vol.Optional("status_done"): vol.All([vol.All(str, vol.Length(max=40))], vol.Length(max=10)),
+            vol.Optional("notify"): vol.All([vol.All(str, vol.Match(r"^[a-z0-9_]+$"))], vol.Length(max=10)),
+            vol.Optional("notify_ha"): bool,
+            vol.Optional("important"): bool,
+        })], vol.Length(max=10)),
         vol.Optional("demand_entity"): _opt(vol.All(str, vol.Match(r"^climate\.[a-z0-9_]+$"))),
         vol.Optional("demand_action"): vol.In(["lower", "off"]),
         vol.Optional("demand_low"): vol.All(vol.Coerce(float), vol.Range(min=5, max=25)),
@@ -566,6 +578,27 @@ async def ws_calendar_import(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"], {"blocks": blocks})
 
 
+@websocket_api.websocket_command({
+    vol.Required("type"): "hauswerk/kraftwerk/appliance/action",
+    vol.Required("id"): str,
+    vol.Required("action"): vol.In(["still_running", "finished", "no_run", "ack", "reset", "learn_history"]),
+})
+@websocket_api.async_response
+async def ws_appliance_action(hass: HomeAssistant, connection, msg) -> None:
+    """Gerät mit Fertigerkennung: Korrektur (alle Benutzer) bzw. neu lernen / aus dem Verlauf lernen (Bearbeiten)."""
+    kw = _kw(hass)
+    if kw is None:
+        return _not_ready(connection, msg)
+    if msg["action"] in ("reset", "learn_history") and not _may_edit(hass, connection):
+        connection.send_error(msg["id"], "unauthorized", "Nur mit Berechtigung zum Ändern")
+        return
+    result = await kw.appliances.async_action(msg["id"], msg["action"], by=_who(connection))
+    if not result.get("ok"):
+        connection.send_error(msg["id"], "not_possible", result.get("error") or "Nicht möglich")
+        return
+    connection.send_result(msg["id"], result)
+
+
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/notify/test"})
 @require_editor
 @websocket_api.async_response
@@ -749,6 +782,7 @@ COMMANDS = (
     ws_rw_profile_delete,
     ws_log_get,
     ws_log_subscribe,
+    ws_appliance_action,
 )
 
 

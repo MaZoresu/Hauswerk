@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.55.1";
+const VERSION = "0.56.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -121,6 +121,9 @@ const PICKERS = {
   temp_sensor: { scope: "room", multi: false, domains: ["sensor"], deviceClass: "temperature" },
   humidity_sensor: { scope: "room", multi: false, domains: ["sensor"], deviceClass: "humidity" },
   co2_sensor: { scope: "room", multi: false, domains: ["sensor"], deviceClass: "carbon_dioxide" },
+  kwa_power: { scope: "pop", multi: false, domains: ["sensor"], deviceClass: "power" },
+  kwa_door: { scope: "pop", multi: false, domains: ["binary_sensor"] },
+  kwa_status: { scope: "pop", multi: false, domains: ["sensor", "binary_sensor", "select", "input_select"] },
   persons: { scope: "settings", multi: true, domains: ["person", "device_tracker"] },
   presence_sensor: { scope: "room", multi: false, domains: ["binary_sensor"] },
   comfort_entity: { scope: "room", multi: false, domains: ["input_number", "number", "sensor"] },
@@ -264,6 +267,7 @@ const SHUT_VIEWS = [
 ];
 const KW_VIEWS = [
   { id: "kwflow", slug: "energiefluss", name: "Energiefluss", icon: "mdi:transmission-tower" },
+  { id: "kwdev", slug: "geraete", name: "Geräte", icon: "mdi:washing-machine" },
   { id: "kwrep", slug: "verlauf", name: "Verlauf", icon: "mdi:chart-bar" },
   { id: "kwset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
 ];
@@ -285,6 +289,13 @@ const KW_ICONS = [
   [/computer|\bpc\b|b(ü|ue)ro|desk|monitor|gaming/, "mdi:desktop-tower-monitor"], [/drucker|printer/, "mdi:printer"], [/licht|lampe|leuchte|light/, "mdi:lightbulb-outline"],
   [/aquarium|terrarium/, "mdi:fishbowl-outline"], [/rasen|m(ä|ae)her|garten|garage|werkstatt/, "mdi:hammer-wrench"], [/akku|batterie|speicher/, "mdi:battery-charging-outline"],
 ];
+const APP_TYPES = {
+  waschmaschine: { label: "Waschmaschine", icon: "mdi:washing-machine", match: /wasch|washer|washing/ },
+  trockner: { label: "Trockner", icon: "mdi:tumble-dryer", match: /trockner|dryer/ },
+  geschirrspueler: { label: "Geschirrspüler", icon: "mdi:dishwasher", match: /sp(ü|ue)l|dishwasher/ },
+  sonstiges: { label: "Anderes Gerät", icon: "mdi:power-plug-outline", match: null },
+};
+const APP_STATE = { idle: ["Bereit", "#64748b", "mdi:power-sleep"], running: ["Läuft", "#0ea5e9", "mdi:play-circle-outline"], ending: ["Ende wird geprüft", "#f59e0b", "mdi:timer-sand"], done: ["Fertig", "#22c55e", "mdi:check-circle"] };
 const KW_POPS = ["kwdetect", "kwsolar", "kwgrid", "kwbatt", "kwhome", "kwcons"];
 // Geplante Module: nur ausgegraut angezeigt, noch ohne Funktion.
 const COMING = [
@@ -362,6 +373,7 @@ const LOG_CATS = {
   command: { name: "Thermostat-Befehle", icon: "mdi:access-point", c: "#94a3b8", off: true },
   settings: { name: "Einstellungen", icon: "mdi:cog-outline", c: "#64748b" },
   notify: { name: "Nachrichten", icon: "mdi:message-badge-outline", c: "#0ea5e9" },
+  appliance: { name: "Geräte", icon: "mdi:washing-machine", c: "#f59e0b" },
 };
 const SKIES = [["night", "Nacht"], ["dawn", "Sonnenaufgang"], ["day", "Tag"], ["dusk", "Sonnenuntergang"]];
 const DEFAULT_VIEW = "start";
@@ -863,6 +875,10 @@ class HauswerkPanel extends HTMLElement {
     const set = this._data?.settings || {};
     const bad = (id) => !S[id] || ["unavailable", "unknown"].includes(S[id].state);
     const add = (lvl, icon, text, sub, action, data = {}) => out.push({ lvl, icon, text, sub, action, data });
+    for (const [aid, a] of Object.entries(s.appliances || {})) {
+      const c = (this._data?.settings?.kw_appliances || []).find((x) => x.id === aid);
+      if (c && a.state === "done") add("warn", APP_TYPES[c.type]?.icon || "mdi:check-circle-outline", `${c.name} fertig`, a.last ? `${this._durTxt(a.last.dur)} · ${fmt(a.last.wh / 1000, 2)} kWh – ausräumen` : "ausräumen", "tab", { tab: "kwdev" });
+    }
     if (s.waste_due) add("info", this._calIcon(s.waste_due.types[0])[0], `${s.waste_due.when === "morgen" ? "Morgen" : "Heute"} Müllabfuhr`, s.waste_due.types.join(" · "), "settings-go", { sub: "calendars" });
     for (const r of this._rooms()) {
       const rs = s.rooms?.[r.id] || {};
@@ -994,7 +1010,7 @@ class HauswerkPanel extends HTMLElement {
     if (!this._data) return;
     const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, vent: this._viewVent, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom,
       shutters: this._viewShutters, shutset: () => this._settingsPage("rw"),
-      kwflow: this._viewKwFlow, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw") }[this._tab] || this._viewStart;
+      kwflow: this._viewKwFlow, kwdev: this._viewKwDev, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw") }[this._tab] || this._viewStart;
     let html;
     try {
       html = view.call(this);
@@ -4178,6 +4194,11 @@ class HauswerkPanel extends HTMLElement {
     else if (grid != null && grid > 0) { icon = "mdi:transmission-tower-import"; title = `Bezug ${W(grid)}${home != null && home < 400 ? " – nur Grundlast" : ""}`; }
     else title = home != null ? `Verbrauch ${W(home)}` : "Keine Leistungswerte";
     const lines = [];
+    for (const c of this._data?.settings?.kw_appliances || []) {
+      const a = this._status?.appliances?.[c.id];
+      if (a && ["running", "ending", "done"].includes(a.state))
+        lines.unshift({ icon: APP_TYPES[c.type]?.icon || "mdi:power-plug-outline", c: a.state === "done" ? "#22c55e" : "#0ea5e9", text: `${c.name}: ${this._appLine(a)}`, act: `data-action="tab" data-tab="kwdev"` });
+    }
     if (top && !title.includes(top.name)) lines.push({ icon: top.icon, c: "#0ea5e9", text: `Größter Verbraucher: ${top.name} ${W(top.w)}` });
     if (fl.has.batt && fl.soc != null)
       lines.push({ icon: "mdi:home-battery-outline", c: fl.soc < 15 ? "#ef4444" : "#ec4899", text: `Akku ${fmt(fl.soc, 0)} %${batt > 5 ? ` – entlädt ${W(batt)}` : batt < -5 ? ` – lädt ${W(batt)}` : ""}${fl.soc < 15 ? " – fast leer" : ""}` });
@@ -4191,6 +4212,161 @@ class HauswerkPanel extends HTMLElement {
     const hv = home != null ? W(home).split(" ") : null;
     return this._brief({ cls: "card br-mod-kw", tone, icon, label: `<ha-icon icon="mdi:flash-outline"></ha-icon>Kraftwerk · jetzt`, big: hv ? `${hv[0]}<span>${hv[1] || ""} Haus</span>` : "",
       side: `<span class="kw-live"><i></i>live</span>`, title, lines, chips });
+  }
+
+  // ------------------------------------------------------------ Geräte mit Fertigerkennung
+  _durTxt(sec) {
+    if (sec == null) return "–";
+    const m = Math.round(sec / 60);
+    return m < 60 ? `${m} Min.` : `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} Std.`;
+  }
+
+  /** Kurzer Stand für Zeilen: „läuft seit 0:45 Std. – noch ca. 50 Min.“ */
+  _appLine(a) {
+    const now = Date.now() / 1000;
+    if (a.state === "running" && a.run) {
+      const rest = a.run.eta ? a.run.eta - now : null;
+      return `läuft seit ${this._durTxt(a.run.elapsed)}${rest != null ? (rest > 60 ? ` – noch ca. ${this._durTxt(rest)}` : " – müsste gleich fertig sein") : ""}`;
+    }
+    if (a.state === "ending" && a.run) return `Ende wird geprüft – ${this._durTxt(a.run.quiet)} von ${this._durTxt(a.run.wait)} Ruhe`;
+    if (a.state === "done" && a.last) return `fertig seit ${new Date(a.last.end * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} – ausräumen`;
+    return a.learning ? "Lernphase – bereit" : "bereit";
+  }
+
+  _viewKwDev() {
+    const list = this._data.settings.kw_appliances || [];
+    const st = this._status?.appliances || {};
+    const card = (c) => {
+      const a = st[c.id] || { state: "idle", learning: true, n: 0, model: {} };
+      const m = a.model || {};
+      const [label, col, sic] = APP_STATE[a.state] || APP_STATE.idle;
+      const watt = a.watt;
+      const now = Date.now() / 1000;
+      let main = "";
+      if (a.run && (a.state === "running" || a.state === "ending")) {
+        const pc = a.state === "ending" ? Math.min(100, (a.run.quiet / Math.max(1, a.run.wait)) * 100) : a.run.eta ? Math.min(100, ((now - a.run.start) / Math.max(1, a.run.eta - a.run.start)) * 100) : 0;
+        main = `<div class="ap-run ${a.state}"><div class="vt-bar"><i style="width:${pc}%"></i></div><b>${esc(this._appLine(a))}</b>
+          <small>${fmt(a.run.wh / 1000, 2)} kWh bisher${a.run.pauses ? ` · ${a.run.pauses} Pause${a.run.pauses > 1 ? "n" : ""}` : ""}${a.state === "ending" ? " · kurze Pausen im Programm sind normal – erst nach genug Ruhe gilt es als fertig" : ""}</small></div>`;
+      } else if (a.state === "done" && a.last)
+        main = `<div class="ap-run done"><b>Fertig – ${this._durTxt(a.last.dur)}, ${fmt(a.last.wh / 1000, 2)} kWh</b><small>Ende ${new Date(a.last.end * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} · erkannt ${new Date(a.last.detected * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}${a.last.why && a.last.why !== "Ruhe" ? ` · ${esc(a.last.why)}` : ""}</small></div>`;
+      else main = `<div class="ap-run idle"><b>${a.learning ? `Lernphase – ${a.n} von 3 Durchläufen` : "Bereit"}</b><small>${a.learning ? "Bis dahin wartet Kraftwerk vorsichtig länger, bevor es „fertig“ meldet." : "Startet automatisch, sobald das Gerät Strom zieht."}</small></div>`;
+      const btn = (act, txt, icon, cls = "secondary") => `<button class="${cls} small" data-action="app-act" data-id="${esc(c.id)}" data-a="${act}"><ha-icon icon="${icon}"></ha-icon>${txt}</button>`;
+      const acts = a.state === "done" ? btn("ack", "Gesehen", "mdi:check", "primary") + btn("still_running", "Läuft noch", "mdi:play-outline") + btn("no_run", "Kein Durchlauf", "mdi:close")
+        : a.state === "running" || a.state === "ending" ? btn("finished", "Ist schon fertig", "mdi:check-all") + btn("no_run", "Kein Durchlauf", "mdi:close") : "";
+      const learned = a.n ? [
+        `Gelernt aus ${a.n} Durchl${a.n === 1 ? "auf" : "äufen"}`,
+        m.dur_lo != null ? `Dauer meist ${this._durTxt(m.dur_lo)}${m.dur_hi && m.dur_hi - m.dur_lo > 120 ? `–${this._durTxt(m.dur_hi)}` : ""}` : "",
+        m.pause_max ? `längste Pause im Programm ${this._durTxt(m.pause_max)}` : "keine Pausen im Programm",
+        `fertig nach ${this._durTxt(m.end_wait)} Ruhe`,
+        m.tail_s ? `Nachlauf (Knitterschutz/Anzeige) bis ${this._durTxt(m.tail_s)}${m.tail_w ? `, Spitzen bis ${fmt(m.tail_w, 0)} W` : ""}` : "",
+        `aktiv ab ${fmt(m.active_w, 0)} W${m.quiet_w != null ? ` (Ruhe/Anzeige bis ${fmt(m.quiet_w, 1)} W)` : ""}`,
+        m.kwh_med ? `Ø ${fmt(m.kwh_med, 2)} kWh` : "",
+        m.interval ? `Messwert etwa alle ${this._durTxt(m.interval)}` : "",
+      ].filter(Boolean).join(" · ") : `Startwerte für ${APP_TYPES[c.type]?.label || "Gerät"}: fertig nach ${this._durTxt(m.end_wait)} Ruhe, aktiv ab ${fmt(m.active_w, 0)} W`;
+      const hist = (a.history || []).slice(0, 5);
+      return `<article class="card ap-c">
+        <div class="vt-h"><span class="sr-ic" style="--c:${col}"><ha-icon icon="${APP_TYPES[c.type]?.icon || "mdi:power-plug-outline"}"></ha-icon></span><b>${esc(c.name)}</b>
+          <span class="vt-chip" style="--c:${col}"><ha-icon icon="${sic}"></ha-icon>${a.learning && a.state === "idle" ? "Lernphase" : label}</span>
+          <button class="icon" data-action="pop-open" data-pop="kwapp:${esc(c.id)}" title="Einstellen"><ha-icon icon="mdi:cog-outline"></ha-icon></button></div>
+        ${main}
+        <div class="ap-w"><ha-icon icon="mdi:flash-outline"></ha-icon>${a.gap ? `<span class="warn">Messwert fehlt – zählt nicht als Ende</span>` : `jetzt ${watt == null ? "–" : `${fmt(watt, watt < 10 ? 1 : 0)} W`}`}</div>
+        ${acts ? `<div class="ap-acts">${acts}</div>` : ""}
+        <details class="role-help"><summary>Was Kraftwerk gelernt hat</summary><p class="muted small">${esc(learned)}</p>
+          ${hist.length ? `<div class="ap-hist">${hist.map((h) => `<span><b>${new Date(h.start * 1000).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" })} ${new Date(h.start * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</b>${this._durTxt(h.dur)} · ${fmt(h.wh / 1000, 2)} kWh${h.max_pause ? ` · Pause bis ${this._durTxt(h.max_pause)}` : ""}${h.why && h.why !== "Ruhe" ? ` · ${esc(h.why)}` : ""}</span>`).join("")}</div>` : ""}
+        </details>
+      </article>`;
+    };
+    const head = this._sectionHead("mdi:washing-machine", "Geräte mit Fertigerkennung", this._admin ? `<button class="link" data-action="pop-open" data-pop="kwapp:new"><ha-icon icon="mdi:plus"></ha-icon>Gerät</button>` : "");
+    if (!list.length)
+      return head + `<section class="card empty"><ha-icon icon="mdi:washing-machine"></ha-icon><h2>Waschmaschine, Trockner & Co. melden, wenn sie fertig sind</h2>
+        <p class="muted">Kraftwerk lernt am Stromverbrauch einer Mess-Steckdose, wie ein Durchlauf aussieht – mit Pausen, Nachlauf und Knitterschutz – und meldet das Ende einmal aufs Handy.</p>
+        ${this._admin ? `<button class="primary" data-action="pop-open" data-pop="kwapp:new"><ha-icon icon="mdi:plus"></ha-icon>Gerät einrichten</button>` : ""}</section>`;
+    return head + `<div class="vt-grid">${list.map(card).join("")}</div>`;
+  }
+
+  /** Einrichtung eines Geräts: Name, Typ, Leistungssensor, Zusatzsensoren, Kanäle. */
+  _kwAppPop(id) {
+    const d = this._pop.draft;
+    const list = this._data.settings.kw_appliances || [];
+    const S = this._hass.states;
+    if (!d.init) {
+      const c = list.find((x) => x.id === id);
+      Object.assign(d, c ? { id: c.id, name: c.name, type: c.type, kwa_power: c.power, kwa_door: c.door || null, kwa_status: c.status || null,
+        status_done: (c.status_done || []).join(", "), notify: [...(c.notify || [])], notify_ha: !!c.notify_ha, important: !!c.important }
+        : { id: null, name: "", type: "waschmaschine", kwa_power: null, kwa_door: null, kwa_status: null, status_done: "", notify: [...(this._data.settings.notify_targets || [])], notify_ha: false, important: false });
+      d.init = true;
+    }
+    // Leistungssensor vorschlagen: passend zum Typ, mit W/kW
+    const powers = Object.keys(S).filter((e) => e.startsWith("sensor.") && ["W", "kW"].includes(S[e].attributes?.unit_of_measurement));
+    const re = APP_TYPES[d.type]?.match;
+    const sugg = re ? powers.filter((e) => re.test(`${e} ${S[e].attributes?.friendly_name || ""}`.toLowerCase()) && !list.some((x) => x.power === e && x.id !== d.id)) : [];
+    const ps = d.kwa_power ? S[d.kwa_power] : null;
+    const unit = ps?.attributes?.unit_of_measurement;
+    const services = Object.keys(this._hass.services?.notify || {}).filter((x) => !["notify", "persistent_notification", "send_message"].includes(x))
+      .sort((a, b) => (a.startsWith("mobile_app_") === b.startsWith("mobile_app_") ? a.localeCompare(b) : a.startsWith("mobile_app_") ? -1 : 1));
+    const chosen = new Set(d.notify || []);
+    const chip = (x) => `<button class="pchip ${chosen.has(x) ? "on" : ""}" data-action="kwapp-notify" data-id="${esc(x)}" aria-pressed="${chosen.has(x)}"><i></i>${esc(this._notifyName(x))}</button>`;
+    const sw2 = (k, on) => `<label class="switch"><input type="checkbox" data-kwapp-flag="${k}" ${on ? "checked" : ""}><span></span></label>`;
+    const a = (this._status?.appliances || {})[d.id] || null;
+    return {
+      icon: APP_TYPES[d.type]?.icon || "mdi:power-plug-outline", c: "#f59e0b", title: d.id ? esc(d.name || "Gerät") : "Gerät einrichten", sub: "Kraftwerk · Fertigerkennung",
+      body: `
+        <label class="field"><span>Name</span><input type="text" maxlength="40" data-kwapp="name" value="${esc(d.name)}" placeholder="${esc(APP_TYPES[d.type]?.label || "")}"></label>
+        <div class="field"><span>Gerätetyp</span><div class="segs small">${Object.entries(APP_TYPES).map(([k, t]) => `<button class="seg ${d.type === k ? "on" : ""}" data-action="kwapp-type" data-v="${k}"><ha-icon icon="${t.icon}"></ha-icon>${t.label}</button>`).join("")}</div></div>
+        <p class="muted small">Der Typ setzt nur die vorsichtigen Startwerte (z. B. Trockner: kurzes Warten, Waschmaschine/Geschirrspüler: lange Pausen möglich). Danach lernt Kraftwerk aus jedem Durchlauf.</p>
+        <div class="lbl">Leistungssensor</div>
+        ${sugg.length && !d.kwa_power ? `<div class="pchips">${sugg.map((e) => `<button class="pchip" data-action="kwapp-pick" data-id="${esc(e)}"><i></i>${esc(this._entityName(e))} · ${esc(S[e].state)} ${esc(S[e].attributes.unit_of_measurement)}</button>`).join("")}</div>` : ""}
+        <div class="field">${this._picker("kwa_power", d.kwa_power ? [d.kwa_power] : [])}</div>
+        ${ps ? `<p class="muted small"><ha-icon icon="mdi:flash-outline"></ha-icon>jetzt ${esc(ps.state)} ${esc(unit || "")}${!["W", "kW", "mW"].includes(unit) ? ` – <b>Einheit „${esc(unit || "keine")}“ ist keine Leistung</b>, bitte einen Sensor in W oder kW wählen` : ""}${["unavailable", "unknown"].includes(ps.state) ? " – gerade nicht erreichbar; fehlende Werte zählen nie als Ende" : ""}. Viele Mess-Steckdosen melden nur bei Änderung – das ist in Ordnung.</p>` : ""}
+        <details class="role-help" ${d.kwa_door || d.kwa_status ? "open" : ""}><summary>Weitere Sensoren (optional)</summary>
+          <div class="field"><span><ha-icon icon="mdi:door-open"></ha-icon> Türkontakt</span>${this._picker("kwa_door", d.kwa_door ? [d.kwa_door] : [])}</div>
+          <p class="muted small">Wird die Tür geöffnet, während das Ende geprüft wird, gilt das Gerät sofort als fertig – und Kraftwerk lernt, wie viel Ruhe wirklich reichte. Ist es fertig, gilt das Öffnen als „Gesehen“.</p>
+          <div class="field"><span><ha-icon icon="mdi:list-status"></ha-icon> Status des Geräts</span>${this._picker("kwa_status", d.kwa_status ? [d.kwa_status] : [])}</div>
+          ${d.kwa_status ? `<label class="field"><span>Zustand „fertig“ (mehrere mit Komma)</span><input type="text" data-kwapp="status_done" value="${esc(d.status_done)}" placeholder="z. B. Finished, fertig, WM ist fertig"><small class="muted">jetzt: ${esc(S[d.kwa_status]?.state ?? "–")}</small></label>` : ""}
+        </details>
+        <div class="lbl">Fertigmeldung</div>
+        <div class="pchips">${[...new Set([...services, ...chosen])].map(chip).join("") || `<span class="muted small">Keine App gefunden</span>`}</div>
+        <div class="wxrows">
+          ${this._setRow("kwha", "Auch in Home Assistant", "Mitteilung in der Seitenleiste", sw2("notify_ha", d.notify_ha), "Erscheint als Mitteilung (Glocke) in Home Assistant und verschwindet mit „Gesehen“.")}
+          ${this._setRow("kwimp", "Wichtig", "durchbricht „Nicht stören“", sw2("important", d.important), "iPhone: zeitkritisch, Android: hohe Priorität.")}
+        </div>
+        <p class="muted small">Je Durchlauf und Kanal kommt höchstens eine Meldung – auch nach Neustarts oder Verbindungsabbrüchen. Erkannt wird in Home Assistant selbst, das Dashboard muss nicht offen sein.</p>
+        ${d.id && this._admin ? `<div class="lbl">Lernen</div><div class="ap-acts">
+          <button class="secondary small" data-action="app-act" data-id="${esc(d.id)}" data-a="learn_history"><ha-icon icon="mdi:history"></ha-icon>Aus dem Verlauf lernen (10 Tage)</button>
+          <button class="secondary small" data-action="app-act" data-id="${esc(d.id)}" data-a="reset"><ha-icon icon="mdi:restore"></ha-icon>Neu lernen</button></div>
+          <p class="muted small">${a ? `Gelernt aus ${a.n} Durchläufen. ` : ""}„Aus dem Verlauf lernen“ spielt die gespeicherten Messwerte der letzten Tage nach – ohne Meldungen.</p>` : ""}`,
+      foot: `${d.id && this._admin ? `<button class="danger" data-action="kwapp-del" title="Gerät entfernen"><ha-icon icon="mdi:trash-can-outline"></ha-icon></button>` : ""}<span class="grow"></span>
+        <button class="secondary" data-action="pop-close">Abbrechen</button>${this._admin ? `<button class="primary" data-action="kwapp-save" ${d.kwa_power && String(d.name || "").trim() ? "" : "disabled"}><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>` : ""}`,
+    };
+  }
+
+  async _kwAppSave(del = false) {
+    const d = this._pop.draft;
+    const list = clone(this._data.settings.kw_appliances || []);
+    const slug = (x) => String(x).toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss").replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 30) || "geraet";
+    let id = d.id;
+    if (!id) { id = slug(d.name); while (list.some((x) => x.id === id)) id += "_2"; }
+    const item = { id, name: String(d.name).trim(), type: d.type, power: d.kwa_power, door: d.kwa_door || null, status: d.kwa_status || null,
+      status_done: String(d.status_done || "").split(",").map((x) => x.trim()).filter(Boolean), notify: d.notify || [], notify_ha: !!d.notify_ha, important: !!d.important };
+    const next = del ? list.filter((x) => x.id !== id) : list.some((x) => x.id === id) ? list.map((x) => (x.id === id ? item : x)) : [...list, item];
+    try {
+      this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { kw_appliances: next } });
+      this._toast(del ? `${item.name} entfernt` : `${item.name} gespeichert${d.id ? "" : " – Lernphase beginnt"}`);
+      this._closePop();
+      this._renderMain();
+    } catch (err) {
+      this._toast(`Das hat nicht geklappt: ${err?.message || err}`);
+    }
+  }
+
+  async _appAct(id, action) {
+    try {
+      const res = await this._ws({ type: "hauswerk/kraftwerk/appliance/action", id, action });
+      const c = (this._data.settings.kw_appliances || []).find((x) => x.id === id);
+      this._toast(action === "learn_history" ? `${c?.name}: ${res.runs} Durchläufe aus dem Verlauf gelernt` : `${c?.name}: ${res.text}`);
+    } catch (err) {
+      this._toast(`Das hat nicht geklappt: ${err?.message || err}`);
+    }
   }
 
   _viewKwRep() {
@@ -6084,6 +6260,7 @@ class HauswerkPanel extends HTMLElement {
     }
     if (String(id).startsWith("rwc:")) return this._rwcPop(id.slice(4));
     if (String(id).startsWith("rwpos:")) return this._rwPosPop(id.slice(6));
+    if (String(id).startsWith("kwapp:")) return this._kwAppPop(id.slice(6));
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (KW_POPS.includes(id)) return this._kwPop(id);
     if (id === "setup") return this._setupPop();
@@ -7645,6 +7822,11 @@ class HauswerkPanel extends HTMLElement {
       this._renderMain();
       return;
     }
+    if (["kwa_power", "kwa_door", "kwa_status"].includes(field)) {
+      if (field === "kwa_power" && values[0] && !String(this._pop.draft.name || "").trim()) this._pop.draft.name = APP_TYPES[this._pop.draft.type]?.label || "";
+      this._renderPop();
+      return;
+    }
     if (["outside_sensor", "weather_entity", "sun_entity", "vacation_calendar", "import_calendar", "w_weather"].includes(field)) {
       this._refreshSettings();
       return;
@@ -7695,6 +7877,16 @@ class HauswerkPanel extends HTMLElement {
       this._setQuery = t.value;
       const list = this.shadowRoot.getElementById("set-list");
       if (list) list.innerHTML = this._settingsList();
+      return;
+    }
+    if (t.dataset.kwappFlag && this._pop?.id?.startsWith("kwapp:")) {
+      this._pop.draft[t.dataset.kwappFlag] = t.checked;
+      return;
+    }
+    if (t.dataset.kwapp && this._pop?.id?.startsWith("kwapp:")) {
+      this._pop.draft[t.dataset.kwapp] = t.value;
+      if (isChange) this._renderPop();
+      else { const b = this.shadowRoot.querySelector('#pop [data-action="kwapp-save"]'); if (b) b.disabled = !(this._pop.draft.kwa_power && t.value.trim()); }
       return;
     }
     if (t.dataset.kwname && this._pop?.id === "kwcons") {
@@ -8863,6 +9055,35 @@ class HauswerkPanel extends HTMLElement {
       case "set-seg":
         this._settings[el.dataset.key] = el.dataset.v === "null" ? null : el.dataset.v;
         this._refreshSettings();
+        break;
+      case "kwapp-type":
+        this._pop.draft.type = el.dataset.v;
+        this._renderPop();
+        break;
+      case "kwapp-pick":
+        this._pop.draft.kwa_power = el.dataset.id;
+        if (!String(this._pop.draft.name || "").trim()) this._pop.draft.name = APP_TYPES[this._pop.draft.type]?.label || "";
+        this._renderPop();
+        break;
+      case "kwapp-notify": {
+        const set = new Set(this._pop.draft.notify || []);
+        if (set.has(el.dataset.id)) set.delete(el.dataset.id); else set.add(el.dataset.id);
+        this._pop.draft.notify = [...set];
+        this._renderPop();
+        break;
+      }
+      case "kwapp-flag":
+        this._pop.draft[el.dataset.k] = !this._pop.draft[el.dataset.k];
+        this._renderPop();
+        break;
+      case "kwapp-save":
+        this._kwAppSave();
+        break;
+      case "kwapp-del":
+        this._kwAppSave(true);
+        break;
+      case "app-act":
+        this._appAct(el.dataset.id, el.dataset.a);
         break;
       case "dash-create":
         this._dashCreate();
@@ -10786,6 +11007,19 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .rwm-win.big { width:34px; height:42px; border-radius:7px; }
 .rwm-nx { margin-left:auto; display:inline-flex; align-items:center; gap:3px; font-size:12px; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .rwm-nx ha-icon { --mdc-icon-size:13px; }
+.ap-c { padding:14px 16px; display:flex; flex-direction:column; gap:10px; margin:0; }
+.ap-run { display:flex; flex-direction:column; gap:4px; }
+.ap-run small { color:var(--muted); font-size:12.5px; }
+.ap-run.ending .vt-bar i { background:#f59e0b; }
+.ap-run.running .vt-bar i { background:#0ea5e9; }
+.ap-run.done b { color:#16a34a; }
+.ap-w { display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--muted); }
+.ap-w ha-icon { --mdc-icon-size:15px; }
+.ap-w .warn { color:#f59e0b; font-weight:600; }
+.ap-acts { display:flex; flex-wrap:wrap; gap:8px; }
+.ap-acts button { padding:8px 12px; min-height:0; font-size:13px; }
+.ap-hist { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--muted); }
+.ap-hist b { color:var(--text); font-weight:600; margin-right:6px; }
 .vt-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:14px; }
 .vt-c { padding:14px 16px; display:flex; flex-direction:column; gap:10px; margin:0; cursor:pointer; }
 .vt-h { display:flex; align-items:center; gap:8px; }

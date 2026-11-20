@@ -1043,3 +1043,29 @@ def test_rollwerk_fenster_nur_wenn_offen(panel):
     p.wait()
     joined = " | ".join(p.js(f"() => [...{EL}.shadowRoot.querySelectorAll('.rw-c .rw-info')].map((e) => e.textContent)"))
     assert "Sonne aufs Fenster" not in joined and "Sonne – beschattet" not in joined
+
+
+def test_kraftwerk_geraete_fertigerkennung(panel):
+    """Kraftwerk › Geräte: Zustände, Gelerntes, Korrektur, Einrichtung (Schema geprüft), Hinweis „fertig“."""
+    p = panel
+    p.view("kwdev")
+    text = p.js(f"{EL}.shadowRoot.textContent")
+    assert "läuft seit 45 Min." in text and "noch ca." in text and "Fertig – 1:42 Std." in text and "Gelernt aus 6 Durchläufen" in text
+    assert any(h["text"] == "Trockner fertig" for h in p.js(f"{EL}._hints()"))
+    p.click('[data-action="app-act"][data-id="trockner"][data-a="ack"]')
+    p.wait(300)
+    act = [m for m in p.sent() if m["type"] == "hauswerk/kraftwerk/appliance/action"][-1]
+    assert act["id"] == "trockner" and act["action"] == "ack"
+    # neues Gerät einrichten
+    p.js(f"() => {{ {EL}._openPop('kwapp:new'); }}")
+    p.wait()
+    p.click('#pop [data-action="kwapp-type"][data-v="geschirrspueler"]')
+    p.js(f"() => {{ {EL}._setPickerValue('kwa_power', ['sensor.steckdose_trockner_leistung']); }}")
+    p.js(f"""() => {{ const i = {EL}.shadowRoot.querySelector('#pop [data-kwapp="name"]'); i.value = 'Spülmaschine Küche'; i.dispatchEvent(new Event('input', {{bubbles: true, composed: true}})); }}""")
+    p.js(f"""() => {{ const c = {EL}.shadowRoot.querySelector('#pop [data-kwapp-flag="important"]'); c.checked = true; c.dispatchEvent(new Event('change', {{bubbles: true, composed: true}})); }}""")
+    p.click('#pop [data-action="kwapp-save"]')
+    p.wait(400)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]["kw_appliances"]
+    new = saved[-1]
+    assert new["id"] == "spuelmaschine_kueche" and new["type"] == "geschirrspueler" and new["important"] is True
+    assert new["power"] == "sensor.steckdose_trockner_leistung" and len(saved) == 3

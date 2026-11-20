@@ -12,7 +12,7 @@ from homeassistant.util import dt as dt_util
 from .const import LOG_DAYS, LOG_MAX, LOG_STORAGE_KEY, SETTING_LABELS
 
 # Kategorien (das Panel zeigt sie als Filter)
-CATEGORIES = ("presence", "season", "target", "window", "manual", "health", "command", "settings", "shutter")
+CATEGORIES = ("presence", "season", "target", "window", "manual", "health", "command", "settings", "shutter", "appliance")
 
 
 VALUE_LABEL = {"never": "nie", "outage": "nur nach Ausfall", "always": "immer", "auto": "automatisch", "home": "Zuhause"}

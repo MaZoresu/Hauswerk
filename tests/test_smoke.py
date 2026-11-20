@@ -59,7 +59,7 @@ def _stub_homeassistant():
     _mod("homeassistant.config_entries", ConfigEntry=object)
     _mod("homeassistant.const", STATE_HOME="home", STATE_UNAVAILABLE="unavailable", STATE_UNKNOWN="unknown",
          EVENT_CALL_SERVICE="call_service")
-    _mod("homeassistant.core", Event=object, HomeAssistant=object, Context=Context, callback=lambda f: f)
+    _mod("homeassistant.core", Event=object, HomeAssistant=object, State=object, Context=Context, callback=lambda f: f)
     helpers = _mod("homeassistant.helpers")
     helpers.device_registry = _mod("homeassistant.helpers.device_registry",
                                    async_get=lambda hass: types.SimpleNamespace(async_get=DEVS.get))
@@ -96,7 +96,7 @@ def hw(tmp_path_factory):
     pkg = root / "hw"
     pkg.mkdir()
     _mod("homeassistant.config_entries", ConfigEntry=object)
-    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py"):
+    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py"):
         shutil.copy(SRC / name, pkg / name)
     (pkg / "__init__.py").write_text("")
     sys.path.insert(0, str(root))
@@ -1203,5 +1203,53 @@ def test_lueften_ausgebaut(hw):
         week = ctl.status()["rooms"]["bad"]["air"]["week"]
         assert week["count"] == 1 and week["minutes"] >= 35 and week["rh_drop"] == 12
         assert ctl._data()["vent_log"]["bad"][0]["rh0"] == 72
+
+    asyncio.run(run())
+
+
+def test_geraet_fertig_einmal_gemeldet(hw):
+    """Kraftwerk-Gerät: läuft ohne Dashboard (nur Zustände und Takt), meldet „fertig“ je Kanal genau einmal –
+    auch nach einem Neustart nicht doppelt; Korrektur und Zustand stehen im Status."""
+    async def run():
+        STORES.clear()
+        NOW[0] = datetime(2026, 11, 20, 7, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("sensor.wm_leistung", "0.05", {"unit_of_measurement": "W"}, "WM Leistung")
+        log, haus, ctl = await _setup(hw, hass)
+        kw = hw.Kraftwerk(hass, log, haus)
+        await kw.async_load()
+        await kw.async_save_settings({"kw_appliances": [{"id": "wm", "name": "Waschmaschine", "type": "waschmaschine",
+                                                         "power": "sensor.wm_leistung", "notify": ["mobile_app_pixel"],
+                                                         "notify_ha": True}]})
+        await kw.async_start()
+        app = kw.appliances
+        assert haus.status()["appliances"]["wm"]["label"] == "Bereit" and haus.status()["appliances"]["wm"]["learning"]
+
+        def power(w, minutes):
+            for _ in range(int(minutes * 2)):
+                NOW[0] += timedelta(seconds=30)
+                hass.set("sensor.wm_leistung", str(w), {"unit_of_measurement": "W"}, "WM Leistung")
+                app._feed("wm", app._cfg("wm"), hass.states.get("sensor.wm_leistung"), NOW[0].timestamp())
+
+        power(1900, 40)
+        assert app.status()["wm"]["label"] == "Läuft"
+        power(150, 30)
+        power(1.6, 40)
+        await asyncio.sleep(0)
+        st = app.status()["wm"]
+        assert st["state"] == "done" and st["label"] == "Fertig"
+        assert hass.sent().count("Waschmaschine fertig") == 1
+        assert any(c[0] == "persistent_notification" for c in hass.calls)
+        # Neustart: aus dem Speicher laden – keine zweite Meldung
+        kw2 = hw.Kraftwerk(hass, log, haus)
+        await kw2.async_load()
+        await kw2.async_start()
+        rec = kw2.appliances.det["wm"].last
+        kw2.appliances._announce("wm", kw2.appliances._cfg("wm"), rec)
+        await asyncio.sleep(0)
+        assert hass.sent().count("Waschmaschine fertig") == 1
+        # Korrektur „Gesehen“
+        res = await kw2.appliances.async_action("wm", "ack")
+        assert res["ok"] and kw2.appliances.status()["wm"]["state"] == "idle"
 
     asyncio.run(run())

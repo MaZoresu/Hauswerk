@@ -2,6 +2,16 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.56.0 – 2026-11-20
+
+### Neu – Kraftwerk: lernende Fertigerkennung
+- **Kraftwerk › Geräte:** Waschmaschine, Trockner, Geschirrspüler oder ein anderes Gerät melden, wenn sie fertig sind – erkannt am Stromverbrauch einer Mess-Steckdose, direkt in Home Assistant (das Dashboard muss nicht offen sein).
+- **Einrichtung je Gerät:** Name, Gerätetyp, Leistungssensor (W, kW oder mW; passende Steckdosen werden vorgeschlagen), optional Türkontakt und ein Status-Sensor des Geräts (z. B. „fertig“), Kanäle für die Meldung (Apps, Mitteilung in Home Assistant, „Wichtig“).
+- **Zustände:** Lernphase · Bereit · Läuft (mit Restzeit aus den gelernten Durchläufen) · Ende wird geprüft (mit „x von y Min. Ruhe“) · Fertig. Dazu Zeile in der Kopfkachel, Hinweis unter der Glocke und im Bildschirmschoner.
+- **Lernen aus beobachteten Durchläufen, je Gerät getrennt und dauerhaft gespeichert:** typische Dauer, alle Ruhephasen mitten im Programm (Einweichen, Pumpenpausen), Leistung „aktiv“ gegenüber Ruhe/Anzeige, Nachlauf (Knitterschutz-Spitzen, Anzeige, Standby) und Messabstand. Die Wartezeit bis „fertig“ richtet sich nach der längsten gelernten Pause; deutlich vor der üblichen Dauer wird länger geprüft. Unter „Was Kraftwerk gelernt hat“ steht alles nachvollziehbar mit den letzten Durchläufen.
+- **Korrektur:** „Läuft noch“ (die Ruhe war eine Pause – künftig länger prüfen), „Ist schon fertig“ (so viel Ruhe reicht – künftig kürzer), „Kein Durchlauf“ (höhere Mindestenergie), „Gesehen“. Dazu „Aus dem Verlauf lernen“ (spielt die letzten 10 Tage nach, ohne Meldungen) und „Neu lernen“.
+- **Fertigmeldung:** je Durchlauf und Kanal höchstens einmal – vor dem Senden gespeichert, damit Neustarts, Neuladen oder Verbindungsabbrüche keine Doppel auslösen. Fehlende Messwerte (nicht erreichbar, Neustart) zählen weder als Ruhe noch als Ende. Kurze Spitzen im Nachlauf starten keinen neuen Durchlauf.
+
 ## 0.55.1 – 2026-11-20
 
 ### Geändert (Rollwerk-Kacheln)

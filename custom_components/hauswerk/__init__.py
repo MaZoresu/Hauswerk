@@ -90,6 +90,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await shutters.async_load()
     power = Kraftwerk(hass, log, haus)
     await power.async_load()
+    power.appliances.subscribe(heating.push)
     hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HOUSE: haus, MODULE_HEATING: heating, MODULE_SHUTTER: shutters, MODULE_POWER: power}
 
     api.async_register(hass)

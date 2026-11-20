@@ -11,7 +11,7 @@ Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite 
 |---|---|
 | <img src="docs/icons/heizwerk.svg" height="20"> **Heizwerk** | fertig – raumweise Heizungsregelung (früher eine eigene Integration) |
 | <img src="docs/icons/rollwerk.svg" height="20"> **Rollwerk** | Rollläden mit Profilen wie die Cover Control Automation: Zeiten, Sonne, Helligkeit, Beschattung, Lüften, Bewohner, Sturm |
-| <img src="docs/icons/kraftwerk.svg" height="20"> **Kraftwerk** | Energiefluss live – Solar, Netz, Batterie, Hausverbrauch und Verbraucher; Tageswerte, Autarkie und Kosten aus dem Energie-Dashboard |
+| <img src="docs/icons/kraftwerk.svg" height="20"> **Kraftwerk** | Energiefluss live – Solar, Netz, Batterie, Hausverbrauch und Verbraucher; Tageswerte, Autarkie und Kosten aus dem Energie-Dashboard; **lernende Fertigerkennung** für Waschmaschine, Trockner & Co. |
 | Licht | geplant |
 | Garten | geplant |
 

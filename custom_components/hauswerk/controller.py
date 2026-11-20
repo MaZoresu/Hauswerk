@@ -788,6 +788,13 @@ class Heizen:
 
     # ------------------------------------------------------------ Abonnements fürs Panel
     @callback
+    @callback
+    def push(self) -> None:
+        """Status sofort an das Panel schicken (z. B. Gerät fertig), ohne neu zu regeln."""
+        status = self.status()
+        for cb in list(self._subscribers):
+            cb(status)
+
     def subscribe(self, cb: Callable[[dict], None]) -> Callable[[], None]:
         self._subscribers.add(cb)
 
