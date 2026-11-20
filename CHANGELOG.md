@@ -2,6 +2,17 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.66.0 – 2026-11-20
+
+### Neu (Lichtwerk)
+- **Ablauftimer bis die Leuchte wieder ausgeht** – für Licht über Bewegungsmelder:
+  - **HmIP-Direktverknüpfung:** Lichtwerk liest die Einschaltdauer der Verknüpfung aus der CCU (nur lesen, z. B. 1 Min.). Solange der Melder Bewegung bzw. Anwesenheit meldet, steht „aus 1 Min. nach der letzten Bewegung“; ist er ruhig, läuft „aus in 0:42“ sekundengenau herunter.
+  - **Bewegung im Profil:** genauso mit der Nachlaufzeit des Profils („Aus nach x Min. ohne Bewegung“).
+  - In der kompakten Ansicht steht der Countdown neben dem Namen.
+
+### Geändert
+- **Kein Melder-Name mehr in der Kachel:** Die Markierung heißt nur noch „HmIP“, die Zeile mit dem Bewegungsmelder entfällt (das Symbol an der Lampe bleibt; der Name steht beim Antippen bzw. Darüberfahren). Auch die Kopfkachel sagt nur „… HmIP an“.
+
 ## 0.65.5 – 2026-11-20
 
 ### Geändert

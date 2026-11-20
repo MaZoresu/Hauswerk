@@ -147,6 +147,31 @@ def findings(rooms: dict[str, dict], analysis: dict[str, dict], name_of, devices
     return out
 
 
+# HmIP-Zeitbasis (TIME_BASE 0–7) in Sekunden; Basis 7 mit Faktor 31 = unendlich
+_HMIP_BASE = [0.1, 1, 5, 10, 60, 300, 600, 3600]
+
+
+def on_time(paramset: dict | None, kind: str = "SHORT") -> float | None:
+    """Einschaltdauer einer Verknüpfung in Sekunden aus dem Link-Paramset (HmIP: Basis × Faktor, BidCos: Sekunden).
+    None = unendlich bzw. unbekannt."""
+    p = paramset or {}
+    if f"{kind}_ON_TIME_BASE" in p and f"{kind}_ON_TIME_FACTOR" in p:
+        base, fac = int(p[f"{kind}_ON_TIME_BASE"]), int(p[f"{kind}_ON_TIME_FACTOR"])
+        if (base == 7 and fac == 31) or not 0 <= base < len(_HMIP_BASE):
+            return None
+        return _HMIP_BASE[base] * fac
+    if f"{kind}_ON_TIME" in p:
+        v = float(p[f"{kind}_ON_TIME"])
+        return None if v >= 111600 or v <= 0 else v
+    return None
+
+
+def entity_channel(unique_id: str | None, addr: str) -> int | None:
+    """Kanal einer Homematic-Entität aus ihrer unique_id (…<adresse>_<kanal>_…)."""
+    m = re.search(re.escape(addr.lower()) + r"[_:](\d+)", (unique_id or "").lower())
+    return int(m.group(1)) if m else None
+
+
 class HmLinks:
     """Liest und merkt die Direktverknüpfungen der CCU."""
 
@@ -156,6 +181,7 @@ class HmLinks:
         self.devices: dict[str, dict[str, Any]] = {}
         self.at: str | None = None
         self.error: str | None = None
+        self.on_times: dict[tuple[str, str], float | None] = {}
 
     @property
     def available(self) -> bool:
@@ -205,6 +231,25 @@ class HmLinks:
                 raise
             return out
 
+    async def async_on_time(self, sender: str, entity_id: str, addr: str) -> tuple[bool, float | None]:
+        """Einschaltdauer der Verknüpfung Sender-Kanal → Leuchte. (gelesen?, Sekunden oder None = dauerhaft)."""
+        key = (sender, entity_id)
+        if key in self.on_times:
+            return True, self.on_times[key]
+        entry = er.async_get(self.hass).async_get(entity_id)
+        first = entity_channel(getattr(entry, "unique_id", None), addr)
+        for ch in ([first] if first is not None else []) + [c for c in range(1, 9) if c != first]:
+            try:
+                res = await self.hass.services.async_call(HM_DOMAIN, "get_link_paramset",
+                                                          {"sender_channel_address": sender, "receiver_channel_address": f"{addr}:{ch}"},
+                                                          blocking=True, return_response=True)
+            except Exception:  # noqa: BLE001 - kein Link auf diesem Kanal
+                continue
+            if res:
+                self.on_times[key] = on_time(res)
+                return True, self.on_times[key]
+        return False, None
+
     def entities_of(self, addr: str) -> list[str]:
         """Entitäten eines Homematic-Geräts (für Sender wie Bewegungsmelder)."""
         reg = er.async_get(self.hass)
@@ -231,6 +276,7 @@ class HmLinks:
                 errors.append(f"{a}: {err}")
         if peers:
             self.peers = peers
+            self.on_times = {}
             self.at = dt_util.utcnow().isoformat()
         self.error = "; ".join(errors[:3]) if errors and not peers else None
         _LOGGER.debug("Homematic-Verknüpfungen: %d Geräte gelesen, %d Fehler", len(peers), len(errors))

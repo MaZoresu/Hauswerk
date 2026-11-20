@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.65.5";
+const VERSION = "0.66.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -760,6 +760,10 @@ class HauswerkPanel extends HTMLElement {
       const c = this.shadowRoot.querySelector(".hclock");
       if (c) c.textContent = new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
     }, 15000);
+    // Ablauftimer der Lichter (aus in m:ss) sekündlich, ohne neu zu zeichnen
+    this._tick = setInterval(() => {
+      for (const el of this.shadowRoot.querySelectorAll("[data-lw-until]")) el.textContent = this._lwLeft(el.dataset.lwUntil);
+    }, 1000);
     this._timer = setInterval(() => {
       this._reports = {};
       if (["start", "overview", "report"].includes(this._tab)) this._renderMain();
@@ -770,6 +774,7 @@ class HauswerkPanel extends HTMLElement {
     window.removeEventListener("popstate", this._onLocation);
     clearInterval(this._timer);
     clearInterval(this._clock);
+    clearInterval(this._tick);
     if (this._io) this._io.disconnect();
     for (const sub of Object.values(this._fcSubs || {})) sub.then((u) => u()).catch(() => {});
     this._fcSubs = {};
@@ -4200,7 +4205,7 @@ class HauswerkPanel extends HTMLElement {
     }
     const lines = [];
     for (const l of hmip.slice(0, 2))
-      lines.push({ icon: "mdi:link-variant", c: "#0ea5e9", text: `${this._lwName(l)} HmIP an – ${l.ls.ccu}`, act: act(l) });
+      lines.push({ icon: "mdi:link-variant", c: "#0ea5e9", text: `${this._lwName(l)} HmIP an`, act: act(l) });
     for (const l of manual.slice(0, 2))
       lines.push({ icon: "mdi:hand-back-right-outline", c: C.hand, text: `${this._lwName(l)} von Hand ${l.st?.state === "on" ? "an" : "aus"} – Automatik wartet${l.ls.manual.until ? ` bis ${new Date(l.ls.manual.until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : " bis zum nächsten Wechsel"}`, act: act(l) });
     for (const l of motion.slice(0, 1)) lines.push({ icon: "mdi:motion-sensor", c: C.ok, text: `${this._lwName(l)}: Bewegung`, act: act(l) });
@@ -4244,13 +4249,13 @@ class HauswerkPanel extends HTMLElement {
       const flags = [];
       const mot = this._lwMotion(l);
       const ccuMotion = this._lwLinkPeers(l).some((x) => x.name === l.ls.ccu && x.kind === "motion");
-      if (l.ls.ccu) flags.push([ccuMotion ? "mdi:motion-sensor" : "mdi:link-variant", `HmIP · ${l.ls.ccu}`, "#0ea5e9"]);
+      if (l.ls.ccu) flags.push([ccuMotion ? "mdi:motion-sensor" : "mdi:link-variant", "HmIP", "#0ea5e9"]);
       else if (l.ls.manual && l.cfg.auto !== false) flags.push(["mdi:hand-back-right-outline", "von Hand – Automatik wartet", C.hand]);
       if (l.ls.motion) flags.push(["mdi:motion-sensor", "Bewegung", C.ok]);
       if (on && l.ls.night) flags.push(["mdi:weather-night", "Nachtlicht", "#6366f1"]);
+      if (on && l.ls.off) flags.push(["mdi:timer-outline", this._lwOffTxt(l.ls.off), C.ok]);
       const nx = l.ls.next;
       const info = [
-        ...(mot ? [["mdi:motion-sensor", mot.length === 1 ? mot[0].replace(" (HmIP)", "") : `${mot.length} Melder`, `Bewegungsmelder: ${mot.join(", ")}`]] : []),
         ...(on && l.ls.since ? [["mdi:clock-outline", `an seit ${new Date(l.ls.since).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`]] : []),
         ...(nx && l.cfg.auto !== false ? [[nx.action === "on" ? "mdi:lightbulb-on-outline" : "mdi:lightbulb-off-outline", `${nx.action === "on" ? "an" : "aus"} ${this._lwWhen(nx)}`, nx.reason]] : []),
         ...(l.cfg.auto !== false ? [["mdi:tune-variant", this._lwProfName(l.cfg.profile)]] : []),
@@ -4276,7 +4281,7 @@ class HauswerkPanel extends HTMLElement {
       const flag = l.ls.ccu ? [this._lwLinkPeers(l).some((x) => x.name === l.ls.ccu && x.kind === "motion") ? "mdi:motion-sensor" : "mdi:link-variant", "#0ea5e9"] : l.cfg.auto === false ? (mot ? ["mdi:motion-sensor", "var(--muted)"] : null) : l.ls.manual ? ["mdi:hand-back-right-outline", C.hand] : l.ls.motion ? ["mdi:motion-sensor", C.ok] : on && l.ls.night ? ["mdi:weather-night", "#6366f1"] : mot ? ["mdi:motion-sensor", "var(--muted)"] : null;
       return `
         <article class="card rw-m lw-m ${bad ? "bad" : ""}" style="--lc:${this._lwColor(l)}" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" role="button" tabindex="0" title="Helligkeit">
-          <div class="rwm-top"><b>${esc(this._lwName(l))}</b>${flag ? `<ha-icon icon="${flag[0]}" style="color:${flag[1]}"></ha-icon>` : ""}</div>
+          <div class="rwm-top"><b>${esc(this._lwName(l))}</b>${on && l.ls.off?.at ? `<small class="lw-offm"><span data-lw-until="${esc(l.ls.off.at)}">${this._lwLeft(l.ls.off.at)}</span></small>` : ""}${flag ? `<ha-icon icon="${flag[0]}" style="color:${flag[1]}"></ha-icon>` : ""}</div>
           <div class="rwm-pos"><ha-icon class="lw-mi" icon="${bad ? "mdi:lightbulb-alert-outline" : on ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}"></ha-icon><b>${bad ? "–" : on ? (pct != null && pct < 100 ? `${pct} %` : "an") : "aus"}</b>${l.ls.next && l.cfg.auto !== false ? `<small class="rwm-nx">${this._lwWhen(l.ls.next).replace("morgen ", "")} ${l.ls.next.action === "on" ? "↑" : "↓"}</small>` : ""}</div>
           <div class="rwm-ctl"><button class="sbtn" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" ${bad ? "disabled" : ""} title="${on ? "Aus" : "An"}"><ha-icon icon="mdi:power"></ha-icon></button></div>
         </article>`;
@@ -4328,6 +4333,18 @@ class HauswerkPanel extends HTMLElement {
     const prof = l.cfg.auto === false ? {} : this._data.lichtwerk?.profiles?.[l.cfg.profile || "standard"] || {};
     const names = [...(prof.motion || []).map((e) => this._entityName(e)), ...(this._lwLinkPeers(l).filter((x) => x.kind === "motion").map((x) => `${x.name} (HmIP)`))];
     return names.length ? [...new Set(names)] : null;
+  }
+
+  _lwLeft(iso) {
+    const sec = Math.max(0, Math.round((new Date(iso) - Date.now()) / 1000));
+    return sec >= 3600 ? `${Math.floor(sec / 3600)}:${String(Math.floor((sec % 3600) / 60)).padStart(2, "0")} h` : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+  }
+
+  /** Ablauftimer: „aus in 0:42“ (läuft live) bzw. „aus 1 Min. nach der letzten Bewegung“. */
+  _lwOffTxt(off) {
+    if (off.at) return `aus in <span data-lw-until="${esc(off.at)}">${this._lwLeft(off.at)}</span>`;
+    const m = off.while >= 60 ? `${fmt(off.while / 60, off.while % 60 ? 1 : 0)} Min.` : `${Math.round(off.while)} s`;
+    return `aus ${m} nach der letzten Bewegung`;
   }
 
   _lwLinkPeers(l) {
@@ -12568,6 +12585,7 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .lw-bulb { width:46px; height:46px; flex:none; border-radius:14px; border:none; display:grid; place-items:center; cursor:pointer; background:var(--card2); color:var(--muted); }
 .lw-bulb ha-icon { --mdc-icon-size:26px; }
 .lw-bulb { position:relative; }
+.lw-offm { margin-left:auto; font-variant-numeric:tabular-nums; color:#22c55e; font-weight:600; }
 .lw-mot { position:absolute; right:-5px; bottom:-5px; width:20px; height:20px; border-radius:50%; display:grid; place-items:center; background:var(--card); border:1.5px solid var(--line, var(--card2)); color:#22c55e; }
 .lw-mot ha-icon { --mdc-icon-size:13px !important; }
 .lw-bulb.on { background:color-mix(in srgb, var(--lc) 26%, var(--card2)); color:var(--lc); box-shadow:0 0 18px color-mix(in srgb, var(--lc) 45%, transparent); }

@@ -141,6 +141,11 @@ class Hass:
             cb(types.SimpleNamespace(data={"domain": domain, "service": service, "service_data": data}, context=ctx))
         if (domain, service) == ("calendar", "get_events"):
             return {data["entity_id"]: {"events": getattr(self, "events", {}).get(data["entity_id"], [])}}
+        if (domain, service) == ("homematicip_local", "get_link_paramset"):
+            key = (data["sender_channel_address"], data["receiver_channel_address"])
+            if key not in getattr(self, "paramsets", {}):
+                raise RuntimeError("XMLRPC Fault: no link")
+            return self.paramsets[key]
         if (domain, service) == ("homematicip_local", "get_link_peers"):
             a = data["device_address"]
             if a in getattr(self, "bidcos", set()):
@@ -1717,6 +1722,18 @@ def test_homematic_verknuepfungen(hw):
     asyncio.run(run())
 
 
+def test_hmip_einschaltdauer():
+    import importlib.util as iu
+    spec = iu.spec_from_file_location("hml", Path(__file__).resolve().parents[1] / "custom_components" / "hauswerk" / "hmlinks.py")
+    m = iu.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    assert m.on_time({"SHORT_ON_TIME_BASE": 4, "SHORT_ON_TIME_FACTOR": 1}) == 60
+    assert m.on_time({"SHORT_ON_TIME_BASE": 1, "SHORT_ON_TIME_FACTOR": 30}) == 30
+    assert m.on_time({"SHORT_ON_TIME_BASE": 7, "SHORT_ON_TIME_FACTOR": 31}) is None
+    assert m.on_time({"SHORT_ON_TIME": 60.0}) == 60 and m.on_time({"SHORT_ON_TIME": 111600.0}) is None
+    assert m.entity_channel("00085d89a3c2f9_4_state", "00085D89A3C2F9") == 4 and m.entity_channel(None, "X") is None
+
+
 def test_lichtwerk_ccu_verknuepfungen(hw):
     """Lichtwerk: Leuchten, die die CCU direkt schaltet (Bewegungsmelder), werden erkannt; Schalten über die
     Verknüpfung ist nicht „von Hand“ – Lichtwerk wartet, bis die CCU wieder ausschaltet. BidCos je Kanal."""
@@ -1741,6 +1758,8 @@ def test_lichtwerk_ccu_verknuepfungen(hw):
         REG_.async_get = lambda h: types.SimpleNamespace(async_get=REG.get, entities=REG)
         hass.links = {"BSM1": ["BSM1:4", "BSM1:1", "SPI1:1"], "PEQ1:1": ["PEQ9:1", "PEQ1:1", "PEQ1:2"]}
         hass.bidcos = {"PEQ1"}
+        hass.paramsets = {("SPI1:1", "BSM1:4"): {"SHORT_ON_TIME_BASE": 4, "SHORT_ON_TIME_FACTOR": 1, "SHORT_OFF_TIME_BASE": 7},
+                          ("PEQ9:1", "PEQ1:1"): {"SHORT_ON_TIME": 90.0}}
         log, haus, ctl = await _setup(hw, hass)
         lw = hw.Lichtwerk(hass, log, haus)
         await lw.async_load()
@@ -1766,6 +1785,13 @@ def test_lichtwerk_ccu_verknuepfungen(hw):
         x = lw.status()["lights"]["light.windfang"]
         assert x["ccu"] == "S_Bewegung:Windfang" and x["want"] is None and x["cause"].startswith("HmIP: S_Bewegung:Windfang") and len(hass.calls) == n
         assert lw.status()["manual"] == 0
+        # Ablauftimer: Melder meldet noch → „solange Bewegung + 1 Min.“; Melder ruhig → Ablauf 1 Min. danach
+        assert wf["peers"][0]["on_time"] == 60 and st["lights"]["light.eingang"]["peers"][0]["on_time"] == 90
+        assert lw.status()["lights"]["light.windfang"]["off"] == {"while": 60, "src": "HmIP"}
+        hass.set("binary_sensor.spi", "off", {"device_class": "occupancy"}, "S_Bewegung:Windfang")
+        await lw.async_evaluate()
+        off = lw.status()["lights"]["light.windfang"]["off"]
+        assert off["src"] == "HmIP" and off["at"] == (NOW[0] + timedelta(seconds=60)).isoformat(), off
         # CCU schaltet nach ihrer Nachlaufzeit aus → Lichtwerk übernimmt wieder
         NOW[0] += timedelta(minutes=3)
         old = hass.st["light.windfang"]

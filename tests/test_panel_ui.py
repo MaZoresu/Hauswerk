@@ -1457,7 +1457,7 @@ def test_lichtwerk_ccu_verknuepfungen(panel):
     p.view("lights")
     p.wait()
     main = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
-    assert "HmIP · Bewegung Flur OG" in main and "von Hand" not in main.split("Flur OG")[1].split("\n\n")[0]
+    assert "HmIP" in main and "Bewegung Flur OG" not in main
 
 
 def test_lichtwerk_bewegungsmelder_symbol(panel):
@@ -1468,7 +1468,18 @@ def test_lichtwerk_bewegungsmelder_symbol(panel):
     ids = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.lw-c')].filter((c) => c.querySelector('.lw-mot')).map((c) => c.querySelector('.lw-bulb').dataset.ids)")
     assert "light.flur_og" in ids and "light.eingang" in ids and "light.kuche" not in ids and "light.wohnzimmer" not in ids, ids
     txt = p.js(f"{EL}.shadowRoot.querySelector('.lw-bulb[data-ids=\"light.eingang\"]').closest('.lw-c').innerText")
-    assert "S_Bewegung:Vorgarten" in txt
+    assert "S_Bewegung:Vorgarten" not in txt  # kein Melder-Name in der Kachel
+    # Ablauftimer: läuft sekündlich, „solange Bewegung“ als Text
+    p.js(f"""() => {{ const x = {EL}._lwStatus.lights['light.flur_og']; Object.assign(x, {{ state: 'on', ccu: 'Bewegung Flur OG', off: {{ at: new Date(Date.now() + 75e3).toISOString(), src: 'HmIP' }} }});
+      {EL}._hass.states['light.flur_og'] = {{ ...{EL}._hass.states['light.flur_og'], state: 'on' }};
+      Object.assign({EL}._lwStatus.lights['light.wohnzimmer'], {{ off: {{ while: 60, src: 'HmIP' }} }}); {EL}._renderMain(); }}""")
+    p.wait(1200)
+    main = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    t1 = p.js(f"{EL}.shadowRoot.querySelector('#main [data-lw-until]').textContent")
+    p.wait(2100)
+    t2 = p.js(f"{EL}.shadowRoot.querySelector('#main [data-lw-until]').textContent")
+    assert t1.startswith("1:") and t2 != t1, (t1, t2)
+    assert "aus 1 Min. nach der letzten Bewegung" in main
 
 
 def test_lichtwerk_hmip_bei_profil_aus(panel):
@@ -1479,5 +1490,5 @@ def test_lichtwerk_hmip_bei_profil_aus(panel):
     p.view("lights")
     p.wait()
     card = p.js(f"{EL}.shadowRoot.querySelector('.lw-bulb[data-ids=\"light.wohnzimmer\"]').closest('.lw-c').innerText")
-    assert "HmIP · S_Bewegung:Windfang" in card and "von Hand" not in card and "Automatik übernimmt" not in card, card
+    assert "HmIP" in card and "S_Bewegung" not in card and "von Hand" not in card and "Automatik übernimmt" not in card, card
     assert p.js(f"!!{EL}.shadowRoot.querySelector('.lw-bulb[data-ids=\"light.wohnzimmer\"] .lw-mot')")

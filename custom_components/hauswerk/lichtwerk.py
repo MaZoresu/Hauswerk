@@ -220,6 +220,15 @@ class Lichtwerk:
             return self.links_status()
         await self.hmlinks.async_refresh(list(self.settings.get("lw_lights") or []))
         self._analyze_links()
+        # Einschaltdauer je Verknüpfung (für den Ablauftimer an der Kachel)
+        for eid, info in self._links.items():
+            a = self.hmlinks.addr(eid)
+            for p in info["peers"]:
+                for ch in p["channels"] or [1]:
+                    ok, sec = await self.hmlinks.async_on_time(f"{p['address']}:{ch}", eid, a)
+                    if ok:
+                        p["on_time"], p["on_time_known"] = sec, True
+                        break
         self._track()
         if by:
             self.log.add("settings", "Lichtwerk: Homematic-Verknüpfungen gelesen",
@@ -246,7 +255,8 @@ class Lichtwerk:
                         merged[pa]["channels"].append(ch)
                     continue
                 ents = [e for e in self.hmlinks.entities_of(pa) if e.startswith("binary_sensor.") or e.startswith("event.")]
-                merged[pa] = {"address": pa, "name": dev.get("name") or pa, "model": dev.get("model"), "kind": sensor_kind(dev.get("model")),
+                ot = next(((True, v) for (snd, le), v in self.hmlinks.on_times.items() if le == eid and snd.split(":")[0] == pa), (False, None))
+                merged[pa] = {"on_time": ot[1], "on_time_known": ot[0], "address": pa, "name": dev.get("name") or pa, "model": dev.get("model"), "kind": sensor_kind(dev.get("model")),
                               "channels": [ch] if ch is not None else [], "entities": ents}
             info = {"peers": list(merged.values()), "own": own}
             self._links[eid] = info
@@ -614,6 +624,8 @@ class Lichtwerk:
                 "switched_at": dt_util.utc_from_timestamp(rt["switched_at"]).isoformat() if rt.get("switched_at") else None,
                 "since": st.last_changed.isoformat() if st is not None and getattr(st, "last_changed", None) else None,
             }
+        for eid, x in lights.items():
+            x["off"] = self._off_timer(eid, x) if x["state"] == "on" else None
         on = [e for e, x in lights.items() if x["state"] == "on"]
         nxt = sorted((x["next"]["day"], x["next"]["min"], e) for e, x in lights.items() if x.get("next"))
         return {"lights": lights, "on": len(on), "total": len(lights), "elevation": elev,
@@ -621,6 +633,27 @@ class Lichtwerk:
                           "count": sum(1 for n in nxt if n[:2] == nxt[0][:2])} if nxt else None),
                 "manual": sum(1 for x in lights.values() if x["manual"] and not x["ccu"]), "away": bool(self.haus.away),
                 "links": self.links_status()}
+
+    def _off_timer(self, eid: str, x: dict) -> dict | None:
+        """Wann geht die Leuchte wieder aus? Bewegung im Profil (Nachlaufzeit) oder HmIP-Verknüpfung (Einschaltdauer der CCU).
+        {"at": ISO} = Ablauf, {"while": Sekunden} = solange Bewegung, danach so lange."""
+        rt = self._rt.get(eid) or {}
+        if x.get("ccu"):
+            peer = next((p for p in (self._links.get(eid) or {}).get("peers", []) if p["name"] == x["ccu"]), None)
+            if not peer or not peer.get("on_time"):
+                return None
+            sts = [st for e in peer.get("entities") or [] if (st := self.hass.states.get(e)) is not None and st.state in ("on", "off")]
+            if any(st.state == "on" for st in sts) or not sts:
+                return {"while": peer["on_time"], "src": "HmIP"}
+            last = max(st.last_changed.timestamp() for st in sts)
+            return {"at": dt_util.utc_from_timestamp(max(last + peer["on_time"], dt_util.utcnow().timestamp())).isoformat(), "src": "HmIP"}
+        if x.get("motion") and x.get("auto") and str(x.get("cause") or "").startswith("Bewegung"):
+            prof = self.profile(eid)
+            off = float(prof.get("motion_off") or 3) * 60
+            if any(self._on(m) for m in prof.get("motion") or []):
+                return {"while": off, "src": "Bewegung"}
+            return {"at": dt_util.utc_from_timestamp(float(rt.get("motion_last") or 0) + off).isoformat(), "src": "Bewegung"}
+        return None
 
     def status(self) -> dict:
         if not self._status:
