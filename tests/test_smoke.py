@@ -127,7 +127,7 @@ class Hass:
         self.states = types.SimpleNamespace(
             get=self.st.get, async_entity_ids=lambda domain: [e for e in self.st if e.startswith(f"{domain}.")],
             async_all=lambda domain=None: [s for e, s in self.st.items() if domain is None or e.startswith(f"{domain}.")])
-        self.services = types.SimpleNamespace(async_call=self._call)
+        self.services = types.SimpleNamespace(async_call=self._call, has_service=lambda d, s: True)
         self.listeners = []
         self.bus = types.SimpleNamespace(async_listen=lambda ev, cb: self.listeners.append(cb) or (lambda: None))
         self.forecast = None
@@ -1309,5 +1309,45 @@ def test_rollwerk_zeiten_je_rollladen_und_beschattungstemperatur(hw):
         # das Schließen hängt nicht an der Beschattungstemperatur
         assert rw.status()["covers"]["cover.wz"]["times"]["close"] is not None
         await rw.async_stop()
+
+    asyncio.run(run())
+
+
+def test_benachrichtigungskanaele(hw):
+    """Gemeinsame Kanäle: alte Auswahl übernommen, je Anlass eigene Kanäle (z. B. Ansage), nur erreichbare,
+    keine Doppel binnen 2 Min., Testnachricht mit Ergebnis je Kanal."""
+    async def run():
+        STORES.clear()
+        NOW[0] = datetime(2026, 11, 20, 10, 0, tzinfo=timezone.utc)
+        STORES["hauswerk.haus"] = {"settings": {"notify_targets": ["mobile_app_pixel"], "notify_ha": True}}
+        hass = Hass()
+        hass.set("tts.google", "unknown", {}, "Google")
+        hass.set("media_player.tablet", "idle", {}, "Tablet")
+        hass.set("notify.iphone", "unknown", {}, "iPhone")
+        hass.set("media_player.tv", "unavailable", {}, "Fernseher")
+        log, haus, ctl = await _setup(hw, hass)
+        assert haus.settings["notify_channels"] == ["svc:mobile_app_pixel", "ha"]
+        await haus.async_save_settings({"notify_channels": ["svc:mobile_app_pixel", "ent:notify.iphone"],
+                                        "notify_routes": {"vent_done": ["tts:tts.google|media_player.tablet", "tts:tts.google|media_player.tv"]},
+                                        "notify_quiet": False, "notify_vent_done": "normal"})
+        haus.notify("ventdone:bad", "vent_done", "Fenster schließen", "Bad: genug gelüftet")
+        await asyncio.sleep(0)
+        tts = [c for c in hass.calls if c[0] == "tts"]
+        assert tts == [("tts", "speak", {"entity_id": "tts.google", "media_player_entity_id": "media_player.tablet",
+                                         "message": "Fenster schließen. Bad: genug gelüftet"})]
+        assert any(e["title"] == "Kanal nicht erreichbar" for e in log.entries)  # Fernseher aus
+        # Standard-Kanäle für andere Anlässe: App-Dienst + notify-Entität
+        haus.notify("frost", "frost", "Frost", "heute Nacht −5 °C")
+        await asyncio.sleep(0)
+        assert ("notify", "send_message", {"entity_id": "notify.iphone", "title": "Frost", "message": "heute Nacht −5 °C"}) in hass.calls
+        assert [c[1] for c in hass.calls if c[0] == "notify" and c[2].get("title") == "Frost"] == ["mobile_app_pixel", "send_message"]
+        # gleiche Nachricht gleich nochmal über send(): kein Doppel
+        n = len(hass.calls)
+        haus.send(["ent:notify.iphone"], "Frost", "heute Nacht −5 °C")
+        await asyncio.sleep(0)
+        assert len(hass.calls) == n
+        # Test: Ergebnis je Kanal
+        res = await haus.async_test_notify(channels=["svc:mobile_app_pixel", "tts:tts.google|media_player.tv"])
+        assert [r["ok"] for r in res] == [True, False] and res[1]["error"] == "nicht erreichbar"
 
     asyncio.run(run())

@@ -1102,3 +1102,34 @@ def test_rollwerk_tagesleiste_beschattung_nur_wenn_zu_erwarten(panel):
     p.js(f"() => {{ for (const c of Object.values({EL}._rwStatus.covers)) c.shade_likely = true; {EL}._renderMain(); }}")
     p.wait()
     assert p.js(f"{EL}.shadowRoot.querySelectorAll('.rw-c .d-shade').length") > 0
+
+
+def test_benachrichtigungskanaele(panel):
+    """Benachrichtigungen: alle Kanäle nach Art (App, Pushover, Telegram, Ansage …), nicht erreichbare nicht wählbar,
+    Ansage hinzufügen, eigene Kanäle je Anlass, Test an die Auswahl; Gerät nutzt dieselbe Auswahl."""
+    p = panel
+    p.js(f"() => {{ {EL}._openPop('notify'); }}")
+    p.wait()
+    body = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    for t in ("Pushover", "Telegram", "Jules iPhone", "Tablet Overlay-Nachricht", "Mitteilung (Glocke)", "Ansage hinzufügen"):
+        assert t in body, t
+    assert p.js(f"{EL}._settings.notify_channels") == ["svc:mobile_app_pixel_8"]
+    p.click('#pop [data-action="ch-toggle"][data-list="default"][data-ch="svc:pushover"]')
+    p.click('#pop [data-action="ch-toggle"][data-list="default"][data-ch="ent:notify.jules_iphone"]')
+    # Ansage: Fernseher ist nicht erreichbar → nicht in der Auswahl, Tablet schon
+    assert p.js(f"[...{EL}.shadowRoot.querySelectorAll('#pop [data-tts-player] option')].map(o => o.value)") == ["media_player.tablet"]
+    p.click('#pop [data-action="ch-tts-add"][data-list="default"]')
+    chans = p.js(f"{EL}._settings.notify_channels")
+    assert chans == ["svc:mobile_app_pixel_8", "svc:pushover", "ent:notify.jules_iphone", "tts:tts.google_translate|media_player.tablet"]
+    # eigene Kanäle für „Fenster schließen“
+    p.click('#pop [data-action="ch-route"][data-kind="vent_done"]')
+    p.click('#pop [data-action="ch-toggle"][data-list="route:vent_done"][data-ch="svc:mobile_app_pixel_8"]')
+    assert p.js(f"{EL}._settings.notify_routes.vent_done") == ["svc:pushover", "ent:notify.jules_iphone", "tts:tts.google_translate|media_player.tablet"]
+    p.click('#pop [data-action="ch-test"][data-list="default"]')
+    p.wait(200)
+    test = [m for m in p.sent() if m["type"] == "hauswerk/notify/test"][-1]
+    assert test["channels"] == chans
+    p.click('#pop [data-action="pop-save"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"].endswith("settings/save") and "notify_channels" in m.get("settings", {})][-1]["settings"]
+    assert saved["notify_channels"] == chans and saved["notify_routes"]["vent_done"][0] == "svc:pushover"

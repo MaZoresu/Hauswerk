@@ -53,7 +53,7 @@ SETTING_LABELS = {
     "notify_battery": "Benachrichtigungen", "notify_quiet": "Ruhezeit", "notify_quiet_from": "Ruhezeit", "notify_quiet_to": "Ruhezeit",
     "battery_low": "Batterie-Warnung", "preheat_weather": "Vorheizen nach Wetter", "workday_entity": "Arbeitstag-Sensor",
     "workday_as": "Feiertage wie", "vent_rh": "Lüften-Hinweis", "sun_entity": "Sonne",
-    "notify_ha": "Mitteilung in Home Assistant", "notify_cold": "Benachrichtigungen", "notify_vent": "Benachrichtigungen", "notify_vent_done": "Benachrichtigungen", "vent_morning": "Lüften", "vent_co2": "Lüften", "vent_cool": "Lüften", "vent_long_min": "Lüften",
+    "notify_ha": "Mitteilung in Home Assistant", "notify_channels": "Benachrichtigungen an", "notify_routes": "Benachrichtigungen je Anlass", "notify_cold": "Benachrichtigungen", "notify_vent": "Benachrichtigungen", "notify_vent_done": "Benachrichtigungen", "vent_morning": "Lüften", "vent_co2": "Lüften", "vent_cool": "Lüften", "vent_long_min": "Lüften",
     "demand_entity": "Wärmeanforderung", "demand_action": "Wärmeanforderung", "demand_low": "Wärmeanforderung",
     "demand_valve": "Wärmeanforderung", "rw_covers": "Rollwerk: Rollläden", "rw_storm": "Rollwerk: Sturmschutz", "rw_wind_entity": "Rollwerk: Sturmschutz", "rw_recovery": "Rollwerk: Nach Neustart", "demand_hold": "Wärmeanforderung", "demand_preheat": "Wärmeanforderung",
     "kw_solar": "Kraftwerk: Solar", "kw_grid": "Kraftwerk: Netz", "kw_grid_export": "Kraftwerk: Netz", "kw_grid_invert": "Kraftwerk: Netz",
@@ -124,7 +124,11 @@ HOUSE_DEFAULTS = {
     # Benachrichtigungen aufs Handy (Home-Assistant-App: notify.mobile_app_…)
     # Art je Anlass: off = aus | log = nur Protokoll | normal = Push | important = wichtig (auch in der Ruhezeit,
     # durchbricht „Nicht stören“ auf dem iPhone, hohe Priorität auf Android)
-    "notify_targets": [],         # Dienste ohne "notify.", z. B. "mobile_app_pixel_8"
+    "notify_targets": [],         # (alt) Dienste ohne "notify." – übernommen in notify_channels
+    # Kanäle für alle Module: "svc:<notify-Dienst>", "ent:notify.<entität>", "tts:tts.<dienst>|media_player.<gerät>",
+    # "sat:assist_satellite.<gerät>", "ha" (Mitteilung in Home Assistant). None = noch aus den alten Einstellungen übernehmen
+    "notify_channels": None,
+    "notify_routes": {},          # je Anlass eigene Kanäle: {"vent_done": ["tts:…"]}; fehlt = Standard-Kanäle
     "notify_window": "normal",    # Fenster lange offen
     "notify_window_min": 30,      # … ab so vielen Minuten
     "notify_offline": "normal",   # Thermostat nicht erreichbar

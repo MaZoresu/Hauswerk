@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.58.0 – 2026-11-20
+
+### Neu
+- **Benachrichtigungen über mehrere Kanäle – gemeinsam für Heizwerk, Rollwerk und Kraftwerk** (Hauswerk › Benachrichtigungen). Angeboten wird, was in Home Assistant eingerichtet ist, nach Art sortiert: Home-Assistant-App, Pushover, Telegram, E-Mail, Benachrichtigungs-Entitäten (z. B. Anzeige am Tablet), Sprachassistenten, **Ansagen über Lautsprecher** (Sprachdienst + Lautsprecher frei kombinierbar), Mitteilung in Home Assistant und weitere Dienste. Nicht erreichbare Kanäle sind nicht wählbar und werden beim Senden übersprungen (Protokoll).
+- **Je Anlass eigene Kanäle**: z. B. „Fenster schließen“ als Ansage im Wohnzimmer, Frost nur aufs Handy. Ohne eigene Auswahl gelten die Standard-Kanäle. Aus / Protokoll / Normal / Wichtig je Anlass wie bisher.
+- **Testnachricht an die Auswahl** – mit Ergebnis je Kanal („nicht zugestellt: …“).
+- **Fertigmeldung von Waschmaschine & Trockner** nutzt dieselbe Kanalauswahl (inkl. Ansage). Weiterhin je Durchlauf und Kanal höchstens einmal, auch nach Neustart.
+
+### Geändert
+- **Schutz vor doppelten Meldungen**: dieselbe Nachricht an denselben Kanal kommt innerhalb von 2 Minuten nur einmal (z. B. nach Neuladen). Ansagen in der Ruhezeit nur bei „Wichtig“.
+- Bisherige Auswahl (Apps und „Auch in Home Assistant“, auch je Gerät) wird automatisch übernommen.
+
 ## 0.57.1 – 2026-11-20
 
 ### Geändert

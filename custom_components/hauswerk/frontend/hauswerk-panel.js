@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.57.1";
+const VERSION = "0.58.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4292,8 +4292,8 @@ class HauswerkPanel extends HTMLElement {
     if (!d.init) {
       const c = list.find((x) => x.id === id);
       Object.assign(d, c ? { id: c.id, name: c.name, type: c.type, kwa_power: c.power, kwa_door: c.door || null, kwa_status: c.status || null,
-        status_done: (c.status_done || []).join(", "), notify: [...(c.notify || [])], notify_ha: !!c.notify_ha, important: !!c.important }
-        : { id: null, name: "", type: "waschmaschine", kwa_power: null, kwa_door: null, kwa_status: null, status_done: "", notify: [...(this._data.settings.notify_targets || [])], notify_ha: false, important: false });
+        status_done: (c.status_done || []).join(", "), notify: [...(c.notify || []).map((x) => (x.includes(":") || x === "ha" ? x : `svc:${x}`)), ...(c.notify_ha && !(c.notify || []).includes("ha") ? ["ha"] : [])], important: !!c.important }
+        : { id: null, name: "", type: "waschmaschine", kwa_power: null, kwa_door: null, kwa_status: null, status_done: "", notify: [...(this._data.settings.notify_channels || [])], important: false });
       d.init = true;
     }
     // Leistungssensor vorschlagen: passend zum Typ, mit W/kW
@@ -4302,10 +4302,6 @@ class HauswerkPanel extends HTMLElement {
     const sugg = re ? powers.filter((e) => re.test(`${e} ${S[e].attributes?.friendly_name || ""}`.toLowerCase()) && !list.some((x) => x.power === e && x.id !== d.id)) : [];
     const ps = d.kwa_power ? S[d.kwa_power] : null;
     const unit = ps?.attributes?.unit_of_measurement;
-    const services = Object.keys(this._hass.services?.notify || {}).filter((x) => !["notify", "persistent_notification", "send_message"].includes(x))
-      .sort((a, b) => (a.startsWith("mobile_app_") === b.startsWith("mobile_app_") ? a.localeCompare(b) : a.startsWith("mobile_app_") ? -1 : 1));
-    const chosen = new Set(d.notify || []);
-    const chip = (x) => `<button class="pchip ${chosen.has(x) ? "on" : ""}" data-action="kwapp-notify" data-id="${esc(x)}" aria-pressed="${chosen.has(x)}"><i></i>${esc(this._notifyName(x))}</button>`;
     const sw2 = (k, on) => `<label class="switch"><input type="checkbox" data-kwapp-flag="${k}" ${on ? "checked" : ""}><span></span></label>`;
     const a = (this._status?.appliances || {})[d.id] || null;
     return {
@@ -4324,11 +4320,10 @@ class HauswerkPanel extends HTMLElement {
           <div class="field"><span><ha-icon icon="mdi:list-status"></ha-icon> Status des Geräts</span>${this._picker("kwa_status", d.kwa_status ? [d.kwa_status] : [])}</div>
           ${d.kwa_status ? `<label class="field"><span>Zustand „fertig“ (mehrere mit Komma)</span><input type="text" data-kwapp="status_done" value="${esc(d.status_done)}" placeholder="z. B. Finished, fertig, WM ist fertig"><small class="muted">jetzt: ${esc(S[d.kwa_status]?.state ?? "–")}</small></label>` : ""}
         </details>
-        <div class="lbl">Fertigmeldung</div>
-        <div class="pchips">${[...new Set([...services, ...chosen])].map(chip).join("") || `<span class="muted small">Keine App gefunden</span>`}</div>
+        <div class="lbl">Fertigmeldung an</div>
+        ${this._chPicker("app", d.notify)}
         <div class="wxrows">
-          ${this._setRow("kwha", "Auch in Home Assistant", "Mitteilung in der Seitenleiste", sw2("notify_ha", d.notify_ha), "Erscheint als Mitteilung (Glocke) in Home Assistant und verschwindet mit „Gesehen“.")}
-          ${this._setRow("kwimp", "Wichtig", "durchbricht „Nicht stören“", sw2("important", d.important), "iPhone: zeitkritisch, Android: hohe Priorität.")}
+          ${this._setRow("kwimp", "Wichtig", "durchbricht „Nicht stören“, Ansage auch in der Ruhezeit", sw2("important", d.important), "iPhone: zeitkritisch, Android: hohe Priorität.")}
         </div>
         <p class="muted small">Je Durchlauf und Kanal kommt höchstens eine Meldung – auch nach Neustarts oder Verbindungsabbrüchen. Erkannt wird in Home Assistant selbst, das Dashboard muss nicht offen sein.</p>
         ${d.id && this._admin ? `<div class="lbl">Lernen</div><div class="ap-acts">
@@ -4347,7 +4342,7 @@ class HauswerkPanel extends HTMLElement {
     let id = d.id;
     if (!id) { id = slug(d.name); while (list.some((x) => x.id === id)) id += "_2"; }
     const item = { id, name: String(d.name).trim(), type: d.type, power: d.kwa_power, door: d.kwa_door || null, status: d.kwa_status || null,
-      status_done: String(d.status_done || "").split(",").map((x) => x.trim()).filter(Boolean), notify: d.notify || [], notify_ha: !!d.notify_ha, important: !!d.important };
+      status_done: String(d.status_done || "").split(",").map((x) => x.trim()).filter(Boolean), notify: d.notify || [], notify_ha: false, important: !!d.important };
     const next = del ? list.filter((x) => x.id !== id) : list.some((x) => x.id === id) ? list.map((x) => (x.id === id ? item : x)) : [...list, item];
     try {
       this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { kw_appliances: next } });
@@ -5634,6 +5629,89 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Anzeigename eines notify-Dienstes: mobile_app_pixel_8 → Pixel 8. */
+  // ------------------------------------------------------------ Benachrichtigungskanäle (gemeinsam für alle Module)
+  /** Alle nutzbaren Kanäle aus Home Assistant: Dienste (App, Pushover, Telegram, E-Mail …), notify-Entitäten,
+   *  Sprachassistenten und die Mitteilung in Home Assistant. Ansagen (Sprachdienst + Lautsprecher) kommen dazu,
+   *  sobald sie gewählt sind. ok = gerade erreichbar. */
+  _channels(extra = []) {
+    const S = this._hass?.states || {};
+    const svc = Object.keys(this._hass?.services?.notify || {}).filter((x) => !["notify", "persistent_notification", "send_message"].includes(x));
+    const out = new Map();
+    const group = (t) => /pushover/.test(t) ? "Pushover" : /telegram/.test(t) ? "Telegram" : /smtp|e_?mail|gmail|mail/.test(t) ? "E-Mail"
+      : /text_zu_sprache|tts|speak|alexa|echo|google_home|nest/.test(t) ? "Sprachausgabe" : /mobile_app/.test(t) ? "App" : null;
+    for (const x of svc) out.set(`svc:${x}`, { id: `svc:${x}`, group: group(x) || "Weitere", label: this._notifyName(x), sub: `notify.${x}`, ok: true });
+    for (const e of Object.keys(S).filter((k) => k.startsWith("notify."))) {
+      const name = S[e].attributes?.friendly_name || e;
+      const g = group(`${e} ${name}`.toLowerCase()) || (/overlay|bildschirm|display/i.test(name) ? "Bildschirm" : /csv|file|datei/i.test(e) ? "Weitere" : "App");
+      out.set(`ent:${e}`, { id: `ent:${e}`, group: g, label: name, sub: e, ok: S[e].state !== "unavailable" });
+    }
+    for (const e of Object.keys(S).filter((k) => k.startsWith("assist_satellite.")))
+      out.set(`sat:${e}`, { id: `sat:${e}`, group: "Sprachausgabe", label: S[e].attributes?.friendly_name || e, sub: "Sprachassistent", ok: S[e].state !== "unavailable" });
+    out.set("ha", { id: "ha", group: "Home Assistant", label: "Mitteilung (Glocke)", sub: "Seitenleiste von Home Assistant", ok: true });
+    for (const id of extra) if (!out.has(id)) out.set(id, this._chInfo(id));
+    return [...out.values()];
+  }
+
+  _chInfo(id) {
+    const S = this._hass?.states || {};
+    if (id === "ha") return { id, group: "Home Assistant", label: "Mitteilung (Glocke)", sub: "", ok: true };
+    const [kind, rest] = [id.slice(0, 3), id.slice(4)];
+    if (kind === "tts") {
+      const [tts, player] = rest.split("|");
+      const ok = !!S[tts] && S[tts].state !== "unavailable" && !!S[player] && S[player].state !== "unavailable";
+      return { id, group: "Sprachausgabe", label: `Ansage ${S[player]?.attributes?.friendly_name || player}`, sub: S[tts]?.attributes?.friendly_name || tts, ok };
+    }
+    if (kind === "svc") return { id, group: "Weitere", label: this._notifyName(rest), sub: `notify.${rest}`, ok: !!this._hass?.services?.notify?.[rest] };
+    return { id, group: "Weitere", label: S[rest]?.attributes?.friendly_name || rest, sub: rest, ok: !!S[rest] && S[rest].state !== "unavailable" };
+  }
+
+  _chName(id) {
+    return this._chInfo(id)?.label || id;
+  }
+
+  /** Kanal-Auswahl: Chips nach Art, nur erreichbare wählbar; Ansage mit Sprachdienst + Lautsprecher; Test. */
+  _chPicker(list, selected, { test = true, disabled = "" } = {}) {
+    const sel = new Set(selected || []);
+    const all = this._channels([...sel]);
+    const order = ["App", "Pushover", "Telegram", "E-Mail", "Sprachausgabe", "Bildschirm", "Weitere", "Home Assistant"];
+    const groups = order.map((g) => [g, all.filter((c) => c.group === g)]).filter(([, l]) => l.length);
+    const chip = (c) => `<button class="pchip ${sel.has(c.id) ? "on" : ""}" data-action="ch-toggle" data-list="${esc(list)}" data-ch="${esc(c.id)}" aria-pressed="${sel.has(c.id)}" title="${esc(c.sub || c.id)}" ${(!c.ok && !sel.has(c.id)) || disabled ? "disabled" : ""}><i></i>${esc(c.label)}${c.ok ? "" : " · nicht erreichbar"}</button>`;
+    const S = this._hass?.states || {};
+    const tts = Object.keys(S).filter((e) => e.startsWith("tts.") && S[e].state !== "unavailable");
+    const players = Object.keys(S).filter((e) => e.startsWith("media_player.") && S[e].state !== "unavailable");
+    const name = (e) => esc(S[e]?.attributes?.friendly_name || e);
+    return `<div class="chpick" data-chlist="${esc(list)}">
+      ${groups.map(([g, l]) => `<div class="chg"><small>${g}</small><div class="pchips">${l.map(chip).join("")}</div></div>`).join("")}
+      ${tts.length && players.length ? `<div class="chg"><small>Ansage hinzufügen</small><div class="ch-tts">
+        <select data-tts-engine>${tts.map((e) => `<option value="${e}">${name(e)}</option>`).join("")}</select>
+        <select data-tts-player>${players.map((e) => `<option value="${e}">${name(e)}</option>`).join("")}</select>
+        <button class="secondary small" data-action="ch-tts-add" data-list="${esc(list)}" ${disabled}><ha-icon icon="mdi:plus"></ha-icon>Ansage</button></div></div>` : ""}
+      ${test && this._admin ? `<button class="secondary small" data-action="ch-test" data-list="${esc(list)}" ${sel.size ? "" : "disabled"}><ha-icon icon="mdi:send-outline"></ha-icon>Testnachricht an die Auswahl</button>` : ""}
+    </div>`;
+  }
+
+  /** Liste hinter einer Kanal-Auswahl: Standard, je Anlass oder je Gerät (Entwurf im Fenster). */
+  _chList(list) {
+    if (list === "default") return this._settings.notify_channels || (this._settings.notify_channels = []);
+    if (list.startsWith("route:")) {
+      const k = list.slice(6);
+      this._settings.notify_routes = { ...(this._settings.notify_routes || {}) };
+      return this._settings.notify_routes[k] || (this._settings.notify_routes[k] = []);
+    }
+    if (list === "app") return this._pop.draft.notify || (this._pop.draft.notify = []);
+    return [];
+  }
+
+  _chSet(list, values) {
+    if (list === "default") this._settings.notify_channels = values;
+    else if (list.startsWith("route:")) {
+      const routes = { ...(this._settings.notify_routes || {}) };
+      if (values.length) routes[list.slice(6)] = values; else delete routes[list.slice(6)];
+      this._settings.notify_routes = routes;
+    } else if (list === "app") this._pop.draft.notify = values;
+    this._renderPop();
+  }
+
   _notifyName(x) {
     const name = String(x).replace(/^mobile_app_/, "").replace(/_/g, " ");
     return name.charAt(0).toUpperCase() + name.slice(1);
@@ -5689,8 +5767,8 @@ class HauswerkPanel extends HTMLElement {
           sum: `${p.weather_entity ? this._entityName(p.weather_entity) : "Wetter automatisch"}${p.outside_sensor ? ` · Außen: ${this._entityName(p.outside_sensor)}` : ""} · Kälte < ${fmt(p.cold_snap_temp ?? 0)} °C · Sturm ab ${fmt(p.storm_kmh ?? 70, 0)} km/h`,
           warn: this._wxAlerts().length > 0, words: "wetter außentemperatur sensor prognose sonne kälteeinbruch sturm frost heizgrenze" },
         { g: "Haus", id: "notify", icon: "mdi:cellphone-message", c: "#0ea5e9", title: "Benachrichtigungen",
-          sum: (p.notify_targets || []).length || p.notify_ha
-            ? `${[...(p.notify_targets || []).map((x) => this._notifyName(x)), ...(p.notify_ha ? ["Home Assistant"] : [])].join(", ")}${p.notify_quiet ? ` · Ruhezeit ${p.notify_quiet_from || "22:00"}–${p.notify_quiet_to || "07:00"}` : ""}`
+          sum: (p.notify_channels || []).length
+            ? `${(p.notify_channels || []).map((x) => this._chName(x)).join(", ")}${p.notify_quiet ? ` · Ruhezeit ${p.notify_quiet_from || "22:00"}–${p.notify_quiet_to || "07:00"}` : ""}`
             : "Noch keine App gewählt – Nachrichten nur im Protokoll",
           words: "handy app nachricht push benachrichtigung fenster batterie frost ruhezeit thermostat" },
         { g: "Darstellung", id: "look", icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung",
@@ -6601,14 +6679,9 @@ class HauswerkPanel extends HTMLElement {
       }
 
       case "notify": {
-        const services = Object.keys(this._hass.services?.notify || {})
-          .filter((x) => !["notify", "persistent_notification", "send_message"].includes(x))
-          .sort((a, b) => (a.startsWith("mobile_app_") === b.startsWith("mobile_app_") ? a.localeCompare(b) : a.startsWith("mobile_app_") ? -1 : 1));
-        const chosen = new Set(p.notify_targets || []);
-        const all = [...new Set([...services, ...chosen])];
-        const chip = (x) => `<button class="pchip ${chosen.has(x) ? "on" : ""}" data-action="notify-toggle" data-id="${esc(x)}" aria-pressed="${chosen.has(x)}" ${dis}><i></i>${esc(this._notifyName(x))}${chosen.has(x) && !services.includes(x) ? " · fehlt" : ""}</button>`;
         const row = (k, title, sub, value, text, ctl) => this._setRow(k, title, sub, value, text, ctl);
-        const saved = (this._data.settings.notify_targets || []).length || this._data.settings.notify_ha;
+        if (p.notify_channels == null) p.notify_channels = [...(p.notify_targets || []).map((t) => `svc:${t}`), ...(p.notify_ha ? ["ha"] : [])];
+        const routes = p.notify_routes || {};
         // Art je Anlass (früher an/aus)
         if (p.notify_waste == null) p.notify_waste = "off";
         if (p.notify_vent == null) p.notify_vent = "off";
@@ -6618,21 +6691,22 @@ class HauswerkPanel extends HTMLElement {
           else if (p[k] === false) p[k] = "off";
         }
         const MODES_N = [["off", "Aus", "mdi:bell-off-outline"], ["log", "Protokoll", "mdi:text-box-outline"], ["normal", "Normal", "mdi:bell-outline"], ["important", "Wichtig", "mdi:bell-alert-outline"]];
-        const kind = (key, title, sub, extra, text) => `<div class="wxsrc">${row(key, title, sub, extra || "", text, !!extra)}<div class="wxr-pk">${segs(key, MODES_N, "normal").replace('class="segs small"', 'class="segs small n4"')}</div></div>`;
+        const kind = (key, title, sub, extra, text) => {
+          const k = key.replace(/^notify_/, "");
+          const own = (routes[k] || []).length > 0;
+          return `<div class="wxsrc">${row(key, title, sub, extra || "", text, !!extra)}<div class="wxr-pk">${segs(key, MODES_N, "normal").replace('class="segs small"', 'class="segs small n4"')}</div>
+            ${p[key] !== "off" && p[key] !== "log" ? `<details class="role-help ch-route" ${own ? "open" : ""}><summary>Kanäle: ${own ? esc(routes[k].map((c) => this._chName(c)).join(", ")) : "Standard"}</summary>
+              <label class="ch-own"><input type="checkbox" ${own ? "checked" : ""} data-action="ch-route" data-kind="${k}" data-on="${own ? "0" : "1"}" ${dis}> eigene Kanäle für diesen Anlass</label>
+              ${own ? this._chPicker(`route:${k}`, routes[k], { disabled: dis }) : ""}</details>` : ""}</div>`;
+        };
         return {
-          icon: "mdi:cellphone-message", c: "#0ea5e9", title: "Benachrichtigungen", sub: "Hauswerk · aufs Handy über die Home-Assistant-App",
+          icon: "mdi:cellphone-message", c: "#0ea5e9", title: "Benachrichtigungen", sub: "Hauswerk · für Heizwerk, Rollwerk und Kraftwerk",
           body: `
-            <div class="wxrows">
-              ${row("apps", "An wen?", "Geräte mit der Home-Assistant-App", `<div class="pchips">${all.map(chip).join("") || `<span class="muted small">Keine App gefunden</span>`}</div>`,
-                "Jedes Handy mit der Home-Assistant-App bringt einen Dienst „notify.mobile_app_…“ mit. Gewählte Geräte bekommen die Nachrichten als Push-Mitteilung. Ohne Auswahl landen sie nur im Protokoll.", true)}
-            </div>
-            <div class="wxrows">
-              ${row("nha", "Auch in Home Assistant", "als Mitteilung in der Seitenleiste (Glocke)", sw("notify_ha"),
-                "Zusätzlich zur App erscheint die Nachricht als Mitteilung in Home Assistant und verschwindet von selbst, sobald der Anlass erledigt ist (z. B. Fenster zu).")}
-            </div>
-            ${saved && this._admin ? `<button class="secondary small" data-action="notify-test"><ha-icon icon="mdi:send-outline"></ha-icon>Testnachricht senden</button>` : ""}
+            ${head("mdi:send-variant-outline", "Kanäle")}
+            <p class="muted small">Alles, was in Home Assistant zum Benachrichtigen eingerichtet ist: Home-Assistant-App, Pushover, Telegram, E-Mail, Ansagen über Lautsprecher (Sprachdienst + Gerät), Sprachassistenten, Anzeige am Tablet und weitere. Wählbar sind nur Kanäle, die gerade erreichbar sind. Diese Auswahl gilt für alle Anlässe – je Anlass lassen sich unten eigene Kanäle wählen, Geräte in Kraftwerk haben eine eigene Auswahl.</p>
+            ${this._chPicker("default", p.notify_channels, { disabled: dis })}
             ${head("mdi:bell-ring-outline", "Wann und wie?")}
-            <p class="muted small">Je Anlass: <b>Aus</b> · <b>Protokoll</b> (nur dort, kein Push) · <b>Normal</b> (Push, in der Ruhezeit zurückgehalten) · <b>Wichtig</b> (sofort, auch in der Ruhezeit; durchbricht „Nicht stören“ auf dem iPhone, hohe Priorität auf Android).</p>
+            <p class="muted small">Je Anlass: <b>Aus</b> · <b>Protokoll</b> (nur dort, kein Push) · <b>Normal</b> (Push, in der Ruhezeit zurückgehalten) · <b>Wichtig</b> (sofort, auch in der Ruhezeit; durchbricht „Nicht stören“ auf dem iPhone, hohe Priorität auf Android). Ansagen kommen in der Ruhezeit nur bei „Wichtig“. Dieselbe Nachricht kommt nur einmal – bis der Anlass erledigt ist.</p>
             <div class="wxsrcs">
               ${kind("notify_window", "Fenster lange offen", `ab ${p.notify_window_min ?? 30} Min.`, minutes("notify_window_min", 30, 5, 720, 5),
                 "Steht ein Fenster eines Raums so lange offen, kommt eine Nachricht – einmal je Öffnen.")}
@@ -8803,6 +8877,38 @@ class HauswerkPanel extends HTMLElement {
         await this._ws({ type: "hauswerk/notify/test" });
         this._toast("Testnachricht gesendet");
         break;
+      case "ch-toggle": {
+        const cur = [...this._chList(el.dataset.list)];
+        const i = cur.indexOf(el.dataset.ch);
+        if (i >= 0) cur.splice(i, 1); else cur.push(el.dataset.ch);
+        this._chSet(el.dataset.list, cur);
+        break;
+      }
+      case "ch-tts-add": {
+        const box = el.closest(".ch-tts");
+        const id = `tts:${box.querySelector("[data-tts-engine]").value}|${box.querySelector("[data-tts-player]").value}`;
+        const cur = [...this._chList(el.dataset.list)];
+        if (!cur.includes(id)) cur.push(id);
+        this._chSet(el.dataset.list, cur);
+        break;
+      }
+      case "ch-route": {
+        const k = el.dataset.kind;
+        if (el.dataset.on === "1") this._chSet(`route:${k}`, [...(this._settings.notify_channels || [])]);
+        else this._chSet(`route:${k}`, []);
+        break;
+      }
+      case "ch-test": {
+        const channels = [...this._chList(el.dataset.list)];
+        try {
+          const res = await this._ws({ type: "hauswerk/notify/test", channels });
+          const bad = (res?.results || []).filter((r) => !r.ok);
+          this._toast(bad.length ? `Nicht zugestellt: ${bad.map((r) => `${this._chName(r.channel)} (${r.error})`).join(", ")}` : `Testnachricht an ${channels.map((c) => this._chName(c)).join(", ")} gesendet`);
+        } catch (err) {
+          this._toast(`Das hat nicht geklappt: ${err?.message || err}`);
+        }
+        break;
+      }
       case "person-toggle": {
         const list = new Set(this._settings.persons || []);
         if (list.has(el.dataset.id)) list.delete(el.dataset.id);
@@ -11035,6 +11141,12 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .rwm-win.big { width:34px; height:42px; border-radius:7px; }
 .rwm-nx { margin-left:auto; display:inline-flex; align-items:center; gap:3px; font-size:12px; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
 .rwm-nx ha-icon { --mdc-icon-size:13px; }
+.chpick { display:flex; flex-direction:column; gap:10px; margin:6px 0 12px; }
+.chg small { display:block; font-size:11.5px; color:var(--muted); font-weight:600; margin-bottom:4px; text-transform:uppercase; letter-spacing:.04em; }
+.ch-tts { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.ch-tts select { min-width:0; flex:1 1 140px; }
+.ch-route summary { font-size:12.5px; }
+.ch-own { display:flex; align-items:center; gap:8px; font-size:13px; margin:6px 0; }
 .ap-c { padding:14px 16px; display:flex; flex-direction:column; gap:10px; margin:0; }
 .ap-run { display:flex; flex-direction:column; gap:4px; }
 .ap-run small { color:var(--muted); font-size:12.5px; }

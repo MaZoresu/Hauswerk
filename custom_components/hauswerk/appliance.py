@@ -152,25 +152,22 @@ class Appliances:
             text += f" ({rec['why']})"
         run_key = f"{dev_id}:{rec['id']}"
         done = set(self.sent.get(run_key) or [])
-        channels = list(c.get("notify") or [])
-        if c.get("notify_ha"):
-            channels.append("ha")
+        channels = self.channels(c)
         new = [ch for ch in channels if ch not in done]
         self.sent[run_key] = sorted(done | set(new))
         self._save(now=True)  # erst merken, dann senden: kein Doppel nach Absturz/Neustart
-        payload: dict[str, Any] = {"title": f"{name} fertig", "message": text}
-        if c.get("important"):
-            payload["data"] = {"push": {"interruption-level": "time-sensitive"}, "priority": "high", "ttl": 0,
-                               "channel": "Hauswerk wichtig", "importance": "high"}
-        for ch in new:
-            if ch == "ha":
-                self.hass.async_create_task(self.haus._async_call(
-                    "persistent_notification", "create",
-                    {"title": f"{name} fertig", "message": text, "notification_id": f"hauswerk_geraet_{dev_id}"}))
-            else:
-                self.hass.async_create_task(self.haus._async_send(ch, payload))
+        sent = self.haus.send(new, f"{name} fertig", text, bool(c.get("important")), key=f"geraet_{dev_id}") if new else []
+        new = [self.haus.channel_name(ch) for ch in sent]
         how = f"gesendet an {', '.join(new)}" if new else ("schon gemeldet" if channels else "keine Kanäle gewählt")
         self.log.add("appliance", f"{name} fertig", f"{text} · {how}", module="kraftwerk")
+
+    @staticmethod
+    def channels(c: dict) -> list[str]:
+        """Kanäle eines Geräts (gemeinsame Benachrichtigung); alte Einträge (nur Dienstname, notify_ha) übernehmen."""
+        out = [ch if ":" in ch or ch == "ha" else f"svc:{ch}" for ch in c.get("notify") or []]
+        if c.get("notify_ha") and "ha" not in out:
+            out.append("ha")
+        return out
 
     # ------------------------------------------------------------ Panel
     def status(self) -> dict:
@@ -190,9 +187,9 @@ class Appliances:
         if text is None:
             return {"ok": False, "error": "Passt gerade nicht zum Zustand"}
         name = c.get("name") or TYPES[det.kind]["label"]
-        if action == "ack" and c.get("notify_ha"):
+        if action == "ack" and "ha" in self.channels(c):
             self.hass.async_create_task(self.haus._async_call(
-                "persistent_notification", "dismiss", {"notification_id": f"hauswerk_geraet_{dev_id}"}))
+                "persistent_notification", "dismiss", {"notification_id": self.haus._ha_id(f"geraet_{dev_id}")}))
         if action != "ack":
             self.log.add("appliance", f"{name}: {text.split(' – ')[0]}", text + (f" · {by}" if by else ""), module="kraftwerk")
         self._events(dev_id, c, changed=True)

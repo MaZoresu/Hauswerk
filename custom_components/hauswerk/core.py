@@ -112,7 +112,8 @@ class Haus:
         self._flags: dict[str, Any] = {}
         # Benachrichtigungen: zuletzt gesendet je Schlüssel, in der Ruhezeit zurückgehalten, gerade aktuell
         self._sent: dict[str, float] = {}
-        self._queued: dict[str, tuple[str, str, str | None, str | None]] = {}
+        self._queued: dict[str, tuple] = {}
+        self._recent: dict[tuple, float] = {}  # (Kanal, Titel, Text) → gesendet um: gegen Doppel nach Neuladen o. Ä.
         self._active: set[str] = set()
         # Wettervorhersage (Frost)
         self._fc_at = 0.0
@@ -153,6 +154,10 @@ class Haus:
         if old_cals and not self.settings.get("calendars"):
             self.settings["calendars"] = list(old_cals)
         self._waste_new = "waste_calendars" not in current  # Müllabholung einmalig erkennen (async_start)
+        # Benachrichtigungen: alte Auswahl (Apps + Home Assistant) als Kanäle übernehmen
+        if self.settings.get("notify_channels") is None:
+            self.settings["notify_channels"] = [f"svc:{t}" for t in self.settings.get("notify_targets") or []] + (
+                ["ha"] if self.settings.get("notify_ha") else [])
         self.settings = {k: v for k, v in self.settings.items() if k in HOUSE_KEYS}
         await self._store.async_save({"settings": self.settings})
 
@@ -241,6 +246,12 @@ class Haus:
     # ------------------------------------------------------------ Einstellungen
     async def async_save_settings(self, settings: dict[str, Any], by: str | None = None) -> None:
         settings = {k: v for k, v in settings.items() if k in HOUSE_KEYS}
+        if ("notify_targets" in settings or "notify_ha" in settings) and "notify_channels" not in settings:
+            # alte Auswahl (Apps, Home Assistant) – z. B. aus einem noch nicht neu geladenen Panel – in die Kanäle übernehmen
+            targets = settings.get("notify_targets", self.settings.get("notify_targets")) or []
+            ha = settings.get("notify_ha", self.settings.get("notify_ha"))
+            keep = [c for c in self.settings.get("notify_channels") or [] if not c.startswith("svc:") and c != "ha"]
+            settings["notify_channels"] = [f"svc:{t}" for t in targets] + (["ha"] if ha else []) + keep
         changed = [k for k, v in settings.items() if self.settings.get(k) != v]
         if not changed:
             return
@@ -595,13 +606,95 @@ class Haus:
         return in_quiet_hours(now.hour * 60 + now.minute, self.settings.get("notify_quiet_from"),
                               self.settings.get("notify_quiet_to"))
 
-    def _target_names(self) -> str:
-        names = []
-        for target in self.settings.get("notify_targets") or []:
-            names.append(target.removeprefix("mobile_app_").replace("_", " ").title())
-        if self.settings.get("notify_ha"):
-            names.append("Home Assistant")
-        return ", ".join(names)
+    # ---- Kanäle
+    def channels_for(self, kind: str | None = None) -> list[str]:
+        """Kanäle eines Anlasses: eigene Auswahl je Anlass, sonst die Standard-Kanäle."""
+        routes = self.settings.get("notify_routes") or {}
+        if kind and routes.get(kind):
+            return list(routes[kind])
+        return list(self.settings.get("notify_channels") or [])
+
+    def channel_name(self, ch: str) -> str:
+        if ch == "ha":
+            return "Home Assistant"
+        kind, _, rest = ch.partition(":")
+        if kind == "svc":
+            return rest.removeprefix("mobile_app_").replace("_", " ").title()
+        if kind == "tts":
+            tts, _, player = rest.partition("|")
+            return f"Ansage {self._name(player)}"
+        return self._name(rest)
+
+    def channel_ok(self, ch: str) -> bool:
+        """Nutzbar? Dienst vorhanden bzw. Entität erreichbar."""
+        if ch == "ha":
+            return True
+        kind, _, rest = ch.partition(":")
+        if kind == "svc":
+            return self.hass.services.has_service("notify", rest)
+        if kind == "tts":
+            tts, _, player = rest.partition("|")
+            return all((st := self.hass.states.get(e)) is not None and st.state != "unavailable" for e in (tts, player)) \
+                and self.hass.services.has_service("tts", "speak")
+        if kind in ("ent", "sat"):
+            st = self.hass.states.get(rest)
+            return st is not None and st.state != "unavailable"
+        return False
+
+    def _target_names(self, kind: str | None = None) -> str:
+        return ", ".join(self.channel_name(c) for c in self.channels_for(kind))
+
+    @callback
+    def send(self, channels: list[str], title: str, message: str, important: bool = False, key: str | None = None) -> list[str]:
+        """Eine Nachricht an Kanäle schicken – gemeinsam für alle Module. Nicht nutzbare Kanäle werden übersprungen
+        (Protokoll), dieselbe Nachricht an denselben Kanal innerhalb von 2 Minuten nur einmal (Schutz vor Doppeln
+        durch Neuladen/Wiederverbinden). Ansagen in der Ruhezeit nur, wenn wichtig. Rückgabe: gesendete Kanäle."""
+        now = dt_util.utcnow().timestamp()
+        self._recent = {k: t for k, t in self._recent.items() if now - t < 120}
+        sent = []
+        for ch in dict.fromkeys(channels):
+            if (ch, title, message) in self._recent:
+                continue
+            if not self.channel_ok(ch):
+                self.log.add("notify", "Kanal nicht erreichbar", f"{self.channel_name(ch)} ({ch}) – übersprungen")
+                continue
+            if ch.startswith(("tts:", "sat:")) and self._quiet() and not important:
+                continue
+            self._recent[(ch, title, message)] = now
+            self.hass.async_create_task(self._async_channel(ch, title, message, important, key))
+            sent.append(ch)
+        return sent
+
+    async def _async_channel(self, ch: str, title: str, message: str, important: bool = False,
+                             key: str | None = None, raise_errors: bool = False) -> None:
+        kind, _, rest = ch.partition(":")
+        if ch == "ha":
+            domain, service, data = "persistent_notification", "create", {"title": title, "message": message}
+            if key:
+                data["notification_id"] = self._ha_id(key)
+        elif kind == "svc":
+            data = {"title": title, "message": message}
+            if important:
+                # iPhone: durchbricht „Nicht stören“ (zeitkritisch); Android: hohe Priorität, sofort zustellen
+                data["data"] = {"push": {"interruption-level": "time-sensitive"}, "priority": "high", "ttl": 0,
+                                "channel": "Hauswerk wichtig", "importance": "high"}
+            domain, service = "notify", rest
+        elif kind == "ent":
+            domain, service, data = "notify", "send_message", {"entity_id": rest, "title": title, "message": message}
+        elif kind == "tts":
+            tts, _, player = rest.partition("|")
+            domain, service, data = "tts", "speak", {"entity_id": tts, "media_player_entity_id": player, "message": f"{title}. {message}"}
+        elif kind == "sat":
+            domain, service, data = "assist_satellite", "announce", {"entity_id": rest, "message": f"{title}. {message}"}
+        else:
+            return
+        try:
+            await self.hass.services.async_call(domain, service, data, blocking=True)
+        except Exception as err:  # noqa: BLE001 - Kanal weg oder falsch eingerichtet: nur protokollieren
+            _LOGGER.warning("Benachrichtigung über %s fehlgeschlagen: %s", ch, err)
+            self.log.add("notify", "Nachricht nicht zugestellt", f"{self.channel_name(ch)}: {err}")
+            if raise_errors:
+                raise
 
     def notify_mode(self, kind: str) -> str:
         """Art der Benachrichtigung je Anlass: off | log | normal | important (früher an/aus)."""
@@ -630,23 +723,23 @@ class Haus:
             return
         self._sent[key] = now
         important = mode == "important"
-        targets = self.settings.get("notify_targets") or []
+        targets = self.channels_for(kind)
         if mode == "log":
             how = "nur Protokoll"
-        elif not targets and not self.settings.get("notify_ha"):
-            how = "nur hier – keine App unter Benachrichtigungen gewählt"
+        elif not targets:
+            how = "nur hier – kein Kanal unter Benachrichtigungen gewählt"
         elif self._quiet() and not important:
-            self._queued[key] = (title, message, room, room_name)
+            self._queued[key] = (title, message, room, room_name, kind)
             how = f"Ruhezeit – wird um {self.settings.get('notify_quiet_to')} gesendet, falls noch aktuell"
         else:
-            self._send(title, message, important, key)
-            how = f"{'wichtig ' if important else ''}gesendet an {self._target_names()}"
+            sent = self.send(targets, title, message, important, key)
+            how = f"{'wichtig ' if important else ''}gesendet an {', '.join(self.channel_name(c) for c in sent) or '– (kein Kanal erreichbar)'}"
         self.log.add("notify", title, f"{message} · {how}", room, room_name)
 
     @callback
     def clear(self, key: str) -> None:
         """Anlass erledigt (z. B. Fenster zu): Nachricht darf beim nächsten Mal wieder kommen."""
-        if key in self._sent and self.settings.get("notify_ha"):
+        if key in self._sent and any(c == "ha" for c in self.channels_for() + [c for r in (self.settings.get("notify_routes") or {}).values() for c in r]):
             self.hass.async_create_task(self._async_call(
                 "persistent_notification", "dismiss", {"notification_id": self._ha_id(key)}))
         self._active.discard(key)
@@ -658,29 +751,19 @@ class Haus:
         if not self._queued or self._quiet():
             return
         queued, self._queued = self._queued, {}
-        for key, (title, message, room, room_name) in queued.items():
+        for key, (title, message, room, room_name, *rest) in queued.items():
             if key in self._active:
-                self._send(title, message, False, key)
-                self.log.add("notify", title, f"{message} · nach der Ruhezeit gesendet an {self._target_names()}", room, room_name)
+                kind = rest[0] if rest else None
+                sent = self.send(self.channels_for(kind), title, message, False, key)
+                self.log.add("notify", title, f"{message} · nach der Ruhezeit gesendet an {', '.join(self.channel_name(c) for c in sent)}", room, room_name)
 
     @staticmethod
     def _ha_id(key: str) -> str:
         return "hauswerk_" + "".join(c if c.isalnum() else "_" for c in key)
 
     @callback
-    def _send(self, title: str, message: str, important: bool = False, key: str | None = None) -> None:
-        payload: dict[str, Any] = {"title": title, "message": message}
-        if important:
-            # iPhone: durchbricht „Nicht stören“ (zeitkritisch); Android: hohe Priorität, sofort zustellen
-            payload["data"] = {"push": {"interruption-level": "time-sensitive"}, "priority": "high", "ttl": 0,
-                               "channel": "Hauswerk wichtig", "importance": "high"}
-        for target in self.settings.get("notify_targets") or []:
-            self.hass.async_create_task(self._async_send(target, payload))
-        if self.settings.get("notify_ha"):
-            data = {"title": title, "message": message}
-            if key:
-                data["notification_id"] = self._ha_id(key)
-            self.hass.async_create_task(self._async_call("persistent_notification", "create", data))
+    def _send(self, title: str, message: str, important: bool = False, key: str | None = None, kind: str | None = None) -> None:
+        self.send(self.channels_for(kind), title, message, important, key)
 
     async def _async_send(self, target: str, payload: dict[str, Any]) -> None:
         try:
@@ -695,11 +778,24 @@ class Haus:
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("%s.%s fehlgeschlagen: %s", domain, service, err)
 
-    async def async_test_notify(self, by: str | None = None) -> None:
-        """Testnachricht aus dem Panel (ohne Ruhezeit)."""
+    async def async_test_notify(self, by: str | None = None, channels: list[str] | None = None) -> list[dict]:
+        """Testnachricht aus dem Panel (ohne Ruhezeit) – an die gewählten Kanäle; Ergebnis je Kanal."""
         title, message = "Hauswerk", "Testnachricht – Benachrichtigungen funktionieren."
-        self._send(title, message)
-        self.log.add("notify", "Testnachricht", f"gesendet an {self._target_names() or '–'}{f' · von {by}' if by else ''}")
+        out = []
+        for ch in dict.fromkeys(channels if channels is not None else self.channels_for()):
+            if not self.channel_ok(ch):
+                out.append({"channel": ch, "ok": False, "error": "nicht erreichbar"})
+                continue
+            try:
+                await self._async_channel(ch, title, message, raise_errors=True)
+                out.append({"channel": ch, "ok": True})
+            except Exception as err:  # noqa: BLE001
+                out.append({"channel": ch, "ok": False, "error": str(err) or type(err).__name__})
+        ok = [self.channel_name(r["channel"]) for r in out if r["ok"]]
+        bad = [f"{self.channel_name(r['channel'])} ({r['error']})" for r in out if not r["ok"]]
+        self.log.add("notify", "Testnachricht", (f"gesendet an {', '.join(ok)}" if ok else "nicht gesendet")
+                     + (f" · Fehler: {', '.join(bad)}" if bad else "") + (f" · {by}" if by else ""))
+        return out
 
     # ------------------------------------------------------------ Wetter
     def weather_entity(self) -> str | None:

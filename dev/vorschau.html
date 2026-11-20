@@ -14,6 +14,11 @@
 const now = new Date().toISOString();
 const st = (state, attributes = {}) => ({ state, attributes, last_changed: now, last_updated: now });
 const states = {
+  "notify.jules_iphone": { state: "unknown", attributes: { friendly_name: "Jules iPhone" } },
+  "notify.tablet_overlay_nachricht": { state: "unknown", attributes: { friendly_name: "Tablet Overlay-Nachricht" } },
+  "tts.google_translate": { state: "unknown", attributes: { friendly_name: "Google Translate" } },
+  "media_player.tablet": { state: "idle", attributes: { friendly_name: "Tablet" } },
+  "media_player.fernseher": { state: "unavailable", attributes: { friendly_name: "Fernseher" } },
   "person.jens": st("home", { friendly_name: "Jens" }),
   "person.julia": st("not_home", { friendly_name: "Julia", latitude: 51.3432, longitude: 12.3742 }),
   "zone.arbeit": st("0", { friendly_name: "Arbeit", latitude: 51.30, longitude: 12.40 }),
@@ -150,7 +155,7 @@ const entities = {
   "binary_sensor.fenster_bad": { area_id: "bad" }, "cover.ra_bad": { area_id: "bad" }, "cover.ra_bad_dach": { area_id: "bad" }, "binary_sensor.bad_fenster_gekippt": { area_id: "bad" }, "sensor.kueche_temperatur": { area_id: "kueche" }, "sensor.garten_temp": { area_id: "garten" },
 };
 const hass = {
-  services: { notify: { mobile_app_pixel_8: {}, mobile_app_ipad_kueche: {}, persistent_notification: {}, notify: {} } },
+  services: { notify: { mobile_app_pixel_8: {}, mobile_app_ipad_kueche: {}, pushover: {}, telegram_familie: {}, persistent_notification: {}, notify: {}, send_message: {} }, tts: { speak: {} } },
   states, areas, devices, entities, themes: { darkMode: false }, user: { is_admin: true },
   callWS: async (msg) => {
     wsLog.push(msg.type);
@@ -193,7 +198,7 @@ const hass = {
       }
       return out;
     }
-    if (msg.type === "hauswerk/notify/test") return null;
+    if (msg.type === "hauswerk/notify/test") return { results: (msg.channels || []).map((c) => ({ channel: c, ok: true })) };
     if (msg.type === "person/create") { states["person." + msg.name.toLowerCase()] = st("unknown", { friendly_name: msg.name }); return { id: msg.name.toLowerCase(), name: msg.name }; }
     if (msg.type === "hauswerk/log/get") {
       const T = (m) => Date.now() / 1000 - m * 60;

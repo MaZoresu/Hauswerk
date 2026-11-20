@@ -31,6 +31,10 @@ TEMP = vol.All(vol.Coerce(float), vol.Range(min=5, max=30))
 ENTITY = vol.All(str, vol.Match(r"^[a-z0-9_]+\.[a-z0-9_]+$"))
 ENTITY_LIST = vol.All([ENTITY], vol.Length(max=20))
 SENSOR = vol.All(str, vol.Match(r"^sensor\.[a-z0-9_]+$"))
+# Benachrichtigungskanal (siehe core.Haus.send)
+CHANNEL = vol.All(str, vol.Match(
+    r"^(ha|svc:[a-z0-9_]+|ent:notify\.[a-z0-9_]+|tts:tts\.[a-z0-9_]+\|media_player\.[a-z0-9_]+|sat:assist_satellite\.[a-z0-9_]+)$"))
+CHANNELS = vol.All([CHANNEL], vol.Length(max=12))
 MINUTES = vol.All(vol.Coerce(int), vol.Range(min=0, max=240))
 NOTIFY_MODE = vol.Any(bool, vol.In(["off", "log", "normal", "important"]))
 
@@ -203,6 +207,8 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("storm_kmh"): vol.All(vol.Coerce(float), vol.Range(min=20, max=200)),
         # Benachrichtigungen
         vol.Optional("notify_targets"): vol.All([vol.All(str, vol.Match(r"^[a-z0-9_]+$"))], vol.Length(max=10)),
+        vol.Optional("notify_channels"): CHANNELS,
+        vol.Optional("notify_routes"): vol.All(dict, vol.Length(max=20), {vol.All(str, vol.Match(r"^[a-z_]{2,30}$")): CHANNELS}),
         vol.Optional("notify_window"): NOTIFY_MODE,
         vol.Optional("notify_window_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=720)),
         vol.Optional("notify_offline"): NOTIFY_MODE,
@@ -236,7 +242,7 @@ SETTINGS_SCHEMA = vol.Schema(
             vol.Optional("door"): _opt(vol.All(str, vol.Match(r"^binary_sensor\.[a-z0-9_]+$"))),
             vol.Optional("status"): _opt(vol.All(str, vol.Match(r"^[a-z_]+\.[a-z0-9_]+$"))),
             vol.Optional("status_done"): vol.All([vol.All(str, vol.Length(max=40))], vol.Length(max=10)),
-            vol.Optional("notify"): vol.All([vol.All(str, vol.Match(r"^[a-z0-9_]+$"))], vol.Length(max=10)),
+            vol.Optional("notify"): CHANNELS,
             vol.Optional("notify_ha"): bool,
             vol.Optional("important"): bool,
         })], vol.Length(max=10)),
@@ -599,19 +605,22 @@ async def ws_appliance_action(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"], result)
 
 
-@websocket_api.websocket_command({vol.Required("type"): "hauswerk/notify/test"})
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/notify/test", vol.Optional("channels"): CHANNELS})
 @require_editor
 @websocket_api.async_response
 async def ws_notify_test(hass: HomeAssistant, connection, msg) -> None:
-    """Testnachricht an die gewählten Apps."""
+    """Testnachricht – ausdrücklich ausgelöst – an die übergebenen bzw. die Standard-Kanäle; Ergebnis je Kanal."""
     haus = _haus(hass)
     if haus is None:
         return _not_ready(connection, msg)
-    if not haus.settings.get("notify_targets") and not haus.settings.get("notify_ha"):
-        connection.send_error(msg["id"], "no_targets", "Erst eine App oder Home Assistant auswählen und speichern")
+    channels = msg.get("channels")
+    if channels is None:
+        channels = haus.channels_for()
+    if not channels:
+        connection.send_error(msg["id"], "no_targets", "Erst einen Kanal auswählen")
         return
-    await haus.async_test_notify(by=_who(connection))
-    connection.send_result(msg["id"])
+    result = await haus.async_test_notify(by=_who(connection), channels=channels)
+    connection.send_result(msg["id"], {"results": result})
 
 
 _CONTACT = _opt(vol.All(str, vol.Match(r"^(binary_sensor|input_boolean|sensor)\.[a-z0-9_]+$")))
