@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.77.0";
+const VERSION = "0.78.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4915,7 +4915,28 @@ class HauswerkPanel extends HTMLElement {
         soil != null ? [`${fmt(soil, 0)} %`, `Bodenfeuchte · Pause ab ${this._data.settings.bw_soil_wet ?? 85} %`, soil >= (this._data.settings.bw_soil_wet ?? 85) ? "#0ea5e9" : ""] : null,
       ].filter(Boolean).map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>
     </section>`;
-    const water = !(E.valve || E.watering || E.need || E.soil) ? "" : `<section class="card bw-c">
+    const zones = bs.zones || [];
+    const zoneHtml = !zones.length ? "" : `<section class="card bw-c bw-zones">
+      <div class="bw-h"><span class="bw-ic" style="--c:#0ea5e9"><ha-icon icon="mdi:sprinkler-variant"></ha-icon></span><span class="grow"><b>Bewässerung</b>
+        <small>${this._data.settings.bw_water_auto ? `Gießplan: täglich ${esc(this._data.settings.bw_water_time || "05:00")} Uhr${bs.next_water ? ` · als Nächstes ${new Date(bs.next_water).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : ""}` : "Gießplan aus – gegossen wird von Hand oder über deine Automationen"}${soil != null ? ` · Boden ${fmt(soil, 0)} %` : ""}</small></span></div>
+      <div class="bw-act">${zones.some((z) => z.running_until) || bs.queue ? `<button class="qbtn" data-action="bw-stop"><ha-icon icon="mdi:stop"></ha-icon>Gießen stoppen</button>`
+        : zones.some((z) => (z.duration || 0) > 0 && z.valve) ? `<button class="qbtn hot" data-action="bw-water"><ha-icon icon="mdi:sprinkler-variant"></ha-icon>Alle mit Bedarf gießen</button>` : ""}</div>
+      ${zones.map((z) => {
+        const min = z.duration ? Math.max(1, Math.round(z.duration / 60)) : 0;
+        const vs = z.valve ? this._hass.states[z.valve] : null;
+        const bucket = z.bucket != null ? Number(z.bucket) : null;
+        return `<div class="bwz ${z.running_until ? "run" : ""}">
+          <div class="bwz-h"><b>${esc(z.name)}</b><small>${z.running_until ? `<span style="color:#0ea5e9">gießt noch <span data-lw-until="${esc(z.running_until)}">${this._lwLeft(z.running_until)}</span></span>`
+            : min ? `braucht ${min} Min. Wasser` : "kein Bedarf"}${bucket != null ? ` · Bilanz ${bucket > 0 ? "+" : ""}${fmt(bucket, 1)} mm` : ""}${z.valve ? ` · ${esc(this._entityName(z.valve))}${vs && vs.state === "unavailable" ? " (nicht erreichbar)" : ""}` : ` · <button class="link inline" data-action="tab" data-tab="gardenset">Ventil zuordnen</button>`}</small></div>
+          <div class="bwz-a">
+            ${z.valve && !z.running_until ? `<button class="qbtn ${min ? "hot" : ""}" data-action="bw-water" data-zone="${esc(z.zone)}" data-min="${min || 10}"><ha-icon icon="mdi:water-outline"></ha-icon>${min || 10} Min. gießen</button>` : ""}
+            ${z.multiplier != null && z.multiplier_entity ? `<span class="bwz-m" title="Multiplikator: mehr oder weniger Wasser als berechnet"><button class="sbtn" data-action="bw-mult" data-e="${esc(z.multiplier_entity)}" data-v="${Math.max(0.1, Math.round((Number(z.multiplier) - 0.05) * 100) / 100)}">−</button><b>×${fmt(Number(z.multiplier), 2)}</b><button class="sbtn" data-action="bw-mult" data-e="${esc(z.multiplier_entity)}" data-v="${Math.round((Number(z.multiplier) + 0.05) * 100) / 100}">+</button></span>` : ""}
+            <button class="qbtn" data-action="bw-si" data-s="calculate" data-e="${esc(z.zone)}" title="Bedarf neu berechnen"><ha-icon icon="mdi:calculator-variant-outline"></ha-icon>Berechnen</button>
+            <button class="qbtn" data-action="bw-si" data-s="set_bucket" data-e="${esc(z.zone)}" title="Wasserbilanz auf 0 setzen (z. B. nach Gießen von Hand)"><ha-icon icon="mdi:restore"></ha-icon>Bilanz 0</button>
+          </div></div>`;
+      }).join("")}
+    </section>`;
+    const water = zones.length ? zoneHtml : !(E.valve || E.watering || E.need || E.soil) ? "" : `<section class="card bw-c">
       <div class="bw-h"><span class="bw-ic" style="--c:#0ea5e9"><ha-icon icon="mdi:sprinkler-variant"></ha-icon></span><span class="grow"><b>Bewässerung</b>
         <small>${bs.watering ? "läuft gerade" : need === true ? "Gießen nötig" : need === false ? "Gießen gerade nicht nötig" : "bereit"}${bs.water_end ? ` · zuletzt bis ${new Date(bs.water_end).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : ""}</small></span></div>
       ${valve ? `<div class="bw-act">${valve.state === "unavailable" ? `<p class="muted small">Ventil ${esc(this._entityName(E.valve))} nicht erreichbar</p>`
@@ -9019,11 +9040,32 @@ class HauswerkPanel extends HTMLElement {
         const pk = (key, label, icon, found) => `<div class="field"><span><ha-icon icon="${icon}"></ha-icon> ${label} (leer = ${found && !p[key] ? `automatisch: ${esc(this._entityName(found))}` : "automatisch"})</span>${this._picker(key, p[key] ? [p[key]] : [])}</div>`;
         return {
           icon: "mdi:sprinkler-variant", c: "#0ea5e9", title: "Bewässerung", sub: "Beetwerk",
-          body: `${pk("bw_valve", "Ventil (valve oder Schalter)", "mdi:valve", E.valve)}
+          body: `${(() => {
+              const bs = this._status?.beetwerk || {};
+              const zs = bs.zones || [];
+              if (!zs.length) return `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Keine Zonen von Smart Irrigation gefunden – Beetwerk nutzt dann das Ventil unten.</p>`;
+              const valves = Object.keys(this._hass.states).filter((e) => (e.startsWith("valve.") && !e.startsWith("valve.smart_irrigation_")) || (e.startsWith("switch.") && /bew(ä|ae|a)sser|irrig|ventil|sprinkler|beregn/.test(`${e} ${this._hass.states[e].attributes?.friendly_name || ""}`.toLowerCase())));
+              const cfg = (zid) => (p.bw_zones || []).find((x) => x.zone === zid) || {};
+              return `${head("mdi:calendar-clock", "Gießplan")}
+              <div class="wxrows">${this._setRow("bwauto", "Beetwerk gießt", "täglich zur Startzeit alle Zonen mit Bedarf", sw("bw_water_auto"), "Smart Irrigation berechnet je Zone die Dauer (Wasserbilanz aus Wetter und Verdunstung). Beetwerk öffnet zur Startzeit nacheinander die Ventile für die berechnete Dauer und setzt danach die Wasserbilanz zurück. Der Mäher fährt solange in die Station. Deine bisherigen Bewässerungs-Automationen dann unten abschalten.")}
+                ${this._setRow("bwskip", "Bei Regen nicht gießen", "Regen jetzt oder in den nächsten 6 Std.", sw("bw_water_skip"))}</div>
+              <label class="field narrow"><span><ha-icon icon="mdi:clock-outline"></ha-icon> Startzeit</span><input type="time" data-set="bw_water_time" value="${esc(p.bw_water_time || "05:00")}" ${dis}></label>
+              ${head("mdi:sprinkler-variant", "Zonen aus Smart Irrigation")}
+              ${zs.map((z) => `<div class="bwz-cfg"><b>${esc(z.name)}</b><small>${z.duration ? `braucht ${Math.round(z.duration / 60)} Min.` : "kein Bedarf"}${z.throughput ? ` · ${fmt(z.throughput, 0)} l/min` : ""}${z.size ? ` · ${fmt(z.size, 0)} m²` : ""}</small>
+                <label class="field"><span>Ventil${z.guessed && z.valve && !cfg(z.zone).valve ? " (gefunden über den Namen)" : ""}</span><select data-bwz="valve" data-zone="${esc(z.zone)}" ${dis}><option value="">– keins –</option>${valves.map((v) => `<option value="${esc(v)}" ${z.valve === v ? "selected" : ""}>${esc(this._entityName(v))}</option>`).join("")}</select></label>
+                <label class="check small"><span>Im Gießplan</span><span class="switch"><input type="checkbox" data-bwz="auto" data-zone="${esc(z.zone)}" ${z.auto ? "checked" : ""} ${dis}><span></span></span></label></div>`).join("")}
+              <p class="muted small"><ha-icon icon="mdi:open-in-new"></ha-icon>Wetterquellen, Berechnung, Fläche, Durchfluss und Bodenart stellst du in <a href="/smart-irrigation" target="_top">Smart Irrigation</a> ein.</p>
+              ${(bs.automations || []).length ? `${head("mdi:robot-outline", "Bisherige Bewässerungs-Automationen")}
+              <div class="evlist">${bs.automations.map((a) => `<div class="ev"><ha-icon icon="mdi:robot-outline" style="color:${a.on ? "#16a34a" : "#94a3b8"}"></ha-icon><span class="grow"><b>${esc(a.name)}</b><small>${a.on ? "aktiv" : "aus"}</small></span>
+                ${this._admin ? `<button class="secondary small" data-action="bw-autom" data-e="${esc(a.id)}" data-on="${a.on ? 0 : 1}">${a.on ? "Abschalten" : "Einschalten"}</button>` : ""}</div>`).join("")}</div>
+              <p class="muted small">Gießt Beetwerk nach Plan, diese Automationen abschalten – sonst wird doppelt gegossen.</p>` : ""}
+              ${head("mdi:tune-variant", "Weitere Sensoren")}`;
+            })()}
+            ${pk("bw_valve", "Ventil ohne Zonen (valve oder Schalter)", "mdi:valve", E.valve)}
             ${pk("bw_soil", "Bodenfeuchte", "mdi:water-percent", E.soil)}
             ${pk("bw_need", "Gießen nötig (z. B. Smart Irrigation)", "mdi:water-alert-outline", E.need)}
             ${pk("bw_watering", "Bewässerung läuft (z. B. Smart Irrigation)", "mdi:sprinkler-variant", E.watering)}
-            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Wann gegossen wird, steuern weiter deine Automationen bzw. Smart Irrigation. Beetwerk zeigt den Stand, schaltet das Ventil von Hand und lässt den Mäher während und nach dem Bewässern stehen.</p>`,
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Während und nach dem Bewässern lässt Beetwerk den Mäher stehen.</p>`,
         };
       }
 
@@ -10156,6 +10198,16 @@ class HauswerkPanel extends HTMLElement {
       if (isChange) this._renderPop();
       return;
     }
+    if (t.dataset.bwz && this._settings && isChange) {
+      const zid = t.dataset.zone;
+      const list = [...(this._settings.bw_zones || []).filter((x) => x.zone !== zid)];
+      const cur = (this._settings.bw_zones || []).find((x) => x.zone === zid) || { zone: zid, valve: null, auto: true };
+      if (t.dataset.bwz === "valve") cur.valve = t.value || null;
+      else cur.auto = t.checked;
+      this._settings.bw_zones = [...list, cur];
+      this._instantSave("bw_zones");
+      return;
+    }
     if (t.dataset.lwl === "profile" && this._pop?.draft?.cfg) {
       // „Kein Profil“: Lichtwerk zeigt die Leuchte nur an (das bisherige Profil bleibt gemerkt)
       if (t.value) Object.assign(this._pop.draft.cfg, { profile: t.value, auto: true });
@@ -10807,6 +10859,33 @@ class HauswerkPanel extends HTMLElement {
         }
         break;
       }
+      case "bw-water": {
+        const res = await this._ws({ type: "hauswerk/beetwerk/water", zone: el.dataset.zone || null, minutes: el.dataset.zone ? Number(el.dataset.min) : null });
+        if (this._status) this._status.beetwerk = res.status;
+        this._renderMain();
+        this._toast(res.result === "gestartet" ? "Gießen gestartet" : "Nichts zu gießen");
+        break;
+      }
+      case "bw-stop": {
+        const res = await this._ws({ type: "hauswerk/beetwerk/stop" });
+        if (this._status) this._status.beetwerk = res.status;
+        this._renderMain();
+        this._toast("Gießen gestoppt");
+        break;
+      }
+      case "bw-mult":
+        await this._hass.callService("number", "set_value", { entity_id: el.dataset.e, value: Number(el.dataset.v) });
+        this._toast(`Multiplikator ×${fmt(Number(el.dataset.v), 2)}`);
+        break;
+      case "bw-si":
+        await this._hass.callService("smart_irrigation", el.dataset.s, {}, { entity_id: el.dataset.e });
+        this._toast(el.dataset.s === "calculate" ? "Berechnung gestartet" : "Wasserbilanz auf 0");
+        break;
+      case "bw-autom":
+        await this._hass.callService("automation", el.dataset.on === "1" ? "turn_on" : "turn_off", { entity_id: el.dataset.e });
+        this._toast(el.dataset.on === "1" ? "Automation eingeschaltet" : "Automation abgeschaltet");
+        setTimeout(() => this._renderPop(), 800);
+        break;
       case "bw-pause": {
         const cur = new Set(this._settings.bw_pause || ["rain", "soil", "frost", "water"]);
         if (cur.has(el.dataset.k)) cur.delete(el.dataset.k);
@@ -14112,7 +14191,16 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .bw-bat { display:inline-flex; align-items:center; gap:4px; font-weight:700; font-size:14px; color:var(--muted); }
 .bw-act { display:flex; flex-wrap:wrap; gap:8px; }
 .bw-act .qbtn { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 16px; border-radius:12px; border:1px solid var(--line); background:color-mix(in srgb, var(--text) 6%, transparent); font-size:14px; font-weight:600; }
-.bw-act .qbtn ha-icon { --mdc-icon-size:20px; }
+.bw-act .qbtn ha-icon, .bwz-a .qbtn ha-icon { --mdc-icon-size:20px; }
+.bwz { display:flex; flex-direction:column; gap:8px; padding:12px 0 0; border-top:1px solid var(--line); }
+.bwz.run .bwz-h b { color:#0ea5e9; }
+.bwz-h b { display:block; font-size:15px; } .bwz-h small { color:var(--muted); font-size:13px; }
+.bwz-a { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.bwz-a .qbtn { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; min-height:40px; padding:0 12px; border-radius:12px; border:1px solid var(--line); background:color-mix(in srgb, var(--text) 6%, transparent); font-size:13.5px; font-weight:600; }
+.bwz-a .qbtn.hot { background:color-mix(in srgb, #0ea5e9 16%, transparent); border-color:color-mix(in srgb, #0ea5e9 50%, transparent); }
+.bwz-m { display:inline-flex; align-items:center; gap:6px; } .bwz-m b { font-variant-numeric:tabular-nums; min-width:44px; text-align:center; }
+:host([tablet]) .bwz-a .qbtn { min-height:52px; font-size:15px; }
+.bwz-cfg { padding:10px 0; border-bottom:1px solid var(--line); } .bwz-cfg > b { display:block; } .bwz-cfg > small { color:var(--muted); }
 .bw-act .qbtn.hot { background:color-mix(in srgb, #16a34a 18%, transparent); border-color:color-mix(in srgb, #16a34a 50%, transparent); color:#15803d; }
 :host([dark]) .bw-act .qbtn.hot { color:#86efac; }
 :host([tablet]) .bw-act .qbtn { min-height:56px; font-size:16px; }

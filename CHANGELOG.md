@@ -2,6 +2,16 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.78.0 – 2026-11-21
+
+### Neu – Beetwerk gießt mit Smart Irrigation
+- **Zonen aus Smart Irrigation** stehen auf der Seite Garten: je Zone der berechnete Bedarf („braucht 12 Min. Wasser“), die Wasserbilanz in mm, das Ventil und – während gegossen wird – ein Countdown.
+- **Bedienen je Zone:** „12 Min. gießen“ (berechnete Dauer, sonst 10 Min.), Multiplikator − / +, „Berechnen“ und „Bilanz 0“. Dazu „Alle mit Bedarf gießen“ und „Gießen stoppen“.
+- **Gießplan (Einstellungen › Beetwerk › Bewässerung):** Beetwerk gießt täglich zur Startzeit (Standard 05:00) alle Zonen mit Bedarf nacheinander – Ventil auf für die berechnete Dauer, danach zu und Wasserbilanz zurück auf 0. Bei Regen jetzt oder in den nächsten 6 Stunden wird ausgelassen (abschaltbar). Der Mäher fährt solange in die Station und wartet danach. Alles im Protokoll (Filter Beetwerk). Übersteht Neustarts: eine laufende Zone wird beendet und das Ventil geschlossen.
+- **Ventil je Zone:** Die Ventile von Smart Irrigation selbst sind nur Platzhalter – Beetwerk ordnet das echte Ventil (valve oder Schalter) über den Namen zu (z. B. Zone „Beet Links“ ↔ „Beet_Links“) oder du wählst es je Zone aus. Je Zone abwählbar aus dem Gießplan.
+- **Bisherige Bewässerungs-Automationen** werden aufgelistet und lassen sich mit einem Tipp abschalten, damit nicht doppelt gegossen wird.
+- Wetterquellen, Berechnung, Fläche, Durchfluss und Bodenart bleiben in Smart Irrigation (Link im Fenster).
+
 ## 0.77.0 – 2026-11-21
 
 ### Neu – Modul Beetwerk (Garten)

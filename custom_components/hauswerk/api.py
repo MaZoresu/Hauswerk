@@ -249,6 +249,11 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("bw_resume_wait"): vol.All(vol.Coerce(int), vol.Range(min=0, max=600)),
         vol.Optional("bw_resume_until"): _hm,
         vol.Optional("bw_blades_days"): vol.All(vol.Coerce(int), vol.Range(min=0, max=365)),
+        vol.Optional("bw_zones"): vol.All([vol.Schema({vol.Required("zone"): ENTITY, vol.Optional("valve"): _opt(ENTITY), vol.Optional("auto"): bool},
+                                                      extra=vol.REMOVE_EXTRA)], vol.Length(max=16)),
+        vol.Optional("bw_water_auto"): bool,
+        vol.Optional("bw_water_time"): _hm,
+        vol.Optional("bw_water_skip"): bool,
         # Lichtwerk
         vol.Optional("lw_lights"): vol.All([vol.All(str, vol.Match(r"^(light|switch|input_boolean)\.[a-z0-9_]+$"))], vol.Length(max=80)),
         vol.Optional("lw_lux_sensor"): _opt(SENSOR),
@@ -352,6 +357,28 @@ def _kw(hass: HomeAssistant):
 
 def _bw(hass: HomeAssistant):
     return (hass.data.get(DOMAIN) or {}).get(MODULE_GARDEN)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/beetwerk/water", vol.Optional("zone"): _opt(ENTITY),
+                                  vol.Optional("minutes"): _opt(vol.All(vol.Coerce(float), vol.Range(min=1, max=120)))})
+@websocket_api.async_response
+async def ws_bw_water(hass: HomeAssistant, connection, msg) -> None:
+    """Beetwerk: jetzt gießen – eine Zone (Minuten frei oder berechnete Dauer) oder alle Zonen mit Bedarf."""
+    bw = _bw(hass)
+    if bw is None:
+        return _not_ready(connection, msg)
+    res = await bw.async_water(msg.get("zone"), (msg["minutes"] * 60) if msg.get("minutes") else None, by=_who(connection))
+    connection.send_result(msg["id"], {"result": res, "status": bw.status()})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/beetwerk/stop"})
+@websocket_api.async_response
+async def ws_bw_stop(hass: HomeAssistant, connection, msg) -> None:
+    bw = _bw(hass)
+    if bw is None:
+        return _not_ready(connection, msg)
+    await bw.async_water_stop(by=_who(connection))
+    connection.send_result(msg["id"], {"status": bw.status()})
 
 
 def _lw(hass: HomeAssistant):
@@ -1047,6 +1074,8 @@ COMMANDS = (
     ws_lw_command,
     ws_lw_automation_off,
     ws_lw_links_refresh,
+    ws_bw_water,
+    ws_bw_stop,
     ws_rw_profile_save,
     ws_rw_profile_delete,
     ws_log_get,

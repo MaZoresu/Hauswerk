@@ -154,7 +154,12 @@ const status = {
   beetwerk: { configured: true, entities: { mower: "lawn_mower.automower", battery: "sensor.automower_mower_battery_charge", status: "sensor.automower_mower_status_plain",
     blades_days: "sensor.automower_mower_blades_days", hours: "sensor.automower_mower_statistic_hours", winter: "switch.automower_winter_mode", eod: "button.automower_eod",
     error: null, soil: "sensor.bodenfeuchte_rasen", need: "binary_sensor.smart_irrigation_rasen_1_irrigation_needed", watering: "binary_sensor.smart_irrigation_rasen_1_watering_now",
-    valve: "valve.rasen", bucket: null }, reasons: [], paused: null, error: null, watering: false, water_end: null },
+    valve: "valve.rasen", bucket: null }, reasons: [], paused: null, error: null, watering: false, water_end: null, queue: 0,
+    next_water: new Date(Date.now() + 9 * 3600e3).toISOString(), automations: [{ id: "automation.rasenbewasserung", name: "Bewässerung_Rasen", on: true }],
+    zones: [{ zone: "sensor.smart_irrigation_rasen_1", valve: "valve.rasen", guessed: true, auto: true, name: "Rasen 1", duration: 720, bucket: -4.2, max_bucket: 15, multiplier: 0.85,
+      multiplier_entity: "number.smart_irrigation_rasen_1_multiplier", need: true, state: "automatic", throughput: 15, size: 50, valve_state: "closed", running_until: null },
+      { zone: "sensor.smart_irrigation_beet_links", valve: null, guessed: false, auto: true, name: "Beet Links", duration: 0, bucket: 9.9, multiplier: 0.9,
+        multiplier_entity: "number.smart_irrigation_beet_links_multiplier", need: false, state: "automatic", throughput: 10, size: 12, valve_state: null, running_until: null }] },
   appliances: {
     waschmaschine: { state: "running", label: "Läuft", learning: false, n: 6, watt: 1932, gap: false,
       model: { n: 6, learning: false, active_w: 8, quiet_w: 3.1, start_w: 10, pause_max: 1500, end_wait: 2070, dur_med: 6300, dur_lo: 5400, dur_hi: 6900, kwh_med: 1.24, tail_s: 1620, tail_w: 2, interval: 150 },
@@ -237,6 +242,7 @@ const hass = {
     if (msg.type === "frontend/set_user_data" || msg.type === "frontend/set_system_data") { (window.hwFront = window.hwFront || {})[msg.type.slice(13)] = msg.value; return null; }
     if (msg.type === "hauswerk/heizen/get") return { settings, rooms, plans: {}, target_sensors: {}, status, defaults, modes: {}, is_admin: true, user_admin: true, rollwerk: { covers: rwCovers, profiles: rwProfiles, status: rwStatus }, lichtwerk: { lights: lwLights, profiles: lwProfiles, status: lwStatus, automations: [{ entity_id: "automation.nachtlicht", name: "Auto_Nachtlicht", state: "on" }] } };
     if (msg.type === "hauswerk/rollwerk/command") return null;
+    if (msg.type === "hauswerk/beetwerk/water" || msg.type === "hauswerk/beetwerk/stop") return { result: "gestartet", status: status.beetwerk };
     if (msg.type === "hauswerk/lichtwerk/command") return null;
     if (msg.type === "hauswerk/heizen/links/refresh") return status.hm_links;
     if (msg.type === "hauswerk/lichtwerk/links/refresh") return lwLinks;
@@ -316,7 +322,7 @@ const hass = {
     }
     throw new Error("unbekannt: " + msg.type);
   },
-  callService: async (domain, service, data) => { (window.hwSent = window.hwSent || []).push({ type: "call_service", domain, service, service_data: data }); },
+  callService: async (domain, service, data, target) => { (window.hwSent = window.hwSent || []).push({ type: "call_service", domain, service, service_data: data, target }); },
   connection: { subscribeMessage: (cb, msg) => { wsLog.push(msg.type); return Promise.resolve(() => {}); } },
 };
 </script>

@@ -1938,7 +1938,7 @@ def test_beetwerk_garten_und_einstellungen(panel):
     p.view("garden")
     p.wait(300)
     txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
-    assert "Automower" in txt and "Mäht" in txt and "Bewässerung" in txt and "Gießen nötig" in txt and "Messer im Einsatz" in txt
+    assert "Automower" in txt and "Mäht" in txt and "Bewässerung" in txt and "braucht 12 Min. Wasser" in txt and "Messer im Einsatz" in txt
     n = len(p.sent())
     p.click('[data-action="bw-svc"][data-s="dock"]')
     calls = [m for m in p.sent()[n:] if m.get("type") == "call_service"]
@@ -1953,3 +1953,30 @@ def test_beetwerk_garten_und_einstellungen(panel):
     p.wait(300)
     saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
     assert saved == {"bw_pause": ["rain", "soil", "water"]}, saved
+
+
+def test_beetwerk_zonen_giessen(panel):
+    """Beetwerk › Garten: Zonen aus Smart Irrigation mit Bedarf, Gießen, Multiplikator, Berechnen;
+    Einstellungen: Gießplan, Ventil je Zone (sofort gespeichert), bisherige Automationen abschalten."""
+    p = panel
+    p.view("garden")
+    p.wait(300)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "Rasen 1" in txt and "braucht 12 Min. Wasser" in txt and "Ventil zuordnen" in txt and "Alle mit Bedarf gießen" in txt
+    p.click('[data-action="bw-water"][data-zone="sensor.smart_irrigation_rasen_1"]')
+    m = [x for x in p.sent() if x.get("type") == "hauswerk/beetwerk/water"][-1]
+    assert m["zone"] == "sensor.smart_irrigation_rasen_1" and m["minutes"] == 12
+    p.click('[data-action="bw-mult"][data-v="0.9"]')
+    assert [x for x in p.sent() if x.get("type") == "call_service"][-1]["service_data"] == {"entity_id": "number.smart_irrigation_rasen_1_multiplier", "value": 0.9}
+    p.click('[data-action="bw-si"][data-s="calculate"]')
+    c = [x for x in p.sent() if x.get("type") == "call_service"][-1]
+    assert c["domain"] == "smart_irrigation" and c["service"] == "calculate" and c["target"] == {"entity_id": "sensor.smart_irrigation_rasen_1"}
+    p.view("gardenset")
+    p.js(f"() => {EL}._openPop('bwwater')")
+    p.wait()
+    body = p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    assert "Beetwerk gießt" in body and "Bewässerung_Rasen" in body and "Abschalten" in body
+    p.page.locator('hauswerk-panel #pop select[data-bwz="valve"][data-zone="sensor.smart_irrigation_beet_links"]').select_option("valve.rasen")
+    p.wait(300)
+    saved = [x for x in p.sent() if x["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
+    assert saved["bw_zones"] == [{"zone": "sensor.smart_irrigation_beet_links", "valve": "valve.rasen", "auto": True}], saved

@@ -2080,3 +2080,58 @@ def test_beetwerk_maehpause_fehler_wartung(hw):
         await bw.async_stop()
 
     asyncio.run(run())
+
+
+def test_beetwerk_giessen_mit_smart_irrigation(hw):
+    """Beetwerk gießt: Zonen aus Smart Irrigation, Ventil mit gleichem Namen gefunden, Dauer berechnet, danach
+    Ventil zu und Wasserbilanz zurück; Gießplan zur Startzeit, bei Regen ausgelassen; Mäher fährt solange in die Station."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 6, 10, 4, 1, tzinfo=timezone.utc)  # 05:01 lokal (Test-Zeitzone UTC+1)
+        hass = Hass()
+        hass.set("sensor.smart_irrigation_rasen_1", "600", {"bucket": -4.2, "multiplier": 0.85, "unit_of_measurement": "s"}, "Rasen 1 Dauer")
+        hass.set("sensor.smart_irrigation_beet_links", "0", {"bucket": 3.1, "unit_of_measurement": "s"}, "Beet Links Dauer")
+        hass.set("valve.smart_irrigation_rasen_1", "unavailable", {}, "Rasen 1")
+        hass.set("valve.garten_rasen", "closed", {}, "Rasen 1")
+        hass.set("valve.garten_beet", "closed", {}, "Beet_Links")
+        hass.set("lawn_mower.robonect", "mowing", {}, "Automower")
+        hass.set("weather.home", "sunny", {"temperature": 18, "humidity": 60})
+        hass.set("automation.rasenbewasserung", "on", {}, "Bewässerung_Rasen")
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"weather_entity": "weather.home"})
+        bw = hw.Beetwerk(hass, log, haus)
+        await bw.async_load()
+        await bw.async_start()
+        z = {x["zone"]: x for x in bw.zones()}
+        assert z["sensor.smart_irrigation_rasen_1"]["valve"] == "valve.garten_rasen" and z["sensor.smart_irrigation_beet_links"]["valve"] == "valve.garten_beet"
+        assert bw.status()["automations"] == [{"id": "automation.rasenbewasserung", "name": "Bewässerung_Rasen", "on": True}]
+        # Gießplan 05:00 (an): nur die Zone mit Dauer > 0
+        await bw.async_save_settings({"bw_water_auto": True, "bw_water_time": "05:00"})
+        await bw.async_evaluate()
+        assert ("valve", "open_valve", {"entity_id": "valve.garten_rasen"}) in hass.calls
+        assert ("valve", "open_valve", {"entity_id": "valve.garten_beet"}) not in hass.calls
+        assert ("lawn_mower", "dock", {"entity_id": "lawn_mower.robonect"}) in hass.calls
+        zs = {x["zone"]: x for x in bw.status()["zones"]}
+        assert bw.status()["watering"] is True and zs["sensor.smart_irrigation_rasen_1"]["running_until"]
+        # nach 10 Min.: zu, Wasserbilanz zurück
+        NOW[0] += timedelta(minutes=10, seconds=5)
+        await bw.async_evaluate()
+        assert ("valve", "close_valve", {"entity_id": "valve.garten_rasen"}) in hass.calls
+        assert ("smart_irrigation", "set_bucket", {"entity_id": "sensor.smart_irrigation_rasen_1"}) in hass.calls
+        assert any(e["title"] == "Rasen 1 gegossen" for e in log.entries)
+        # Von Hand: 5 Min. Beet, Stopp
+        await bw.async_water("sensor.smart_irrigation_beet_links", 300)
+        assert ("valve", "open_valve", {"entity_id": "valve.garten_beet"}) in hass.calls
+        await bw.async_water_stop()
+        assert ("valve", "close_valve", {"entity_id": "valve.garten_beet"}) in hass.calls and not any(x["running_until"] for x in bw.status()["zones"])
+        # Nächster Tag mit Regen: ausgelassen
+        NOW[0] += timedelta(days=1)
+        hass.set("weather.home", "rainy", {"temperature": 14, "humidity": 95})
+        n = hass.calls.count(("valve", "open_valve", {"entity_id": "valve.garten_rasen"}))
+        await bw.async_evaluate()
+        assert hass.calls.count(("valve", "open_valve", {"entity_id": "valve.garten_rasen"})) == n
+        assert any(e["title"] == "Bewässerung ausgelassen" for e in log.entries)
+        await bw.async_stop()
+
+    asyncio.run(run())
