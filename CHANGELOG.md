@@ -2,6 +2,20 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.80.0 – 2026-11-21
+
+### Neu – Beetwerk: mehr für den Mähroboter
+- **Mäher mit Bild:** Die Karte auf der Seite Garten zeigt einen gezeichneten Mähroboter, der seinen Zustand zeigt – fährt (Räder und Messer drehen), lädt (Blitz), in der Station, Regen-, Hitze- oder Igelpause (Symbol des Grundes), Fehler (rot), Winterpause. Dazu „Mäht seit 42 Min.“, Akku als Balken und der nächste Start laut Zeitplan.
+- **Garten frei – Kinder und Tiere:** Meldet ein Person- oder Haustier-Sensor im Garten (z. B. die Kamera) etwas, während der Mäher fährt, schickt Beetwerk ihn in die Station. Ist 30 Min. (einstellbar) niemand mehr zu sehen, startet er wieder. Wahlweise Nachricht „Mäher fährt heim“ mit Kamerabild in der Home-Assistant-App (Benachrichtigungen › Beetwerk, Standard: nur Protokoll). Auf der Seite Garten „2 Std. belegt“ und „Bis heute Abend“, z. B. zum Grillen.
+- **Igelschutz:** Zwischen Sonnenuntergang und Sonnenaufgang (Puffer einstellbar) wird nie gemäht – mäht der Roboter im Dunkeln, schickt Beetwerk ihn in den Feierabend; am nächsten Tag mäht er nach seinem Zeitplan weiter.
+- **Hitzepause** ab 30 °C draußen (weiter ab 2 °C kühler) und **Saison-Hinweise:** „Winterpause einlegen?“ nach 3 kalten Tagen im Herbst, „Saison starten?“ nach 5 milden Nächten im Frühjahr.
+- **Zeitpläne:** Die Zeitpläne des Mähers (Robonect, 14 Stück) als Wochenleiste mit der Igelschutz-Zeit; je Zeitplan an/aus und ändern (Uhrzeit, Wochentage) – gespeichert am Mäher.
+- **Verschleiß:** Hinweise unter der Glocke bei stumpfen Messern (Messerqualität bzw. Messer-Drehzahl deutlich unter dem Üblichen), alterndem Akku (Kapazität unter 70 % der besten), schwachem Signal des Begrenzungsdrahts, schwachem WLAN und Feuchte im Gehäuse.
+- **Wächter:** Nachricht mit Kamerabild, wenn der Mäher außerhalb der Station keine Verbindung mehr hat, 20 Min. im Garten steht oder nachts ab 22 Uhr nicht in der Station ist.
+- **Statistik:** Mähstunden je Tag (14 Tage), Ladevorgänge, Fehler und die häufigsten Fehler mit Uhrzeit („3× Mäher steckt fest, meist 14–16 Uhr“).
+- **Widget „Mähroboter“** für die Startseite und eine Zeile im Bildschirmschoner („wartet – jemand im Garten“).
+- Einstellungen › Beetwerk: neu „Garten frei & Igelschutz“ und „Hitze, Saison & Wächter“.
+
 ## 0.79.0 – 2026-11-21
 
 ### Neu – Wer treibt den Duty Cycle hoch?

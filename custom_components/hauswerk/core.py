@@ -665,7 +665,8 @@ class Haus:
         return ", ".join(self.channel_name(c) for c in self.channels_for(kind))
 
     @callback
-    def send(self, channels: list[str], title: str, message: str, important: bool = False, key: str | None = None) -> list[str]:
+    def send(self, channels: list[str], title: str, message: str, important: bool = False, key: str | None = None,
+             image: str | None = None) -> list[str]:
         """Eine Nachricht an Kanäle schicken – gemeinsam für alle Module. Nicht nutzbare Kanäle werden übersprungen
         (Protokoll), dieselbe Nachricht an denselben Kanal innerhalb von 2 Minuten nur einmal (Schutz vor Doppeln
         durch Neuladen/Wiederverbinden). Ansagen in der Ruhezeit nur, wenn wichtig. Rückgabe: gesendete Kanäle."""
@@ -697,7 +698,7 @@ class Haus:
             if ch in bundle and not important and self._bundle_add(ch, title, message, now):
                 sent.append(ch)
                 continue
-            self.hass.async_create_task(self._async_channel(ch, title, message, important, key))
+            self.hass.async_create_task(self._async_channel(ch, title, message, important, key, image=image))
             sent.append(ch)
         return sent
 
@@ -730,7 +731,7 @@ class Haus:
         self._save()
 
     async def _async_channel(self, ch: str, title: str, message: str, important: bool = False,
-                             key: str | None = None, raise_errors: bool = False) -> None:
+                             key: str | None = None, raise_errors: bool = False, image: str | None = None) -> None:
         kind, _, rest = ch.partition(":")
         if ch == "ha":
             domain, service, data = "persistent_notification", "create", {"title": title, "message": message}
@@ -742,6 +743,9 @@ class Haus:
                 # iPhone: durchbricht „Nicht stören“ (zeitkritisch); Android: hohe Priorität, sofort zustellen
                 data["data"] = {"push": {"interruption-level": "time-sensitive"}, "priority": "high", "ttl": 0,
                                 "channel": "Hauswerk wichtig", "importance": "high"}
+            if image:
+                # Bild in der Mitteilung der Home-Assistant-App, z. B. /api/camera_proxy/camera.garten
+                data.setdefault("data", {})["image"] = image
             domain, service = "notify", rest
         elif kind == "ent":
             domain, service, data = "notify", "send_message", {"entity_id": rest, "title": title, "message": message}
@@ -773,7 +777,8 @@ class Haus:
 
     @callback
     def notify(self, key: str, kind: str, title: str, message: str,
-               room: str | None = None, room_name: str | None = None, quiet_why: str | None = None) -> None:
+               room: str | None = None, room_name: str | None = None, quiet_why: str | None = None,
+               image: str | None = None) -> None:
         """Nachricht je nach Art: aufs Handy (normal oder wichtig), nur ins Protokoll oder gar nicht.
 
         Dieselbe Nachricht (key) kommt erst wieder, wenn sie mit clear() erledigt ist oder
@@ -805,7 +810,7 @@ class Haus:
             self._queued[key] = (title, message, room, room_name, kind)
             how = f"Ruhezeit – wird um {self.settings.get('notify_quiet_to')} gesendet, falls noch aktuell"
         else:
-            sent = self.send(targets, title, message, important, key)
+            sent = self.send(targets, title, message, important, key, image=image)
             how = f"{'wichtig ' if important else ''}gesendet an {', '.join(self.channel_name(c) for c in sent) or '– (kein Kanal erreichbar)'}"
         state = "log" if mode == "log" or not targets else "held" if key in self._queued else "sent"
         self._hist(title, message, kind, state, how)

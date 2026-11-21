@@ -741,7 +741,8 @@ def test_schoner_module_als_symbole(tablet):
     p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
     p.js(f"{EL}._saverShow()")
     mods = p.js(f"[...{EL}.shadowRoot.querySelectorAll('#saver .sv-mod')].map((m) => [m.querySelector('.sv-logo svg') != null, m.querySelectorAll('.sv-i').length, m.innerText])")
-    assert len(mods) == 4 and all(m[0] and m[1] >= 1 for m in mods), mods  # Heizwerk, Rollwerk, Kraftwerk, Lichtwerk
+    assert len(mods) == 5 and all(m[0] and m[1] >= 1 for m in mods), mods  # Heizwerk, Rollwerk, Kraftwerk, Lichtwerk, Beetwerk
+    assert "mäht" in mods[4][2] and "64 %" in mods[4][2], mods[4]
     text = p.js(f"{EL}.shadowRoot.getElementById('saver').innerText")
     assert "Raum heizt" not in text and "Rollläden:" not in text and "Solar " not in text
     # Heizwerk wie bisher · Rollwerk offen/zu · Kraftwerk ohne Akku · Lichtwerk wie viele an
@@ -1953,6 +1954,55 @@ def test_beetwerk_garten_und_einstellungen(panel):
     p.wait(300)
     saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
     assert saved == {"bw_pause": ["rain", "soil", "water"]}, saved
+
+
+def test_beetwerk_maeher_erweitert(panel):
+    """Beetwerk-Mäher: Bild mit Zustand, Garten belegt, Zeitpläne (Wochenleiste, schalten, ändern), Statistik,
+    Verschleiß-Hinweis, Einstellungen Garten frei & Igelschutz sowie Hitze/Saison/Wächter, Widget Mähroboter."""
+    p = panel
+    p.view("garden")
+    p.wait(300)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "Mäht seit 42 Min." in txt and "Garten frei" in txt and "Zeitpläne" in txt and "Statistik" in txt and "3× Mäher steckt fest" in txt, txt
+    assert "Messer drehen 14 %" in txt
+    assert p.js(f"{EL}.shadowRoot.querySelector('.bw-art.st-mowing svg') != null")
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.bwt-r').length") == 7
+    p.click('[data-action="bw-busy"][data-v="evening"]')
+    m = [x for x in p.sent() if x.get("type") == "hauswerk/beetwerk/busy"][-1]
+    assert m.get("until") == "evening", m
+    p.wait(300)
+    assert "Garten belegt bis" in p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    p.click('[data-action="bw-busy"][data-v="clear"]')
+    last = [x for x in p.sent() if x.get("type") == "hauswerk/beetwerk/busy"][-1]
+    assert not last.get("hours") and not last.get("until"), last
+    # Zeitplan schalten und ändern
+    p.js(f"() => {{ const i = {EL}.shadowRoot.querySelector('input[data-bwtm=\"switch.automower_timer_2\"]'); i.checked = true; i.dispatchEvent(new Event('change', {{ bubbles: true }})); }}")
+    c = [x for x in p.sent() if x.get("type") == "call_service"][-1]
+    assert c["domain"] == "switch" and c["service"] == "turn_on" and c["service_data"] == {"entity_id": "switch.automower_timer_2"}, c
+    p.js(f"() => {EL}._openPop('bwtimer:3')")
+    p.wait()
+    p.click('#pop [data-action="bw-tm-day"][data-k="sa"]')
+    p.click('#pop [data-action="bw-tm-save"]')
+    m = [x for x in p.sent() if x.get("type") == "hauswerk/beetwerk/timer"][-1]
+    assert m["timer"] == 3 and m["days"] == ["mo", "we", "fr", "sa"] and m["start"] == "08:00", m
+    # Einstellungen
+    p.view("gardenset")
+    p.wait()
+    lst = p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+    assert "Garten frei & Igelschutz" in lst and "Hitze, Saison & Wächter" in lst
+    p.js(f"() => {EL}._openPop('bwguard')")
+    p.wait()
+    assert "Igelschutz" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    p.js(f"{EL}._closePop()")
+    p.js(f"() => {EL}._openPop('bwwatch')")
+    p.wait()
+    assert "Wächter" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    p.js(f"{EL}._closePop()")
+    # Widget
+    p.view("start")
+    p.wait()
+    html = p.js(f"{EL}._widget({{ id: 'm', type: 'mower', size: 'l', title: null, entities: [] }}, 0, false, 1)")
+    assert "bw-art" in html and "gemäht · 7 Tage" in html and "Zur Station" in html
 
 
 def test_beetwerk_zonen_giessen(panel):

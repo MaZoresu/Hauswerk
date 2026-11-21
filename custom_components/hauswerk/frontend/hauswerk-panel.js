@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.79.0";
+const VERSION = "0.80.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -120,6 +120,7 @@ const NK_KINDS = [
   { k: "light_away", g: "Lichtwerk", icon: "mdi:home-lightbulb-outline", c: "#6366f1", title: "Licht an, niemand zu Hause", def: "normal", ex: ["Licht an, niemand zu Hause", "Wohnzimmer, Küche – brennt seit 30 Min."], text: "Brennt Licht so lange (Lichtwerk › Einstellungen), obwohl niemand zu Hause ist – nicht im Urlaub mit Anwesenheits-Simulation." },
   { k: "light_offline", g: "Lichtwerk", icon: "mdi:lightbulb-alert-outline", c: C.alert, title: "Leuchte nicht erreichbar", def: "log", ex: ["Leuchte nicht erreichbar", "Flur OG meldet sich seit 15 Min. nicht"], text: "Eine Leuchte aus Lichtwerk meldet sich so lange nicht (gleiche Zeit wie bei Thermostaten)." },
   { k: "mower", g: "Beetwerk", icon: "mdi:robot-mower-outline", c: C.alert, title: "Mähroboter braucht Hilfe", def: "important", ex: ["Mähroboter braucht Hilfe", "Automower: Mäher steckt fest"], text: "Meldet der Mähroboter einen Fehler (steckt fest, außerhalb des Drahts, Messer blockiert …)." },
+  { k: "mower_guard", g: "Beetwerk", icon: "mdi:human-child", c: "#16a34a", title: "Mäher fährt heim", def: "log", ex: ["Mäher fährt heim", "Jemand im Garten – Automower wartet in der Station"], text: "Die Kamera meldet Kinder oder Tiere im Garten und Beetwerk schickt den Mäher in die Station – mit Kamerabild in der App." },
   { k: "mower_care", g: "Beetwerk", icon: "mdi:saw-blade", c: "#16a34a", title: "Mähroboter: Wartung", def: "log", ex: ["Mähroboter: Messer wechseln", "seit 62 Tagen im Einsatz (Hinweis ab 60)"], text: "Messer lange im Einsatz – Hinweis unter der Glocke, auf Wunsch als Nachricht." },
   { k: "waste", g: "Hauswerk", icon: "mdi:trash-can-outline", c: "#64748b", title: "Müllabfuhr morgen", def: "off", ex: ["Morgen Müllabfuhr", "Restabfall, Papier – Tonne heute Abend rausstellen."], text: "Am Vorabend ab der Uhrzeit unter Hauswerk › Kalender › Müllabholung, einmal je Abholtag." },
 ];
@@ -205,6 +206,7 @@ Object.assign(WIDGETS, {
   events: { name: "Nächste Ereignisse", icon: "mdi:timeline-clock-outline", c: "#38bdf8", text: "Zeitleiste: Heizwechsel, Rollladen-Fahrten und Termine (Kalender wählbar)", config: true, cal: true },
   calendar: { name: "Termine", icon: "mdi:calendar-month-outline", c: "#f472b6", text: "Termine heute und morgen, z. B. Müllabfuhr – mit Symbol je Müllart", config: true, cal: true },
   vent: { name: "Lüften", icon: "mdi:weather-windy", c: "#22d3ee", text: "Wo jetzt gelüftet werden sollte (mit Dauer), laufende Lüftungen mit Countdown, Schimmelgefahr", go: "vent" },
+  mower: { name: "Mähroboter", icon: "mdi:robot-mower-outline", c: "#16a34a", text: "Zustand mit Bild, Akku, Mähen und Zur Station; groß mit Mähstunden der Woche und nächstem Start", go: "garden" },
   light: { name: "Licht", icon: "mdi:lightbulb-outline", c: "#6366f1", text: "Wie viele Lichter an sind, nächste Schaltung, Alle aus; groß mit allen Lichtern zum Schalten", go: "lights" },
 });
 const DEFAULT_WIDGETS = [{ type: "heat", size: "m" }, { type: "weather", size: "s" }, { type: "windows", size: "s" }, { type: "presence", size: "l" }, { type: "rooms", size: "l" }];
@@ -216,6 +218,8 @@ const PICKERS = {
   bw_watering: { scope: "settings", multi: false, domains: ["binary_sensor"] },
   bw_need: { scope: "settings", multi: false, domains: ["binary_sensor"] },
   bw_valve: { scope: "settings", multi: false, domains: ["valve", "switch"] },
+  bw_guard_sensors: { scope: "settings", multi: true, domains: ["binary_sensor"] },
+  bw_camera: { scope: "settings", multi: false, domains: ["camera"] },
   climates: { scope: "room", multi: true, domains: ["climate"] },
   windows: { scope: "room", multi: true, domains: ["binary_sensor", "cover"] },
   temp_sensor: { scope: "room", multi: false, domains: ["sensor"], deviceClass: "temperature" },
@@ -459,7 +463,7 @@ const BW_VIEWS = [
   { id: "garden", slug: "garten", name: "Garten", icon: "mdi:flower-outline" },
   { id: "gardenset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true },
 ];
-const BW_POPS = ["bwmower", "bwwater", "bwpause", "bwcare"];
+const BW_POPS = ["bwmower", "bwwater", "bwpause", "bwcare", "bwguard", "bwwatch"];
 const LW_VIEWS = [
   { id: "lights", slug: "licht", name: "Licht", icon: "mdi:lightbulb-group-outline" },
   { id: "lwrep", slug: "bericht", name: "Bericht", icon: "mdi:chart-bar" },
@@ -2486,6 +2490,15 @@ class HauswerkPanel extends HTMLElement {
       const ls = this._lwLights();
       const on = ls.filter((l) => l.st?.state === "on").length;
       mods.push(["lichtwerk", [it("mdi:lightbulb-on-outline", String(on), "Lichter an")]]);
+    }
+    const bws = this._status?.beetwerk;
+    if (bws?.entities?.mower) {
+      const mv = this._bwMowerState(bws);
+      const x = [it(mv.icon, null, mv.label)];
+      const b = this._bwNum(bws.entities.battery);
+      if (b != null) x.push(it("mdi:battery-outline", `${fmt(b, 0)} %`, "Akku"));
+      x.push(`<span class="sv-i sv-t">${esc(mv.short)}</span>`);
+      mods.push(["beetwerk", x]);
     }
     // Vorhersage der nächsten Stunden
     let fcHtml = "";
@@ -4895,29 +4908,14 @@ class HauswerkPanel extends HTMLElement {
       big: bat != null ? `${fmt(bat, 0)}<span> %</span>` : "", title, side: setBtn,
       lines: [
         ...(reasons.length ? [{ icon: "mdi:pause-octagon-outline", text: `Gerade nicht mähen: ${reasons.join(", ")}` }] : []),
+        ...Object.values(bs.wear || {}).slice(0, 1).map((t) => ({ icon: "mdi:wrench-outline", text: t })),
         ...(bs.water_until ? [{ icon: "mdi:timer-sand", text: `Bewässerung läuft – fertig um ${new Date(bs.water_until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} Uhr · Mäher wartet` }]
           : bs.watering ? [{ icon: "mdi:sprinkler-variant", text: "Bewässerung läuft – Mäher wartet" }] : []),
         ...(blades != null && blades >= (this._data.settings.bw_blades_days || 60) ? [{ icon: "mdi:saw-blade", text: `Messer seit ${fmt(blades, 0)} Tagen – bald wechseln` }] : []),
       ],
     });
-    const mower = !E.mower ? "" : `<section class="card bw-c">
-      <div class="bw-h"><span class="bw-ic" style="--c:${lb[2]}"><ha-icon icon="${lb[1]}"></ha-icon></span><span class="grow"><b>${esc(this._entityName(E.mower))}</b><small>${esc(lb[0])}${detail && !String(detail).toLowerCase().startsWith(lb[0].slice(0, 3).toLowerCase()) && !["unknown", "unavailable"].includes(detail) ? ` · ${esc(detail)}` : ""}${winter ? " · Winterpause" : ""}</small></span>
-        ${bat != null ? `<span class="bw-bat"><ha-icon icon="mdi:battery${bat >= 95 ? "" : `-${Math.max(10, Math.round(bat / 10) * 10)}`}"></ha-icon>${fmt(bat, 0)} %</span>` : ""}</div>
-      ${bs.error ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>${esc(bs.error)}</p>` : ""}
-      ${bs.paused ? `<p class="note"><ha-icon icon="mdi:pause-octagon-outline"></ha-icon>Mähpause seit ${new Date(bs.paused.at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} – ${esc(bs.paused.why)}${this._data.settings.bw_resume !== false ? ". Beetwerk startet ihn danach wieder." : ""}</p>` : ""}
-      <div class="bw-act">
-        ${svc("lawn_mower", "start_mowing", E.mower, "Mähen", "mdi:play", "hot")}
-        ${svc("lawn_mower", "pause", E.mower, "Pause", "mdi:pause")}
-        ${svc("lawn_mower", "dock", E.mower, "Zur Station", "mdi:home-import-outline")}
-        ${E.eod ? svc("button", "press", E.eod, "Feierabend", "mdi:weather-night") : ""}
-        ${E.winter ? svc("switch", winter ? "turn_off" : "turn_on", E.winter, winter ? "Saison starten" : "Winterpause", winter ? "mdi:sprout-outline" : "mdi:snowflake") : ""}
-      </div>
-      <div class="vt-f">${[
-        blades != null ? [`${fmt(blades, 0)} Tage`, "Messer im Einsatz", blades >= (this._data.settings.bw_blades_days || 60) ? "#f59e0b" : ""] : null,
-        hours != null ? [`${fmt(hours, 0)} Std.`, "Betriebsstunden", ""] : null,
-        soil != null ? [`${fmt(soil, 0)} %`, `Bodenfeuchte · Pause ab ${this._data.settings.bw_soil_wet ?? 85} %`, soil >= (this._data.settings.bw_soil_wet ?? 85) ? "#0ea5e9" : ""] : null,
-      ].filter(Boolean).map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>
-    </section>`;
+    const mower = !E.mower ? "" : this._bwMowerCard(bs, svc);
+    const extra = E.mower ? this._bwTimersCard(bs) + this._bwStatsCard(bs) : "";
     const zones = bs.zones || [];
     const zoneHtml = !zones.length ? "" : `<section class="card bw-c bw-zones">
       <div class="bw-h"><span class="bw-ic" style="--c:#0ea5e9"><ha-icon icon="mdi:sprinkler-variant"></ha-icon></span><span class="grow"><b>Bewässerung</b>
@@ -4953,7 +4951,177 @@ class HauswerkPanel extends HTMLElement {
         E.bucket && this._bwNum(E.bucket) != null ? [`${fmt(this._bwNum(E.bucket), 1)} mm`, "Wasserbilanz (Smart Irrigation)", ""] : null,
       ].filter(Boolean).map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>
     </section>`;
-    return head + `<div class="bw-grid">${mower}${water}</div>`;
+    return head + `<div class="bw-grid">${mower}${water}${extra}</div>`;
+  }
+
+  /** Zustand des Mähers in Worten, Farbe und Symbol – für Karte, Widget und Bildschirmschoner. */
+  _bwMowerState(bs) {
+    const E = bs.entities || {};
+    const st = E.mower ? this._hass.states[E.mower]?.state : null;
+    const winter = E.winter ? this._hass.states[E.winter]?.state === "on" : false;
+    const reasons = (bs.reasons || []).map((r) => r.k);
+    const charging = st === "docked" && this._bwNum(E.battery) != null && this._bwNum(E.battery) < 98;
+    let k = st === "mowing" ? "mowing" : st === "returning" ? "returning" : st === "error" ? "error" : st === "paused" ? "paused" : st === "docked" ? (charging ? "charging" : "docked") : ["unavailable", "unknown", null, undefined].includes(st) ? "offline" : "docked";
+    if (winter) k = "winter";
+    let badge = { mowing: "", returning: "mdi:home-import-outline", error: "mdi:alert", paused: "mdi:pause", charging: "mdi:lightning-bolt", docked: "", offline: "mdi:wifi-off", winter: "mdi:snowflake" }[k];
+    if (["docked", "charging", "paused", "returning"].includes(k) && reasons.length) {
+      const r = reasons[0];
+      badge = { rain: "mdi:weather-pouring", soil: "mdi:water-percent", frost: "mdi:snowflake", water: "mdi:sprinkler-variant", guard: "mdi:human-child", busy: "mdi:account-group", night: "mdi:weather-night", heat: "mdi:thermometer-high" }[r] || badge;
+    } else if (k === "docked" && bs.night) badge = "mdi:weather-night";
+    const c = { mowing: "#16a34a", returning: "#0ea5e9", error: C.alert, paused: "#f59e0b", charging: "#eab308", docked: "#64748b", offline: "#94a3b8", winter: "#38bdf8" }[k];
+    const label = { mowing: "Mäht", returning: "Fährt zur Station", error: "Braucht Hilfe", paused: "Pausiert", charging: "Lädt", docked: "In der Station", offline: "Nicht erreichbar", winter: "Winterpause" }[k];
+    const icon = { mowing: "mdi:robot-mower", returning: "mdi:home-import-outline", error: "mdi:alert-circle-outline", paused: "mdi:pause-circle-outline", charging: "mdi:battery-charging", docked: "mdi:home-outline", offline: "mdi:wifi-off", winter: "mdi:snowflake" }[k];
+    const why = (bs.reasons || []).map((r) => r.text);
+    const short = k === "mowing" ? "mäht" : why.length && ["docked", "charging", "paused", "returning"].includes(k) ? `wartet – ${why[0]}` : label.toLowerCase();
+    return { k, badge, c, label, icon, short, st };
+  }
+
+  /** Selbst gezeichneter Mähroboter, der seinen Zustand zeigt (fährt, lädt, schläft, Fehler …). */
+  _bwArt(mv, size = "") {
+    return `<span class="bw-art ${size} st-${mv.k}" style="--c:${mv.c}"><svg viewBox="0 0 140 92" aria-hidden="true">
+      <ellipse class="sh" cx="70" cy="84" rx="56" ry="5"></ellipse>
+      <g class="grass">${[8, 30, 54, 80, 104, 128].map((x, i) => `<path d="M${x} 86 l3 -${8 + (i % 3) * 3} l3 ${8 + (i % 3) * 3}"></path>`).join("")}</g>
+      <g class="bob">
+        <ellipse class="blade" cx="76" cy="78" rx="26" ry="3.2"></ellipse>
+        <path class="body" d="M16 70 C14 50 30 38 52 36 L96 35 C118 36 128 50 126 70 Z"></path>
+        <path class="lid" d="M36 44 C58 28 92 28 112 44 C92 38 60 38 36 50 Z"></path>
+        <rect class="panel" x="62" y="44" width="26" height="10" rx="4"></rect>
+        <circle class="btn" cx="75" cy="49" r="3"></circle>
+        <rect class="strip" x="20" y="62" width="102" height="4" rx="2"></rect>
+        <g class="wheel" style="transform-origin:40px 72px"><circle cx="40" cy="72" r="13"></circle><path d="M40 61v22M29 72h22"></path></g>
+        <g class="wheel f" style="transform-origin:112px 77px"><circle cx="112" cy="77" r="6"></circle></g>
+      </g>
+    </svg>${mv.badge ? `<span class="bw-art-b"><ha-icon icon="${mv.badge}"></ha-icon></span>` : ""}</span>`;
+  }
+
+  _bwAgo(iso) {
+    const m = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+    return m < 60 ? `${m} Min.` : m < 1440 ? `${Math.floor(m / 60)} Std. ${m % 60 ? `${m % 60} Min.` : ""}`.trim() : `${Math.round(m / 1440)} Tagen`;
+  }
+
+  _bwMowerCard(bs, svc) {
+    const E = bs.entities || {};
+    const S = this._hass.states;
+    const mv = this._bwMowerState(bs);
+    const bat = this._bwNum(E.battery);
+    const winter = mv.k === "winter";
+    const detail = E.status ? S[E.status]?.state : null;
+    const blades = this._bwNum(E.blades_days);
+    const hours = this._bwNum(E.hours);
+    const soil = this._bwNum(E.soil);
+    const set = this._data.settings;
+    const since = bs.since && !["offline"].includes(mv.k) ? ` seit ${this._bwAgo(bs.since)}` : "";
+    const next = bs.next_start ? new Date(bs.next_start) : null;
+    const busy = bs.busy_until ? new Date(bs.busy_until) : null;
+    const g = bs.guard || {};
+    const wear = Object.values(bs.wear || {});
+    return `<section class="card bw-c bw-mow">
+      <div class="bw-hero">${this._bwArt(mv)}
+        <div class="bw-hero-t"><b>${esc(this._entityName(E.mower))}</b>
+          <span class="bw-st" style="color:${mv.c}">${esc(mv.label)}${esc(since)}</span>
+          <small>${detail && !["unknown", "unavailable"].includes(detail) ? esc(detail) : ""}${next ? `${detail ? " · " : ""}nächster Start ${next.toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : ""}</small>
+          ${bat != null ? `<span class="bw-batbar" title="Akku"><i style="width:${Math.max(3, Math.min(100, bat))}%;background:${bat < 20 ? C.alert : mv.k === "charging" ? "#eab308" : "#16a34a"}"></i><em>${fmt(bat, 0)} %</em></span>` : ""}
+        </div></div>
+      ${bs.error ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>${esc(bs.error)}</p>` : ""}
+      ${bs.paused ? `<p class="note"><ha-icon icon="mdi:pause-octagon-outline"></ha-icon>Mähpause seit ${new Date(bs.paused.at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} – ${esc(bs.paused.why)}${(bs.paused.reasons || []).every((r) => r === "night") ? ". Der Zeitplan des Mähers übernimmt danach." : set.bw_resume !== false ? ". Beetwerk startet ihn danach wieder." : ""}</p>` : ""}
+      ${wear.map((t) => `<p class="note"><ha-icon icon="mdi:wrench-outline"></ha-icon>${esc(t)}</p>`).join("")}
+      <div class="bw-act">
+        ${svc("lawn_mower", "start_mowing", E.mower, "Mähen", "mdi:play", "hot")}
+        ${svc("lawn_mower", "pause", E.mower, "Pause", "mdi:pause")}
+        ${svc("lawn_mower", "dock", E.mower, "Zur Station", "mdi:home-import-outline")}
+        ${E.eod ? svc("button", "press", E.eod, "Feierabend", "mdi:weather-night") : ""}
+        ${E.winter ? svc("switch", winter ? "turn_off" : "turn_on", E.winter, winter ? "Saison starten" : "Winterpause", winter ? "mdi:sprout-outline" : "mdi:snowflake") : ""}
+      </div>
+      <div class="bw-guard">
+        <span class="bw-ic sm" style="--c:${busy || (bs.reasons || []).some((r) => r.k === "guard") ? "#f59e0b" : "#16a34a"}"><ha-icon icon="mdi:human-child"></ha-icon></span>
+        <span class="grow"><b>${busy ? `Garten belegt bis ${busy.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : (bs.reasons || []).some((r) => r.k === "guard") ? "Jemand im Garten – Mäher wartet" : "Garten frei"}</b>
+          <small>${set.bw_guard === false ? "Kamera-Wächter aus" : (g.sensors || []).length ? `${(g.sensors || []).map((x) => esc(this._entityName(x))).join(", ")}${g.seen ? ` · zuletzt ${this._hhmm(g.seen)}` : ""}` : "kein Melder im Garten gefunden"}${set.bw_night !== false ? " · nachts Igelschutz" : ""}</small></span>
+        <div class="bw-act bw-guard-a">${busy ? `<button class="qbtn" data-action="bw-busy" data-v="clear"><ha-icon icon="mdi:check"></ha-icon>Wieder frei</button>`
+          : `<button class="qbtn" data-action="bw-busy" data-v="2"><ha-icon icon="mdi:timer-outline"></ha-icon>2 Std. belegt</button><button class="qbtn" data-action="bw-busy" data-v="evening"><ha-icon icon="mdi:grill-outline"></ha-icon>Bis heute Abend</button>`}</div>
+      </div>
+      <div class="vt-f">${[
+        blades != null ? [`${fmt(blades, 0)} Tage`, "Messer im Einsatz", blades >= (set.bw_blades_days || 60) ? "#f59e0b" : ""] : null,
+        hours != null ? [`${fmt(hours, 0)} Std.`, "Betriebsstunden", ""] : null,
+        soil != null ? [`${fmt(soil, 0)} %`, `Bodenfeuchte · Pause ab ${set.bw_soil_wet ?? 85} %`, soil >= (set.bw_soil_wet ?? 85) ? "#0ea5e9" : ""] : null,
+        bs.stats ? [`${fmt(bs.stats.week_hours, 1)} Std.`, "gemäht in 7 Tagen", ""] : null,
+      ].filter(Boolean).map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>
+    </section>`;
+  }
+
+  /** Zeitpläne des Mähers als Wochenleiste (mit Nacht = Igelschutz) und Liste zum Schalten und Ändern. */
+  _bwTimersCard(bs) {
+    const tms = bs.timers || [];
+    if (!tms.length) return "";
+    const DAYS = [["mo", "Mo"], ["tu", "Di"], ["we", "Mi"], ["th", "Do"], ["fr", "Fr"], ["sa", "Sa"], ["su", "So"]];
+    const min = (t) => { const [h, m] = String(t || "0:0").split(":").map(Number); return (h || 0) * 60 + (m || 0); };
+    const pc = (m) => `${(m / 1440) * 100}%`;
+    const loc = (iso) => { const d = new Date(iso); return isNaN(d) ? null : d.getHours() * 60 + d.getMinutes(); };
+    const set = this._data.settings;
+    const rise = bs.sun?.rise ? loc(bs.sun.rise) : null, sset = bs.sun?.set ? loc(bs.sun.set) : null;
+    const night = set.bw_night !== false && rise != null && sset != null
+      ? `<i class="bwt-n" style="left:0;width:${pc(rise + (set.bw_night_margin || 0))}"></i><i class="bwt-n" style="left:${pc(sset - (set.bw_night_margin || 0))};width:${pc(1440 - sset + (set.bw_night_margin || 0))}"></i>` : "";
+    const on = tms.filter((t) => t.on && t.days.length);
+    const today = ["su", "mo", "tu", "we", "th", "fr", "sa"][new Date().getDay()];
+    const nowM = new Date().getHours() * 60 + new Date().getMinutes();
+    const rows = DAYS.map(([k, l]) => `<div class="bwt-r ${k === today ? "today" : ""}"><span>${l}</span><div class="bwt-bar">${night}${on.filter((t) => t.days.includes(k)).map((t) => {
+      const a = min(t.start), b = min(t.end);
+      return b > a ? `<i class="bwt-s" style="left:${pc(a)};width:${pc(b - a)}" title="Zeitplan ${t.id}: ${esc(t.start)}–${esc(t.end)}"></i>` : `<i class="bwt-s" style="left:${pc(a)};width:${pc(1440 - a)}"></i><i class="bwt-s" style="left:0;width:${pc(b)}"></i>`;
+    }).join("")}${k === today ? `<i class="bwt-now" style="left:${pc(nowM)}"></i>` : ""}</div></div>`).join("");
+    const DL = Object.fromEntries(DAYS);
+    const shown = tms.filter((t) => t.on || t.days.length);
+    const free = tms.find((t) => !t.on && !t.days.length);
+    return `<section class="card bw-c">
+      <div class="bw-h"><span class="bw-ic" style="--c:#16a34a"><ha-icon icon="mdi:calendar-clock"></ha-icon></span><span class="grow"><b>Zeitpläne</b><small>${on.length ? `${on.length} aktiv` : "keiner aktiv"} · grau = Igelschutz (dunkel)</small></span></div>
+      <div class="bwt">${rows}<div class="bwt-ax"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div></div>
+      <div class="evlist">${shown.map((t) => `<div class="ev"><label class="switch"><input type="checkbox" data-bwtm="${esc(t.entity)}" ${t.on ? "checked" : ""}><span></span></label><span class="grow"><b>${esc(t.start)}–${esc(t.end)}</b><small>Zeitplan ${t.id} · ${t.days.map((d) => DL[d]).join(", ") || "kein Tag"}</small></span>
+        ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="bwtimer:${t.id}" title="Ändern"><ha-icon icon="mdi:pencil-outline"></ha-icon></button>` : ""}</div>`).join("") || `<p class="muted small">Noch kein Zeitplan am Mäher.</p>`}</div>
+      ${this._admin && free ? `<button class="link" data-action="pop-open" data-pop="bwtimer:${free.id}"><ha-icon icon="mdi:plus"></ha-icon>Zeitplan hinzufügen</button>` : ""}
+    </section>`;
+  }
+
+  /** Statistik: Mähstunden je Tag (14 Tage), Ladevorgänge, Fehler mit Häufigkeit und Uhrzeit. */
+  _bwStatsCard(bs) {
+    const st = bs.stats;
+    if (!st) return "";
+    const days = st.days || [];
+    const max = Math.max(1, ...days.map((d) => d.hours));
+    const bars = days.map((d) => `<span class="bws-b" title="${new Date(d.day).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" })}: ${fmt(d.hours, 1)} Std.${d.errors ? ` · ${d.errors} Fehler` : ""}"><i style="height:${(d.hours / max) * 100}%;${d.errors ? `background:${C.alert}` : ""}"></i><small>${new Date(d.day).toLocaleDateString("de-DE", { weekday: "narrow" })}</small></span>`).join("");
+    return `<section class="card bw-c">
+      <div class="bw-h"><span class="bw-ic" style="--c:#16a34a"><ha-icon icon="mdi:chart-bar"></ha-icon></span><span class="grow"><b>Statistik</b><small>letzte 14 Tage · gezählt seit dem Update</small></span></div>
+      <div class="vt-f"><span><b>${fmt(st.week_hours, 1)} Std.</b><small>gemäht · 7 Tage</small></span><span><b>${st.week_charges}</b><small>Ladevorgänge</small></span><span ${st.week_errors ? `style="--c:${C.alert}" class="on"` : ""}><b>${st.week_errors}</b><small>Fehler</small></span></div>
+      <div class="bws">${bars}</div>
+      ${(st.errors || []).length ? `<div class="lbl">Häufigste Fehler · 7 Tage</div><div class="evlist">${st.errors.map((e) => `<div class="ev"><ha-icon icon="mdi:alert-circle-outline" style="color:${C.alert}"></ha-icon><span class="grow"><b>${e.count}× ${esc(e.text)}</b><small>meist ${e.from === e.to ? `um ${e.from} Uhr` : `${e.from}–${e.to + 1} Uhr`}</small></span></div>`).join("")}</div>` : ""}
+    </section>`;
+  }
+
+  _w_mower(w, z) {
+    const bs = this._status?.beetwerk || {};
+    const E = bs.entities || {};
+    if (!E.mower) return `<p class="muted small">Kein Mähroboter gefunden.</p>`;
+    const mv = this._bwMowerState(bs);
+    const bat = this._bwNum(E.battery);
+    const why = (bs.reasons || []).map((r) => r.text);
+    const btn = (sv, l, i, cls = "") => `<button class="qbtn ${cls}" data-action="bw-svc" data-d="lawn_mower" data-s="${sv}" data-e="${esc(E.mower)}" data-l="${l}"><ha-icon icon="${i}"></ha-icon>${l}</button>`;
+    return `<div class="bw-w">${this._bwArt(mv, z === "s" ? "sm" : "")}<div class="bw-w-t"><b style="color:${mv.c}">${esc(mv.label)}</b>${bat != null ? `<small>Akku ${fmt(bat, 0)} %</small>` : ""}</div></div>
+      ${z !== "s" && why.length ? `<p class="muted small">Gerade nicht mähen: ${esc(why.join(", "))}</p>` : ""}
+      ${z !== "s" ? `<div class="bw-act">${mv.k === "mowing" ? btn("dock", "Zur Station", "mdi:home-import-outline") : btn("start_mowing", "Mähen", "mdi:play", "hot")}</div>` : ""}
+      ${z === "l" && bs.stats ? `<div class="vt-f"><span><b>${fmt(bs.stats.week_hours, 1)} Std.</b><small>gemäht · 7 Tage</small></span>${bs.next_start ? `<span><b>${new Date(bs.next_start).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}</b><small>nächster Start</small></span>` : ""}</div>` : ""}`;
+  }
+
+  _bwTimerPop(n) {
+    const t = (this._status?.beetwerk?.timers || []).find((x) => x.id === n) || { id: n, on: false, start: "09:00", end: "13:00", days: [] };
+    const d = (this._pop.draft.tm ||= { enable: t.on || !t.days.length, start: t.start || "09:00", end: t.end || "13:00", days: [...(t.days.length ? t.days : ["mo", "we", "fr"])] });
+    const DAYS = [["mo", "Mo"], ["tu", "Di"], ["we", "Mi"], ["th", "Do"], ["fr", "Fr"], ["sa", "Sa"], ["su", "So"]];
+    const warn = this._data.settings.bw_night !== false && this._status?.beetwerk?.sun?.set
+      && d.end > new Date(this._status.beetwerk.sun.set).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) ? `<p class="note"><ha-icon icon="mdi:weather-night"></ha-icon>Endet nach Sonnenuntergang – im Dunkeln schickt der Igelschutz den Mäher heim.</p>` : "";
+    return {
+      icon: "mdi:calendar-clock", c: "#16a34a", title: `Zeitplan ${n}`, sub: "Beetwerk · wird am Mäher gespeichert (Robonect)",
+      body: `<label class="check"><span>Aktiv</span><span class="switch"><input type="checkbox" data-tm="enable" ${d.enable ? "checked" : ""}><span></span></span></label>
+        <div class="bwt-time"><label class="field"><span>Von</span><input type="time" data-tm="start" value="${esc(d.start)}"></label><label class="field"><span>Bis</span><input type="time" data-tm="end" value="${esc(d.end)}"></label></div>
+        <div class="rq-quick">${DAYS.map(([k, l]) => `<button class="pill ${d.days.includes(k) ? "on" : ""}" data-action="bw-tm-day" data-k="${k}">${l}</button>`).join("")}</div>
+        ${warn}`,
+      foot: `<button class="secondary" data-action="pop-close">Abbrechen</button><button class="primary" data-action="bw-tm-save" data-n="${n}">Speichern</button>`,
+    };
   }
 
   /** Zonen-Einstellung (Entwurf) mit Ventil-Liste – auch für ältere Einträge mit nur einem Ventil. */
@@ -4997,6 +5165,8 @@ class HauswerkPanel extends HTMLElement {
       { g: "Garten", id: "bwmower", t: "oft", icon: "mdi:robot-mower-outline", c: "#16a34a", title: "Mähroboter", sum: auto("bw_mower", E.mower), val: E.mower ? "" : "fehlt", warn: !E.mower && !E.valve, words: "mähroboter rasenmäher mäher lawn mower robonect automower" },
       { g: "Garten", id: "bwpause", t: "oft", icon: "mdi:pause-octagon-outline", c: "#0ea5e9", title: "Mähpause", sum: pause.length ? `bei ${pause.map((k) => PT[k]).join(", ")}${p.bw_resume !== false ? " · danach weiter" : ""}` : "aus", val: String(pause.length), words: "regen nass boden frost bewässerung pause weiter" },
       { g: "Garten", id: "bwwater", icon: "mdi:sprinkler-variant", c: "#0ea5e9", title: "Bewässerung", sum: [E.valve ? `Ventil ${this._entityName(E.valve)}` : "", E.soil ? `Bodenfeuchte ${this._entityName(E.soil)}` : ""].filter(Boolean).join(" · ") || "keine gefunden", words: "bewässerung ventil gießen bodenfeuchte smart irrigation" },
+      { g: "Garten", id: "bwguard", t: "oft", icon: "mdi:human-child", c: "#16a34a", title: "Garten frei & Igelschutz", sum: [p.bw_guard !== false ? `Kamera schickt den Mäher heim (${(bs.guard?.sensors || []).length ? (bs.guard.sensors || []).map((x) => this._entityName(x)).join(", ") : "kein Melder"})` : "Kamera aus", p.bw_night !== false ? "nachts nie mähen" : ""].filter(Boolean).join(" · "), val: p.bw_guard !== false ? `${p.bw_guard_wait ?? 30} Min.` : "aus", warn: p.bw_guard !== false && E.mower && !(bs.guard?.sensors || []).length, words: "kamera kinder person haustier hund katze igel nacht garten frei belegt" },
+      { g: "Garten", id: "bwwatch", icon: "mdi:shield-search", c: "#16a34a", title: "Hitze, Saison & Wächter", sum: [p.bw_heat !== false ? `Hitzepause ab ${fmt(p.bw_heat_temp ?? 30, 0)} °C` : "", p.bw_season !== false ? "Saison-Hinweise" : "", p.bw_watch !== false ? `Wächter nach ${p.bw_watch_min ?? 20} Min.` : ""].filter(Boolean).join(" · ") || "aus", words: "hitze sommer saison winterpause diebstahl wächter gestohlen akku verschleiß" },
       { g: "Garten", id: "bwcare", icon: "mdi:saw-blade", c: "#16a34a", title: "Wartung", sum: `Messer wechseln nach ${p.bw_blades_days ?? 60} Tagen`, val: E.blades_days && this._bwNum(E.blades_days) != null ? `${fmt(this._bwNum(E.blades_days), 0)} Tage` : "", words: "messer wartung klingen" },
       { g: "Allgemein", go: "log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll", sum: "Mähpausen, Fehler, Einstellungen", words: "protokoll" },
     ];
@@ -8415,6 +8585,7 @@ class HauswerkPanel extends HTMLElement {
     if (String(id).startsWith("rwc:")) return this._rwcPop(id.slice(4));
     if (String(id).startsWith("rwpos:")) return this._rwPosPop(id.slice(6));
     if (String(id).startsWith("kwapp:")) return this._kwAppPop(id.slice(6));
+    if (String(id).startsWith("bwtimer:")) return this._bwTimerPop(Number(id.slice(8)));
     if (String(id).startsWith("lwp:")) { const [, pid, sec] = String(id).split(":"); return this._lwpPop(pid, LW_SECTIONS.some(([x]) => x === sec) ? sec : "on"); }
     if (String(id).startsWith("lwbri:") || String(id).startsWith("lwl:") || String(id).startsWith("lwroom:") || String(id).startsWith("lwarea:") || LW_POPS.includes(id)) return this._lwPop(id);
     if (String(id).startsWith("rwarea:")) {
@@ -9117,6 +9288,38 @@ class HauswerkPanel extends HTMLElement {
             <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Während und nach dem Bewässern lässt Beetwerk den Mäher stehen.</p>`,
         };
       }
+
+      case "bwguard": {
+        const g = this._status?.beetwerk?.guard || {};
+        return {
+          icon: "mdi:human-child", c: "#16a34a", title: "Garten frei & Igelschutz", sub: "Beetwerk",
+          body: `${head("mdi:cctv", "Garten frei – Kinder und Tiere")}
+            <div class="wxrows">${this._setRow("bwg", "Mäher heimschicken", "wenn die Kamera jemanden im Garten sieht", sw("bw_guard"), "Meldet ein Person- oder Haustier-Sensor im Garten (z. B. von der Kamera) etwas, während der Mäher fährt, schickt Beetwerk ihn in die Station. Ist so lange niemand mehr zu sehen, startet er wieder – bis zur Uhrzeit aus der Mähpause.")}</div>
+            <div class="field"><span><ha-icon icon="mdi:motion-sensor"></ha-icon> Melder (leer = automatisch${(g.sensors || []).length && !(p.bw_guard_sensors || []).length ? `: ${esc(g.sensors.map((x) => this._entityName(x)).join(", "))}` : ""})</span>${this._picker("bw_guard_sensors", p.bw_guard_sensors || [])}</div>
+            <label class="field narrow"><span><ha-icon icon="mdi:timer-sand"></ha-icon> Weiter, wenn niemand mehr zu sehen ist seit</span>${minutes("bw_guard_wait", 30, 1, 240, 5)}</label>
+            <div class="field"><span><ha-icon icon="mdi:camera-outline"></ha-icon> Kamera für das Bild in der Nachricht (leer = ${g.camera && !p.bw_camera ? `automatisch: ${esc(this._entityName(g.camera))}` : "automatisch"})</span>${this._picker("bw_camera", p.bw_camera ? [p.bw_camera] : [])}</div>
+            <p class="muted small"><ha-icon icon="mdi:bell-outline"></ha-icon>Ob du eine Nachricht bekommst, stellst du unter <button class="link inline" data-action="settings-go" data-sub="notify">Benachrichtigungen</button> › Beetwerk › „Mäher fährt heim“ ein (Standard: nur Protokoll). Das Kamerabild kommt in der Home-Assistant-App mit. Auf der Seite Garten gibt es dazu „2 Std. belegt“ und „Bis heute Abend“, z. B. zum Grillen.</p>
+            ${head("mdi:weather-night", "Igelschutz")}
+            <div class="wxrows">${this._setRow("bwn", "Nachts nie mähen", "zwischen Sonnenuntergang und Sonnenaufgang", sw("bw_night"), "Igel und andere Tiere sind in der Dämmerung und nachts unterwegs und werden von Mährobotern oft schwer verletzt. Mäht der Roboter im Dunkeln, schickt Beetwerk ihn in den Feierabend (Robonect) bzw. in die Station; am nächsten Tag mäht er nach seinem Zeitplan weiter.")}</div>
+            <label class="field narrow"><span><ha-icon icon="mdi:weather-sunset"></ha-icon> Puffer vor Sonnenuntergang und nach Sonnenaufgang</span>${minutes("bw_night_margin", 0, 0, 180, 15)}</label>`,
+        };
+      }
+
+      case "bwwatch":
+        return {
+          icon: "mdi:shield-search", c: "#16a34a", title: "Hitze, Saison & Wächter", sub: "Beetwerk",
+          body: `${head("mdi:thermometer-high", "Hitze")}
+            <div class="wxrows">${this._setRow("bwh", "Hitzepause", "Rasen verbrennt sonst", sw("bw_heat"), "Ist es draußen so heiß, fährt der Mäher in die Station; 2 °C kühler darf er nach der Wartezeit der Mähpause wieder.")}</div>
+            <label class="field narrow"><span><ha-icon icon="mdi:thermometer"></ha-icon> Ab</span>${minutes("bw_heat_temp", 30, 20, 45, 1, "°C")}</label>
+            ${head("mdi:calendar-sync-outline", "Saison")}
+            <div class="wxrows">${this._setRow("bws", "Saison-Hinweise", "Winterpause einlegen bzw. Saison starten", sw("bw_season"), "Herbst: 3 Tage kaum über 5 °C → „Winterpause einlegen?“. Frühjahr in der Winterpause: 5 Nächte über 5 °C → „Saison starten?“. Als Hinweis unter der Glocke (Benachrichtigungen › Beetwerk › Wartung).")}</div>
+            ${head("mdi:shield-search", "Wächter")}
+            <div class="wxrows">${this._setRow("bww", "Mäher überwachen", "Diebstahl und Stillstand", sw("bw_watch"), "Nachricht mit Kamerabild (Anlass „Mähroboter braucht Hilfe“), wenn der Mäher außerhalb der Station keine Verbindung mehr hat, so lange im Garten steht oder nachts ab 22 Uhr nicht in der Station ist.")}</div>
+            <label class="field narrow"><span><ha-icon icon="mdi:timer-sand"></ha-icon> Melden nach</span>${minutes("bw_watch_min", 20, 5, 240, 5)}</label>
+            ${head("mdi:battery-heart-variant", "Verschleiß")}
+            <label class="field narrow"><span><ha-icon icon="mdi:battery-alert-variant-outline"></ha-icon> „Akku altert“ unter … % der besten Kapazität</span>${minutes("bw_battery_min", 70, 30, 95, 5, "%")}</label>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Außerdem meldet Beetwerk stumpfe Messer (Messerqualität bzw. Drehzahl deutlich unter dem Üblichen), ein schwaches Signal des Begrenzungsdrahts, schwaches WLAN und Feuchte im Gehäuse – unter der Glocke, als Nachricht unter Benachrichtigungen › Beetwerk › Wartung.</p>`,
+        };
 
       case "bwcare":
         return {
@@ -10247,6 +10450,15 @@ class HauswerkPanel extends HTMLElement {
       if (isChange) this._renderPop();
       return;
     }
+    if (t.dataset.tm && this._pop?.draft?.tm) {
+      this._pop.draft.tm[t.dataset.tm] = t.type === "checkbox" ? t.checked : t.value;
+      return;
+    }
+    if (t.dataset.bwtm && isChange) {
+      this._hass.callService("switch", t.checked ? "turn_on" : "turn_off", { entity_id: t.dataset.bwtm });
+      this._toast(t.checked ? "Zeitplan eingeschaltet" : "Zeitplan ausgeschaltet");
+      return;
+    }
     if (t.dataset.bwz && this._settings && isChange) {
       const cur = this._bwZoneCfg(t.dataset.zone);
       if (t.dataset.bwz === "valve") {
@@ -10948,6 +11160,29 @@ class HauswerkPanel extends HTMLElement {
         this._toast(el.dataset.on === "1" ? "Automation eingeschaltet" : "Automation abgeschaltet");
         setTimeout(() => this._renderPop(), 800);
         break;
+      case "bw-busy": {
+        const v = el.dataset.v;
+        const res = await this._ws({ type: "hauswerk/beetwerk/busy", ...(v === "evening" ? { until: "evening" } : v === "clear" ? {} : { hours: Number(v) }) });
+        if (this._status) this._status.beetwerk = res.status;
+        this._renderMain();
+        this._toast(v === "clear" ? "Garten wieder frei" : v === "evening" ? "Mäher bleibt bis heute Abend in der Station" : `Mäher bleibt ${v} Std. in der Station`);
+        break;
+      }
+      case "bw-tm-day": {
+        const d = this._pop.draft.tm;
+        d.days = d.days.includes(el.dataset.k) ? d.days.filter((x) => x !== el.dataset.k) : [...d.days, el.dataset.k];
+        this._renderPop();
+        break;
+      }
+      case "bw-tm-save": {
+        const d = this._pop.draft.tm;
+        const res = await this._ws({ type: "hauswerk/beetwerk/timer", timer: Number(el.dataset.n), enable: !!d.enable, start: d.start, end: d.end, days: d.days });
+        if (this._status) this._status.beetwerk = res.status;
+        this._closePop();
+        this._renderMain();
+        this._toast("Zeitplan an den Mäher gesendet");
+        break;
+      }
       case "bw-pause": {
         const cur = new Set(this._settings.bw_pause || ["rain", "soil", "frost", "water"]);
         if (cur.has(el.dataset.k)) cur.delete(el.dataset.k);
@@ -14245,6 +14480,41 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .vt-ok { color:var(--muted); font-size:13px; }
 .vt-ok ha-icon { color:#22c55e; }
 .brief.br-mod-bw { --mc:#15803d; --mc2:#86efac; } :host([dark]) .brief.br-mod-bw { --mc:#86efac; }
+.bw-hero { display:flex; align-items:center; gap:16px; }
+.bw-hero-t { display:flex; flex-direction:column; gap:3px; min-width:0; flex:1; } .bw-hero-t b { font-size:17px; } .bw-hero-t small { color:var(--muted); font-size:13px; }
+.bw-st { font-weight:700; font-size:15px; }
+.bw-batbar { position:relative; display:block; height:18px; border-radius:9px; background:color-mix(in srgb, var(--muted) 18%, transparent); overflow:hidden; margin-top:4px; max-width:220px; }
+.bw-batbar i { position:absolute; inset:0 auto 0 0; border-radius:9px; } .bw-batbar em { position:relative; font-style:normal; font-size:12px; font-weight:700; padding-left:8px; line-height:18px; }
+.bw-art { position:relative; display:inline-block; width:132px; flex:none; } .bw-art.sm { width:84px; } .bw-art svg { width:100%; height:auto; display:block; overflow:visible; }
+.bw-art .sh { fill:color-mix(in srgb, var(--fg, #000) 12%, transparent); }
+.bw-art .grass path { fill:none; stroke:#4ade80; stroke-width:2; stroke-linecap:round; opacity:.7; }
+.bw-art .body { fill:var(--c); } .bw-art .lid { fill:color-mix(in srgb, var(--c) 60%, #fff); }
+.bw-art .panel { fill:#1e293b; opacity:.85; } .bw-art .btn { fill:#ef4444; } .bw-art .strip { fill:#0f172a; opacity:.25; }
+.bw-art .wheel circle { fill:#1e293b; } .bw-art .wheel path { stroke:#64748b; stroke-width:2.4; } .bw-art .blade { fill:none; stroke:#94a3b8; stroke-width:1.6; stroke-dasharray:6 4; opacity:0; }
+.bw-art.st-mowing .blade { opacity:1; animation:bwblade .4s linear infinite; } .bw-art.st-mowing .wheel { animation:bwspin 1.6s linear infinite; }
+.bw-art.st-mowing .bob { animation:bwbob 1.2s ease-in-out infinite; } .bw-art.st-mowing .grass { animation:bwgrass 1.6s linear infinite; }
+.bw-art.st-returning .wheel { animation:bwspin 2.4s linear infinite; } .bw-art.st-offline svg, .bw-art.st-winter svg { filter:grayscale(.8); opacity:.7; }
+.bw-art.st-error .body { animation:bwerr 1s ease-in-out infinite; }
+.bw-art-b { position:absolute; right:-2px; top:-4px; width:34px; height:34px; border-radius:50%; display:grid; place-items:center; background:var(--card-bg, #fff); color:var(--c); box-shadow:0 2px 8px rgba(0,0,0,.18); }
+.bw-art.sm .bw-art-b { width:26px; height:26px; } .bw-art-b ha-icon { --mdc-icon-size:20px; } .bw-art.sm .bw-art-b ha-icon { --mdc-icon-size:15px; }
+.bw-art.st-charging .bw-art-b { animation:bwpulse 1.6s ease-in-out infinite; }
+@keyframes bwspin { to { transform:rotate(360deg); } } @keyframes bwbob { 50% { transform:translateY(-1.5px); } }
+@keyframes bwblade { to { stroke-dashoffset:-20; } } @keyframes bwgrass { from { transform:translateX(0); } to { transform:translateX(-24px); } }
+@keyframes bwpulse { 50% { transform:scale(1.15); } } @keyframes bwerr { 50% { fill:#ef4444; } }
+@media (prefers-reduced-motion: reduce) { .bw-art * { animation:none !important; } }
+.bw-guard { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; border-radius:14px; background:color-mix(in srgb, var(--muted) 8%, transparent); }
+.bw-guard-a { flex-basis:100%; } .bw-guard .grow b { display:block; font-size:14px; } .bw-guard .grow small { color:var(--muted); font-size:12px; } .bw-ic.sm { width:34px; height:34px; border-radius:11px; } .bw-ic.sm ha-icon { --mdc-icon-size:20px; }
+.bwt { display:flex; flex-direction:column; gap:5px; }
+.bwt-r { display:grid; grid-template-columns:26px 1fr; align-items:center; gap:8px; font-size:12px; color:var(--muted); } .bwt-r.today span { color:var(--fg); font-weight:700; }
+.bwt-bar { position:relative; height:14px; border-radius:7px; background:color-mix(in srgb, var(--muted) 12%, transparent); overflow:hidden; }
+.bwt-bar i { position:absolute; top:0; bottom:0; } .bwt-n { background:repeating-linear-gradient(45deg, color-mix(in srgb, #64748b 35%, transparent) 0 4px, transparent 4px 8px); }
+.bwt-s { background:#16a34a; border-radius:7px; opacity:.9; } .bwt-now { width:2px; background:#ef4444; }
+.bwt-ax { display:flex; justify-content:space-between; margin-left:34px; font-size:11px; color:var(--muted); }
+.bwt-time { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.bws { display:flex; align-items:flex-end; gap:4px; height:90px; } .bws-b { flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:3px; }
+.bws-b i { width:100%; border-radius:4px 4px 2px 2px; background:#16a34a; min-height:2px; } .bws-b small { font-size:10px; color:var(--muted); }
+.bw-w { display:flex; align-items:center; gap:12px; } .bw-w-t { display:flex; flex-direction:column; } .bw-w-t small { color:var(--muted); }
+.sv-t { font-size:.8em; color:#cbd5e1; }
 .bw-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; margin-top:14px; }
 .bw-c { display:flex; flex-direction:column; gap:12px; }
 .bw-h { display:flex; align-items:center; gap:12px; } .bw-h b { display:block; font-size:16px; } .bw-h small { color:var(--muted); font-size:13px; }

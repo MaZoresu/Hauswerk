@@ -2149,6 +2149,106 @@ def test_beetwerk_maehpause_fehler_wartung(hw):
     asyncio.run(run())
 
 
+def test_beetwerk_garten_frei_igel_hitze_waechter(hw):
+    """Beetwerk-Mäher: Kamera meldet Person -> heim (Nachricht mit Kamerabild), 30 Min. ohne Meldung -> weiter;
+    Garten belegt; Igelschutz nachts per Feierabend; Hitzepause; Wächter; Verschleiß; Statistik und Zeitpläne."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 6, 10, 9, 0, tzinfo=timezone.utc)  # 10:00 lokal
+        hass = Hass()
+        ents = ("lawn_mower.robonect", "sensor.automower_mower_battery_charge", "button.automower_eod", "sensor.automower_battery_capacity",
+                "sensor.automower_wire", "sensor.automower_wlan_rssi", "sensor.automower_health_climate_humidity", "sensor.automower_motor_blade",
+                "switch.automower_timer_1", "switch.automower_timer_2", "sensor.automower_mower_statistic_hours")
+        for eid in ents:
+            REG[eid] = types.SimpleNamespace(entity_id=eid, device_id="mower", domain=eid.split(".")[0], disabled_by=None,
+                                             device_class="battery" if "battery_charge" in eid else None, original_device_class=None)
+        hass.set("lawn_mower.robonect", "mowing", {}, "Automower")
+        hass.set("sensor.automower_mower_battery_charge", "80")
+        hass.set("sensor.automower_battery_capacity", "1600")
+        hass.set("sensor.automower_wire", "100")
+        hass.set("sensor.automower_wlan_rssi", "90")
+        hass.set("sensor.automower_health_climate_humidity", "40")
+        hass.set("sensor.automower_motor_blade", "2900")
+        hass.set("sensor.automower_mower_statistic_hours", "1703")
+        hass.set("switch.automower_timer_1", "on", {"id": 1, "start": "08:00", "end": "14:10", "weekdays": {"mo": True, "tu": False, "we": True, "th": False, "fr": False, "sa": False, "su": False}}, "Timer 1")
+        hass.set("switch.automower_timer_2", "off", {"id": 2, "start": "08:00", "end": "10:00", "weekdays": {}}, "Timer 2")
+        hass.set("binary_sensor.garten_person", "off", {}, "Garten Person")
+        hass.set("binary_sensor.garten_fahrzeug", "off", {}, "Garten Fahrzeug")
+        hass.set("camera.garten_fliessend", "idle", {}, "Garten")
+        hass.set("sun.sun", "above_horizon", {"next_setting": "2026-06-10T19:30:00+00:00", "next_rising": "2026-06-11T03:00:00+00:00"})
+        hass.set("weather.home", "sunny", {"temperature": 22, "humidity": 50})
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"weather_entity": "weather.home", "notify_targets": ["mobile_app_pixel"], "notify_quiet": False,
+                                        "notify_mower_guard": "normal"})
+        bw = hw.Beetwerk(hass, log, haus)
+        await bw.async_load()
+        await bw.async_start()
+        assert bw.guard_sensors() == ["binary_sensor.garten_person"] and bw.camera() == "camera.garten_fliessend"
+        dock = ("lawn_mower", "dock", {"entity_id": "lawn_mower.robonect"})
+        start = ("lawn_mower", "start_mowing", {"entity_id": "lawn_mower.robonect"})
+        await bw.async_evaluate()
+        assert dock not in hass.calls
+        # Kinder im Garten -> heim, Nachricht mit Kamerabild
+        hass.set("binary_sensor.garten_person", "on", {}, "Garten Person")
+        await bw.async_evaluate()
+        await asyncio.sleep(0)
+        assert dock in hass.calls
+        assert "Mäher fährt heim" in hass.sent()
+        assert any(c[0] == "notify" and (c[2].get("data") or {}).get("image") == "/api/camera_proxy/camera.garten_fliessend" for c in hass.calls)
+        hass.set("lawn_mower.robonect", "docked", {}, "Automower")
+        hass.set("binary_sensor.garten_person", "off", {}, "Garten Person")
+        NOW[0] += timedelta(minutes=20)
+        await bw.async_evaluate()
+        assert start not in hass.calls  # erst 30 Min. nach der letzten Meldung
+        NOW[0] += timedelta(minutes=11)
+        await bw.async_evaluate()
+        assert start in hass.calls
+        # Garten belegt 2 Std.
+        hass.set("lawn_mower.robonect", "mowing", {}, "Automower")
+        n = hass.calls.count(dock)
+        await bw.async_busy(hours=2, by="Test")
+        assert hass.calls.count(dock) == n + 1 and bw.status()["busy_until"]
+        await bw.async_busy(None)
+        assert bw.status()["busy_until"] is None
+        # Hitze: ab 30 °C
+        hass.set("lawn_mower.robonect", "mowing", {}, "Automower")
+        hass.set("weather.home", "sunny", {"temperature": 31, "humidity": 30})
+        n = hass.calls.count(dock)
+        await bw.async_evaluate()
+        assert hass.calls.count(dock) == n + 1 and "heat" in [r["k"] for r in bw.status()["reasons"]]
+        hass.set("weather.home", "sunny", {"temperature": 29, "humidity": 30})
+        await bw.async_evaluate()
+        assert "heat" in [r["k"] for r in bw.status()["reasons"]]  # Abstand 2 °C
+        hass.set("weather.home", "sunny", {"temperature": 22, "humidity": 30})
+        await bw.async_evaluate()
+        # Igelschutz: nachts mäht er -> Feierabend statt Station, kein Neustart
+        bw._persist["paused"] = None
+        hass.set("lawn_mower.robonect", "mowing", {}, "Automower")
+        hass.set("sun.sun", "below_horizon", {"next_setting": "2026-06-11T19:30:00+00:00", "next_rising": "2026-06-11T03:00:00+00:00"})
+        await bw.async_evaluate()
+        assert ("button", "press", {"entity_id": "button.automower_eod"}) in hass.calls
+        assert "night" in [r["k"] for r in bw.status()["reasons"]]
+        # Wächter: nachts nach 22 Uhr nicht in der Station
+        NOW[0] = datetime(2026, 6, 10, 21, 30, tzinfo=timezone.utc)  # 22:30 lokal
+        await bw.async_evaluate()
+        await asyncio.sleep(0)
+        assert "Mähroboter nachts nicht in der Station" in hass.sent()
+        # Verschleiß: Akku-Kapazität fällt unter 70 %
+        hass.set("sensor.automower_battery_capacity", "1000")
+        assert "Akku altert" in (bw.wear(bw.entities())["battery"] or "")
+        hass.set("sensor.automower_health_climate_humidity", "85")
+        assert bw.wear(bw.entities())["humid"]
+        st = bw.status()
+        assert st["stats"]["days"][-1]["hours"] > 0 and len(st["timers"]) == 2
+        assert st["timers"][0] == {"entity": "switch.automower_timer_1", "id": 1, "on": True, "start": "08:00", "end": "14:10", "days": ["mo", "we"]}
+        await bw.async_timer(2, True, "09:00", "12:00", ["sa", "su"], by="Test")
+        assert ("robonect", "timer", {"entity_id": "lawn_mower.robonect", "timer": "2", "enable": True, "start": "09:00", "end": "12:00", "weekdays": ["sa", "su"]}) in hass.calls
+        await bw.async_stop()
+
+    asyncio.run(run())
+
+
 def test_beetwerk_giessen_mit_smart_irrigation(hw):
     """Beetwerk gießt: Zonen aus Smart Irrigation, Ventil mit gleichem Namen gefunden, Dauer berechnet, danach
     Ventil zu und Wasserbilanz zurück; Gießplan zur Startzeit, bei Regen ausgelassen; Mäher fährt solange in die Station."""

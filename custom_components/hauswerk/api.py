@@ -144,7 +144,7 @@ ROOM_SCHEMA = vol.Schema(
 )
 
 WIDGET_TYPES = ["vent", "light", "heat", "presence", "weather", "rooms", "shortcuts", "windows", "schedule", "report", "values", "forecast",
-                "hints", "power", "shutters", "rwnext", "energy", "lage", "events", "calendar"]
+                "hints", "power", "shutters", "rwnext", "energy", "lage", "events", "calendar", "mower"]
 WIDGET_SCHEMA = vol.Schema(
     {
         vol.Required("id"): vol.All(str, vol.Length(min=1, max=20)),
@@ -235,6 +235,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_light_offline"): NOTIFY_MODE,
         vol.Optional("notify_mower"): NOTIFY_MODE,
         vol.Optional("notify_mower_care"): NOTIFY_MODE,
+        vol.Optional("notify_mower_guard"): NOTIFY_MODE,
         # Beetwerk (Garten)
         vol.Optional("bw_mower"): _opt(vol.All(str, vol.Match(r"^lawn_mower\.[a-z0-9_]+$"))),
         vol.Optional("bw_soil"): _opt(ENTITY),
@@ -255,6 +256,18 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("bw_water_auto"): bool,
         vol.Optional("bw_water_time"): _hm,
         vol.Optional("bw_water_skip"): bool,
+        vol.Optional("bw_guard"): bool,
+        vol.Optional("bw_guard_sensors"): vol.All([ENTITY], vol.Length(max=10)),
+        vol.Optional("bw_guard_wait"): vol.All(vol.Coerce(int), vol.Range(min=1, max=240)),
+        vol.Optional("bw_camera"): _opt(vol.All(str, vol.Match(r"^camera\.[a-z0-9_]+$"))),
+        vol.Optional("bw_night"): bool,
+        vol.Optional("bw_night_margin"): vol.All(vol.Coerce(int), vol.Range(min=0, max=180)),
+        vol.Optional("bw_heat"): bool,
+        vol.Optional("bw_heat_temp"): vol.All(vol.Coerce(float), vol.Range(min=20, max=45)),
+        vol.Optional("bw_season"): bool,
+        vol.Optional("bw_watch"): bool,
+        vol.Optional("bw_watch_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
+        vol.Optional("bw_battery_min"): vol.All(vol.Coerce(int), vol.Range(min=30, max=95)),
         # Lichtwerk
         vol.Optional("lw_lights"): vol.All([vol.All(str, vol.Match(r"^(light|switch|input_boolean)\.[a-z0-9_]+$"))], vol.Length(max=80)),
         vol.Optional("lw_lux_sensor"): _opt(SENSOR),
@@ -370,6 +383,32 @@ async def ws_bw_water(hass: HomeAssistant, connection, msg) -> None:
         return _not_ready(connection, msg)
     res = await bw.async_water(msg.get("zone"), (msg["minutes"] * 60) if msg.get("minutes") else None, by=_who(connection))
     connection.send_result(msg["id"], {"result": res, "status": bw.status()})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/beetwerk/busy", vol.Optional("hours"): _opt(vol.All(vol.Coerce(float), vol.Range(min=0.25, max=24))),
+                                  vol.Optional("until"): _opt(vol.In(["evening"]))})
+@websocket_api.async_response
+async def ws_bw_busy(hass: HomeAssistant, connection, msg) -> None:
+    """Beetwerk: „Garten belegt“ – Mäher bleibt in der Station (… Stunden oder bis heute Abend); ohne Angabe aufheben."""
+    bw = _bw(hass)
+    if bw is None:
+        return _not_ready(connection, msg)
+    await bw.async_busy(msg.get("hours"), msg.get("until"), by=_who(connection))
+    connection.send_result(msg["id"], {"status": bw.status()})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/beetwerk/timer", vol.Required("timer"): vol.All(vol.Coerce(int), vol.Range(min=1, max=14)),
+                                  vol.Required("enable"): bool, vol.Required("start"): _hm, vol.Required("end"): _hm,
+                                  vol.Required("days"): vol.All([vol.In(["mo", "tu", "we", "th", "fr", "sa", "su"])], vol.Length(max=7))})
+@require_editor
+@websocket_api.async_response
+async def ws_bw_timer(hass: HomeAssistant, connection, msg) -> None:
+    """Beetwerk: Zeitplan am Mäher ändern (Robonect)."""
+    bw = _bw(hass)
+    if bw is None:
+        return _not_ready(connection, msg)
+    await bw.async_timer(msg["timer"], msg["enable"], msg["start"], msg["end"], msg["days"], by=_who(connection))
+    connection.send_result(msg["id"], {"status": bw.status()})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/beetwerk/stop"})
@@ -1077,6 +1116,8 @@ COMMANDS = (
     ws_lw_links_refresh,
     ws_bw_water,
     ws_bw_stop,
+    ws_bw_busy,
+    ws_bw_timer,
     ws_rw_profile_save,
     ws_rw_profile_delete,
     ws_log_get,

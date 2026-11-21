@@ -160,7 +160,15 @@ const status = {
     zones: [{ zone: "sensor.smart_irrigation_rasen_1", valve: "valve.rasen", valves: ["valve.rasen"], guessed: true, auto: true, name: "Rasen 1", duration: 720, bucket: -4.2, max_bucket: 15, multiplier: 0.85,
       multiplier_entity: "number.smart_irrigation_rasen_1_multiplier", need: true, state: "automatic", throughput: 15, size: 50, valve_state: "closed", running_until: null },
       { zone: "sensor.smart_irrigation_beet_links", valve: null, valves: [], guessed: false, auto: true, name: "Beet Links", duration: 0, bucket: 9.9, multiplier: 0.9,
-        multiplier_entity: "number.smart_irrigation_beet_links_multiplier", need: false, state: "automatic", throughput: 10, size: 12, valve_state: null, running_until: null }] },
+        multiplier_entity: "number.smart_irrigation_beet_links_multiplier", need: false, state: "automatic", throughput: 10, size: 12, valve_state: null, running_until: null }],
+    guard: { sensors: ["binary_sensor.garten_person", "binary_sensor.garten_haustier"], camera: "camera.garten", seen: new Date(Date.now() - 50 * 60e3).toISOString(), by: "binary_sensor.garten_person" },
+    busy_until: null, night: false, since: new Date(Date.now() - 42 * 60e3).toISOString(), next_start: null,
+    sun: { set: (() => { const d = new Date(); d.setHours(20, 45, 0, 0); return d.toISOString(); })(), rise: (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(5, 10, 0, 0); return d.toISOString(); })() },
+    wear: { blades: "Messer drehen 14 % langsamer als sonst – Messer stumpf oder Gras sehr hoch" },
+    timers: [{ entity: "switch.automower_timer_1", id: 1, on: true, start: "08:00", end: "14:10", days: ["mo", "we", "fr"] }, { entity: "switch.automower_timer_2", id: 2, on: false, start: "15:00", end: "18:00", days: ["sa"] }, { entity: "switch.automower_timer_3", id: 3, on: false, start: "08:00", end: "10:00", days: [] }],
+    stats: { week_hours: 18.5, week_charges: 9, week_errors: 3, cap_max: 1650,
+      days: Array.from({ length: 14 }, (_, i) => ({ day: new Date(Date.now() - (13 - i) * 86400e3).toISOString().slice(0, 10), hours: [0, 3.2, 0, 4.1, 0, 2.5, 0, 3.8, 0, 4.2, 1.1, 3.6, 0, 2.4][i], charges: i % 2, errors: i === 9 ? 2 : i === 11 ? 1 : 0 })),
+      errors: [{ text: "Mäher steckt fest", count: 3, from: 14, to: 15 }], last_errors: [] } },
   appliances: {
     waschmaschine: { state: "running", label: "Läuft", learning: false, n: 6, watt: 1932, gap: false,
       model: { n: 6, learning: false, active_w: 8, quiet_w: 3.1, start_w: 10, pause_max: 1500, end_wait: 2070, dur_med: 6300, dur_lo: 5400, dur_hi: 6900, kwh_med: 1.24, tail_s: 1620, tail_w: 2, interval: 150 },
@@ -247,7 +255,8 @@ const hass = {
     if (msg.type === "frontend/set_user_data" || msg.type === "frontend/set_system_data") { (window.hwFront = window.hwFront || {})[msg.type.slice(13)] = msg.value; return null; }
     if (msg.type === "hauswerk/heizen/get") return { settings, rooms, plans: {}, target_sensors: {}, status, defaults, modes: {}, is_admin: true, user_admin: true, rollwerk: { covers: rwCovers, profiles: rwProfiles, status: rwStatus }, lichtwerk: { lights: lwLights, profiles: lwProfiles, status: lwStatus, automations: [{ entity_id: "automation.nachtlicht", name: "Auto_Nachtlicht", state: "on" }] } };
     if (msg.type === "hauswerk/rollwerk/command") return null;
-    if (msg.type === "hauswerk/beetwerk/water" || msg.type === "hauswerk/beetwerk/stop") return { result: "gestartet", status: status.beetwerk };
+    if (["hauswerk/beetwerk/water", "hauswerk/beetwerk/stop", "hauswerk/beetwerk/timer"].includes(msg.type)) return { result: "gestartet", status: status.beetwerk };
+    if (msg.type === "hauswerk/beetwerk/busy") { status.beetwerk.busy_until = msg.until || msg.hours ? new Date(Date.now() + 7200e3).toISOString() : null; return { status: status.beetwerk }; }
     if (msg.type === "hauswerk/lichtwerk/command") return null;
     if (msg.type === "hauswerk/heizen/links/refresh") return status.hm_links;
     if (msg.type === "hauswerk/lichtwerk/links/refresh") return lwLinks;
