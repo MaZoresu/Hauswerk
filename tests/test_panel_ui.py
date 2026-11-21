@@ -1854,3 +1854,20 @@ def test_einstellungen_neu_geordnet(panel):
     p.js(f"() => {EL}._openPop('tablet')")
     p.wait()
     assert p.has('#pop [data-action="tablet-toggle"]')
+
+
+def test_lichtwerk_eigenes_symbol(panel):
+    """Leuchte › Symbol: Auswahl oder eigenes mdi-Symbol, wird gespeichert und an der Kachel gezeigt."""
+    p = panel
+    p.js(f"() => {EL}._openPop('lwl:light.flur_og')")
+    p.wait()
+    p.click('#pop [data-action="lwl-icon"][data-v="mdi:ceiling-light"]')
+    assert p.has('#pop [data-action="lwl-icon"][data-v="mdi:ceiling-light"].on')
+    p.click('#pop [data-action="lwl-save"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/lichtwerk/light/save"][-1]["light"]
+    assert saved["icon"] == "mdi:ceiling-light"
+    p.js(f"() => {{ {EL}._data.lichtwerk.lights['light.flur_og'] = {{ ...({EL}._data.lichtwerk.lights['light.flur_og'] || {{}}), icon: 'mdi:ceiling-light' }}; }}")
+    p.view("lights")
+    p.wait(300)
+    assert p.has('ha-icon[icon="mdi:ceiling-light"]')

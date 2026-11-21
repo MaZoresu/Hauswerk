@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.73.2";
+const VERSION = "0.74.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4127,7 +4127,7 @@ class HauswerkPanel extends HTMLElement {
     const timer = on && l.ls.off?.at ? `<span style="color:${C.ok}"><ha-icon icon="mdi:timer-outline"></ha-icon><span data-lw-until="${esc(l.ls.off.at)}">${this._lwLeft(l.ls.off.at)}</span></span>` : "";
     return this._wallTile({
       act: `data-action="pop-open" data-pop="lwbri:${esc(l.id)}"`, color: on ? this._lwColor(l) : C.rest,
-      ic: `<button class="wt-bulb ${on ? "on" : ""}" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" ${bad ? "disabled" : ""} title="${on ? "Aus" : "An"}" style="--lc:${this._lwColor(l)}"><ha-icon icon="${bad ? "mdi:lightbulb-alert-outline" : on ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}"></ha-icon>${mot ? `<span class="lw-mot"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</button>`,
+      ic: `<button class="wt-bulb ${on ? "on" : ""}" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" ${bad ? "disabled" : ""} title="${on ? "Aus" : "An"}" style="--lc:${this._lwColor(l)}"><ha-icon icon="${this._lwIco(l, on, bad)}"></ha-icon>${mot ? `<span class="lw-mot"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</button>`,
       area: area !== this._lwName(l) ? area : "", name: this._lwName(l),
       value: bad ? "–" : on ? (dim && pct != null ? fmt(pct, 0) : "an") : "aus", unit: !bad && on && dim && pct != null ? "%" : "",
       status: timer || st, cls: `${on ? "on" : ""} ${bad ? "bad" : ""}`,
@@ -4706,7 +4706,7 @@ class HauswerkPanel extends HTMLElement {
       return `
         <article class="card lw-c ${bad ? "bad" : ""} ${on ? "on" : ""}" style="--lc:${this._lwColor(l)}">
           <div class="rw-top">
-            <button class="lw-bulb ${on ? "on" : ""}" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" title="${on ? "Ausschalten" : "Einschalten"}" ${bad ? "disabled" : ""}><ha-icon icon="${bad ? "mdi:lightbulb-alert-outline" : on ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}"></ha-icon>${mot ? `<span class="lw-mot" title="Schaltet über Bewegungsmelder: ${esc(mot.join(", "))}"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</button>
+            <button class="lw-bulb ${on ? "on" : ""}" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" title="${on ? "Ausschalten" : "Einschalten"}" ${bad ? "disabled" : ""}><ha-icon icon="${this._lwIco(l, on, bad)}"></ha-icon>${mot ? `<span class="lw-mot" title="Schaltet über Bewegungsmelder: ${esc(mot.join(", "))}"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</button>
             <button class="grow lw-name" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" title="Helligkeit">${areaLabel && areaLabel.toLowerCase() !== this._lwName(l).toLowerCase() ? `<small class="rw-al">${esc(areaLabel)}</small>` : ""}<b>${esc(this._lwName(l))}</b><small>${esc(stTxt)}${l.ls.cause && l.cfg.auto !== false ? ` · ${esc(l.ls.cause)}` : ""}</small></button>
             ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="lwl:${esc(l.id)}" title="Einstellungen dieses Lichts"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
           </div>
@@ -4725,7 +4725,7 @@ class HauswerkPanel extends HTMLElement {
       return `
         <article class="card rw-m lw-m ${bad ? "bad" : ""}" style="--lc:${this._lwColor(l)}" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" role="button" tabindex="0" title="Helligkeit">
           <div class="rwm-top"><b>${esc(this._lwName(l))}</b>${on && l.ls.off?.at ? `<small class="lw-offm"><span data-lw-until="${esc(l.ls.off.at)}">${this._lwLeft(l.ls.off.at)}</span></small>` : ""}${flag ? `<ha-icon icon="${flag[0]}" style="color:${flag[1]}"></ha-icon>` : ""}</div>
-          <div class="rwm-pos"><ha-icon class="lw-mi" icon="${bad ? "mdi:lightbulb-alert-outline" : on ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}"></ha-icon><b>${bad ? "–" : on ? (pct != null && pct < 100 ? `${pct} %` : "an") : "aus"}</b>${l.ls.next && l.cfg.auto !== false ? `<small class="rwm-nx">${this._lwWhen(l.ls.next).replace("morgen ", "")} ${l.ls.next.action === "on" ? "↑" : "↓"}</small>` : ""}</div>
+          <div class="rwm-pos"><ha-icon class="lw-mi" icon="${this._lwIco(l, on, bad)}"></ha-icon><b>${bad ? "–" : on ? (pct != null && pct < 100 ? `${pct} %` : "an") : "aus"}</b>${l.ls.next && l.cfg.auto !== false ? `<small class="rwm-nx">${this._lwWhen(l.ls.next).replace("morgen ", "")} ${l.ls.next.action === "on" ? "↑" : "↓"}</small>` : ""}</div>
           <div class="rwm-ctl"><button class="sbtn" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" ${bad ? "disabled" : ""} title="${on ? "Aus" : "An"}"><ha-icon icon="mdi:power"></ha-icon></button></div>
         </article>`;
     };
@@ -4774,6 +4774,13 @@ class HauswerkPanel extends HTMLElement {
     return [...by.entries()].map(([p, l]) => `<div class="pop-tl">${by.size > 1 ? `<small class="muted">${esc(this._lwProfName(p))}</small>` : ""}${this._lwDayBar(l)}</div>`).join("");
   }
 
+  /** Symbol einer Leuchte: eigenes (Leuchte › Einstellungen › Symbol), sonst Glühbirne an/aus; nicht erreichbar mit Warnzeichen. */
+  _lwIco(l, on = false, bad = false) {
+    if (bad) return "mdi:lightbulb-alert-outline";
+    if (l?.cfg?.icon) return l.cfg.icon;
+    return on ? "mdi:lightbulb-on" : "mdi:lightbulb-outline";
+  }
+
   _lwRoomTile(area, list) {
     const S = this._hass.states;
     const bad = (l) => !l.st || ["unavailable", "unknown"].includes(l.st.state);
@@ -4796,7 +4803,7 @@ class HauswerkPanel extends HTMLElement {
       else if (l.ls.manual && l.cfg.auto !== false) f.push(`<ha-icon icon="mdi:hand-back-right-outline" style="color:${C.hand}" title="von Hand"></ha-icon>`);
       if (o && l.ls.off?.at) f.push(`<ha-icon icon="mdi:timer-outline" style="color:${C.ok}"></ha-icon><span data-lw-until="${esc(l.ls.off.at)}">${this._lwLeft(l.ls.off.at)}</span>`);
       const mot = this._lwMotion(l);
-      return `<div class="lwr"><span class="lwr-b"><ha-icon icon="${bad(l) ? "mdi:lightbulb-alert-outline" : o ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}" style="color:${bad(l) ? C.alert : this._lwColor(l)}"></ha-icon>${mot ? `<span class="lw-mot" title="Schaltet über Bewegungsmelder: ${esc(mot.join(", "))}"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</span>
+      return `<div class="lwr"><span class="lwr-b"><ha-icon icon="${this._lwIco(l, o, bad(l))}" style="color:${bad(l) ? C.alert : this._lwColor(l)}"></ha-icon>${mot ? `<span class="lw-mot" title="Schaltet über Bewegungsmelder: ${esc(mot.join(", "))}"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</span>
         <button class="lwr-n" data-action="pop-open" data-pop="lwbri:${esc(l.id)}"><b>${esc(this._lwName(l))}</b><small>${bad(l) ? "nicht erreichbar" : o ? `an${dim && pct != null ? ` · ${pct} %` : ""}` : "aus"}</small></button>
         ${f.length ? `<span class="lwr-f">${f.join("")}</span>` : ""}
         <button class="sbtn" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${o ? "off" : "on"}" ${bad(l) ? "disabled" : ""} title="${o ? "Aus" : "An"}"><ha-icon icon="mdi:power"></ha-icon></button></div>`;
@@ -4824,7 +4831,7 @@ class HauswerkPanel extends HTMLElement {
     const lux = p.lw_lux_sensor ? this._entityName(p.lw_lux_sensor) : "automatisch";
     return [
       { g: "Lichter", id: "lwadd", icon: "mdi:auto-fix", c: "#6366f1", title: "Licht hinzufügen", sum: "Assistent: Lichter wählen, Profil aus Vorlage (Abendlicht, Außenlicht, Flur mit Bewegung …)", words: "assistent neu hinzufügen licht lampe leuchte" },
-      ...lights.map((l) => ({ g: "Lichter", id: `lwl:${l.id}`, icon: "mdi:lightbulb-outline", c: l.cfg.auto === false ? "#94a3b8" : "#818cf8", title: this._lwName(l), off: l.cfg.auto === false, offTxt: "PROFIL AUS",
+      ...lights.map((l) => ({ g: "Lichter", id: `lwl:${l.id}`, icon: this._lwIco(l, false), c: l.cfg.auto === false ? "#94a3b8" : "#818cf8", title: this._lwName(l), off: l.cfg.auto === false, offTxt: "PROFIL AUS",
         sum: [`Profil „${this._lwProfName(l.cfg.profile)}“${l.cfg.auto === false ? " (aus)" : ""}`, l.ls.area ? `Raum ${l.ls.area}` : ""].filter(Boolean).join(" · "), words: `${l.id} licht profil` })),
       ...profiles.map((x) => {
         const n = lights.filter((l) => (l.cfg.profile || "standard") === x.id).length;
@@ -4903,7 +4910,7 @@ class HauswerkPanel extends HTMLElement {
       const dim = eid.startsWith("light.") && (l.ls.modes || S[eid]?.attributes?.supported_color_modes || []).some((m) => m !== "onoff");
       const presets = [["off", "Aus", "mdi:lightbulb-off-outline"], ...(prof.night ? [[prof.night_brightness ?? 10, "Nachtlicht", "mdi:weather-night"]] : []), [prof.brightness ?? 80, "Normal", "mdi:lightbulb-outline"], [100, "Hell", "mdi:lightbulb-on"]];
       return {
-        icon: "mdi:lightbulb-outline", c: "#6366f1", title: esc(this._lwName(l)), sub: `Lichtwerk · ${l.st?.state === "on" ? `an${pct != null ? ` · ${pct} %` : ""}` : "aus"}`, open: true,
+        icon: this._lwIco(l, l.st?.state === "on"), c: "#6366f1", title: esc(this._lwName(l)), sub: `Lichtwerk · ${l.st?.state === "on" ? `an${pct != null ? ` · ${pct} %` : ""}` : "aus"}`, open: true,
         body: `
           ${l.ls.cause && l.cfg.auto !== false ? `<div class="rq-why"><ha-icon icon="mdi:help-circle-outline"></ha-icon><span><b>Automatik</b><small>${esc(l.ls.cause)}</small>${l.ls.next ? `<small class="muted">Als Nächstes: ${l.ls.next.action === "on" ? "an" : "aus"} ${this._lwWhen(l.ls.next)} (${esc(l.ls.next.reason)})</small>` : ""}</span></div>` : ""}
           ${l.ls.ccu ? `<div class="room-note"><ha-icon icon="mdi:link-variant"></ha-icon>HmIP · ${esc(l.ls.ccu)}${l.cfg.auto !== false ? " – Lichtwerk wartet, bis die Direktverknüpfung ausschaltet" : ""}</div>` : ""}
@@ -4922,9 +4929,17 @@ class HauswerkPanel extends HTMLElement {
       if (!d.cfg) d.cfg = { profile: "standard", auto: true, name: null, ...(this._data.lichtwerk?.lights?.[eid] || {}) };
       const profs = this._lwProfiles();
       return {
-        icon: "mdi:lightbulb-outline", c: "#6366f1", title: esc(this._entityName(eid)), sub: `Lichtwerk · ${esc(eid)}`,
+        icon: d.cfg.icon || "mdi:lightbulb-outline", c: "#6366f1", title: esc(this._entityName(eid)), sub: `Lichtwerk · ${esc(eid)}`,
         body: `
           <label class="field"><span><ha-icon icon="mdi:form-textbox"></ha-icon> Name (leer = aus Home Assistant)</span><input type="text" maxlength="40" data-lwl="name" value="${esc(d.cfg.name || "")}" placeholder="${esc(this._entityName(eid))}" ${dis}></label>
+          <div class="field"><span><ha-icon icon="mdi:shape-outline"></ha-icon> Symbol</span>
+            <div class="icons">
+              <button class="ic-pick ${!d.cfg.icon ? "on" : ""}" data-action="lwl-icon" data-v="" title="Standard (Glühbirne)" ${dis}><ha-icon icon="mdi:lightbulb-outline"></ha-icon><em>Auto</em></button>
+              ${LW_ICON_CHOICES.map((i) => `<button class="ic-pick ${d.cfg.icon === i ? "on" : ""}" data-action="lwl-icon" data-v="${i}" title="${i.replace("mdi:", "")}" ${dis}><ha-icon icon="${i}"></ha-icon></button>`).join("")}
+              ${d.cfg.icon && !LW_ICON_CHOICES.includes(d.cfg.icon) ? `<button class="ic-pick on" data-action="lwl-icon" data-v="${esc(d.cfg.icon)}"><ha-icon icon="${esc(d.cfg.icon)}"></ha-icon></button>` : ""}
+            </div>
+            <input type="text" class="ic-own" maxlength="64" data-lwl="icon" value="${esc(d.cfg.icon && !LW_ICON_CHOICES.includes(d.cfg.icon) ? d.cfg.icon : "")}" placeholder="eigenes Symbol, z. B. mdi:lamp" ${dis}>
+          </div>
           ${(this._lwStatus?.report?.lights?.[eid]?.power_src === "sensor") ? `<p class="muted small"><ha-icon icon="mdi:flash-outline"></ha-icon>Leistung gemessen am Gerät: ${fmt(this._lwStatus.report.lights[eid].power ?? 0, 1)} W</p>`
             : `<label class="field"><span><ha-icon icon="mdi:flash-outline"></ha-icon> Leistung (für den Bericht, leer = nur Brenndauer)</span><div class="unit"><input type="number" min="0" max="5000" step="0.5" data-lwl="watt" value="${d.cfg.watt ?? ""}" placeholder="z. B. 9" ${dis}><i>W</i></div></label>`}
           <label class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Profil</span><select data-lwl="profile" ${dis}>${profs.map((x) => `<option value="${esc(x.id)}" ${(d.cfg.profile || "standard") === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
@@ -4974,7 +4989,7 @@ class HauswerkPanel extends HTMLElement {
           ${L.error ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>${esc(L.error)}</p>` : ""}
           ${(L.findings || []).length ? `<div class="lbl">Hinweise</div><div class="evlist">${L.findings.map((f) => `<div class="ev"><ha-icon icon="mdi:link-variant-off" style="color:${f.level === "warn" ? "#f97316" : "#0ea5e9"}"></ha-icon><span class="grow"><b>${esc(f.text.split(" – ")[0])}</b><small>${esc(f.text.split(" – ")[1] || "")}</small></span></div>`).join("")}</div>` : ""}
           <div class="lbl">Je Leuchte</div>
-          <div class="hl-list">${rows.map((l) => `<div class="hl-room"><div class="hl-w"><span class="hl-wn"><ha-icon icon="mdi:lightbulb-outline"></ha-icon>${esc(this._lwName(l))}</span><ha-icon class="hl-arrow" icon="mdi:arrow-left"></ha-icon><span class="hl-ps">${L.lights[l.id].peers.length ? L.lights[l.id].peers.map((x) => this._lwPeer(x)).join("") : `<em class="hl-none">${L.lights[l.id].own ? "nur eigene Taster" : "keine Verknüpfung"}</em>`}</span></div></div>`).join("") || `<p class="muted">Keine Homematic-Leuchte in Lichtwerk – oder noch nichts gelesen.</p>`}</div>`,
+          <div class="hl-list">${rows.map((l) => `<div class="hl-room"><div class="hl-w"><span class="hl-wn"><ha-icon icon="${this._lwIco(l, false)}"></ha-icon>${esc(this._lwName(l))}</span><ha-icon class="hl-arrow" icon="mdi:arrow-left"></ha-icon><span class="hl-ps">${L.lights[l.id].peers.length ? L.lights[l.id].peers.map((x) => this._lwPeer(x)).join("") : `<em class="hl-none">${L.lights[l.id].own ? "nur eigene Taster" : "keine Verknüpfung"}</em>`}</span></div></div>`).join("") || `<p class="muted">Keine Homematic-Leuchte in Lichtwerk – oder noch nichts gelesen.</p>`}</div>`,
         foot: `<button class="secondary" data-action="pop-close">Schließen</button>${this._admin ? `<button class="primary" data-action="lwlinks-refresh"><ha-icon icon="mdi:refresh"></ha-icon>Neu lesen</button>` : ""}`,
       };
     }
@@ -5155,7 +5170,7 @@ class HauswerkPanel extends HTMLElement {
     return `${head}<div class="wlist">${list.map((l) => {
       const o = l.st?.state === "on";
       const pct = this._lwPct(l);
-      return `<div class="wrow"><ha-icon icon="${o ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}" style="color:${this._lwColor(l)}"></ha-icon><span class="grow"><b>${esc(this._lwName(l))}</b><small>${esc(l.ls.cause || "")}</small></span><button class="sbtn" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${o ? "off" : "on"}" title="${o ? "Aus" : "An"}">${o ? (pct != null && pct < 100 ? `${pct} %` : "an") : "aus"}</button></div>`;
+      return `<div class="wrow"><ha-icon icon="${this._lwIco(l, o)}" style="color:${this._lwColor(l)}"></ha-icon><span class="grow"><b>${esc(this._lwName(l))}</b><small>${esc(l.ls.cause || "")}</small></span><button class="sbtn" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${o ? "off" : "on"}" title="${o ? "Aus" : "An"}">${o ? (pct != null && pct < 100 ? `${pct} %` : "an") : "aus"}</button></div>`;
     }).join("")}</div>`;
   }
 
@@ -7993,7 +8008,7 @@ class HauswerkPanel extends HTMLElement {
     }
     // Lichtwerk
     if (this._data.lichtwerk) {
-      for (const l of this._lwLights()) add("Licht", "mdi:lightbulb-outline", "#6366f1", this._lwName(l), `${this._lwProfName(l.cfg.profile)}${l.ls.cause ? ` · ${l.ls.cause}` : ""}`, `licht lampe leuchte ${l.id} ${l.ls.area || ""}`, a("pop-open", { pop: `lwbri:${l.id}` }));
+      for (const l of this._lwLights()) add("Licht", this._lwIco(l, false), "#6366f1", this._lwName(l), `${this._lwProfName(l.cfg.profile)}${l.ls.cause ? ` · ${l.ls.cause}` : ""}`, `licht lampe leuchte ${l.id} ${l.ls.area || ""}`, a("pop-open", { pop: `lwbri:${l.id}` }));
       for (const p of this._lwProfiles()) add("Profile", "mdi:tune-variant", "#6366f1", p.name, "Lichtwerk-Profil", "profil lichtwerk licht", a("pop-open", { pop: `lwp:${p.id}:on` }));
     }
     // Kraftwerk
@@ -9939,6 +9954,8 @@ class HauswerkPanel extends HTMLElement {
     }
     if (t.dataset.lwl && this._pop?.draft?.cfg) {
       this._pop.draft.cfg[t.dataset.lwl] = t.type === "checkbox" ? t.checked : t.value || null;
+      // eigenes Symbol: nach dem Tippen die Auswahl aktualisieren
+      if (t.dataset.lwl === "icon" && isChange) this._renderPop();
       return;
     }
     if (t.dataset.lwbri !== undefined && this._pop?.draft) {
@@ -11183,7 +11200,8 @@ class HauswerkPanel extends HTMLElement {
       }
       case "lwl-save": {
         const cfg = this._pop.draft.cfg;
-        const res = await this._ws({ type: "hauswerk/lichtwerk/light/save", entity_id: el.dataset.id, light: { profile: cfg.profile || "standard", auto: cfg.auto !== false, name: cfg.name || null, watt: cfg.watt === "" || cfg.watt == null ? null : Number(cfg.watt) } });
+        const res = await this._ws({ type: "hauswerk/lichtwerk/light/save", entity_id: el.dataset.id, light: { profile: cfg.profile || "standard", auto: cfg.auto !== false, name: cfg.name || null, watt: cfg.watt === "" || cfg.watt == null ? null : Number(cfg.watt),
+          icon: /^mdi:[a-z0-9-]{1,60}$/.test(String(cfg.icon || "").trim().toLowerCase()) ? String(cfg.icon).trim().toLowerCase() : null } });
         this._data.lichtwerk.lights = res.lights;
         this._data.settings = res.settings;
         this._closePop();
@@ -11191,6 +11209,10 @@ class HauswerkPanel extends HTMLElement {
         this._toast("Gespeichert");
         break;
       }
+      case "lwl-icon":
+        this._pop.draft.cfg.icon = el.dataset.v || null;
+        this._renderPop();
+        break;
       case "lwl-remove": {
         const res = await this._ws({ type: "hauswerk/lichtwerk/light/remove", entity_id: el.dataset.id });
         this._data.lichtwerk.lights = res.lights;
@@ -11650,6 +11672,10 @@ const SET_FINE = ["calibration", "liming", "demand", "radio", "protect", "boost"
 // Lüft-Bilanz je Raum: Ampel
 const VB = { ok: ["#22c55e", "gut gelüftet"], warn: ["#f59e0b", "bald lüften"], bad: ["#ef4444", "zu selten gelüftet"] };
 const LW_POPS = ["lwadd", "lwgeneral", "lwauto", "lwlinks"];
+// Symbole für Leuchten (Leuchte › Einstellungen › Symbol)
+const LW_ICON_CHOICES = ["mdi:ceiling-light", "mdi:ceiling-light-multiple", "mdi:chandelier", "mdi:light-recessed", "mdi:track-light", "mdi:wall-sconce", "mdi:wall-sconce-round",
+  "mdi:floor-lamp", "mdi:desk-lamp", "mdi:lamp", "mdi:lava-lamp", "mdi:led-strip-variant", "mdi:string-lights", "mdi:candle", "mdi:outdoor-lamp", "mdi:coach-lamp",
+  "mdi:globe-light", "mdi:spotlight-beam", "mdi:christmas-tree", "mdi:television-ambient-light", "mdi:power-socket-eu", "mdi:bell-ring-outline", "mdi:fan", "mdi:speaker"];
 const LW_LK = { motion: "mdi:motion-sensor", button: "mdi:gesture-tap-button", other: "mdi:link-variant" };
 const MODULE_LOGOS = {
   heizen: `<svg viewBox="0 0 48 48" aria-hidden="true">
@@ -12332,6 +12358,7 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .dtab.on ha-icon { color:var(--accent); }
 .dtab i { position:absolute; top:8px; left:24px; width:7px; height:7px; border-radius:50%; background:var(--accent); }
 .icons { display:flex; flex-wrap:wrap; gap:6px; }
+.ic-own { margin-top:8px; width:100%; }
 .ic-pick { all:unset; cursor:pointer; position:relative; width:42px; height:42px; display:grid; place-items:center; border-radius:12px; border:1px solid var(--line2); color:var(--muted); }
 .ic-pick:hover { color:var(--text); border-color:var(--accent); }
 .ic-pick.on { color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent); }

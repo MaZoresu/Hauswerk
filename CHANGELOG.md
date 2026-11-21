@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.74.0 – 2026-11-21
+
+### Neu (Lichtwerk)
+- **Eigenes Symbol je Leuchte:** Unter Einstellungen › Lichtwerk › Leuchte › **Symbol** aus 24 Symbolen wählen (Deckenleuchte, Kronleuchter, Stehlampe, Schreibtischlampe, Wandleuchte, LED-Streifen, Lichterkette, Kerze, Außenleuchte, Steckdose, Gong …) oder ein eigenes `mdi:`-Symbol eintragen. „Auto“ = Glühbirne wie bisher.
+- Das Symbol erscheint überall: Einstellungsliste, Kacheln (detailliert, kompakt, Räume, Wand-Kacheln am Tablet), Helligkeitsfenster, Widget „Licht“, Homematic-Übersicht und Suche. Nicht erreichbare Leuchten zeigen weiter das Warnzeichen.
+
 ## 0.73.2 – 2026-11-21
 
 ### Geändert

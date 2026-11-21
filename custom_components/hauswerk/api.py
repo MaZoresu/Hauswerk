@@ -847,6 +847,7 @@ LIGHT_SCHEMA = vol.Schema({
     vol.Optional("auto"): bool,
     vol.Optional("name"): vol.Any(None, vol.All(str, vol.Length(max=40))),
     vol.Optional("watt"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=5000))),
+    vol.Optional("icon"): vol.Any(None, vol.All(str, vol.Match(r"^mdi:[a-z0-9-]{1,60}$"))),
 }, extra=vol.REMOVE_EXTRA)
 
 
