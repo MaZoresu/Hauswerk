@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.72.1 – 2026-11-21
+
+### Neu – Tagesleiste in den Fenstern hinter den Kacheln
+- **Heizwerk:** Das Fenster eines Raums („Manuell ändern“) zeigt den Tagesplan mit Vorheizen und „Komfort bis …“.
+- **Rollwerk:** „Höhe einstellen“ zeigt die Tagesleiste des Profils mit Öffnet/Schließt-Zeiten; das Raum-Fenster eine Leiste je Profil der Rollläden (mit Profilname, wenn mehrere).
+- **Lichtwerk:** Das Fenster einer Leuchte und das Raum-Fenster zeigen die Tagesleiste des Profils (mit Szenen), im Raum eine je Profil.
+- Nur bei eingeschalteter Automatik bzw. aktivem Profil.
+
 ## 0.72.0 – 2026-11-21
 
 ### Geändert – Tabletmodus: Wand-Kacheln nach festem Muster

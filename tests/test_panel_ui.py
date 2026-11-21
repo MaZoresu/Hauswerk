@@ -1742,3 +1742,31 @@ def test_tablet_wand_startseite_und_details(tablet):
     p.js(f"() => {{ localStorage.setItem('hauswerk.tablet.saver', '10'); {EL}._lastAct = Date.now() - 130000; {EL}._homed = false; {EL}._saverTick(); }}")
     p.wait(200)
     assert p.js(f"{EL}._tab") == "start" and p.js(f"{EL}.shadowRoot.getElementById('saver').hidden") is True
+
+
+def test_zeitleiste_in_detailfenstern(tablet):
+    """Tagesleiste in den Fenstern hinter den Wand-Kacheln: Raum (Heizwerk), Rollladen, Rollläden je Raum, Licht, Lichter je Raum."""
+    p = tablet
+    room = p.js(f"Object.keys({EL}._data.rooms)[0]")
+    p.js(f"(id) => {EL}._openPop('rq', {{ id, temp: 21, hours: null }})", room)
+    p.wait()
+    assert p.has("#pop .pop-tl .rsched")
+    p.js(f"{EL}._closePop()")
+    cover = p.js(f"{EL}._rwCovers().find((c) => c.cfg.auto !== false).id")
+    p.js(f"(id) => {EL}._openPop('rwpos:' + id)", cover)
+    p.wait()
+    assert p.has("#pop .pop-tl")
+    p.js(f"{EL}._closePop()")
+    p.js(f"{EL}._openPop('rwarea:Küche')")
+    p.wait()
+    assert p.has("#pop .pop-tl")
+    p.js(f"{EL}._closePop()")
+    light = p.js(f"{EL}._lwLights().find((l) => l.cfg.auto !== false && {EL}._lwStatus.lights[l.id]).id")
+    p.js(f"(id) => {EL}._openPop('lwbri:' + id)", light)
+    p.wait()
+    assert p.has("#pop .pop-tl")
+    area = p.js(f"(id) => {EL}._lwLights().find((l) => l.id === id).ls.area || 'Ohne Raum'", light)
+    p.js(f"{EL}._closePop()")
+    p.js(f"(a) => {EL}._openPop('lwarea:' + a)", area)
+    p.wait()
+    assert p.has("#pop .pop-tl")

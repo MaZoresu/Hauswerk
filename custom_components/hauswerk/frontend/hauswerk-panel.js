@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.72.0";
+const VERSION = "0.72.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4724,6 +4724,13 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Raumkachel: alle Leuchten eines Raums – alle an/aus, je Leuchte Zeile mit Zustand, HmIP/von Hand, Ablauftimer. */
+  /** Tagesleisten für ein Raum-Fenster: eine je Profil der Lichter (mit Profilname, wenn mehrere). */
+  _lwAreaBars(list) {
+    const by = new Map();
+    for (const l of list) if (l.cfg.auto !== false && !by.has(l.cfg.profile || "standard")) by.set(l.cfg.profile || "standard", l);
+    return [...by.entries()].map(([p, l]) => `<div class="pop-tl">${by.size > 1 ? `<small class="muted">${esc(this._lwProfName(p))}</small>` : ""}${this._lwDayBar(l)}</div>`).join("");
+  }
+
   _lwRoomTile(area, list) {
     const S = this._hass.states;
     const bad = (l) => !l.st || ["unavailable", "unknown"].includes(l.st.state);
@@ -4858,6 +4865,7 @@ class HauswerkPanel extends HTMLElement {
           ${l.ls.cause && l.cfg.auto !== false ? `<div class="rq-why"><ha-icon icon="mdi:help-circle-outline"></ha-icon><span><b>Automatik</b><small>${esc(l.ls.cause)}</small>${l.ls.next ? `<small class="muted">Als Nächstes: ${l.ls.next.action === "on" ? "an" : "aus"} ${this._lwWhen(l.ls.next)} (${esc(l.ls.next.reason)})</small>` : ""}</span></div>` : ""}
           ${l.ls.ccu ? `<div class="room-note"><ha-icon icon="mdi:link-variant"></ha-icon>HmIP · ${esc(l.ls.ccu)}${l.cfg.auto !== false ? " – Lichtwerk wartet, bis die Direktverknüpfung ausschaltet" : ""}</div>` : ""}
           ${l.ls.manual && !l.ls.ccu && l.cfg.auto !== false ? `<div class="room-note"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>Von Hand – Automatik wartet<span class="grow"></span><button class="link" data-action="lw-cmd" data-ids="${esc(eid)}" data-a="resume">Automatik übernimmt</button></div>` : ""}
+          ${l.cfg.auto !== false && this._lwStatus?.lights?.[eid] ? `<div class="pop-tl">${this._lwDayBar(l)}</div>` : ""}
           ${dim ? `<div class="lw-slider"><input type="range" min="1" max="100" step="1" value="${d.v}" data-lwbri><b id="lwbri-v">${d.v} %</b></div>` : ""}
           <div class="rq-quick lw-pre">${presets.map(([v, t, i]) => `<button class="pill" data-action="lw-pre" data-ids="${esc(eid)}" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${t}${v !== "off" && dim ? ` · ${v} %` : ""}</button>`).join("")}</div>
           
@@ -4890,7 +4898,7 @@ class HauswerkPanel extends HTMLElement {
       const area = id.slice(7);
       const list = this._lwLights().filter((l) => (l.ls.area || "Ohne Raum") === area);
       return { icon: "mdi:lightbulb-group-outline", c: "#6366f1", title: esc(area), sub: `${list.length} Lichter`,
-        body: this._lwRoomTile(area, list), foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+        body: this._lwAreaBars(list) + this._lwRoomTile(area, list), foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     }
     if (id.startsWith("lwroom:")) {
       const area = id.slice(7);
@@ -6028,6 +6036,7 @@ class HauswerkPanel extends HTMLElement {
             </div>
           </div>
         </div>
+        ${auto && this._rwStatus?.timelines?.[c.cfg.profile || "standard"] ? `<div class="pop-tl">${this._rwDayBar(this._rwStatus.timelines[c.cfg.profile || "standard"], false, c.rs.shade_likely !== false)}${this._rwTimes(c)}</div>` : ""}
         <div class="sub-h"><ha-icon icon="mdi:tune-vertical"></ha-icon>Behanghöhe</div>
         <div class="rwpre">${presets.map(([n, pv, ic]) => `<button class="rwpre-b ${Math.abs(v - pv) <= 2 ? "on" : ""}" data-action="rwpos-go" data-id="${esc(id)}" data-v="${pv}" ${bad ? "disabled" : ""}>
           <ha-icon icon="${ic}"></ha-icon><span><span class="rwpre-n">${esc(n)}</span><b>${fmt(pv, 0)} %</b></span></button>`).join("")}</div>
@@ -6349,6 +6358,14 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Tagesleiste: Nacht, offen, Beschattung möglich, jetzt-Strich und Zeiten darunter. */
+  /** Tagesleisten für ein Raum-Fenster: eine je Profil der Rollläden (mit Profilname, wenn mehrere). */
+  _rwAreaBars(list) {
+    const tls = this._rwStatus?.timelines || {};
+    const by = new Map();
+    for (const c of list) { const p = c.cfg.profile || "standard"; if (c.cfg.auto !== false && tls[p]) by.set(p, by.get(p) || c.rs.shade_likely !== false); }
+    return [...by.entries()].map(([p, sh]) => `<div class="pop-tl">${by.size > 1 ? `<small class="muted">${esc(this._rwProfName(p))}</small>` : ""}${this._rwDayBar(tls[p], false, sh)}</div>`).join("");
+  }
+
   _rwDayBar(tl, small = false, shade = true) {
     if (!tl) return "";
     if (!shade) tl = { ...tl, shade: [] };
@@ -8024,7 +8041,7 @@ class HauswerkPanel extends HTMLElement {
         return `<div class="lwr">${this._rwWin(c, p)}<button class="lwr-n" data-action="pop-open" data-pop="rwpos:${esc(c.id)}"><b>${esc(this._entityName(c.id))}</b><small>${bad ? "nicht erreichbar" : p == null ? esc(c.st.state) : p >= 95 ? "offen" : p <= 5 ? "zu" : `${fmt(p, 0)} %`}${c.rs.reason && c.cfg.auto !== false ? ` · ${esc(c.rs.reason)}` : ""}</small></button>${b("open", "mdi:arrow-up")}${b("stop", "mdi:stop")}${b("close", "mdi:arrow-down")}</div>`;
       };
       return { icon: "mdi:window-shutter", c: "#3b82f6", title: esc(area), sub: `${list.length} Rollläden`,
-        body: `<div class="lw-room"><div class="lwr-list">${list.map(row).join("")}</div></div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+        body: `${this._rwAreaBars(list)}<div class="lw-room"><div class="lwr-list">${list.map(row).join("")}</div></div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     }
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (KW_POPS.includes(id)) return this._kwPop(id);
@@ -8298,6 +8315,7 @@ class HauswerkPanel extends HTMLElement {
           icon: roomIcon(room), c: this._roomColor(room.id), title: esc(room.name || "Raum"), sub: "Manuell ändern", open: true,
           body: `
             <div class="rq-facts">${facts.map(([i, txt, c]) => `<span style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${esc(txt)}</span>`).join("")}</div>
+            ${auto && (room.climates || []).length ? `<div class="pop-tl">${this._schedStrip(room, rs)}</div>` : ""}
             ${blocked ? `<p class="note"><ha-icon icon="mdi:information-outline"></ha-icon>${blocked}</p>` : ""}
             ${rs.cause ? `<div class="rq-why"><ha-icon icon="mdi:help-circle-outline"></ha-icon><span><b>Warum ${rs.target != null ? `${fmt(rs.target)} °C` : "dieser Zustand"}?</b><small>${esc(rs.cause)}</small>${rs.plan_label && !String(rs.cause).includes(rs.plan_label) ? `<small class="muted">Heizplan: ${esc(rs.plan_label)} · ${fmt(rs.plan_target)} °C</small>` : ""}</span></div>` : ""}
             ${this._fireChip(rs) ? `<p class="muted small"><ha-icon icon="mdi:fireplace"></ha-icon>${esc(this._fireChip(rs)[3])}${fp.manual && fp.until ? ` Endet von selbst um ${new Date(fp.until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}.` : ""}</p>` : ""}
@@ -13118,6 +13136,7 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .wt-s { display:block; font-size:16px; line-height:1.3; min-height:21px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .wt-s span { display:inline-flex; align-items:center; gap:4px; vertical-align:middle; } .wt-s ha-icon { --mdc-icon-size:18px; }
 .wt-dim { color:var(--muted); }
+.pop-tl { margin:4px 0 12px; display:flex; flex-direction:column; gap:4px; } .pop-tl > small { font-size:12px; }
 .wt-ctl { display:flex; gap:10px; margin-top:4px; }
 .wbtn { all:unset; cursor:pointer; flex:1; height:48px; border-radius:14px; display:grid; place-items:center; background:color-mix(in srgb, var(--text) 8%, transparent); }
 .wbtn ha-icon { --mdc-icon-size:26px; } .wbtn:disabled { opacity:.4; }
