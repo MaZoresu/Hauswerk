@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.77.0 – 2026-11-21
+
+### Neu – Modul Beetwerk (Garten)
+- **Eigenes Modul** mit grünem Logo in der Leiste (Handy, Tablet, PC), Seite **Garten** und Reiter **Beetwerk** unter Einstellungen. Ersetzt den Platzhalter „Garten – geplant“.
+- **Mähroboter** (lawn_mower, z. B. Gardena/Husqvarna mit Robonect): Zustand (mäht, in der Station, pausiert, fährt zurück, Fehler), Akku, Status-Text, Messer-Tage, Betriebsstunden. Knöpfe **Mähen**, **Pause**, **Zur Station** – mit Robonect zusätzlich **Feierabend** und **Winterpause / Saison starten**. Mäher und Geräte-Entitäten werden automatisch gefunden.
+- **Mähpause:** Mäht der Roboter bei **Regen**, **nassem Boden** (Bodenfeuchte ab 85 %), **Frost** (unter 3 °C) oder **während/nach dem Bewässern** (60 Min.), schickt Beetwerk ihn in die Station. Ist der Grund 60 Min. vorbei, startet er wieder (bis 19 Uhr, nur wenn Beetwerk pausiert hat). Alles einstellbar unter Einstellungen › Beetwerk › Mähpause; jede Pause steht im Protokoll (Filter Beetwerk).
+- **Bewässerung:** Ventil (valve oder Schalter) auf/zu, Bodenfeuchte, „Gießen nötig“ und „gießt gerade“ (z. B. Smart Irrigation), Wasserbilanz.
+- **Benachrichtigungen:** „Mähroboter braucht Hilfe“ bei Fehlern (Standard: wichtig) und „Messer wechseln“ nach 60 Tagen (Standard: nur Glocke) – unter Benachrichtigungen › Beetwerk.
+
 ## 0.76.1 – 2026-11-21
 
 ### Behoben (Kraftwerk › Verbraucher)

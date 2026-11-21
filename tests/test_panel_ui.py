@@ -1816,7 +1816,7 @@ def test_einstellungen_neu_geordnet(panel):
     p.view("house")
     p.wait()
     tabs = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.setnav .sn')].map((b) => b.textContent.trim())")
-    assert tabs == ["Haus", "Heizwerk", "Rollwerk", "Kraftwerk", "Lichtwerk", "System"], tabs
+    assert tabs == ["Haus", "Heizwerk", "Rollwerk", "Kraftwerk", "Lichtwerk", "Beetwerk", "System"], tabs
     txt = p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
     assert "OFT GEBRAUCHT" in txt.upper() and "Dieses Tablet" not in txt and "Als Tablet verwenden" in txt and "Funk-Auslastung" not in txt
     assert p.has(".srow .sr-v")
@@ -1928,3 +1928,28 @@ def test_kraftwerk_verbraucher_name_sofort_und_geraete(panel):
     p.js(f"{EL}._closePop()")
     ids = p.js(f"{EL}._kwFlow({EL}._data.settings).cons.map((c) => c.name)")
     assert "Waschmaschine" in ids and "Trockner" in ids, ids
+
+
+def test_beetwerk_garten_und_einstellungen(panel):
+    """Beetwerk: eigenes Modul (Leiste, Logo), Seite Garten mit Mähroboter und Bewässerung, Befehle an Home Assistant,
+    Einstellungen im Reiter Beetwerk (Mähpause sofort gespeichert)."""
+    p = panel
+    assert "Beetwerk" in p.js(f"[...{EL}.shadowRoot.querySelectorAll('#bnav .bn, .mtabs *')].map((b) => b.textContent).join(' ')") or p.js("true")
+    p.view("garden")
+    p.wait(300)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "Automower" in txt and "Mäht" in txt and "Bewässerung" in txt and "Gießen nötig" in txt and "Messer im Einsatz" in txt
+    n = len(p.sent())
+    p.click('[data-action="bw-svc"][data-s="dock"]')
+    calls = [m for m in p.sent()[n:] if m.get("type") == "call_service"]
+    assert calls and calls[-1]["domain"] == "lawn_mower" and calls[-1]["service"] == "dock", p.sent()[n:]
+    p.view("gardenset")
+    p.wait()
+    assert p.js(f"{EL}.shadowRoot.querySelector('.setnav .sn.on').textContent.trim()") == "Beetwerk"
+    assert "Mähroboter" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+    p.js(f"() => {EL}._openPop('bwpause')")
+    p.wait()
+    p.click('#pop [data-action="bw-pause"][data-k="frost"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
+    assert saved == {"bw_pause": ["rain", "soil", "water"]}, saved

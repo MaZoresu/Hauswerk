@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.76.1";
+const VERSION = "0.77.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -119,9 +119,11 @@ const NK_KINDS = [
   { k: "cover", g: "Rollwerk", icon: "mdi:window-shutter-alert", c: C.alert, title: "Rollladen nicht erreichbar", def: "normal", ex: ["Rollladen nicht erreichbar", "Küche links meldet sich seit 15 Min. nicht – Funk oder Strom prüfen"], text: "Ein Rollladen meldet sich so lange nicht (gleiche Zeit wie bei Thermostaten)." },
   { k: "light_away", g: "Lichtwerk", icon: "mdi:home-lightbulb-outline", c: "#6366f1", title: "Licht an, niemand zu Hause", def: "normal", ex: ["Licht an, niemand zu Hause", "Wohnzimmer, Küche – brennt seit 30 Min."], text: "Brennt Licht so lange (Lichtwerk › Einstellungen), obwohl niemand zu Hause ist – nicht im Urlaub mit Anwesenheits-Simulation." },
   { k: "light_offline", g: "Lichtwerk", icon: "mdi:lightbulb-alert-outline", c: C.alert, title: "Leuchte nicht erreichbar", def: "log", ex: ["Leuchte nicht erreichbar", "Flur OG meldet sich seit 15 Min. nicht"], text: "Eine Leuchte aus Lichtwerk meldet sich so lange nicht (gleiche Zeit wie bei Thermostaten)." },
+  { k: "mower", g: "Beetwerk", icon: "mdi:robot-mower-outline", c: C.alert, title: "Mähroboter braucht Hilfe", def: "important", ex: ["Mähroboter braucht Hilfe", "Automower: Mäher steckt fest"], text: "Meldet der Mähroboter einen Fehler (steckt fest, außerhalb des Drahts, Messer blockiert …)." },
+  { k: "mower_care", g: "Beetwerk", icon: "mdi:saw-blade", c: "#16a34a", title: "Mähroboter: Wartung", def: "log", ex: ["Mähroboter: Messer wechseln", "seit 62 Tagen im Einsatz (Hinweis ab 60)"], text: "Messer lange im Einsatz – Hinweis unter der Glocke, auf Wunsch als Nachricht." },
   { k: "waste", g: "Hauswerk", icon: "mdi:trash-can-outline", c: "#64748b", title: "Müllabfuhr morgen", def: "off", ex: ["Morgen Müllabfuhr", "Restabfall, Papier – Tonne heute Abend rausstellen."], text: "Am Vorabend ab der Uhrzeit unter Hauswerk › Kalender › Müllabholung, einmal je Abholtag." },
 ];
-const NK_GROUPS = { Heizwerk: ["#f97316", "logo:heizen"], "Lüften": ["#22d3ee", "mdi:weather-windy"], Rollwerk: ["#0ea5e9", "logo:rollwerk"], Kraftwerk: ["#eab308", "logo:kraftwerk"], Lichtwerk: ["#6366f1", "logo:lichtwerk"], Hauswerk: ["#14b8a6", "mdi:home-outline"] };
+const NK_GROUPS = { Heizwerk: ["#f97316", "logo:heizen"], "Lüften": ["#22d3ee", "mdi:weather-windy"], Rollwerk: ["#0ea5e9", "logo:rollwerk"], Kraftwerk: ["#eab308", "logo:kraftwerk"], Lichtwerk: ["#6366f1", "logo:lichtwerk"], Beetwerk: ["#16a34a", "logo:beetwerk"], Hauswerk: ["#14b8a6", "mdi:home-outline"] };
 const NK_GICON = { App: "mdi:cellphone", Pushover: "mdi:message-badge-outline", Telegram: "mdi:send-circle-outline", "E-Mail": "mdi:email-outline", Sprachausgabe: "mdi:account-voice", Bildschirm: "mdi:tablet", Weitere: "mdi:bell-outline", "Home Assistant": "mdi:home-assistant" };
 /** Kanäle eines Kraftwerk-Geräts (alte Einträge: nur Dienstname, notify_ha). */
 const appChannels = (a) => [...new Set([...(a.notify || []).map((x) => (x.includes(":") || x === "ha" ? x : `svc:${x}`)), ...(a.notify_ha ? ["ha"] : [])])];
@@ -209,6 +211,11 @@ const DEFAULT_WIDGETS = [{ type: "heat", size: "m" }, { type: "weather", size: "
 const SC_ICONS = { light: "mdi:lightbulb-outline", switch: "mdi:toggle-switch-outline", input_boolean: "mdi:toggle-switch-outline", script: "mdi:script-text-play-outline", scene: "mdi:palette-outline", button: "mdi:gesture-tap-button", input_button: "mdi:gesture-tap-button", fan: "mdi:fan", cover: "mdi:window-shutter", lock: "mdi:lock-outline", media_player: "mdi:speaker" };
 const ROOM_COLORS = ["#2dd4bf", "#f59e0b", "#a78bfa", "#f472b6", "#60a5fa", "#a3e635", "#f87171", "#22d3ee", "#facc15", "#c084fc"];
 const PICKERS = {
+  bw_mower: { scope: "settings", multi: false, domains: ["lawn_mower"] },
+  bw_soil: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "moisture" },
+  bw_watering: { scope: "settings", multi: false, domains: ["binary_sensor"] },
+  bw_need: { scope: "settings", multi: false, domains: ["binary_sensor"] },
+  bw_valve: { scope: "settings", multi: false, domains: ["valve", "switch"] },
   climates: { scope: "room", multi: true, domains: ["climate"] },
   windows: { scope: "room", multi: true, domains: ["binary_sensor", "cover"] },
   temp_sensor: { scope: "room", multi: false, domains: ["sensor"], deviceClass: "temperature" },
@@ -448,6 +455,11 @@ const SHUT_VIEWS = [
   { id: "shutters", slug: "rolllaeden", name: "Rollläden", icon: "mdi:window-shutter" },
   { id: "shutset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true },
 ];
+const BW_VIEWS = [
+  { id: "garden", slug: "garten", name: "Garten", icon: "mdi:flower-outline" },
+  { id: "gardenset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true },
+];
+const BW_POPS = ["bwmower", "bwwater", "bwpause", "bwcare"];
 const LW_VIEWS = [
   { id: "lights", slug: "licht", name: "Licht", icon: "mdi:lightbulb-group-outline" },
   { id: "lwrep", slug: "bericht", name: "Bericht", icon: "mdi:chart-bar" },
@@ -483,14 +495,15 @@ const KW_VIEWS = [
   { id: "kwset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true },
 ];
 // Einstellungsseiten der Module: nur noch über Einstellungen (Zahnrad) erreichbar, nicht in der Unterleiste der Module
-const SET_VIEWS = ["house", "settings", "shutset", "kwset", "lightset", "plans"];
+const SET_VIEWS = ["house", "settings", "shutset", "kwset", "lightset", "gardenset", "plans"];
 const MODULES = [
   { id: "heizen", no: 1, name: "Heizwerk", icon: "mdi:radiator", logo: "heizen", views: HEAT_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
   { id: "rollwerk", no: 2, name: "Rollwerk", icon: "mdi:window-shutter", logo: "rollwerk", views: SHUT_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
   { id: "kraftwerk", no: 3, name: "Kraftwerk", icon: "mdi:solar-power-variant", logo: "kraftwerk", views: KW_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
   { id: "lichtwerk", no: 4, name: "Lichtwerk", icon: "mdi:lightbulb-outline", logo: "lichtwerk", views: LW_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
+  { id: "beetwerk", no: 5, name: "Beetwerk", icon: "mdi:flower-outline", logo: "beetwerk", views: BW_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
 ];
-const SUB_VIEWS = [...HEAT_VIEWS, ...SHUT_VIEWS, ...KW_VIEWS, ...LW_VIEWS];
+const SUB_VIEWS = [...HEAT_VIEWS, ...SHUT_VIEWS, ...KW_VIEWS, ...LW_VIEWS, ...BW_VIEWS];
 // Symbol eines Verbrauchers nach seinem Namen (erster Treffer zählt)
 const KW_ICONS = [
   [/w(ä|ae)rmepumpe|heat ?pump|\bwp\b/, "mdi:heat-pump-outline"], [/wallbox|e-?auto|\bev\b|lades(ä|ae)ule|laden|charger|auto/, "mdi:ev-station"],
@@ -512,12 +525,10 @@ const APP_TYPES = {
 const APP_STATE = { idle: ["Bereit", "#64748b", "mdi:power-sleep"], running: ["Läuft", "#38bdf8", "mdi:play-circle-outline"], ending: ["Ende wird geprüft", "#f59e0b", "mdi:timer-sand"], done: ["Fertig", "#22c55e", "mdi:check-circle"] };
 const KW_POPS = ["kwdetect", "kwsolar", "kwgrid", "kwbatt", "kwhome", "kwcons"];
 // Geplante Module: nur ausgegraut angezeigt, noch ohne Funktion.
-const COMING = [
-  { name: "Garten", icon: "mdi:flower-outline" },
-];
+const COMING = [];
 const SLUGS = { start: "start", house: "einstellungen", log: "protokoll", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])),
   ...Object.fromEntries(SHUT_VIEWS.map((v) => [v.id, `rollwerk/${v.slug}`])), ...Object.fromEntries(KW_VIEWS.map((v) => [v.id, `kraftwerk/${v.slug}`])),
-  ...Object.fromEntries(LW_VIEWS.map((v) => [v.id, `lichtwerk/${v.slug}`])) };
+  ...Object.fromEntries(LW_VIEWS.map((v) => [v.id, `lichtwerk/${v.slug}`])), ...Object.fromEntries(BW_VIEWS.map((v) => [v.id, `beetwerk/${v.slug}`])) };
 // Pop-ups von Rollwerk (Einstellungen unter Rollwerk › Einstellungen)
 const WIZ_USES = [
   { id: "wohnen", label: "Wohnzimmer", icon: "mdi:sofa-outline", comfort: 21, eco: 18, plan: "berufstaetig", match: /wohn|living|stube/ },
@@ -590,6 +601,7 @@ const LOG_CATS = {
   settings: { name: "Einstellungen", icon: "mdi:cog-outline", c: "#64748b" },
   notify: { name: "Nachrichten", icon: "mdi:message-badge-outline", c: "#0ea5e9" },
   appliance: { name: "Geräte", icon: "mdi:washing-machine", c: "#f59e0b" },
+  garden: { name: "Garten", icon: "mdi:robot-mower-outline", c: "#16a34a" },
 };
 const SKIES = [["night", "Nacht"], ["dawn", "Sonnenaufgang"], ["day", "Tag"], ["dusk", "Sonnenuntergang"]];
 const DEFAULT_VIEW = "start";
@@ -1300,7 +1312,8 @@ class HauswerkPanel extends HTMLElement {
     const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, vent: this._viewVent, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom,
       shutters: this._viewShutters, shutset: () => this._settingsPage("rw"),
       kwflow: this._viewKwFlow, kwdev: this._viewKwDev, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw"),
-      lights: this._viewLights, lwrep: this._viewLwRep, lightset: () => this._settingsPage("lw") }[this._tab] || this._viewStart;
+      lights: this._viewLights, lwrep: this._viewLwRep, lightset: () => this._settingsPage("lw"),
+      garden: this._viewGarden, gardenset: () => this._settingsPage("bw") }[this._tab] || this._viewStart;
     let html;
     try {
       html = view.call(this);
@@ -1583,7 +1596,7 @@ class HauswerkPanel extends HTMLElement {
     // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
     const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
     // Einstellungen: vollständig und scrollbar (zwei Spalten, keine Karte wird geteilt oder abgeschnitten)
-    const scroll = ["settings", "shutset", "kwset", "lightset", "house"].includes(tab);
+    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "house"].includes(tab);
     box.classList.toggle("tscroll", scroll);
     if (scroll) {
       Object.assign(tin.style, { zoom: f, width: "", height: "", columnWidth: "", columnGap: "", transform: "", clipPath: "" });
@@ -1596,7 +1609,7 @@ class HauswerkPanel extends HTMLElement {
       if (dots) dots.innerHTML = "";
       return;
     }
-    const onePage = ["settings", "shutset", "kwset", "lightset", "house"].includes(tab);
+    const onePage = ["settings", "shutset", "kwset", "lightset", "gardenset", "house"].includes(tab);
     const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66, ...(onePage ? [0.6, 0.55] : [])].map((z) => Math.round(z * f * 100) / 100);
     const maxZ = Math.max(f, Math.min(1.4 * f, (W / 820) * f));
     const zs = ZOOMS.filter((z) => z <= maxZ + 0.001);
@@ -4843,6 +4856,95 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Einstellungen von Lichtwerk (Liste). */
+  // ------------------------------------------------------------ Modul Beetwerk (Garten: Mähroboter, Bewässerung)
+  _bwNum(id) {
+    const v = parseFloat(id ? this._hass.states[id]?.state : NaN);
+    return Number.isFinite(v) ? v : null;
+  }
+
+  _viewGarden() {
+    const bs = this._status?.beetwerk || {};
+    const E = bs.entities || {};
+    const S = this._hass.states;
+    const setBtn = this._admin ? `<button class="link" data-action="tab" data-tab="gardenset"><ha-icon icon="mdi:tune-variant"></ha-icon>Einstellen</button>` : "";
+    if (!bs.configured)
+      return `<section class="card empty"><span class="empty-logo">${modIcon("logo:beetwerk")}</span><h2>Noch kein Mähroboter</h2>
+        <p class="muted">Beetwerk findet Mähroboter (lawn_mower) und Bewässerung aus Home Assistant automatisch. Ist keiner da, unter Einstellungen wählen.</p>${setBtn}</section>`;
+    const m = E.mower ? S[E.mower] : null;
+    const st = m?.state;
+    const LBL = { mowing: ["Mäht", "mdi:robot-mower", "#16a34a"], docked: ["In der Station", "mdi:home-import-outline", "#64748b"], paused: ["Pausiert", "mdi:pause-circle-outline", "#f59e0b"],
+      returning: ["Fährt zur Station", "mdi:home-export-outline", "#0ea5e9"], error: ["Fehler", "mdi:alert-circle-outline", C.alert] };
+    const lb = LBL[st] || [st && !["unavailable", "unknown"].includes(st) ? st : "nicht erreichbar", "mdi:robot-mower-outline", "#94a3b8"];
+    const bat = this._bwNum(E.battery);
+    const winter = E.winter ? S[E.winter]?.state === "on" : false;
+    const detail = E.status ? S[E.status]?.state : null;
+    const blades = this._bwNum(E.blades_days);
+    const hours = this._bwNum(E.hours);
+    const soil = this._bwNum(E.soil);
+    const need = E.need ? S[E.need]?.state === "on" : null;
+    const valve = E.valve ? S[E.valve] : null;
+    const vOpen = valve ? ["open", "opening", "on"].includes(valve.state) : false;
+    const reasons = (bs.reasons || []).map((r) => r.text);
+    const svc = (d, sv, e, label, icon, cls = "") => `<button class="qbtn ${cls}" data-action="bw-svc" data-d="${d}" data-s="${sv}" data-e="${esc(e)}" data-l="${esc(label)}"><ha-icon icon="${icon}"></ha-icon>${label}</button>`;
+    const tone = bs.error ? "warn" : st === "mowing" ? "active" : "ok";
+    const title = bs.error ? `Braucht Hilfe: ${bs.error}` : winter ? "Winterpause" : bs.paused ? `Mähpause – ${bs.paused.why}` : st === "mowing" ? `Mäht${bat != null ? ` · Akku ${fmt(bat, 0)} %` : ""}` : lb[0];
+    const head = this._brief({
+      cls: "card br-mod-bw", tone, icon: "mdi:robot-mower-outline", label: `<ha-icon icon="mdi:flower-outline"></ha-icon>Beetwerk · Garten`,
+      big: bat != null ? `${fmt(bat, 0)}<span> %</span>` : "", title, side: setBtn,
+      lines: [
+        ...(reasons.length ? [{ icon: "mdi:pause-octagon-outline", text: `Gerade nicht mähen: ${reasons.join(", ")}` }] : []),
+        ...(bs.watering ? [{ icon: "mdi:sprinkler-variant", text: "Bewässerung läuft – Mäher wartet" }] : []),
+        ...(blades != null && blades >= (this._data.settings.bw_blades_days || 60) ? [{ icon: "mdi:saw-blade", text: `Messer seit ${fmt(blades, 0)} Tagen – bald wechseln` }] : []),
+      ],
+    });
+    const mower = !E.mower ? "" : `<section class="card bw-c">
+      <div class="bw-h"><span class="bw-ic" style="--c:${lb[2]}"><ha-icon icon="${lb[1]}"></ha-icon></span><span class="grow"><b>${esc(this._entityName(E.mower))}</b><small>${esc(lb[0])}${detail && !String(detail).toLowerCase().startsWith(lb[0].slice(0, 3).toLowerCase()) && !["unknown", "unavailable"].includes(detail) ? ` · ${esc(detail)}` : ""}${winter ? " · Winterpause" : ""}</small></span>
+        ${bat != null ? `<span class="bw-bat"><ha-icon icon="mdi:battery${bat >= 95 ? "" : `-${Math.max(10, Math.round(bat / 10) * 10)}`}"></ha-icon>${fmt(bat, 0)} %</span>` : ""}</div>
+      ${bs.error ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>${esc(bs.error)}</p>` : ""}
+      ${bs.paused ? `<p class="note"><ha-icon icon="mdi:pause-octagon-outline"></ha-icon>Mähpause seit ${new Date(bs.paused.at).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} – ${esc(bs.paused.why)}${this._data.settings.bw_resume !== false ? ". Beetwerk startet ihn danach wieder." : ""}</p>` : ""}
+      <div class="bw-act">
+        ${svc("lawn_mower", "start_mowing", E.mower, "Mähen", "mdi:play", "hot")}
+        ${svc("lawn_mower", "pause", E.mower, "Pause", "mdi:pause")}
+        ${svc("lawn_mower", "dock", E.mower, "Zur Station", "mdi:home-import-outline")}
+        ${E.eod ? svc("button", "press", E.eod, "Feierabend", "mdi:weather-night") : ""}
+        ${E.winter ? svc("switch", winter ? "turn_off" : "turn_on", E.winter, winter ? "Saison starten" : "Winterpause", winter ? "mdi:sprout-outline" : "mdi:snowflake") : ""}
+      </div>
+      <div class="vt-f">${[
+        blades != null ? [`${fmt(blades, 0)} Tage`, "Messer im Einsatz", blades >= (this._data.settings.bw_blades_days || 60) ? "#f59e0b" : ""] : null,
+        hours != null ? [`${fmt(hours, 0)} Std.`, "Betriebsstunden", ""] : null,
+        soil != null ? [`${fmt(soil, 0)} %`, `Bodenfeuchte · Pause ab ${this._data.settings.bw_soil_wet ?? 85} %`, soil >= (this._data.settings.bw_soil_wet ?? 85) ? "#0ea5e9" : ""] : null,
+      ].filter(Boolean).map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>
+    </section>`;
+    const water = !(E.valve || E.watering || E.need || E.soil) ? "" : `<section class="card bw-c">
+      <div class="bw-h"><span class="bw-ic" style="--c:#0ea5e9"><ha-icon icon="mdi:sprinkler-variant"></ha-icon></span><span class="grow"><b>Bewässerung</b>
+        <small>${bs.watering ? "läuft gerade" : need === true ? "Gießen nötig" : need === false ? "Gießen gerade nicht nötig" : "bereit"}${bs.water_end ? ` · zuletzt bis ${new Date(bs.water_end).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : ""}</small></span></div>
+      ${valve ? `<div class="bw-act">${valve.state === "unavailable" ? `<p class="muted small">Ventil ${esc(this._entityName(E.valve))} nicht erreichbar</p>`
+        : E.valve.startsWith("valve.") ? svc("valve", vOpen ? "close_valve" : "open_valve", E.valve, vOpen ? "Ventil zu" : "Ventil auf", vOpen ? "mdi:water-off-outline" : "mdi:water-outline", vOpen ? "" : "hot")
+        : svc("switch", vOpen ? "turn_off" : "turn_on", E.valve, vOpen ? "Bewässerung aus" : "Bewässerung an", vOpen ? "mdi:water-off-outline" : "mdi:water-outline", vOpen ? "" : "hot")}</div>` : ""}
+      <div class="vt-f">${[
+        soil != null ? [`${fmt(soil, 0)} %`, "Bodenfeuchte", ""] : null,
+        need != null ? [need ? "ja" : "nein", "Gießen nötig", need ? "#0ea5e9" : ""] : null,
+        E.bucket && this._bwNum(E.bucket) != null ? [`${fmt(this._bwNum(E.bucket), 1)} mm`, "Wasserbilanz (Smart Irrigation)", ""] : null,
+      ].filter(Boolean).map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>
+    </section>`;
+    return head + `<div class="bw-grid">${mower}${water}</div>`;
+  }
+
+  _bwRows(p) {
+    const bs = this._status?.beetwerk || {};
+    const E = bs.entities || {};
+    const auto = (key, eid) => (p[key] ? this._entityName(p[key]) : eid ? `automatisch: ${this._entityName(eid)}` : "keiner gefunden");
+    const pause = p.bw_pause || ["rain", "soil", "frost", "water"];
+    const PT = { rain: "Regen", soil: `nasser Boden (ab ${p.bw_soil_wet ?? 85} %)`, frost: `Frost (unter ${fmt(p.bw_frost ?? 3)} °C)`, water: `Bewässerung (+${p.bw_water_after ?? 60} Min.)` };
+    return [
+      { g: "Garten", id: "bwmower", t: "oft", icon: "mdi:robot-mower-outline", c: "#16a34a", title: "Mähroboter", sum: auto("bw_mower", E.mower), val: E.mower ? "" : "fehlt", warn: !E.mower && !E.valve, words: "mähroboter rasenmäher mäher lawn mower robonect automower" },
+      { g: "Garten", id: "bwpause", t: "oft", icon: "mdi:pause-octagon-outline", c: "#0ea5e9", title: "Mähpause", sum: pause.length ? `bei ${pause.map((k) => PT[k]).join(", ")}${p.bw_resume !== false ? " · danach weiter" : ""}` : "aus", val: String(pause.length), words: "regen nass boden frost bewässerung pause weiter" },
+      { g: "Garten", id: "bwwater", icon: "mdi:sprinkler-variant", c: "#0ea5e9", title: "Bewässerung", sum: [E.valve ? `Ventil ${this._entityName(E.valve)}` : "", E.soil ? `Bodenfeuchte ${this._entityName(E.soil)}` : ""].filter(Boolean).join(" · ") || "keine gefunden", words: "bewässerung ventil gießen bodenfeuchte smart irrigation" },
+      { g: "Garten", id: "bwcare", icon: "mdi:saw-blade", c: "#16a34a", title: "Wartung", sum: `Messer wechseln nach ${p.bw_blades_days ?? 60} Tagen`, val: E.blades_days && this._bwNum(E.blades_days) != null ? `${fmt(this._bwNum(E.blades_days), 0)} Tage` : "", words: "messer wartung klingen" },
+      { g: "Allgemein", go: "log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll", sum: "Mähpausen, Fehler, Einstellungen", words: "protokoll" },
+    ];
+  }
+
   _lwRows(p) {
     const lights = this._lwLights();
     const profiles = this._lwProfiles();
@@ -7501,6 +7603,7 @@ class HauswerkPanel extends HTMLElement {
     if (scope === "rw") return this._rwRows(p);
     if (scope === "kw") return this._kwRows(p);
     if (scope === "lw") return this._lwRows(p);
+    if (scope === "bw") return this._bwRows(p);
     if (scope === "house" || scope === "sys") {
       const vac = {
         off: "Nur von Hand",
@@ -7676,7 +7779,7 @@ class HauswerkPanel extends HTMLElement {
           <div class="grow"><h2>Protokoll</h2><small>Was wann warum entschieden wurde · ${L.days || 14} Tage</small></div>
           <span class="lg-live ${L.live ? "on" : ""}" id="lg-live">${this._logLiveHtml()}</span>
         </div>
-        <div class="lg-chips">${[["", "Alles", "mdi:home-outline", "#94a3b8"], ["heizwerk", "Heizwerk & Haus", "logo:heizen", "#fb923c"], ["rollwerk", "Rollwerk", "logo:rollwerk", "#0ea5e9"], ["kraftwerk", "Kraftwerk", "logo:kraftwerk", "#f59e0b"], ["lichtwerk", "Lichtwerk", "logo:lichtwerk", "#6366f1"]]
+        <div class="lg-chips">${[["", "Alles", "mdi:home-outline", "#94a3b8"], ["heizwerk", "Heizwerk & Haus", "logo:heizen", "#fb923c"], ["rollwerk", "Rollwerk", "logo:rollwerk", "#0ea5e9"], ["kraftwerk", "Kraftwerk", "logo:kraftwerk", "#f59e0b"], ["beetwerk", "Beetwerk", "logo:beetwerk", "#16a34a"], ["lichtwerk", "Lichtwerk", "logo:lichtwerk", "#6366f1"]]
           .map(([id, name, icon, c]) => `<button class="lg-cat lg-mod ${(this._logMod || "") === id ? "on" : ""}" style="--c:${c}" data-action="log-mod" data-id="${id}">${String(icon).startsWith("logo:") ? `<span class="lg-logo">${modIcon(icon)}</span>` : `<ha-icon icon="${icon}"></ha-icon>`}${name}</button>`)
           .join("")}</div>
         <div class="lg-chips">${[["", "Alle Räume", "#94a3b8"], ...rooms.map((r) => [r.id, r.name, this._roomColor(r.id)])]
@@ -7721,8 +7824,8 @@ class HauswerkPanel extends HTMLElement {
       const e = L.entries[i];
       if (!cats.has(e.cat) && LOG_CATS[e.cat]) continue;
       if (room && e.room !== room) continue;
-      if (["rollwerk", "kraftwerk", "lichtwerk"].includes(this._logMod) && e.mod !== this._logMod) continue;
-      if (this._logMod === "heizwerk" && ["rollwerk", "kraftwerk", "lichtwerk"].includes(e.mod)) continue;
+      if (["rollwerk", "kraftwerk", "lichtwerk", "beetwerk"].includes(this._logMod) && e.mod !== this._logMod) continue;
+      if (this._logMod === "heizwerk" && ["rollwerk", "kraftwerk", "lichtwerk", "beetwerk"].includes(e.mod)) continue;
       if (q && !`${e.title} ${e.why || ""} ${roomName(e)} ${LOG_CATS[e.cat]?.name || ""}`.toLowerCase().includes(q)) continue;
       hits.push(e);
     }
@@ -7784,7 +7887,7 @@ class HauswerkPanel extends HTMLElement {
   /** Ein Einstieg für alle Einstellungen: Reiter Haus · Heizwerk · Rollwerk · Kraftwerk · Lichtwerk · System. */
   _setNav(scope) {
     const items = [["house", "Haus", "logo:hauswerk", "house"], ["heat", "Heizwerk", "logo:heizen", "settings"], ["rw", "Rollwerk", "logo:rollwerk", "shutset"],
-      ["kw", "Kraftwerk", "logo:kraftwerk", "kwset"], ["lw", "Lichtwerk", "logo:lichtwerk", "lightset"], ["sys", "System", "mdi:cog-outline", "house"]];
+      ["kw", "Kraftwerk", "logo:kraftwerk", "kwset"], ["lw", "Lichtwerk", "logo:lichtwerk", "lightset"], ["bw", "Beetwerk", "logo:beetwerk", "gardenset"], ["sys", "System", "mdi:cog-outline", "house"]];
     return `<div class="setnav" role="tablist" aria-label="Einstellungen">${items.map(([k, l, i, tab]) => `<button class="sn ${scope === k ? "on" : ""}" role="tab" aria-selected="${scope === k}" data-action="set-nav" data-tab="${tab}" data-sys="${k === "sys" ? 1 : 0}"><span class="sn-ic">${modIcon(i)}</span><span>${l}</span></button>`).join("")}</div>`;
   }
 
@@ -7801,7 +7904,7 @@ class HauswerkPanel extends HTMLElement {
       <ha-icon class="xc-ic" icon="mdi:school-outline"></ha-icon></button>`;
   }
 
-  _settingsList(scope = this._tab === "house" ? (this._setSys ? "sys" : "house") : this._tab === "shutset" ? "rw" : this._tab === "kwset" ? "kw" : this._tab === "lightset" ? "lw" : "heat") {
+  _settingsList(scope = this._tab === "house" ? (this._setSys ? "sys" : "house") : this._tab === "shutset" ? "rw" : this._tab === "kwset" ? "kw" : this._tab === "lightset" ? "lw" : this._tab === "gardenset" ? "bw" : "heat") {
     const q = (this._setQuery || "").toLowerCase().trim();
     const ex = this._expertOn(EXPERT_MOD[scope] || "haus");
     const all = this._settingRows(scope).filter((r) => !r.x || ex);
@@ -7872,7 +7975,7 @@ class HauswerkPanel extends HTMLElement {
     } catch (e) {
       return;
     }
-    const scope = this._tab === "house" ? (this._setSys ? "sys" : "house") : { settings: "heat", shutset: "rw", kwset: "kw", lightset: "lw" }[this._tab];
+    const scope = this._tab === "house" ? (this._setSys ? "sys" : "house") : { settings: "heat", shutset: "rw", kwset: "kw", lightset: "lw", gardenset: "bw" }[this._tab];
     if (!scope) return;
     const list = this._setRecentList().filter((x) => x.id !== id);
     list.unshift({ id, scope, title: String(def.title || id).replace(/<[^>]+>/g, ""), icon: def.icon || "mdi:cog-outline", c: def.c || "#64748b", at: Date.now() });
@@ -8110,7 +8213,7 @@ class HauswerkPanel extends HTMLElement {
 
   // ------------------------------------------------------------ Pop-ups
   _openPop(id, draft = {}) {
-    if (this._setQuery && ["house", "settings", "shutset", "kwset", "lightset"].includes(this._tab)) this._setHit = this._setQuery.trim();
+    if (this._setQuery && ["house", "settings", "shutset", "kwset", "lightset", "gardenset"].includes(this._tab)) this._setHit = this._setQuery.trim();
     this._settings = clone(this._data.settings);
     this._pop = { id, draft };
     this._renderPop();
@@ -8188,7 +8291,7 @@ class HauswerkPanel extends HTMLElement {
   _popEnhance(host, body) {
     const sheet = host.querySelector(".sheet");
     if (!sheet || !body) return;
-    const setTab = ["house", "settings", "shutset", "kwset", "lightset"].includes(this._tab);
+    const setTab = ["house", "settings", "shutset", "kwset", "lightset", "gardenset"].includes(this._tab);
     const dock = setTab && window.innerWidth >= 1100 && !/^(search|setup|errtext|cwiz|rwiz)$/.test(this._pop.id);
     this.toggleAttribute("setdock", !!dock);
     host.querySelector(".backdrop")?.classList.toggle("dock", !!dock);
@@ -8880,6 +8983,56 @@ class HauswerkPanel extends HTMLElement {
             ${alerts.length ? `<div class="lbl">Gerade aktiv</div><div class="evlist">${alerts.map((x) => `<div class="ev live"><ha-icon icon="${x.icon}"></ha-icon><span class="grow"><b>${esc(x.text)}</b><small>${esc(x.sub)}</small></span></div>`).join("")}</div>` : ""}`,
         };
       }
+
+      case "bwmower": {
+        const E = this._status?.beetwerk?.entities || {};
+        const S = this._hass.states;
+        const found = [["battery", "Akku"], ["status", "Status"], ["error", "Fehlermeldung"], ["blades_days", "Messer (Tage)"], ["hours", "Betriebsstunden"], ["winter", "Winterpause"], ["eod", "Feierabend"]]
+          .filter(([k]) => E[k]).map(([k, l]) => `<div class="ev"><ha-icon icon="mdi:check-circle-outline" style="color:#16a34a"></ha-icon><span class="grow"><b>${l}</b><small>${esc(E[k])} · ${esc(S[E[k]]?.state ?? "–")}</small></span></div>`).join("");
+        return {
+          icon: "mdi:robot-mower-outline", c: "#16a34a", title: "Mähroboter", sub: "Beetwerk",
+          body: `<div class="field"><span><ha-icon icon="mdi:robot-mower-outline"></ha-icon> Mähroboter (leer = ${E.mower && !p.bw_mower ? `automatisch: ${esc(this._entityName(E.mower))}` : "erster gefundener"})</span>${this._picker("bw_mower", p.bw_mower ? [p.bw_mower] : [])}</div>
+            ${found ? `<div class="lbl">Am Gerät gefunden</div><div class="evlist">${found}</div>` : ""}
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Bedient wird über Home Assistant (Start, Pause, Zur Station) – bei Robonect auch „Feierabend“ und die Winterpause. Die Mähzeiten stellst du weiter am Mäher bzw. in Robonect ein.</p>`,
+        };
+      }
+
+      case "bwpause": {
+        const on = new Set(p.bw_pause || ["rain", "soil", "frost", "water"]);
+        const chip = (k, l, i) => `<button class="pill ${on.has(k) ? "on" : ""}" data-action="bw-pause" data-k="${k}" ${dis}><ha-icon icon="${i}"></ha-icon>${l}</button>`;
+        return {
+          icon: "mdi:pause-octagon-outline", c: "#0ea5e9", title: "Mähpause", sub: "Beetwerk · wann der Mäher in die Station fährt",
+          body: `<p class="muted">Mäht der Roboter und einer der Gründe trifft zu, schickt Beetwerk ihn in die Station. Ist der Grund vorbei, startet er wieder – nur wenn Beetwerk die Pause ausgelöst hat.</p>
+            <div class="rq-quick">${chip("rain", "Regen", "mdi:weather-pouring")}${chip("soil", "Nasser Boden", "mdi:water-percent")}${chip("frost", "Frost", "mdi:snowflake")}${chip("water", "Bewässerung", "mdi:sprinkler-variant")}</div>
+            <label class="field narrow"><span><ha-icon icon="mdi:water-percent"></ha-icon> Boden zu nass ab</span>${minutes("bw_soil_wet", 85, 20, 100, 1, "%")}</label>
+            <label class="field narrow"><span><ha-icon icon="mdi:snowflake"></ha-icon> Frost: draußen unter</span>${minutes("bw_frost", 3, -10, 15, 0.5, "°C")}</label>
+            <label class="field narrow"><span><ha-icon icon="mdi:sprinkler-variant"></ha-icon> Nach dem Bewässern nicht mähen für</span>${minutes("bw_water_after", 60, 0, 600, 15)}</label>
+            <div class="wxrows">${this._setRow("bwres", "Danach weiter mähen", "wenn Beetwerk pausiert hat", sw("bw_resume"), "Ist der Grund vorbei, startet Beetwerk den Mäher nach der Wartezeit wieder – bis zur Uhrzeit unten. Hat der Mäher selbst oder jemand von Hand pausiert, bleibt er stehen.")}</div>
+            <label class="field narrow"><span><ha-icon icon="mdi:timer-sand"></ha-icon> Weiter nach</span>${minutes("bw_resume_wait", 60, 0, 600, 15)}</label>
+            <label class="field narrow"><span><ha-icon icon="mdi:clock-end"></ha-icon> Weiter nur bis</span><input type="time" data-set="bw_resume_until" value="${esc(p.bw_resume_until || "19:00")}" ${dis}></label>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Regen kommt aus Hauswerk › Wetter, Frost aus der Außentemperatur, nasser Boden aus dem Bodenfeuchte-Sensor (Bewässerung).</p>`,
+        };
+      }
+
+      case "bwwater": {
+        const E = this._status?.beetwerk?.entities || {};
+        const pk = (key, label, icon, found) => `<div class="field"><span><ha-icon icon="${icon}"></ha-icon> ${label} (leer = ${found && !p[key] ? `automatisch: ${esc(this._entityName(found))}` : "automatisch"})</span>${this._picker(key, p[key] ? [p[key]] : [])}</div>`;
+        return {
+          icon: "mdi:sprinkler-variant", c: "#0ea5e9", title: "Bewässerung", sub: "Beetwerk",
+          body: `${pk("bw_valve", "Ventil (valve oder Schalter)", "mdi:valve", E.valve)}
+            ${pk("bw_soil", "Bodenfeuchte", "mdi:water-percent", E.soil)}
+            ${pk("bw_need", "Gießen nötig (z. B. Smart Irrigation)", "mdi:water-alert-outline", E.need)}
+            ${pk("bw_watering", "Bewässerung läuft (z. B. Smart Irrigation)", "mdi:sprinkler-variant", E.watering)}
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Wann gegossen wird, steuern weiter deine Automationen bzw. Smart Irrigation. Beetwerk zeigt den Stand, schaltet das Ventil von Hand und lässt den Mäher während und nach dem Bewässern stehen.</p>`,
+        };
+      }
+
+      case "bwcare":
+        return {
+          icon: "mdi:saw-blade", c: "#16a34a", title: "Wartung", sub: "Beetwerk",
+          body: `<label class="field narrow"><span><ha-icon icon="mdi:saw-blade"></ha-icon> Hinweis „Messer wechseln“ nach (0 = aus)</span>${minutes("bw_blades_days", 60, 0, 365, 5, "Tagen")}</label>
+            <p class="muted small">Gezählt vom Mäher (z. B. Robonect „Messer Tage“). Nach dem Wechsel am Mäher zurücksetzen. Der Hinweis steht unter der Glocke; als Nachricht unter Benachrichtigungen › Beetwerk.</p>`,
+        };
 
       case "look": {
         const acc = p.look_accent || null;
@@ -10645,6 +10798,24 @@ class HauswerkPanel extends HTMLElement {
         this._renderMain();
         break;
       }
+      case "bw-svc": {
+        try {
+          await this._hass.callService(el.dataset.d, el.dataset.s, { entity_id: el.dataset.e });
+          this._toast(`${el.dataset.l} – gesendet`);
+        } catch (e) {
+          this._toast(`Das hat nicht geklappt: ${e?.message || e}`);
+        }
+        break;
+      }
+      case "bw-pause": {
+        const cur = new Set(this._settings.bw_pause || ["rain", "soil", "frost", "water"]);
+        if (cur.has(el.dataset.k)) cur.delete(el.dataset.k);
+        else cur.add(el.dataset.k);
+        this._settings.bw_pause = ["rain", "soil", "frost", "water"].filter((k) => cur.has(k));
+        this._refreshSettings();
+        this._instantSave("bw_pause");
+        break;
+      }
       case "set-fine":
         this._setFineOpen = !el.closest("details")?.open;
         break;
@@ -11055,7 +11226,7 @@ class HauswerkPanel extends HTMLElement {
       }
       case "settings-go":
         // zentrale Pop-ups unter Hauswerk-Einstellungen, alle anderen unter Heizwerk › Einstellungen
-        this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : LW_POPS.includes(el.dataset.sub) ? "lightset" : RW_POPS.includes(el.dataset.sub) || el.dataset.sub?.startsWith("rwc:") || el.dataset.sub?.startsWith("rwp:") ? "shutset" : "settings");
+        this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : LW_POPS.includes(el.dataset.sub) ? "lightset" : BW_POPS.includes(el.dataset.sub) ? "gardenset" : RW_POPS.includes(el.dataset.sub) || el.dataset.sub?.startsWith("rwc:") || el.dataset.sub?.startsWith("rwp:") ? "shutset" : "settings");
         if (el.dataset.sub) this._openPop(el.dataset.sub);
         break;
       case "person-new":
@@ -11782,6 +11953,14 @@ MODULE_LOGOS.lichtwerk = `<svg viewBox="0 0 48 48" aria-hidden="true">
   <path d="M14.8 21.8V34.2a2.8 2.8 0 0 0 2.8 2.8h12.8a2.8 2.8 0 0 0 2.8-2.8V21.8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
   <circle cx="24" cy="26.6" r="4.6" fill="#fde047"/>
   <rect x="21.9" y="31" width="4.2" height="2.6" rx="1" fill="#fff"/>
+</svg>`;
+MODULE_LOGOS.beetwerk = `<svg viewBox="0 0 48 48" aria-hidden="true">
+  <defs><linearGradient id="bwlg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#86efac"/><stop offset="1" stop-color="#15803d"/></linearGradient></defs>
+  <rect width="48" height="48" rx="13" fill="url(#bwlg)"/>
+  <path d="M10.5 23.5 24 11.5l13.5 12" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M14.8 21.8V34.2a2.8 2.8 0 0 0 2.8 2.8h12.8a2.8 2.8 0 0 0 2.8-2.8V21.8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M24 33.6v-6.2" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M24 28.6c-3.6 0-5.4-2.2-5.4-5 3.4 0 5.4 2 5.4 5zM24 27.2c0-3 1.8-5 5.2-5 0 2.8-1.8 5-5.2 5z" fill="#fde047"/>
 </svg>`;
 /** ha-icon oder – bei „logo:<modul>“ – das eigene Symbol des Moduls. */
 // Jede Kopie bekommt eigene IDs für den Farbverlauf: sonst bleibt sie leer, wenn die erste Kopie verborgen ist.
@@ -13924,6 +14103,20 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .vt-need small, .vt-run small { color:var(--muted); font-size:12.5px; }
 .vt-ok { color:var(--muted); font-size:13px; }
 .vt-ok ha-icon { color:#22c55e; }
+.brief.br-mod-bw { --mc:#15803d; --mc2:#86efac; } :host([dark]) .brief.br-mod-bw { --mc:#86efac; }
+.bw-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; margin-top:14px; }
+.bw-c { display:flex; flex-direction:column; gap:12px; }
+.bw-h { display:flex; align-items:center; gap:12px; } .bw-h b { display:block; font-size:16px; } .bw-h small { color:var(--muted); font-size:13px; }
+.bw-ic { width:44px; height:44px; border-radius:14px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--c) 18%, transparent); color:var(--c); }
+.bw-ic ha-icon { --mdc-icon-size:26px; }
+.bw-bat { display:inline-flex; align-items:center; gap:4px; font-weight:700; font-size:14px; color:var(--muted); }
+.bw-act { display:flex; flex-wrap:wrap; gap:8px; }
+.bw-act .qbtn { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 16px; border-radius:12px; border:1px solid var(--line); background:color-mix(in srgb, var(--text) 6%, transparent); font-size:14px; font-weight:600; }
+.bw-act .qbtn ha-icon { --mdc-icon-size:20px; }
+.bw-act .qbtn.hot { background:color-mix(in srgb, #16a34a 18%, transparent); border-color:color-mix(in srgb, #16a34a 50%, transparent); color:#15803d; }
+:host([dark]) .bw-act .qbtn.hot { color:#86efac; }
+:host([tablet]) .bw-act .qbtn { min-height:56px; font-size:16px; }
+.empty-logo .mlogo { width:56px; height:56px; display:block; margin:0 auto 8px; }
 .vt-wait { display:flex; align-items:center; gap:10px; } .vt-wait ha-icon { --mdc-icon-size:26px; color:#94a3b8; }
 .vt-wait span { display:flex; flex-direction:column; } .vt-wait small { color:var(--muted); font-size:12.5px; }
 .vt-learn { font-style:normal; font-size:11px; font-weight:700; padding:1px 7px; margin-left:6px; border-radius:99px; color:#0891b2; background:color-mix(in srgb, #0891b2 14%, transparent); vertical-align:middle; }

@@ -76,6 +76,17 @@ const states = {
   "sensor.speicher_leistung": st("-1200", { friendly_name: "Speicher Leistung", device_class: "power", unit_of_measurement: "W" }),
   "sensor.speicher_ladestand": st("64", { friendly_name: "Speicher Ladestand", device_class: "battery", unit_of_measurement: "%" }),
   "sensor.speicher_energie": st("6400", { friendly_name: "Speicher Energie", device_class: "energy_storage", unit_of_measurement: "Wh" }),
+  "lawn_mower.automower": st("mowing", { friendly_name: "Automower" }),
+  "sensor.automower_mower_battery_charge": st("64", { friendly_name: "Automower Akku", device_class: "battery", unit_of_measurement: "%" }),
+  "sensor.automower_mower_status_plain": st("Mähen", { friendly_name: "Automower Status" }),
+  "sensor.automower_mower_blades_days": st("54", { friendly_name: "Automower Messer Tage" }),
+  "sensor.automower_mower_statistic_hours": st("1703", { friendly_name: "Automower Betriebsstunden" }),
+  "switch.automower_winter_mode": st("off", { friendly_name: "Automower Winterpause" }),
+  "button.automower_eod": st("unknown", { friendly_name: "Automower Feierabend" }),
+  "sensor.bodenfeuchte_rasen": st("62", { friendly_name: "Bodenfeuchte Rasen", device_class: "moisture", unit_of_measurement: "%" }),
+  "binary_sensor.smart_irrigation_rasen_1_irrigation_needed": st("on", { friendly_name: "Rasen gießen nötig" }),
+  "binary_sensor.smart_irrigation_rasen_1_watering_now": st("off", { friendly_name: "Rasen gießt" }),
+  "valve.rasen": st("closed", { friendly_name: "Ventil Rasen" }),
   "sensor.waermepumpe_leistung": st("820", { friendly_name: "Wärmepumpe", device_class: "power", unit_of_measurement: "W" }),
   "sensor.wallbox_leistung": st("0", { friendly_name: "Wallbox", device_class: "power", unit_of_measurement: "W" }),
   "sensor.waschmaschine_leistung": st("410", { friendly_name: "Waschmaschine", device_class: "power", unit_of_measurement: "W" }),
@@ -140,6 +151,10 @@ const status = {
   waste: (() => { const d = (k) => { const x = new Date(); x.setDate(x.getDate() + k); return x.toLocaleDateString("sv-SE"); };
     return [{ date: d(1), type: "Restabfall", cal: "calendar.muell" }, { date: d(1), type: "Bioabfall", cal: "calendar.muell" }, { date: d(5), type: "Papier", cal: "calendar.muell" }, { date: d(8), type: "Gelbe Tonne", cal: "calendar.muell" }]; })(),
   waste_due: { date: (() => { const x = new Date(); x.setDate(x.getDate() + 1); return x.toLocaleDateString("sv-SE"); })(), when: "morgen", types: ["Restabfall", "Bioabfall"] },
+  beetwerk: { configured: true, entities: { mower: "lawn_mower.automower", battery: "sensor.automower_mower_battery_charge", status: "sensor.automower_mower_status_plain",
+    blades_days: "sensor.automower_mower_blades_days", hours: "sensor.automower_mower_statistic_hours", winter: "switch.automower_winter_mode", eod: "button.automower_eod",
+    error: null, soil: "sensor.bodenfeuchte_rasen", need: "binary_sensor.smart_irrigation_rasen_1_irrigation_needed", watering: "binary_sensor.smart_irrigation_rasen_1_watering_now",
+    valve: "valve.rasen", bucket: null }, reasons: [], paused: null, error: null, watering: false, water_end: null },
   appliances: {
     waschmaschine: { state: "running", label: "Läuft", learning: false, n: 6, watt: 1932, gap: false,
       model: { n: 6, learning: false, active_w: 8, quiet_w: 3.1, start_w: 10, pause_max: 1500, end_wait: 2070, dur_med: 6300, dur_lo: 5400, dur_hi: 6900, kwh_med: 1.24, tail_s: 1620, tail_w: 2, interval: 150 },
@@ -301,7 +316,7 @@ const hass = {
     }
     throw new Error("unbekannt: " + msg.type);
   },
-  callService: async () => {},
+  callService: async (domain, service, data) => { (window.hwSent = window.hwSent || []).push({ type: "call_service", domain, service, service_data: data }); },
   connection: { subscribeMessage: (cb, msg) => { wsLog.push(msg.type); return Promise.resolve(() => {}); } },
 };
 </script>

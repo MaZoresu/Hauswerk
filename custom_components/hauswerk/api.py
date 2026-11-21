@@ -10,7 +10,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_HEATING, MODULE_HOUSE, MODULE_LIGHT, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
+from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_GARDEN, MODULE_HEATING, MODULE_HOUSE, MODULE_LIGHT, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
 from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, block_conflicts, parse_hm
 
 
@@ -233,6 +233,22 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_cover"): NOTIFY_MODE,
         vol.Optional("notify_light_away"): NOTIFY_MODE,
         vol.Optional("notify_light_offline"): NOTIFY_MODE,
+        vol.Optional("notify_mower"): NOTIFY_MODE,
+        vol.Optional("notify_mower_care"): NOTIFY_MODE,
+        # Beetwerk (Garten)
+        vol.Optional("bw_mower"): _opt(vol.All(str, vol.Match(r"^lawn_mower\.[a-z0-9_]+$"))),
+        vol.Optional("bw_soil"): _opt(ENTITY),
+        vol.Optional("bw_watering"): _opt(ENTITY),
+        vol.Optional("bw_need"): _opt(ENTITY),
+        vol.Optional("bw_valve"): _opt(ENTITY),
+        vol.Optional("bw_pause"): vol.All([vol.In(["rain", "soil", "frost", "water"])], vol.Length(max=4)),
+        vol.Optional("bw_soil_wet"): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+        vol.Optional("bw_frost"): vol.All(vol.Coerce(float), vol.Range(min=-10, max=15)),
+        vol.Optional("bw_water_after"): vol.All(vol.Coerce(int), vol.Range(min=0, max=600)),
+        vol.Optional("bw_resume"): bool,
+        vol.Optional("bw_resume_wait"): vol.All(vol.Coerce(int), vol.Range(min=0, max=600)),
+        vol.Optional("bw_resume_until"): _hm,
+        vol.Optional("bw_blades_days"): vol.All(vol.Coerce(int), vol.Range(min=0, max=365)),
         # Lichtwerk
         vol.Optional("lw_lights"): vol.All([vol.All(str, vol.Match(r"^(light|switch|input_boolean)\.[a-z0-9_]+$"))], vol.Length(max=80)),
         vol.Optional("lw_lux_sensor"): _opt(SENSOR),
@@ -334,6 +350,10 @@ def _kw(hass: HomeAssistant):
     return (hass.data.get(DOMAIN) or {}).get(MODULE_POWER)
 
 
+def _bw(hass: HomeAssistant):
+    return (hass.data.get(DOMAIN) or {}).get(MODULE_GARDEN)
+
+
 def _lw(hass: HomeAssistant):
     return (hass.data.get(DOMAIN) or {}).get(MODULE_LIGHT)
 
@@ -342,7 +362,7 @@ def _settings(hass: HomeAssistant) -> dict:
     """Alle Einstellungen, wie das Panel sie sieht: zentral (Kern), Heizwerk, Rollwerk (rw_…) und Kraftwerk (kw_…)."""
     haus, ctl, rw, kw, lw = _haus(hass), _ctl(hass), _rw(hass), _kw(hass), _lw(hass)
     return {**(haus.settings if haus else {}), **(ctl.settings if ctl else {}), **(rw.settings if rw else {}),
-            **(kw.settings if kw else {}), **(lw.settings if lw else {})}
+            **(kw.settings if kw else {}), **(lw.settings if lw else {}), **(_bw(hass).settings if _bw(hass) else {})}
 
 
 def _log(hass: HomeAssistant):
@@ -502,7 +522,11 @@ async def ws_settings_save(hass: HomeAssistant, connection, msg) -> None:
     shutter = {k: v for k, v in settings.items() if k.startswith("rw_")}
     power = {k: v for k, v in settings.items() if k.startswith("kw_")}
     light = {k: v for k, v in settings.items() if k.startswith("lw_")}
-    heat = {k: v for k, v in settings.items() if k not in HOUSE_KEYS and not k.startswith(("rw_", "kw_", "lw_"))}
+    garden = {k: v for k, v in settings.items() if k.startswith("bw_")}
+    heat = {k: v for k, v in settings.items() if k not in HOUSE_KEYS and not k.startswith(("rw_", "kw_", "lw_", "bw_"))}
+    if garden and _bw(hass):
+        await _bw(hass).async_save_settings(garden, by=_who(connection))
+        await _bw(hass).async_evaluate()
     if light and _lw(hass):
         await _lw(hass).async_save_settings(light, by=_who(connection))
     if shutter and _rw(hass):

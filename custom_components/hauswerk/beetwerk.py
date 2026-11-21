@@ -1,0 +1,301 @@
+"""Modul Beetwerk: Garten – Mähroboter und Bewässerung.
+
+Beetwerk kennt den Mähroboter (lawn_mower.*) und die Bewässerung (Ventil, Bodenfeuchte, „gießen nötig“,
+„gießt gerade“, z. B. aus Smart Irrigation). Bedient wird direkt über Home Assistant; Beetwerk selbst
+- macht eine Mähpause bei Regen, nassem Boden, Frost und während bzw. kurz nach dem Bewässern
+  (fährt den Mäher in die Station) und startet ihn danach wieder, wenn es die Pause selbst ausgelöst hat,
+- meldet Fehler („braucht Hilfe“) und Wartung (Messer wechseln).
+Gewählte Entitäten stehen in den Einstellungen (bw_…); leer = automatisch gefunden.
+"""
+from __future__ import annotations
+
+import logging
+from datetime import timedelta
+from typing import Any
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
+
+from .const import GARDEN_STORAGE_KEY
+from .core import Haus
+from .log import Protokoll, log_settings
+
+_LOGGER = logging.getLogger(__name__)
+
+BW_DEFAULTS: dict[str, Any] = {
+    "bw_mower": None,        # Mähroboter (lawn_mower.*), leer = erster gefundener
+    "bw_soil": None,         # Bodenfeuchte (%), leer = automatisch
+    "bw_watering": None,     # „gießt gerade“ (binary_sensor), leer = automatisch
+    "bw_need": None,         # „gießen nötig“ (binary_sensor), leer = automatisch
+    "bw_valve": None,        # Ventil der Bewässerung (valve.* oder switch.*), leer = automatisch
+    "bw_pause": ["rain", "soil", "frost", "water"],  # Mähpause bei …
+    "bw_soil_wet": 85,       # Boden zu nass ab … %
+    "bw_frost": 3,           # Frost: Außentemperatur unter … °C
+    "bw_water_after": 60,    # nach dem Bewässern … Min. nicht mähen
+    "bw_resume": True,       # nach der Pause selbst wieder starten (nur wenn Beetwerk pausiert hat)
+    "bw_resume_wait": 60,    # … Min. nach Ende des Grundes
+    "bw_resume_until": "19:00",  # danach nicht mehr starten
+    "bw_blades_days": 60,    # Hinweis „Messer wechseln“ ab … Tagen
+}
+BW_KEYS = frozenset(BW_DEFAULTS)
+RAINY = ("rainy", "pouring", "snowy", "snowy-rainy", "hail", "lightning-rainy")
+BAD = ("unavailable", "unknown", None)
+PAUSE_TEXT = {"rain": "es regnet", "soil": "Boden zu nass", "frost": "Frost", "water": "Bewässerung"}
+
+
+def _num(state) -> float | None:
+    try:
+        return float(state.state) if state is not None and state.state not in BAD else None
+    except (TypeError, ValueError):
+        return None
+
+
+class Beetwerk:
+    """Garten: Mähroboter und Bewässerung."""
+
+    def __init__(self, hass: HomeAssistant, log: Protokoll, haus: Haus) -> None:
+        self.hass = hass
+        self.log = log
+        self.haus = haus
+        self._store: Store = Store(hass, 1, GARDEN_STORAGE_KEY)
+        self.settings: dict[str, Any] = dict(BW_DEFAULTS)
+        self._persist: dict[str, Any] = {}
+        self._unsubs: list = []
+        self._dev: tuple[float, dict] | None = None
+        self._water_end: float | None = None
+        self._was_watering = False
+        self._calm_since: float | None = None
+        haus.extra_status["beetwerk"] = self.status
+
+    async def async_load(self) -> None:
+        stored = await self._store.async_load() or {}
+        self.settings.update({k: v for k, v in (stored.get("settings") or {}).items() if k in BW_KEYS})
+        self._persist = stored.get("persist") or {}
+
+    async def async_start(self) -> None:
+        self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
+
+    async def async_stop(self) -> None:
+        for unsub in self._unsubs:
+            unsub()
+        self._unsubs.clear()
+        await self._store.async_save(self._data())
+
+    def _save(self) -> None:
+        self._store.async_delay_save(self._data, 5)
+
+    def _data(self) -> dict[str, Any]:
+        return {"settings": self.settings, "persist": self._persist}
+
+    async def async_save_settings(self, settings: dict[str, Any], by: str | None = None) -> None:
+        settings = {k: v for k, v in settings.items() if k in BW_KEYS}
+        changed = [k for k, v in settings.items() if self.settings.get(k) != v]
+        if not changed:
+            return
+        log_settings(self.log, settings, changed, by, module="beetwerk", old=self.settings)
+        self.settings.update(settings)
+        self._dev = None
+        self._save()
+
+    # ------------------------------------------------------------ Entitäten
+    def _ids(self, domain: str) -> list[str]:
+        ids = getattr(self.hass.states, "async_entity_ids", None)
+        return sorted(ids(domain)) if ids else []
+
+    def _name(self, entity_id: str | None) -> str:
+        st = self.hass.states.get(entity_id) if entity_id else None
+        return (st.name if st is not None and getattr(st, "name", None) else None) or (entity_id or "–")
+
+    def mower(self) -> str | None:
+        return self.settings.get("bw_mower") or next(iter(self._ids("lawn_mower")), None)
+
+    def _find(self, domain: str, words: tuple[str, ...], device_class: str | None = None) -> str | None:
+        """Erste Entität der Domäne, deren ID oder Name eines der Wörter enthält (bzw. mit passender Geräteklasse)."""
+        best = None
+        for eid in self._ids(domain):
+            st = self.hass.states.get(eid)
+            hay = f"{eid} {getattr(st, 'name', '') or ''}".lower()
+            dc = (st.attributes.get("device_class") if st is not None else None)
+            if any(w in hay for w in words) and (device_class is None or dc in (device_class, None)):
+                if "rasen" in hay or "garten" in hay:
+                    return eid
+                best = best or eid
+        return best
+
+    def entities(self) -> dict[str, str | None]:
+        """Alle Entitäten des Gartens: gewählt oder automatisch gefunden."""
+        s = self.settings
+        dev = self._mower_device()
+        return {
+            "mower": self.mower(),
+            "soil": s.get("bw_soil") or self._find("sensor", ("bodenfeuchte", "soil_moisture", "soil moisture", "moisture"), "moisture"),
+            "watering": s.get("bw_watering") or self._find("binary_sensor", ("watering_now", "gießt", "giesst", "bewässerung_aktiv")),
+            "need": s.get("bw_need") or self._find("binary_sensor", ("irrigation_needed", "gießen_nötig", "bewasserung_notig")),
+            "valve": s.get("bw_valve") or self._find("valve", ("irrigation", "bewässer", "bewasser", "rasen", "garten", "ventil"))
+            or self._find("switch", ("bewässerung", "bewasserung", "irrigation", "gartenventil")),
+            "bucket": self._find("sensor", ("irrigation_rasen_1_bucket", "_bucket")),
+            **dev,
+        }
+
+    def _mower_device(self) -> dict[str, str | None]:
+        """Weitere Entitäten am Gerät des Mähers: Akku, Fehler, Messer, Stunden, Winterpause, Feierabend (alle 10 Min. neu gesucht)."""
+        now = dt_util.utcnow().timestamp()
+        if self._dev is not None and now - self._dev[0] < 600:
+            return self._dev[1]
+        found: dict[str, str | None] = {"battery": None, "error": None, "blades_days": None, "hours": None, "winter": None,
+                                        "eod": None, "status": None}
+        mower = self.mower()
+        try:
+            reg = er.async_get(self.hass)
+            entry = reg.async_get(mower) if mower else None
+            ents = er.async_entries_for_device(reg, entry.device_id) if entry is not None and getattr(entry, "device_id", None) else []
+        except Exception:  # noqa: BLE001 - ohne Register (z. B. Tests) nur die Hauptentität
+            ents = []
+        for e in ents:
+            if getattr(e, "disabled_by", None) is not None:
+                continue
+            eid = e.entity_id
+            dc = getattr(e, "device_class", None) or getattr(e, "original_device_class", None)
+            if e.domain == "sensor" and (dc == "battery" or eid.endswith(("_battery_charge", "_batterie", "_battery"))):
+                if not found["battery"] or eid.endswith("_charge"):
+                    found["battery"] = eid
+            elif e.domain == "sensor" and eid.endswith(("_error_message", "_fehlermeldung")):
+                found["error"] = eid
+            elif e.domain == "sensor" and ("blades_days" in eid or "messer_tage" in eid):
+                found["blades_days"] = eid
+            elif e.domain == "sensor" and ("statistic_hours" in eid or "betriebsstunden" in eid):
+                found["hours"] = eid
+            elif e.domain == "switch" and "winter" in eid:
+                found["winter"] = eid
+            elif e.domain == "button" and eid.endswith(("_eod", "_feierabend")):
+                found["eod"] = eid
+            elif e.domain == "sensor" and eid.endswith(("_status_plain", "_substatus_plain")) and not found["status"]:
+                found["status"] = eid
+        self._dev = (now, found)
+        return found
+
+    # ------------------------------------------------------------ Regeln
+    def _reasons(self, ent: dict, now: float) -> list[str]:
+        """Gründe für eine Mähpause gerade jetzt."""
+        on = set(self.settings.get("bw_pause") or [])
+        out: list[str] = []
+        weather = self.hass.states.get(self.haus.weather_entity() or "")
+        if "rain" in on and weather is not None and weather.state in RAINY:
+            out.append("rain")
+        soil = _num(self.hass.states.get(ent["soil"])) if ent.get("soil") else None
+        if "soil" in on and soil is not None and soil >= float(self.settings.get("bw_soil_wet") or 85):
+            out.append("soil")
+        out_temp, _rh = self.haus.outside_air()
+        if "frost" in on and out_temp is not None and out_temp < float(self.settings.get("bw_frost") or 3):
+            out.append("frost")
+        watering = self._watering(ent)
+        if watering:
+            self._was_watering = True
+        elif self._was_watering:
+            self._was_watering = False
+            self._water_end = now
+        after = float(self.settings.get("bw_water_after") or 0) * 60
+        if "water" in on and (watering or (self._water_end and now - self._water_end < after)):
+            out.append("water")
+        return out
+
+    def _watering(self, ent: dict) -> bool:
+        st = self.hass.states.get(ent["watering"]) if ent.get("watering") else None
+        if st is not None and st.state == "on":
+            return True
+        v = self.hass.states.get(ent["valve"]) if ent.get("valve") else None
+        return v is not None and v.state in ("open", "opening", "on")
+
+    async def _async_tick(self, _now=None) -> None:
+        try:
+            await self.async_evaluate()
+        except Exception:  # noqa: BLE001 - Beetwerk darf den Takt nicht stoppen
+            _LOGGER.exception("Beetwerk: Auswertung fehlgeschlagen")
+
+    async def async_evaluate(self) -> None:
+        ent = self.entities()
+        mower = ent.get("mower")
+        now = dt_util.utcnow().timestamp()
+        reasons = self._reasons(ent, now)
+        self._persist["reasons"] = reasons
+        st = self.hass.states.get(mower) if mower else None
+        state = st.state if st is not None else None
+        paused = self._persist.get("paused")
+        today = dt_util.now().date().isoformat()
+        if paused and paused.get("day") != today:
+            paused = self._persist["paused"] = None
+        winter = self._on(ent.get("winter"))
+        # Mähpause: mäht, aber ein Grund spricht dagegen -> zur Station
+        if mower and state == "mowing" and reasons:
+            why = ", ".join(PAUSE_TEXT[r] for r in reasons)
+            await self._call("lawn_mower", "dock", mower)
+            self._persist["paused"] = {"at": now, "why": why, "reasons": reasons, "day": today}
+            self._calm_since = None
+            self.log.add("garden", "Mähpause – Mäher fährt in die Station", why, module="beetwerk")
+            self._save()
+        elif paused and not reasons and mower and not winter:
+            # Grund vorbei: nach der Wartezeit wieder starten (nur bis zur Uhrzeit, nur wenn Beetwerk pausiert hat)
+            self._calm_since = self._calm_since or now
+            wait = float(self.settings.get("bw_resume_wait") or 60) * 60
+            until = str(self.settings.get("bw_resume_until") or "19:00")
+            local = dt_util.now()
+            h, m = (int(x) for x in until.split(":")[:2])
+            if self.settings.get("bw_resume", True) and now - self._calm_since >= wait and local.hour * 60 + local.minute < h * 60 + m:
+                if state in ("docked", "paused"):
+                    await self._call("lawn_mower", "start_mowing", mower)
+                    self.log.add("garden", "Mähpause vorbei – Mäher startet wieder", paused.get("why"), module="beetwerk")
+                self._persist["paused"] = None
+                self._calm_since = None
+                self._save()
+        elif reasons:
+            self._calm_since = None
+        # Fehler: „braucht Hilfe“
+        err = self.error_text(ent, state)
+        if err:
+            self.haus.notify("bw_mower_error", "mower", "Mähroboter braucht Hilfe", f"{self._name(mower)}: {err}")
+        else:
+            self.haus.clear("bw_mower_error")
+        # Wartung: Messer
+        days = _num(self.hass.states.get(ent["blades_days"])) if ent.get("blades_days") else None
+        limit = float(self.settings.get("bw_blades_days") or 0)
+        if days is not None and limit and days >= limit and not winter:
+            self.haus.notify("bw_blades", "mower_care", "Mähroboter: Messer wechseln", f"seit {days:.0f} Tagen im Einsatz (Hinweis ab {limit:.0f})")
+        else:
+            self.haus.clear("bw_blades")
+
+    def error_text(self, ent: dict, state: str | None) -> str | None:
+        if state == "error":
+            msg = self.hass.states.get(ent["error"]) if ent.get("error") else None
+            text = msg.state if msg is not None and msg.state not in BAD else None
+            return text or "Fehler"
+        return None
+
+    def _on(self, entity_id: str | None) -> bool:
+        st = self.hass.states.get(entity_id) if entity_id else None
+        return st is not None and st.state == "on"
+
+    async def _call(self, domain: str, service: str, entity_id: str) -> None:
+        try:
+            await self.hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=False)
+        except Exception as err:  # noqa: BLE001 - Dienst nicht verfügbar: nur protokollieren
+            self.log.add("garden", f"Befehl an {self._name(entity_id)} fehlgeschlagen", str(err), module="beetwerk")
+
+    # ------------------------------------------------------------ Für das Panel
+    def status(self) -> dict[str, Any]:
+        ent = self.entities()
+        mower = ent.get("mower")
+        st = self.hass.states.get(mower) if mower else None
+        now = dt_util.utcnow().timestamp()
+        paused = self._persist.get("paused")
+        return {
+            "entities": ent,
+            "configured": bool(mower or ent.get("valve")),
+            "reasons": [{"k": r, "text": PAUSE_TEXT[r]} for r in self._persist.get("reasons") or []],
+            "paused": {**paused, "at": dt_util.utc_from_timestamp(paused["at"]).isoformat()} if paused else None,
+            "error": self.error_text(ent, st.state if st is not None else None),
+            "watering": self._watering(ent),
+            "water_end": dt_util.utc_from_timestamp(self._water_end).isoformat() if self._water_end and now - self._water_end < 86400 else None,
+        }

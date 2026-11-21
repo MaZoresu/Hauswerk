@@ -96,7 +96,7 @@ def hw(tmp_path_factory):
     pkg = root / "hw"
     pkg.mkdir()
     _mod("homeassistant.config_entries", ConfigEntry=object)
-    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py", "hmlinks.py"):
+    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py", "hmlinks.py", "beetwerk.py"):
         shutil.copy(SRC / name, pkg / name)
     (pkg / "__init__.py").write_text("")
     sys.path.insert(0, str(root))
@@ -108,6 +108,7 @@ def hw(tmp_path_factory):
         rename=importlib.import_module("hw.rename"),
         Kraftwerk=importlib.import_module("hw.kraftwerk").Kraftwerk,
         Lichtwerk=importlib.import_module("hw.lichtwerk").Lichtwerk,
+        Beetwerk=importlib.import_module("hw.beetwerk").Beetwerk,
         light=importlib.import_module("hw.light_logic"),
         const=importlib.import_module("hw.const"),
     )
@@ -2012,5 +2013,70 @@ def test_lichtwerk_bericht_gesundheit(hw):
         hass.set("light.wz", "off", {"supported_color_modes": ["brightness"]}, "Wohnzimmer")
         lw._check_switched("light.wz", False)
         assert not lw._health("light.wz").get("fail")
+
+    asyncio.run(run())
+
+
+def test_beetwerk_maehpause_fehler_wartung(hw):
+    """Beetwerk: Mäher und Geräte-Entitäten automatisch gefunden; Mähpause bei Regen (in die Station), danach weiter;
+    während und nach dem Bewässern keine Fahrt; Fehler als Nachricht, Messer-Hinweis."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 6, 10, 9, 0, tzinfo=timezone.utc)  # 11:00 lokal
+        hass = Hass()
+        for eid in ("lawn_mower.robonect", "sensor.robonect_mower_battery_charge", "sensor.robonect_mower_error_message",
+                    "sensor.robonect_mower_blades_days", "switch.robonect_winter_mode", "button.robonect_eod"):
+            REG[eid] = types.SimpleNamespace(entity_id=eid, device_id="mower", domain=eid.split(".")[0], disabled_by=None,
+                                             device_class="battery" if "battery" in eid else None, original_device_class=None)
+        hass.set("lawn_mower.robonect", "mowing", {}, "Automower")
+        hass.set("sensor.robonect_mower_battery_charge", "80", name="Akku")
+        hass.set("sensor.robonect_mower_error_message", "Fehler 0", name="Fehler")
+        hass.set("sensor.robonect_mower_blades_days", "70", name="Messer Tage")
+        hass.set("switch.robonect_winter_mode", "off", name="Winter")
+        hass.set("sensor.star_bodenfeuchte_rasen", "60", {"device_class": "moisture", "unit_of_measurement": "%"}, "Bodenfeuchte Rasen")
+        hass.set("binary_sensor.smart_irrigation_rasen_1_watering_now", "off", name="gießt")
+        hass.set("weather.home", "rainy", {"temperature": 14, "humidity": 90})
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"weather_entity": "weather.home", "notify_targets": ["mobile_app_pixel"], "notify_quiet": False})
+        bw = hw.Beetwerk(hass, log, haus)
+        await bw.async_load()
+        await bw.async_start()
+        ent = bw.entities()
+        assert ent["mower"] == "lawn_mower.robonect" and ent["battery"] == "sensor.robonect_mower_battery_charge"
+        assert ent["soil"] == "sensor.star_bodenfeuchte_rasen" and ent["watering"] == "binary_sensor.smart_irrigation_rasen_1_watering_now"
+        assert ent["winter"] == "switch.robonect_winter_mode" and ent["eod"] == "button.robonect_eod"
+        # Regen beim Mähen -> zur Station
+        await bw.async_evaluate()
+        assert ("lawn_mower", "dock", {"entity_id": "lawn_mower.robonect"}) in hass.calls
+        st = haus.status()["beetwerk"]
+        assert st["paused"]["why"] == "es regnet" and st["reasons"][0]["k"] == "rain"
+        # Regen vorbei, Mäher in der Station: nach 60 Min. weiter
+        hass.set("lawn_mower.robonect", "docked", {}, "Automower")
+        hass.set("weather.home", "cloudy", {"temperature": 14, "humidity": 70})
+        await bw.async_evaluate()
+        assert ("lawn_mower", "start_mowing", {"entity_id": "lawn_mower.robonect"}) not in hass.calls
+        NOW[0] += timedelta(minutes=61)
+        await bw.async_evaluate()
+        assert ("lawn_mower", "start_mowing", {"entity_id": "lawn_mower.robonect"}) in hass.calls
+        assert haus.status()["beetwerk"]["paused"] is None
+        # Bewässerung: während und 60 Min. danach Pause
+        hass.set("lawn_mower.robonect", "mowing", {}, "Automower")
+        hass.set("binary_sensor.smart_irrigation_rasen_1_watering_now", "on", name="gießt")
+        n = hass.calls.count(("lawn_mower", "dock", {"entity_id": "lawn_mower.robonect"}))
+        await bw.async_evaluate()
+        assert hass.calls.count(("lawn_mower", "dock", {"entity_id": "lawn_mower.robonect"})) == n + 1
+        assert haus.status()["beetwerk"]["watering"] is True
+        # Fehler -> Nachricht; Messer 70 Tage -> Hinweis (nur Glocke)
+        hass.set("lawn_mower.robonect", "error", {}, "Automower")
+        hass.set("sensor.robonect_mower_error_message", "Mäher steckt fest", name="Fehler")
+        await bw.async_evaluate()
+        await asyncio.sleep(0)
+        assert "Mähroboter braucht Hilfe" in hass.sent()
+        assert haus.status()["beetwerk"]["error"] == "Mäher steckt fest"
+        assert any(e["title"] == "Mähroboter: Messer wechseln" for e in log.entries) or "bw_blades" in str(haus.notify_summary())
+        await bw.async_save_settings({"bw_soil_wet": 70, "bw_pause": ["rain"]})
+        assert bw.settings["bw_soil_wet"] == 70
+        await bw.async_stop()
 
     asyncio.run(run())

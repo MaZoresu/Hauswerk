@@ -13,7 +13,7 @@ Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite 
 | <img src="docs/icons/rollwerk.svg" height="20"> **Rollwerk** | Rollläden mit Profilen wie die Cover Control Automation: Zeiten, Sonne, Helligkeit, Beschattung, Lüften, Bewohner, Sturm |
 | <img src="docs/icons/kraftwerk.svg" height="20"> **Kraftwerk** | Energiefluss live – Solar, Netz, Batterie, Hausverbrauch und Verbraucher; Tageswerte, Autarkie und Kosten aus dem Energie-Dashboard; **lernende Fertigerkennung** für Waschmaschine, Trockner & Co. |
 | <img src="docs/icons/lichtwerk.svg" height="20"> **Lichtwerk** | Licht nach dem Vorbild des Blueprints „Smart Light“: Sonne, Helligkeit, Uhrzeit, Entität, Bewegung, Nachtlicht, dynamisches Licht, von Hand, Anwesenheit und Urlaubs-Simulation |
-| Garten | geplant |
+| <img src="docs/icons/beetwerk.svg" height="20"> **Beetwerk** | Garten: Mähroboter (Start, Pause, Station, Feierabend, Winterpause) mit Mähpause bei Regen, nassem Boden, Frost und Bewässerung; Bewässerung (Ventil, Bodenfeuchte, Smart Irrigation); Fehler- und Wartungs-Hinweise |
 
 ## Installation
 
@@ -63,7 +63,9 @@ Kraftwerk                   Modul Energie
 Lichtwerk                   Modul Licht
   ├─ Licht                  /hauswerk/lichtwerk/licht
   └─ Einstellungen          /hauswerk/lichtwerk/einstellungen
-Garten                      geplant, ausgegraut
+Beetwerk                    Modul Garten
+  ├─ Garten                 /hauswerk/beetwerk/garten
+  └─ Einstellungen          /hauswerk/beetwerk/einstellungen
 ⚙ Einstellungen            /hauswerk/einstellungen  (zentral, für alle Module)
   └─ Protokoll              /hauswerk/protokoll  (was wann warum entschieden wurde)
 🔔 Hinweise                 Pop-up mit allem, was zu beheben oder gut zu wissen ist
