@@ -1898,3 +1898,24 @@ def test_lichtwerk_symbol_vorschlaege(panel):
     p.page.locator('hauswerk-panel #pop input[data-lwl="icon"]').fill("ceiling")
     p.wait(100)
     assert "mdi:ceiling-light" in p.js(f"[...{EL}.shadowRoot.querySelectorAll('#ic-sug [data-v]')].map((b) => b.dataset.v)")
+
+
+def test_lueften_gelernt_beste_zeit_kosten(panel):
+    """Lüften: beste Lüftzeiten in der Kopfkachel, gelernte Dauer, „trocknet nicht“, Kosten; Wärmepreis speicherbar."""
+    p = panel
+    p.js(f"""() => {{ const r = Object.keys({EL}._status.rooms)[0]; const s = {EL}._status.rooms[r];
+        s.vent = null; s.air = {{ ...(s.air || {{}}), wait: {{ why: 'humid', text: 'x', dry_at: new Date(Date.now() + 5 * 3600e3).toISOString() }}, open: null }}; }}""")
+    p.view("vent")
+    p.wait(300)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "Am besten lüften:" in txt and "ct" in txt
+    assert "Lüften trocknet gerade nicht" in txt and "trockener" in txt
+    assert "gelernte Lüftdauer" in txt and "€" in txt
+    p.js(f"() => {EL}._openPop('vent')")
+    p.wait()
+    assert p.has('#pop input[data-set="vent_price"]')
+    p.js(f"""() => {{ const i = {EL}.shadowRoot.querySelector('#pop input[data-set="vent_price"]'); i.value = '9.5'; i.dispatchEvent(new Event('input', {{ bubbles: true, composed: true }})); }}""")
+    p.click('#pop [data-action="pop-save"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
+    assert saved["vent_price"] == 9.5

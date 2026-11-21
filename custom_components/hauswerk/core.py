@@ -120,6 +120,7 @@ class Haus:
         self._active: set[str] = set()
         # Wettervorhersage (Frost)
         self._fc_at = 0.0
+        self.hourly: list[dict[str, Any]] = []  # Stunden-Vorhersage fürs Lüften (beste Lüftzeit)
         self.frost_low: float | None = None
         self.frost_day: str | None = None
         # Funk-Auslastung (Duty Cycle): gefundene Sensoren und aktueller Zustand
@@ -916,6 +917,7 @@ class Haus:
         except Exception as err:  # noqa: BLE001 - Dienst ohne Tagesvorhersage
             _LOGGER.debug("Keine Tagesvorhersage von %s: %s", entity_id, err)
             return
+        await self._async_refresh_hourly(entity_id)
         days = list(((response or {}).get(entity_id) or {}).get("forecast") or [])[:3]
         lows = []
         for day in days:
@@ -940,6 +942,29 @@ class Haus:
                         f"Tiefstwert {_de(low)} °C{day_text} (Grenze {_de(limit)} °C)")
         else:
             self.clear("frost")
+
+    async def _async_refresh_hourly(self, entity_id: str) -> None:
+        """Stunden-Vorhersage (Temperatur, Feuchte, Regen) für die besten Lüftzeiten – leer, wenn der Dienst keine hat."""
+        try:
+            response = await self.hass.services.async_call(
+                "weather", "get_forecasts", {"entity_id": entity_id, "type": "hourly"}, blocking=True, return_response=True
+            )
+        except Exception as err:  # noqa: BLE001 - Dienst ohne Stunden-Vorhersage
+            _LOGGER.debug("Keine Stunden-Vorhersage von %s: %s", entity_id, err)
+            self.hourly = []
+            return
+        rainy = {"rainy", "pouring", "snowy", "snowy-rainy", "hail", "lightning-rainy"}
+        out = []
+        for h in list(((response or {}).get(entity_id) or {}).get("forecast") or [])[:36]:
+            moment, _ = parse_when(h.get("datetime")) if h.get("datetime") else (None, False)
+            if moment is None:
+                continue
+            local = dt_util.as_local(moment)
+            prob = _float(h.get("precipitation_probability"))
+            amount = _float(h.get("precipitation"))
+            out.append({"ts": moment.timestamp(), "hour": local.hour, "temp": _float(h.get("temperature")), "rh": _float(h.get("humidity")),
+                        "rain": h.get("condition") in rainy or (prob is not None and prob >= 60) or (amount is not None and amount >= 0.3)})
+        self.hourly = out
 
     # ------------------------------------------------------------ Für das Panel
     def outside_temp(self) -> float | None:

@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.75.0 – 2026-11-21
+
+### Neu – Lüften in Heizwerk
+- **Lüftdauer lernen statt Tabelle:** Aus jeder Lüftung misst Heizwerk je Raum, wie schnell die Feuchte zur Außenluft hin fällt (Luftwechsel). Ab drei Messungen gilt die gelernte Dauer – bis die Feuchte 10 % unter der Grenze liegt (ohne Feuchte-Anlass etwa 85 % Luftaustausch), 3–30 Min. Empfehlung und Lüft-Timer nutzen sie („gelernt“), die Raumkarte zeigt „gelernte Lüftdauer“; im Protokoll steht „Lüften gelernt“. Ohne Feuchtesensor bleiben die Richtwerte.
+- **Nur lüften, wenn es hilft:** Ist es drinnen feucht, die Luft draußen aber nicht trockener (schwül, Nebel), kommt keine Empfehlung wegen Feuchte. Die Raumkarte sagt „Feucht – aber Lüften trocknet gerade nicht“ und, aus der Stunden-Vorhersage, „ab 21:00 Uhr trockener“. CO₂ und morgens lüften gelten weiter.
+- **Beste Lüftzeit:** Aus der Stunden-Vorhersage des Wetterdienstes (Temperatur, Feuchte, Regen) die besten Zeiten der nächsten 24 Stunden – je eine am Vormittag und am Nachmittag/Abend: kein Regen, trockene Luft, möglichst wenig Wärmeverlust. Steht in der Kopfkachel der Seite Lüften („Am besten lüften: 9:00 (8°, 0,5 ct) · 14:00 …“). In der Sommerpause aus.
+- **Kosten je Lüftung:** Wärmepreis unter Lüften & Schimmelschutz (Standard 12 ct/kWh). Laufende Lüftung „bisher ca. 0,05 kWh, 0,6 ct“, zuletzt gelüftet mit Kosten, 7 Tage in €, beim Dauerkippen „gekippt kostet ca. … je Stunde“; Bericht › Lüften · 7 Tage mit Spalte Kosten.
+
 ## 0.74.3 – 2026-11-21
 
 ### Geändert (Lichtwerk › Einstellungen)

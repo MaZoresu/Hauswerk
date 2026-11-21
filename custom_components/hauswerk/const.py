@@ -57,7 +57,7 @@ SETTING_LABELS = {
     "notify_battery": "Benachrichtigungen", "notify_quiet": "Ruhezeit", "notify_quiet_from": "Ruhezeit", "notify_quiet_to": "Ruhezeit",
     "battery_low": "Batterie-Warnung", "preheat_weather": "Vorheizen nach Wetter", "workday_entity": "Arbeitstag-Sensor",
     "workday_as": "Feiertage wie", "vent_rh": "Lüften-Hinweis", "sun_entity": "Sonne",
-    "notify_ha": "Mitteilung in Home Assistant", "notify_channels": "Benachrichtigungen an", "notify_routes": "Benachrichtigungen je Anlass", "notify_storm": "Benachrichtigungen", "notify_light_away": "Benachrichtigungen", "notify_light_offline": "Benachrichtigungen", "notify_cover": "Benachrichtigungen", "notify_hours": "Benachrichtigungen je Kanal", "notify_voice_away": "Benachrichtigungen", "notify_bundle": "Benachrichtigungen bündeln", "notify_off": "Empfänger pausiert", "notify_cold": "Benachrichtigungen", "notify_vent": "Benachrichtigungen", "notify_vent_done": "Benachrichtigungen", "vent_morning": "Lüften", "vent_co2": "Lüften", "vent_cool": "Lüften", "vent_long_min": "Lüften",
+    "notify_ha": "Mitteilung in Home Assistant", "notify_channels": "Benachrichtigungen an", "notify_routes": "Benachrichtigungen je Anlass", "notify_storm": "Benachrichtigungen", "notify_light_away": "Benachrichtigungen", "notify_light_offline": "Benachrichtigungen", "notify_cover": "Benachrichtigungen", "notify_hours": "Benachrichtigungen je Kanal", "notify_voice_away": "Benachrichtigungen", "notify_bundle": "Benachrichtigungen bündeln", "notify_off": "Empfänger pausiert", "notify_cold": "Benachrichtigungen", "notify_vent": "Benachrichtigungen", "notify_vent_done": "Benachrichtigungen", "vent_morning": "Lüften", "vent_co2": "Lüften", "vent_cool": "Lüften", "vent_long_min": "Lüften", "vent_price": "Lüften",
     "demand_entity": "Wärmeanforderung", "demand_action": "Wärmeanforderung", "demand_low": "Wärmeanforderung",
     "demand_valve": "Wärmeanforderung", "rw_covers": "Rollwerk: Rollläden", "rw_storm": "Rollwerk: Sturmschutz", "rw_wind_entity": "Rollwerk: Sturmschutz", "rw_recovery": "Rollwerk: Nach Neustart", "demand_hold": "Wärmeanforderung", "demand_preheat": "Wärmeanforderung",
     "kw_solar": "Kraftwerk: Solar", "kw_grid": "Kraftwerk: Netz", "kw_grid_export": "Kraftwerk: Netz", "kw_grid_invert": "Kraftwerk: Netz",
@@ -196,6 +196,7 @@ HEAT_DEFAULTS = {
     "vent_co2": 1000,             # CO₂-Grenze in ppm für Räume mit CO₂-Sensor (0 = aus)
     "vent_cool": True,            # Sommer: „Fenster auf zum Kühlen“, wenn draußen kühler
     "vent_long_min": 30,          # Fenster in der Heizzeit länger offen: Hinweis „Kippen kostet Wärme“
+    "vent_price": 12,             # Wärmepreis in ct/kWh (Gas, Öl, Wärmepumpe …) für die Kosten je Lüftung
     # Wärmeanforderung an den Wärmeerzeuger (z. B. Zone der Vaillant-Anlage); leer = aus
     "demand_entity": None,        # climate.* des Wärmeerzeugers
     "demand_action": "lower",     # lower = Soll absenken | off = Zone ausschalten, solange kein Raum Wärme braucht

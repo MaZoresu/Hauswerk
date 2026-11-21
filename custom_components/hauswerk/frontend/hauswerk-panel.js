@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.74.3";
+const VERSION = "0.75.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2181,6 +2181,8 @@ class HauswerkPanel extends HTMLElement {
     const mins = outT == null ? 10 : outT < 0 ? 5 : outT < 10 ? 10 : outT < 15 ? 15 : 25;
     const amp = { ok: ["#22c55e", "kein Risiko"], warn: ["#f59e0b", "aufpassen"], bad: ["#ef4444", "Schimmelgefahr"] };
     const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 60 ? `vor ${Math.max(1, m)} Min.` : m < 1440 ? `vor ${Math.floor(m / 60)} Std.` : `vor ${Math.floor(m / 1440)} Tg.`; };
+    const hh = (iso) => { const d = new Date(iso); const today = d.toDateString() === new Date().toDateString(); return `${today ? "" : "morgen "}${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`; };
+    const ct = (c) => (c == null ? "" : c < 100 ? `${fmt(c, c < 10 ? 1 : 0)} ct` : `${fmt(c / 100, 2)} €`);
     const card = (r) => {
       const s = st[r.id] || {};
       const a = s.air || {};
@@ -2190,15 +2192,17 @@ class HauswerkPanel extends HTMLElement {
         const pc = a.open.cool ? 100 : Math.min(100, (a.open.minutes / a.open.target) * 100);
         state = `<div class="vt-run ${a.open.done ? "done" : ""}"><div class="vt-bar"><i style="width:${pc}%"></i></div>
           <b>${a.open.done ? `Genug gelüftet – Fenster schließen` : a.open.cool ? `Kühlt seit ${Math.floor(a.open.minutes)} Min.` : `Lüftet ${Math.floor(a.open.minutes)} von ${a.open.target} Min.`}</b>
-          <small>${a.open.done ? esc(a.open.done) : a.open.cool ? "Hinweis kommt, sobald es draußen wärmer ist" : "Ende: Zeit um, Feuchte gesunken oder Raum zu kühl"}${a.long ? ` · ca. ${fmt(a.long.kwh)} kWh Wärme` : ""}</small></div>`;
-      } else if (s.vent) state = `<div class="vt-need"><ha-icon icon="mdi:weather-windy"></ha-icon><span><b>Jetzt ${s.vent.minutes} Min. stoßlüften</b><small>${esc((s.vent.reasons || []).join(" · "))}</small></span></div>`;
+          <small>${a.open.done ? esc(a.open.done) : a.open.cool ? "Hinweis kommt, sobald es draußen wärmer ist" : `Ende: Zeit um, Feuchte gesunken oder Raum zu kühl${a.open.learned ? " · Dauer gelernt" : ""}`}${a.open.kwh ? ` · bisher ca. ${fmt(a.open.kwh)} kWh, ${ct(a.open.ct)}` : ""}${a.long ? ` · gekippt kostet ca. ${ct(a.long.ct_h)}/Std.` : ""}</small></div>`;
+      } else if (s.vent) state = `<div class="vt-need"><ha-icon icon="mdi:weather-windy"></ha-icon><span><b>Jetzt ${s.vent.minutes} Min. stoßlüften${a.learned ? ` <em class="vt-learn" title="aus den letzten Lüftungen dieses Raums gelernt">gelernt</em>` : ""}</b><small>${esc((s.vent.reasons || []).join(" · "))}</small></span></div>`;
+      else if (a.wait) state = `<div class="vt-wait"><ha-icon icon="mdi:weather-fog"></ha-icon><span><b>Feucht – aber Lüften trocknet gerade nicht</b><small>Draußen ist mehr Wasser in der Luft${a.wait.dry_at ? ` · ab ${hh(a.wait.dry_at)} Uhr trockener` : " · später noch einmal versuchen"}</small></span></div>`;
       else state = `<div class="vt-ok"><ha-icon icon="mdi:check-circle-outline"></ha-icon><span>${s.humidity == null && a.co2 == null ? "Ohne Feuchtesensor nur Lüft-Timer und Bilanz" : "Kein Lüften nötig"}</span></div>`;
       const facts = [
         s.humidity != null ? [`${fmt(s.humidity, 0)} %`, `Luftfeuchte · ab ${fmt(a.limit, 0)} % lüften`, s.humidity >= (a.limit || 99) ? "#f59e0b" : ""] : null,
         a.mold ? [`${a.mold.wall_rh} %`, `an der Außenwand (${fmt(a.mold.wall_temp)} °C) · ${amp[a.mold.level][1]}`, amp[a.mold.level][0]] : null,
         a.co2 != null ? [`${a.co2} ppm`, "CO₂", a.co2 >= (set.vent_co2 || 1000) ? "#f59e0b" : ""] : null,
-        a.last ? [ago(a.last.at), `zuletzt gelüftet · ${fmt(a.last.min, 0)} Min.${a.last.rh0 != null && a.last.rh1 != null ? ` · ${fmt(a.last.rh0, 0)} → ${fmt(a.last.rh1, 0)} %` : ""}`, ""] : null,
-        a.week?.count ? [`${a.week.count}×`, `7 Tage · ${a.week.minutes} Min.${a.week.kwh ? ` · ca. ${fmt(a.week.kwh)} kWh` : ""}`, ""] : null,
+        a.last ? [ago(a.last.at), `zuletzt gelüftet · ${fmt(a.last.min, 0)} Min.${a.last.rh0 != null && a.last.rh1 != null ? ` · ${fmt(a.last.rh0, 0)} → ${fmt(a.last.rh1, 0)} %` : ""}${a.last.ct ? ` · ${ct(a.last.ct)}` : ""}`, ""] : null,
+        a.week?.count ? [`${a.week.count}×`, `7 Tage · ${a.week.minutes} Min.${a.week.kwh ? ` · ca. ${fmt(a.week.kwh)} kWh` : ""}${a.week.eur ? ` · ${fmt(a.week.eur, 2)} €` : ""}`, ""] : null,
+        a.tau ? [`${fmt(a.minutes, 0)} Min.`, "gelernte Lüftdauer", ""] : null,
         a.balance?.rh_morning != null ? [`${a.balance.rh_morning} %`, "morgens (Ø 3 Tage)", a.balance.level !== "ok" ? VB[a.balance.level][0] : ""] : null,
       ].filter(Boolean);
       return `<article class="card vt-c" data-action="room-page" data-id="${esc(r.id)}" role="button" tabindex="0">
@@ -2208,13 +2212,18 @@ class HauswerkPanel extends HTMLElement {
       </article>`;
     };
     const need = rooms.filter((r) => st[r.id]?.vent || st[r.id]?.air?.open?.done);
+    const plan = this._status?.vent_plan;
     const head = this._brief({
       cls: "card br-mod-heat", tone: need.some((r) => st[r.id]?.air?.open?.done) ? "warn" : need.length ? "active" : "ok", icon: "mdi:weather-windy",
       label: `<ha-icon icon="mdi:weather-windy"></ha-icon>Lüften`,
       big: `${mins}<span> Min.</span>`,
+      // beste Lüftzeiten aus der Stunden-Vorhersage
       title: need.length ? need.map((r) => `${r.name}: ${st[r.id].air?.open?.done ? "Fenster schließen" : `${st[r.id].vent.minutes} Min. lüften`}`).join(" · ") : "Gerade muss nirgends gelüftet werden",
       side: `<button class="link" data-action="settings-go" data-sub="vent"><ha-icon icon="mdi:tune-variant"></ha-icon>Einstellen</button>`,
-      lines: [{ icon: "mdi:thermometer", text: `Richtwert Stoßlüften bei ${outT == null ? "–" : fmt(outT)} °C draußen: ${mins} Min. – Fenster ganz auf, Heizung pausiert` },
+      lines: [
+        ...(plan?.times?.length ? [{ icon: "mdi:clock-check-outline", text: `Am besten lüften: ${plan.times.map((t) => `${hh(t.at)} (${fmt(t.temp, 0)}°, ${ct(t.ct)})`).join(" · ")}` }]
+          : plan ? [{ icon: "mdi:weather-rainy", text: "Heute kaum trockene Luft ohne Regen – nur bei Bedarf kurz lüften" }] : []),
+        { icon: "mdi:thermometer", text: `Richtwert Stoßlüften bei ${outT == null ? "–" : fmt(outT)} °C draußen: ${mins} Min. – mit Feuchtesensor lernt jeder Raum seine eigene Dauer` },
         { icon: "mdi:information-outline", text: "Kurz und weit öffnen statt kippen: tauscht die Luft, ohne Wände auszukühlen" }],
     });
     return head + `<div class="vt-grid">${rooms.map(card).join("")}</div>`;
@@ -7029,9 +7038,9 @@ class HauswerkPanel extends HTMLElement {
         const vr = rooms.filter((r) => st[r.id]?.air?.week?.count);
         if (!vr.length) return "";
         return `<section class="card">${this._sectionHead("mdi:weather-windy", "Lüften · 7 Tage", `<button class="link" data-action="tab" data-tab="vent">Lüften</button>`)}
-          <div class="table-wrap"><table><thead><tr><th>Raum</th><th>gelüftet</th><th>Dauer</th><th>Feuchte</th><th>Wärme</th></tr></thead><tbody>
-          ${vr.map((r) => { const wk = st[r.id].air.week; return `<tr><td><span class="rdot" style="background:${this._roomColor(r.id)}"></span>${esc(r.name)}</td><td>${wk.count}×</td><td>${wk.minutes} Min.</td><td>${wk.rh_drop != null ? `−${wk.rh_drop} %-Pkt.` : "–"}</td><td>${wk.kwh ? `ca. ${fmt(wk.kwh)} kWh` : "–"}</td></tr>`; }).join("")}
-          </tbody></table></div><p class="muted small">Feuchte: Ø Rückgang je Lüftung. Wärme: grob geschätzt (ca. 20 W je Grad Unterschied, solange offen).</p></section>`;
+          <div class="table-wrap"><table><thead><tr><th>Raum</th><th>gelüftet</th><th>Dauer</th><th>Feuchte</th><th>Wärme</th><th>Kosten</th></tr></thead><tbody>
+          ${vr.map((r) => { const wk = st[r.id].air.week; return `<tr><td><span class="rdot" style="background:${this._roomColor(r.id)}"></span>${esc(r.name)}</td><td>${wk.count}×</td><td>${wk.minutes} Min.</td><td>${wk.rh_drop != null ? `−${wk.rh_drop} %-Pkt.` : "–"}</td><td>${wk.kwh ? `ca. ${fmt(wk.kwh)} kWh` : "–"}</td><td>${wk.eur != null ? `${fmt(wk.eur, 2)} €` : "–"}</td></tr>`; }).join("")}
+          </tbody></table></div><p class="muted small">Feuchte: Ø Rückgang je Lüftung. Wärme: grob geschätzt (ca. 20 W je Grad Unterschied, solange offen). Kosten mit dem Wärmepreis unter Lüften & Schimmelschutz.</p></section>`;
       })()}
       ${this._powerReport(rooms, days)}
       ${this._valveHeat(rooms, rep, days)}
@@ -8630,7 +8639,11 @@ class HauswerkPanel extends HTMLElement {
             <p class="muted small">Gilt für Wohnräume. Bäder lüften ab 70 %, Schlaf- und Kinderzimmer ab 60 % – je Raum änderbar (Raum › Geräte › Lüften).</p>
             <div class="lbl">Dauer & Ende</div>
             <p class="muted small">Empfohlen wird kurzes Stoßlüften nach Außentemperatur: unter 0 °C 5 Min., bis 10 °C 10 Min., bis 15 °C 15 Min., darüber 25 Min. Ist das Fenster offen, läuft in der Raumkachel ein Countdown; ist genug gelüftet (Zeit um, Feuchte deutlich gesunken oder Raum 3 °C kühler), kommt „Fenster schließen“.</p>
+<p class="muted small"><ha-icon icon="mdi:school-outline"></ha-icon>Mit Feuchtesensor lernt jeder Raum seine eigene Dauer: Aus jeder Lüftung misst Heizwerk, wie schnell die Feuchte zur Außenluft hin fällt (Luftwechsel). Ab drei Messungen gilt die gelernte Dauer – bis die Feuchte 10 % unter der Grenze liegt, höchstens 30 Min. Ist die Luft draußen nicht trockener (schwül, Nebel), kommt keine Lüft-Empfehlung wegen Feuchte, sondern „ab … Uhr trockener“.</p>
             <label class="field narrow"><span><ha-icon icon="mdi:window-open-variant"></ha-icon> „Kippen kostet Wärme“ nach</span>${minutes("vent_long_min", 30, 5, 240, 5)}</label>
+            <div class="lbl">Kosten</div>
+            <label class="field narrow"><span><ha-icon icon="mdi:currency-eur"></ha-icon> Wärmepreis (Gas, Öl, Wärmepumpe …)</span>${minutes("vent_price", 12, 0, 100, 0.5, "ct/kWh")}</label>
+            <p class="muted small">Für die Kosten je Lüftung, je Woche und „gekippt kostet … je Stunde“. Gerechnet wird grob mit 20 W je Grad Unterschied zwischen drinnen und draußen. Die besten Lüftzeiten des Tages kommen aus der Stunden-Vorhersage des Wetterdienstes (kein Regen, trockene Luft, wenig Wärmeverlust).</p>
             <div class="lbl">Anlässe</div>
             <div class="field"><span><ha-icon icon="mdi:weather-sunset-up"></ha-icon> Morgens lüften (Schlaf- und Kinderzimmer) ab</span>${segs("vent_morning", [["null", "Aus"], ["06:30", "6:30"], ["07:00", "7:00"], ["07:30", "7:30"], ["08:00", "8:00"]], "null")}</div>
             <label class="field narrow"><span><ha-icon icon="mdi:molecule-co2"></ha-icon> Lüften ab CO₂ (0 = aus)</span>${minutes("vent_co2", 1000, 0, 5000, 100, "ppm")}</label>
@@ -13893,6 +13906,9 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .vt-need small, .vt-run small { color:var(--muted); font-size:12.5px; }
 .vt-ok { color:var(--muted); font-size:13px; }
 .vt-ok ha-icon { color:#22c55e; }
+.vt-wait { display:flex; align-items:center; gap:10px; } .vt-wait ha-icon { --mdc-icon-size:26px; color:#94a3b8; }
+.vt-wait span { display:flex; flex-direction:column; } .vt-wait small { color:var(--muted); font-size:12.5px; }
+.vt-learn { font-style:normal; font-size:11px; font-weight:700; padding:1px 7px; margin-left:6px; border-radius:99px; color:#0891b2; background:color-mix(in srgb, #0891b2 14%, transparent); vertical-align:middle; }
 .vt-run { gap:4px; }
 .vt-bar { height:8px; border-radius:99px; background:var(--card2); overflow:hidden; }
 .vt-bar i { display:block; height:100%; border-radius:inherit; background:#22c55e; transition:width .5s; }

@@ -154,6 +154,8 @@ class Hass:
                 return {f"{a}:{data['channel']}": getattr(self, "links", {}).get(f"{a}:{data['channel']}", [])}
             return {a: getattr(self, "links", {}).get(a, [])}
         if (domain, service) == ("weather", "get_forecasts"):
+            if data.get("type") == "hourly" and getattr(self, "hourly", None) is not None:
+                return {data["entity_id"]: {"forecast": self.hourly}}
             return {data["entity_id"]: {"forecast": self.forecast or []}}
         return None
 
@@ -1232,6 +1234,34 @@ def test_lueften_ausgebaut(hw):
             await ctl.async_evaluate()
         assert hass.sent().count("Fenster schließen") == 2
         assert any("nur Glocke – heute schon 2× gesendet" in (e.get("why") or "") for e in log.entries if e["title"] == "Fenster schließen")
+        # Lüften gelernt: nach drei Lüftungen Dauer aus dem Luftwechsel des Raums; Kosten je Lüftung und Woche
+        hass.set("sensor.bad_h", "72", name="Bad Feuchte")
+        NOW[0] += timedelta(minutes=5)
+        hass.set("binary_sensor.bad_fenster", "on", name="Bad Fenster")
+        await ctl.async_evaluate()
+        NOW[0] += timedelta(minutes=8)
+        hass.set("sensor.bad_h", "60", name="Bad Feuchte")
+        await ctl.async_evaluate()
+        hass.set("binary_sensor.bad_fenster", "off", name="Bad Fenster")
+        await ctl.async_evaluate()
+        await ctl.async_evaluate()
+        air = ctl.status()["rooms"]["bad"]["air"]
+        assert len(ctl._data()["vent_tau"]["bad"]) == 3 and air["learned"] and air["tau"] and 3 <= air["minutes"] <= 30
+        assert any(e["title"] == "Lüften gelernt" for e in log.entries)
+        assert air["last"]["ct"] > 0 and air["week"]["eur"] > 0 and air["price"] == 12
+        # Draußen schwül: Lüften trocknet nicht – keine Empfehlung, sondern „später“
+        hass.set("sensor.bad_h", "75", name="Bad Feuchte")
+        hass.set("weather.home", "cloudy", {"temperature": 24.0, "humidity": 95})
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["bad"]
+        assert res["air"]["helps"] is False and res["air"]["wait"] and not any("Luftfeuchte" in r for r in (res["vent"] or {}).get("reasons", []))
+        # beste Lüftzeit aus der Stunden-Vorhersage (Regen wird gemieden)
+        start = NOW[0].replace(minute=0, second=0, microsecond=0)
+        hass.hourly = [{"datetime": (start + timedelta(hours=i)).isoformat(), "temperature": 3 + i * 0.5, "humidity": 80,
+                        "condition": "rainy" if i == 1 else "cloudy"} for i in range(24)]
+        await haus._async_refresh_forecast(force=True)
+        plan = ctl.status()["vent_plan"]
+        assert plan and plan["times"] and all(t["minutes"] and t["ct"] >= 0 for t in plan["times"])
 
     asyncio.run(run())
 

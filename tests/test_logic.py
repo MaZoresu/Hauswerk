@@ -610,3 +610,27 @@ def test_vent_balance():
     assert L.vent_balance(3 * day, {"2026-11-21": 55}, 65, None, 3.2 * day, "2026-11-21")["level"] == "ok"
     assert L.vent_balance(0, {"2026-11-21": 55}, 65, None, 2.1 * day, "2026-11-21")["level"] == "warn"
     assert L.vent_balance(None, {}, 65, {"level": "bad"}, 0, "2026-11-21")["level"] == "bad"
+
+
+def test_lueften_lernen_hilft_beste_zeit():
+    # Luftwechsel lernen: 10 Min. von 70 % auf 55 % bei 20 °C, draußen 5 °C / 80 %
+    tau = L.vent_tau(10, 20, 70, 19, 55, 5, 80)
+    assert tau and 5 < tau < 40
+    assert L.vent_tau(10, 20, 50, 20, 50, 5, 80) is None  # keine Änderung
+    assert L.vent_tau(10, 20, 60, 19, 55, 18, 90) is None  # draußen kaum trockener
+    # ab 3 Messungen gelernt: kürzer als der Richtwert, wenn der Raum schnell lüftet
+    m, learned = L.vent_learned_minutes([3, 3.5, 4], 21, 70, 5, 80, 65, L.vent_minutes(5))
+    assert learned and 3 <= m < L.vent_minutes(5)
+    assert L.vent_learned_minutes([4, 5], 21, 70, 5, 80, 65, 10) == (10, False)
+    # hilft Lüften? draußen schwül → nein
+    assert L.vent_helps(22, 65, 25, 90) is False and L.vent_helps(21, 65, 2, 80) is True and L.vent_helps(None, 65, 2, 80) is None
+    # beste Lüftzeit: kein Regen, trocken, wenig Wärmeverlust; je eine am Vormittag und am Abend
+    now = 1_000_000
+    hours = [{"ts": now + i * 3600, "hour": (6 + i) % 24, "temp": t, "rh": 80, "rain": r} for i, (t, r) in
+             enumerate([(2, False), (4, False), (6, True), (8, False), (9, False), (10, False), (11, False), (10, False), (8, False), (6, False), (5, False), (4, False)])]
+    plan = L.vent_plan(hours, now, 21, 55, 12)
+    assert [p["hour"] for p in plan] == [9, 14], plan  # 8 Uhr regnet; je Hälfte die Stunde mit dem kleinsten Wärmeverlust
+    assert all(p["minutes"] and p["ct"] >= 0 for p in plan)
+    wet = [{**h, "rh": 100, "temp": 22} for h in hours]
+    assert L.vent_plan(wet, now, 21, 55) == []
+    assert L.next_dry_hour(hours, now, 21, 70)["hour"] == 7

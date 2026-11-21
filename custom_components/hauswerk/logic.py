@@ -795,6 +795,91 @@ def window_loss_kwh(minutes: float, in_temp: float | None, out_temp: float | Non
     return round(watt_per_k * (in_temp - out_temp) * minutes / 60 / 1000, 2)
 
 
+def vent_tau(minutes: float, t0: float | None, rh0: float | None, t1: float | None, rh1: float | None,
+             t_out: float | None, rh_out: float | None) -> float | None:
+    """Luftwechsel eines Raums aus einer Lüftung lernen: Zeitkonstante τ in Minuten.
+
+    Die absolute Feuchte nähert sich beim Lüften der Außenluft: x(t) = x_out + (x0 − x_out) · e^(−t/τ).
+    Nur verwertbar, wenn drinnen deutlich feuchter als draußen war und die Feuchte wirklich gesunken ist.
+    """
+    if None in (t0, rh0, t1, rh1, t_out, rh_out) or minutes < 2:
+        return None
+    x0, x1, xo = abs_humidity(t0, rh0), abs_humidity(t1, rh1), abs_humidity(t_out, rh_out)
+    if x0 - xo < 1.5 or x1 >= x0 - 0.2 or x1 <= xo + 0.1:
+        return None
+    tau = minutes / math.log((x0 - xo) / (x1 - xo))
+    return round(tau, 1) if 1 <= tau <= 120 else None
+
+
+def vent_learned_minutes(taus: list[float], in_temp: float | None, in_rh: float | None, out_temp: float | None,
+                         out_rh: float | None, limit_rh: float, fallback: int) -> tuple[int, bool]:
+    """Lüftdauer: aus dem gelernten Luftwechsel (Median der letzten τ, ab 3 Messungen) bis die Feuchte
+    10 % unter der Grenze liegt; ohne Feuchte-Anlass 2·τ (≈ 85 % der Luft getauscht). Sonst die Richtwerte."""
+    good = sorted(t for t in taus if t)[-10:]
+    if len(good) < 3:
+        return fallback, False
+    tau = sorted(good)[len(good) // 2]
+    minutes = 2 * tau
+    if None not in (in_temp, in_rh, out_temp, out_rh) and limit_rh and in_rh >= limit_rh - 5:
+        x0, xo = abs_humidity(in_temp, in_rh), abs_humidity(out_temp, out_rh)
+        xt = abs_humidity(in_temp, max(30.0, limit_rh - 10))
+        if x0 > xt > xo:
+            minutes = tau * math.log((x0 - xo) / (xt - xo))
+    return int(max(3, min(30, round(minutes)))), True
+
+
+def vent_helps(in_temp: float | None, in_rh: float | None, out_temp: float | None, out_rh: float | None,
+               min_gain: float = 1.0) -> bool | None:
+    """Trocknet Lüften gerade? Draußen mindestens min_gain g/m³ weniger Wasser in der Luft (None = unbekannt)."""
+    if None in (in_temp, in_rh, out_temp, out_rh):
+        return None
+    return abs_humidity(in_temp, in_rh) - abs_humidity(out_temp, out_rh) >= min_gain
+
+
+def vent_plan(hours: list[dict], now_ts: float, in_temp: float = 21.0, in_rh: float = 55.0,
+              price_ct: float = 12.0) -> list[dict]:
+    """Beste Lüftzeiten der nächsten 24 Stunden aus der Stunden-Vorhersage: kein Regen, trockene Außenluft,
+    möglichst wenig Wärmeverlust – je eine Zeit am Vormittag (6–12 Uhr) und am Nachmittag/Abend (12–22 Uhr).
+
+    hours: [{"ts": Sekunden, "hour": Ortsstunde 0–23, "temp": °C, "rh": %, "rain": bool}]
+    """
+    best: dict[str, dict] = {}
+    for h in hours:
+        ts, hour, temp = h.get("ts"), h.get("hour"), h.get("temp")
+        if ts is None or hour is None or temp is None or ts < now_ts - 1800 or ts > now_ts + 86400 or not 6 <= hour < 22:
+            continue
+        if h.get("rain"):
+            continue
+        gain = None
+        if h.get("rh") is not None:
+            gain = abs_humidity(in_temp, in_rh) - abs_humidity(temp, h["rh"])
+            if gain < 1.0:
+                continue
+        minutes = vent_minutes(temp)
+        kwh = window_loss_kwh(minutes, in_temp, temp)
+        score = kwh - 0.002 * (gain or 0)  # Wärmeverlust zählt; trockenere Luft nur als Gleichstand-Entscheid
+        slot = "morning" if hour < 12 else "evening"
+        key = f"{slot}:{int((ts - now_ts) // 86400 + (1 if hour < 6 else 0))}"
+        if key not in best or score < best[key]["score"]:
+            best[key] = {"ts": ts, "hour": hour, "temp": round(temp, 1), "minutes": minutes, "kwh": kwh,
+                         "ct": round(kwh * price_ct, 1), "gain": round(gain, 1) if gain is not None else None, "score": score}
+    out = sorted(best.values(), key=lambda x: x["ts"])[:3]
+    for x in out:
+        x.pop("score", None)
+    return out
+
+
+def next_dry_hour(hours: list[dict], now_ts: float, in_temp: float, in_rh: float) -> dict | None:
+    """Erste Stunde (nächste 24 h, ohne Regen), in der die Außenluft trocknet – für „später lüften, ab … trockener“."""
+    for h in sorted(hours, key=lambda x: x.get("ts") or 0):
+        ts = h.get("ts")
+        if ts is None or ts <= now_ts or ts > now_ts + 86400 or h.get("rain") or h.get("temp") is None or h.get("rh") is None:
+            continue
+        if vent_helps(in_temp, in_rh, h["temp"], h["rh"]):
+            return {"ts": ts, "hour": h.get("hour"), "temp": h["temp"]}
+    return None
+
+
 def vent_done(minutes_open: float, target_min: float, rh_start: float | None, rh_now: float | None,
               t_start: float | None, t_now: float | None, limit_rh: float) -> str | None:
     """Genug gelüftet? Zeit erreicht, Feuchte deutlich gesunken oder Raum zu stark abgekühlt – mit Grund."""
