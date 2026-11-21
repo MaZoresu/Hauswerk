@@ -1575,3 +1575,29 @@ def test_lichtwerk_bericht(panel):
     p.view("lights")
     p.wait()
     assert "Batterie 12 %" in p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+
+
+def test_benachrichtigung_geraet_fertig_abwaehlbar(panel):
+    """Empfänger-Karte: „Waschmaschine fertig“/„Trockner fertig“ lassen sich an- und abwählen; gespeichert in kw_appliances
+    in voller Kanal-Schreibweise (Backend-Schema)."""
+    p = panel
+    p.js(f"() => {{ {EL}._nkTab = 'who'; {EL}._openPop('notify'); }}")
+    p.wait()
+    w = '#pop [data-action="nk-app"][data-id="waschmaschine"][data-ch="svc:mobile_app_pixel_8"]'
+    t = '#pop [data-action="nk-app"][data-id="trockner"][data-ch="svc:mobile_app_pixel_8"]'
+    pressed = lambda sel: p.js(f"{EL}.shadowRoot.querySelector('{sel}').getAttribute('aria-pressed')")
+    assert pressed(w) == "false"
+    p.click(w)
+    p.wait()
+    p.click(t)
+    p.wait()
+    assert pressed(w) == "true" and pressed(t) == "true"
+    p.click(t)
+    p.wait()
+    assert pressed(t) == "false"
+    p.click('#pop [data-action="pop-save"]')
+    p.wait(300)
+    m = [x for x in p.sent() if x["type"] == "hauswerk/heizen/settings/save" and "kw_appliances" in x["settings"]][-1]
+    apps = {a["id"]: a for a in m["settings"]["kw_appliances"]}
+    assert apps["waschmaschine"]["notify"] == ["svc:mobile_app_jens", "svc:mobile_app_pixel_8"] and apps["waschmaschine"]["notify_ha"] is True
+    assert apps["trockner"]["notify"] == ["svc:mobile_app_jens"]

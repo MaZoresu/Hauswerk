@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.68.3";
+const VERSION = "0.68.4";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -6662,7 +6662,7 @@ class HauswerkPanel extends HTMLElement {
       const c = chInfo(id);
       const h = health[id];
       const kinds = NK_KINDS.filter((x) => !["off"].includes(p[`notify_${x.k}`]));
-      const devs = apps.filter((a) => appChannels(a).includes(id));
+      const devs = p.kw_appliances || apps;
       const win = hours[id];
       const voice = id.startsWith("tts:") || id.startsWith("sat:");
       const off = paused.has(id);
@@ -6672,7 +6672,7 @@ class HauswerkPanel extends HTMLElement {
         <div class="nk-hs">${off ? `<ha-icon icon="mdi:pause-circle-outline"></ha-icon>pausiert – bekommt nichts, Einstellungen bleiben` : `${dot(id)}${h ? (h.ok ? `zugestellt ${hm(h.at)}` : "Fehler") : c.ok ? "bereit" : "nicht erreichbar"}`}</div>
         ${h && !h.ok ? `<p class="nk-err"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>${esc(h.error || "nicht zugestellt")} · ${hm(h.at)}</p>` : ""}
         <div class="pchips nk-kinds">${kinds.map((x) => { const on = p[`notify_${x.k}`] !== "log" && this._nkChannels(x.k, p).includes(id); return `<button class="pchip ${on ? "on" : ""}" data-action="nk-cell" data-k="${x.k}" data-ch="${esc(id)}" aria-pressed="${on}" ${dis}><i></i>${esc(x.title)}</button>`; }).join("")}
-          ${devs.map((a) => `<span class="pchip on ro" title="unter Kraftwerk › Geräte"><i></i>${esc(a.name || "Gerät")} fertig</span>`).join("")}</div>
+          ${devs.map((a) => { const on = appChannels(a).includes(id); return `<button class="pchip ${on ? "on" : ""}" data-action="nk-app" data-id="${esc(a.id)}" data-ch="${esc(id)}" aria-pressed="${on}" ${dis}><i></i>${esc(a.name || "Gerät")} fertig</button>`; }).join("")}</div>
         <div class="nk-opts">
           <div class="nk-o"><span>Wann</span><div class="segs small"><button class="seg ${win ? "" : "on"}" data-action="nk-hours" data-ch="${esc(id)}" data-v="" ${dis}>Immer</button><button class="seg ${win ? "on" : ""}" data-action="nk-hours" data-ch="${esc(id)}" data-v="${voice ? "08:00-21:00" : "07:00-22:00"}" ${dis}>Zeitraum</button></div>
             ${win ? `<div class="nrow"><input type="time" data-nk-hours="${esc(id)}" data-i="0" value="${esc(win[0])}" ${dis}><span>–</span><input type="time" data-nk-hours="${esc(id)}" data-i="1" value="${esc(win[1])}" ${dis}></div><small class="muted">außerhalb nur Wichtiges</small>` : ""}</div>
@@ -9953,6 +9953,21 @@ class HauswerkPanel extends HTMLElement {
         this._nkLast = this._nkLast || {};
         if (this._settings[k] !== "off") { this._nkLast[k] = this._settings[k]; this._settings[k] = "off"; }
         else this._settings[k] = this._nkLast[k] || (def === "off" ? "normal" : def);
+        this._refreshSettings();
+        break;
+      }
+      case "nk-app": {
+        // Fertigmeldung eines Geräts für diesen Empfänger an/aus (gespeichert mit den Einstellungen)
+        const list = clone(this._settings.kw_appliances || this._data.settings.kw_appliances || []);
+        const a = list.find((x) => x.id === el.dataset.id);
+        if (!a) break;
+        const ch = el.dataset.ch;
+        const has = appChannels(a).includes(ch);
+        // alles in die volle Kanal-Schreibweise (alte Einträge ohne „svc:“), „ha“ über notify_ha
+        const cur = appChannels(a).filter((x) => x !== "ha");
+        if (ch === "ha") a.notify_ha = !has;
+        a.notify = ch === "ha" ? cur : has ? cur.filter((x) => x !== ch) : [...cur, ch];
+        this._settings.kw_appliances = list;
         this._refreshSettings();
         break;
       }

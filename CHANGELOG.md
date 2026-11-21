@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.68.4 – 2026-11-21
+
+### Behoben (Benachrichtigungen)
+- **„Waschmaschine fertig“ / „Trockner fertig“ abwählbar:** In der Empfänger-Karte waren die Fertigmeldungen der Geräte nur Anzeige. Jetzt lassen sie sich wie die anderen Anlässe je Empfänger an- und abwählen; gespeichert wird mit „Speichern“ direkt am Gerät (Kraftwerk › Geräte zeigt dieselbe Auswahl).
+
 ## 0.68.3 – 2026-11-21
 
 ### Geändert (Bildschirmschoner)
