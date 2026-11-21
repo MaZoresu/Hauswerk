@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.72.2";
+const VERSION = "0.72.3";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4105,7 +4105,7 @@ class HauswerkPanel extends HTMLElement {
           <button class="rm-name rlink" data-action="room-page" data-id="${room.id}" title="Raum öffnen">${esc(room.name)}</button>
           ${this._admin ? `<button class="icon tiny" data-action="room-edit" data-id="${room.id}" title="Bearbeiten"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
         </div>
-        ${this._wrapInd(`
+        ${`<div class="rm-ind">${`
           ${s.heating ? `<ha-icon class="rm-fire" icon="mdi:fire" title="Heizt"></ha-icon>` : ""}
           ${(() => { const fc = this._fireChip(s); return fc ? `<span class="rm-dev on" style="color:${fc[2]}" title="${esc(fc[3])}"><ha-icon icon="${fc[0]}"></ha-icon>${esc(fc[1])}</span>` : ""; })()}
           ${(() => { const vc = this._ventChip(s); return vc ? `<span class="rm-dev on" style="color:${vc[2]}" title="${esc(vc[3])}"><ha-icon icon="${vc[0]}"></ha-icon>${esc(vc[1])}</span>` : s.windows_open ? `<ha-icon class="rm-win" icon="mdi:window-open-variant" title="Fenster offen"></ha-icon>` : ""; })()}
@@ -4115,13 +4115,13 @@ class HauswerkPanel extends HTMLElement {
               + (dv.floor?.on ? `<span class="rm-dev on" title="${esc(dv.floor.label)} heizt – ${esc(dv.floor.names)}"><ha-icon icon="mdi:heating-coil"></ha-icon></span>` : "")
               + (s.assist?.on ? `<span class="rm-dev on" title="Heizkörper hilft nach (Mischbetrieb)"><ha-icon icon="mdi:radiator"></ha-icon></span>` : "");
           })()}
-        `)}
+        `.trim()}</div>`}
         <div class="rm-body">
           <span class="rm-temp">${fmt(s.room_temp)}<small>°C</small></span>
           <span class="rm-tgt"><small>Soll</small><b style="color:${tint(tempColor(s.target))}">${fmt(s.target)} °C</b></span>
         </div>
         <div class="rm-mode" title="${esc(s.cause || "")}"><ha-icon icon="${m.i}"></ha-icon>${esc(s.mode_label || "Automatik aus")}${info ? `<span class="grow"></span><small>${esc(info.text)}</small>` : ""}</div>
-        ${info?.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s), this._awayInfo(room), this._todaySegs(s)) : ""}
+        ${info?.blocks ? this._dayBar(info.blocks, room, day, true, this._preLead(room, s), this._awayInfo(room), this._todaySegs(s)) : `<div class="rm-nobar"></div>`}
       </article>`;
   }
 
@@ -12649,6 +12649,14 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .rm-mode ha-icon { --mdc-icon-size:14px; }
 .rm-mode small { color:var(--muted); font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .rmini .dbar.mini { height:6px; }
+/* feste Plätze: Name 2 Zeilen, Symbolzeile immer reserviert, Temperatur/Betriebsart/Leiste unten – in jeder Kachel an derselben Stelle */
+.rmini .rm-head { min-height:42px; align-items:flex-start; }
+.rmini .rm-name.rlink { flex:1; min-width:0; display:block; max-height:2.5em; overflow:hidden; padding-top:4px; overflow-wrap:break-word; hyphens:manual; }
+.rmini .rm-ind { min-height:18px; flex-wrap:nowrap; overflow:hidden; }
+.rmini .rm-ind:empty { display:flex; }
+.rmini .rm-body { margin-top:auto; }
+.rmini .rm-mode { white-space:nowrap; overflow:hidden; }
+.rm-nobar { height:6px; }
 .link.back { margin:0 0 10px; }
 @media (max-width:600px) {
   .hero-row { flex-wrap:wrap; }

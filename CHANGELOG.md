@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.72.3 – 2026-11-21
+
+### Geändert (Heizwerk, kompakte Raumkacheln)
+- **Feste Plätze in jeder Kachel:** Der Name hat immer Platz für zwei Zeilen, die Zeile für Symbole (Ventil, Lüften, Fenster, Feuer) ist auch ohne Symbole reserviert. Temperatur, Soll, Betriebsart und Tagesleiste stehen dadurch in allen Kacheln einer Reihe auf derselben Höhe – auch ohne Heizplan bleibt der Platz der Leiste frei.
+
 ## 0.72.2 – 2026-11-21
 
 ### Geändert (Rollwerk)

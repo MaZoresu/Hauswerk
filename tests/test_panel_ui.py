@@ -1770,3 +1770,20 @@ def test_zeitleiste_in_detailfenstern(tablet):
     p.js(f"(a) => {EL}._openPop('lwarea:' + a)", area)
     p.wait()
     assert p.has("#pop .pop-tl")
+
+
+def test_raumkacheln_kompakt_feste_plaetze(browser, server):
+    """Handy, kompakte Raumkacheln: Symbolzeile auch ohne Symbole reserviert, Temperatur und Tagesleiste in jeder Kachel an derselben Stelle."""
+    page = browser.new_page(viewport={"width": 400, "height": 860})
+    page.goto(f"{server}/dev/vorschau.html")
+    page.wait_for_function(f"{EL} && {EL}._data")
+    p = Panel(page)
+    p.js(f"""() => {{ localStorage.setItem('hauswerk.raumansicht', 'compact'); const el = {EL}; const d = el._data; const src = Object.keys(d.rooms)[0];
+        d.rooms.x1 = {{ ...d.rooms[src], id: 'x1', name: 'Kinderzimmer Janea' }};
+        el._status.rooms.x1 = {{ ...el._status.rooms[src], heating: false, windows_open: false, air: null, valve: null }};
+        el._tab = 'overview'; el._renderMain(); }}""")
+    p.wait(300)
+    pos = p.js(f"""[...{EL}.shadowRoot.querySelectorAll('.rmini')].map((r) => {{ const t = r.getBoundingClientRect().top;
+        return [Math.round(r.querySelector('.rm-temp').getBoundingClientRect().top - t), Math.round(r.querySelector('.dbar, .rm-nobar').getBoundingClientRect().top - t)]; }})""")
+    assert len(pos) >= 3 and len({tuple(x) for x in pos}) == 1, pos
+    page.close()
