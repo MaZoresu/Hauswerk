@@ -1421,7 +1421,10 @@ def test_lichtwerk_profil_aus(panel):
     p.js(f"{EL}._closePop()")
     p.view("lightset")
     p.wait()
-    assert "KEIN PROFIL" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+    # ohne Profil: nicht ausgegraut, keine Marke; mit Profil: Etikett mit dem Profilnamen
+    row = p.js(f"""(() => {{ const b = {EL}.shadowRoot.querySelector('#set-list [data-pop="lwl:light.kuche"]'); return [b.classList.contains('off'), !!b.querySelector('.badge')]; }})()""")
+    assert row == [False, False], row
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('#set-list .badge.tag').length") > 0
     p.js(f"() => {{ {EL}._openPop('lwl:light.kuche'); }}")
     p.wait()
     assert p.js(f"{EL}.shadowRoot.querySelector('#pop select[data-lwl=\"profile\"]').value") == ""  # „Kein Profil“

@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.74.2";
+const VERSION = "0.74.3";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4841,8 +4841,9 @@ class HauswerkPanel extends HTMLElement {
     const lux = p.lw_lux_sensor ? this._entityName(p.lw_lux_sensor) : "automatisch";
     return [
       { g: "Lichter", id: "lwadd", icon: "mdi:auto-fix", c: "#6366f1", title: "Licht hinzufügen", sum: "Assistent: Lichter wählen, Profil aus Vorlage (Abendlicht, Außenlicht, Flur mit Bewegung …)", words: "assistent neu hinzufügen licht lampe leuchte" },
-      ...lights.map((l) => ({ g: "Lichter", id: `lwl:${l.id}`, icon: this._lwIco(l, false), c: l.cfg.auto === false ? "#94a3b8" : "#818cf8", title: this._lwName(l), off: l.cfg.auto === false, offTxt: "KEIN PROFIL",
-        sum: [l.cfg.auto === false ? "Kein Profil – nur anzeigen" : `Profil „${this._lwProfName(l.cfg.profile)}“`, l.ls.area ? `Raum ${l.ls.area}` : ""].filter(Boolean).join(" · "), words: `${l.id} licht profil` })),
+      ...lights.map((l) => ({ g: "Lichter", id: `lwl:${l.id}`, icon: this._lwIco(l, false), c: "#818cf8", title: this._lwName(l),
+        tag: l.cfg.auto === false ? "" : this._lwProfName(l.cfg.profile),
+        sum: l.ls.area ? `Raum ${l.ls.area}` : "", words: `${l.id} licht profil ${l.cfg.auto === false ? "kein profil" : this._lwProfName(l.cfg.profile)}` })),
       ...profiles.map((x) => {
         const n = lights.filter((l) => (l.cfg.profile || "standard") === x.id).length;
         return { g: "Profile", id: `lwp:${x.id}:on`, icon: "mdi:tune-variant", c: "#f59e0b", title: `${x.name} · ${n} ${n === 1 ? "Licht" : "Lichter"}`, sum: this._lwProfSum(x), words: `profil ${x.name} sonne helligkeit zeit bewegung nachtlicht` };
@@ -7792,7 +7793,7 @@ class HauswerkPanel extends HTMLElement {
       return `
         <button class="srow ${r.warn ? "warn" : ""} ${r.off || r.soon ? "off" : ""}" ${attrs}>
           <span class="sr-ic ${String(r.icon).startsWith("logo:") ? "logo" : ""}" style="--c:${r.c}">${modIcon(r.icon)}</span>
-          <span class="sr-t"><b>${esc(r.title)}${r.x ? ` <ha-icon class="sr-x" icon="mdi:school-outline" title="Experteneinstellung"></ha-icon>` : ""}${r.on ? ` <em class="badge ok">AKTIV</em>` : ""}${r.off ? ` <em class="badge">${r.offTxt || "AUTOMATIK AUS"}</em>` : ""}${r.soon ? ` <em class="badge">BALD</em>` : ""}</b>${r.sum ? `<small>${esc(r.sum)}</small>` : ""}</span>
+          <span class="sr-t"><b>${esc(r.title)}${r.x ? ` <ha-icon class="sr-x" icon="mdi:school-outline" title="Experteneinstellung"></ha-icon>` : ""}${r.tag ? ` <em class="badge tag">${esc(r.tag)}</em>` : ""}${r.on ? ` <em class="badge ok">AKTIV</em>` : ""}${r.off ? ` <em class="badge">${r.offTxt || "AUTOMATIK AUS"}</em>` : ""}${r.soon ? ` <em class="badge">BALD</em>` : ""}</b>${r.sum ? `<small>${esc(r.sum)}</small>` : ""}</span>
           ${r.val != null && r.val !== "" ? `<span class="sr-v ${r.warn ? "warn" : ""}">${esc(r.val)}</span>` : ""}
           ${r.soon ? "" : `<ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon>`}
         </button>`;
@@ -12977,6 +12978,7 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .sr-v { flex:none; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13.5px; font-weight:600; color:var(--muted); font-variant-numeric:tabular-nums; }
 .sr-v.warn { color:#f59e0b; }
 .sr-x { --mdc-icon-size:15px; color:var(--muted); }
+.badge.tag { text-transform:none; letter-spacing:0; font-weight:600; color:#818cf8; border-color:color-mix(in srgb, #818cf8 45%, transparent); background:color-mix(in srgb, #818cf8 12%, transparent); }
 .srow.small { padding:7px 10px; } .srow.small .sr-ic { width:30px; height:30px; border-radius:10px; } .srow.small .sr-ic ha-icon { --mdc-icon-size:17px; }
 .sg-warn { border-color:color-mix(in srgb, #f59e0b 50%, var(--line)); background:color-mix(in srgb, #f59e0b 6%, var(--card)); }
 .sg-warn .sg-h, .sg-warn .sg-h ha-icon { color:#f59e0b; } .sg-h ha-icon { --mdc-icon-size:16px; }

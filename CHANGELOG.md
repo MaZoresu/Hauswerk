@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.74.3 – 2026-11-21
+
+### Geändert (Lichtwerk › Einstellungen)
+- **Lichter-Liste:** Leuchten ohne Profil werden nicht mehr ausgegraut und tragen keine Marke. Leuchten mit Profil tragen den Profilnamen als Etikett neben dem Namen (z. B. „Abendlicht“); darunter steht der Raum.
+
 ## 0.74.2 – 2026-11-21
 
 ### Neu (Lichtwerk)
