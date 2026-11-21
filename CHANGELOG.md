@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.79.0 – 2026-11-21
+
+### Neu – Wer treibt den Duty Cycle hoch?
+- **Wer funkt am meisten** (Einstellungen › System › Funk-Auslastung): die Homematic-Geräte mit den meisten Befehlen in der letzten Stunde und den letzten 24 Stunden – mit Herkunft je Befehl: Heizwerk, Rollwerk, Lichtwerk, Beetwerk, Automation „…“ bzw. Skript „…“, von Hand (App) oder andere Integration. Gezählt wird jeder Befehl aus Home Assistant an ein Homematic-Gerät, seit dem letzten Neustart; Programme und Direktverknüpfungen in der CCU selbst sieht Home Assistant nicht.
+- **Verlauf der Auslastung** der letzten 24 Stunden (alle 5 Min.) mit der Drossel-Grenze als Linie.
+- In der Einstellungsliste steht das Gerät, das gerade am meisten funkt.
+
+### Behoben – Heizwerk sendet nicht mehr im Kreis
+- Übernimmt ein Thermostat einen Sollwert nicht – das Gerät antwortet nicht oder eine Verknüpfung in der CCU stellt ihn zurück –, sendete Heizwerk jede Minute erneut (und nach dem Zurückfallen sogar sofort). Das trieb den Duty Cycle der CCU bis 99 %. Jetzt wartet Heizwerk nach jedem Befehl die Bestätigung ab, sendet denselben Wert höchstens zweimal, dann erst nach 15 Min. und danach stündlich.
+- Hinweis unter der Glocke und in der Funk-Auslastung: „Thermostat übernimmt den Sollwert nicht – 7,0 °C 3× gesendet, bleibt bei 12,0 °C · nächster Versuch 21:40“; im Protokoll „… übernimmt den Sollwert nicht“ bzw. „… wieder“. Sobald der Wert steht, geht es normal weiter.
+- **Warnung bei widersprüchlicher Rolle:** Ein Heizkörper, der als Zusatzheizung (oder „Selbst“) gewählt ist, in der CCU aber mit dem Wandthermostat verknüpft ist, wird gemeldet – beide stellen sonst gegeneinander. Abhilfe: Rolle „Folgt Wand“ oder die Verknüpfung in der CCU lösen.
+
 ## 0.78.1 – 2026-11-21
 
 ### Neu (Beetwerk › Bewässerung)

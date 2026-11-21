@@ -1995,3 +1995,16 @@ def test_beetwerk_zonen_giessen(panel):
     p.wait(300)
     txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
     assert "Fertig in" in txt and "Ventil 1/2" in txt and "Zone fertig in" in txt and "Gießen stoppen" in txt, txt
+
+
+def test_funk_wer_funkt(panel):
+    """Funk-Auslastung: Verlauf, unbestätigte Sollwerte und „Wer funkt am meisten“ mit Herkunft."""
+    p = panel
+    p.js(f"() => {EL}._setExpert('haus', true)")
+    p.js(f"() => {EL}._openPop('radio')")
+    p.wait(200)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    assert "Wer funkt am meisten" in txt and "Heizkörper Kleines Bad" in txt and "24/Std." in txt and "Heizwerk 58×" in txt, txt
+    assert "Übernimmt den Sollwert nicht" in txt and "nächster Versuch" in txt
+    assert p.js(f"!!{EL}.shadowRoot.querySelector('#pop .rd-trend polyline')")
+    p.js(f"{EL}._closePop()")

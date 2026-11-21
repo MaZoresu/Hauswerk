@@ -706,7 +706,7 @@ class Lichtwerk:
 
     async def _switch(self, eid: str, on: bool, params: dict, prof: dict, cause: str, adjust: bool = False) -> None:
         domain = eid.split(".")[0]
-        ctx = Context()
+        ctx = self.haus.own_context("Lichtwerk")
         self._ctx = (self._ctx + [ctx.id])[-200:]
         rt = self._rt.setdefault(eid, {})
         if domain == "light":
@@ -944,7 +944,7 @@ class Lichtwerk:
             rt["manual"] = {"since": dt_util.utcnow().timestamp(), "until": until, "state": action}
             rt["ours"] = False
             domain = eid.split(".")[0]
-            ctx = Context()
+            ctx = self.haus.own_context("Lichtwerk")
             self._ctx = (self._ctx + [ctx.id])[-200:]
             if action == "off":
                 svc, data = "turn_off", {"entity_id": eid}

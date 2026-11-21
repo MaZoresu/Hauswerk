@@ -78,6 +78,7 @@ from .logic import (
     smart_lead,
     occupied,
     radio_should_send,
+    retry_wait,
     rise_within,
     room_setting,
     snap,
@@ -110,6 +111,7 @@ VALVE_WORDS = ("valve", "position", "opening", "ventil")
 CONFLICT_WRITES = 3  # so viele fremde Befehle ...
 CONFLICT_WINDOW = 2 * 3600  # ... innerhalb dieser Zeit gelten als zweite Regelung
 PAIR_GRACE = 900  # Sekunden, die ein gekoppeltes Heizkörper-Thermostat vom Wandthermostat abweichen darf
+RETRY_CONFIRM = 45  # s: so lange darf ein gesendeter Sollwert brauchen, bis er im Zustand steht
 CLIMATE_SERVICES = {"set_temperature", "set_hvac_mode", "set_preset_mode", "turn_on", "turn_off", "toggle"}
 COMFORT_MODES = ("komfort", "vorheizen", "manuell", "party", "boost", "belegt")
 NO_TUNING_MODES = ("fenster", "sommer", "entkalken", "warm")
@@ -429,7 +431,7 @@ class Heizen:
     async def _call(self, domain: str, service: str, data: dict[str, Any]) -> None:
         """Dienst aufrufen und als eigenen Befehl merken."""
         now = dt_util.utcnow().timestamp()
-        ctx = Context()
+        ctx = self.haus.own_context("Heizwerk")
         self._own_ctx[ctx.id] = now
         if len(self._own_ctx) > 300:
             self._own_ctx = {k: v for k, v in self._own_ctx.items() if now - v < 600}
@@ -940,10 +942,13 @@ class Heizen:
         return unsub
 
     def status(self) -> dict[str, Any]:
+        self._retry_publish()
         out = {}
         for room_id in self.rooms:
             rt = self._rt(room_id)
             out[room_id] = dict(rt.get("result") or {})
+            out[room_id]["unconfirmed"] = [{"entity": k, "value": v.get("value"), "current": v.get("current"), "fails": v["fails"],
+                                            "next": v.get("next")} for k, v in (rt.get("retry") or {}).items() if v.get("fails", 0) >= 2]
         return {
             **self.haus.status(),
             "rooms": out,
@@ -2044,10 +2049,37 @@ class Heizen:
         current = _float(attrs.get("temperature"))
         # Mit Kompensation erst ab einem ganzen Schritt nachführen, sonst pendelt der Sollwert.
         hysteresis = max(step, 0.5) if use_comp else 0.05
-        if current is not None and abs(current - value) < hysteresis:
-            return
-        # Funk ausgelastet: nur Wechsel der Betriebsart oder größere Änderungen, höchstens alle 15 Minuten
+        retry = rt.setdefault("retry", {})
         last = rt["last_sent"].get(entity_id)
+        if current is not None and abs(current - value) < hysteresis:
+            # erst nach der Bestätigungszeit gilt der Wert als übernommen (Homematic zeigt ihn vorher schon „optimistisch“)
+            if (not last or now - last[1] >= RETRY_CONFIRM) and retry.pop(entity_id, None) is not None:
+                self._retry_publish()
+                self.log.add("health", f"{self._name(entity_id)} übernimmt den Sollwert wieder", f"{self._t(value)} °C bestätigt",
+                             room.get("id"), room.get("name"))
+            return
+        if last and abs(last[0] - value) < 0.05 and now - last[1] < RETRY_CONFIRM:
+            return  # eben gesendet – erst die Bestätigung abwarten statt sofort nachzulegen
+        # Nicht im Kreis senden: bleibt ein gesendeter Wert nicht stehen (Gerät antwortet nicht, CCU-Verknüpfung stellt zurück),
+        # höchstens zweimal senden, dann nach 15 Min. und danach stündlich – jeder Fehlversuch kostet Funkzeit.
+        if last and now - last[1] >= RETRY_CONFIRM:
+            r = retry.get(entity_id) or {"fails": 0}
+            if abs(last[0] - value) < 0.05 and r.get("counted") != last[1]:
+                r.update(fails=r["fails"] + 1, counted=last[1], value=value, current=current, room=room.get("name"))
+                retry[entity_id] = r
+                if r["fails"] == 2:
+                    self.log.add("health", f"{self._name(entity_id)} übernimmt den Sollwert nicht",
+                                 f"{self._t(value)} °C zweimal gesendet, bleibt bei {self._t(current)} °C – Gerät nicht erreichbar oder "
+                                 "eine Verknüpfung in der CCU stellt zurück · Hauswerk versucht es nur noch alle 15 Min. bzw. stündlich",
+                                 room.get("id"), room.get("name"))
+            if r.get("fails", 0) >= 2:
+                wait = retry_wait(r["fails"])
+                r["next"] = dt_util.utc_from_timestamp(last[1] + wait).isoformat()
+                retry[entity_id] = r
+                self._retry_publish()
+                if now - last[1] < wait:
+                    return
+        # Funk ausgelastet: nur Wechsel der Betriebsart oder größere Änderungen, höchstens alle 15 Minuten
         last_mode = rt.setdefault("sent_mode", {}).get(entity_id)
         mode_key = send_key or result["mode"]
         if not radio_should_send(self.haus.radio_busy, current, value, now - last[1] if last else None,
@@ -2061,6 +2093,20 @@ class Heizen:
         extra = f" · gesendet {self._t(value)} °C (Ausgleich)" if abs(value - result["target"]) >= 0.05 else ""
         self.log.add("command", f"{self._name(entity_id)} → {self._t(value)} °C",
                      label or f"Ziel {self._t(result['target'])} °C · {MODES[result['mode']]}{extra}", room.get("id"), room.get("name"))
+
+    def _retry_publish(self) -> None:
+        """Unbestätigte Sollwerte aller Räume an Hauswerk melden (Funk-Auslastung, Glocke)."""
+        out = {}
+        for rid in self.rooms:
+            rt = self._rt(rid)
+            for ent, r in list((rt.get("retry") or {}).items()):
+                if ent not in (self.rooms[rid].get("climates") or []) or ent in (rt.get("followers") or set()):
+                    rt["retry"].pop(ent, None)  # wird nicht mehr von Hauswerk gestellt
+                    continue
+                if r.get("fails", 0) >= 2:
+                    out[ent] = {"room_id": rid, "room": r.get("room"), "value": r.get("value"), "current": r.get("current"),
+                                "fails": r["fails"], "next": r.get("next")}
+        self.haus.radio_retry = out
 
     # ------------------------------------------------------------ Kalte Heizkörper
     def _cold_notice(self, room_id: str, room: dict, result: dict) -> None:

@@ -591,6 +591,73 @@ def test_mischbetrieb(hw):
     assert "Heizkörper hilft nach" in titles and "Heizkörper aus – Fußbodenheizung allein" in titles
 
 
+def test_funk_nicht_im_kreis_senden(hw):
+    """Zusatz-Heizkörper übernimmt den Frostschutz-Wert nicht (CCU stellt zurück): höchstens zweimal senden, dann 15 Min.,
+    danach stündlich; „Wer funkt“ zählt die Befehle je Gerät mit Herkunft."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        DEVS.clear()
+        NOW[0] = datetime(2026, 11, 16, 9, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("climate.wth", "heat", {"current_temperature": 20.8, "temperature": 21.0, "model": "HmIP-WTH-2"}, "WTH Kleines Bad")
+        hass.set("climate.trv", "heat", {"current_temperature": 24.5, "temperature": 12.0, "model": "HMIP-eTRV"}, "Heizkörper Kleines Bad")
+        for eid in ("climate.wth", "climate.trv"):
+            REG[eid] = types.SimpleNamespace(entity_id=eid, device_id=None, domain="climate", disabled_by=None, platform="homematicip_local")
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_start()
+        await ctl.async_save_room({"id": "kb", "name": "Kleines Bad", "comfort": 21, "eco": 18, "enabled": True, "type": "flaeche",
+                                   "climates": ["climate.wth", "climate.trv"], "assist_entities": ["climate.trv"],
+                                   "schedule": [{"days": [0, 1, 2, 3, 4, 5, 6], "start": "06:00", "end": "22:00"}]})
+        to_trv = lambda: [d for dom, sv, d in hass.calls if sv == "set_temperature" and d["entity_id"] == "climate.trv"]
+        assert len(to_trv()) == 1  # 7 °C gesendet, der Heizkörper bleibt bei 12 (wird zurückgestellt)
+        # Rückfall nach 30 s: nicht sofort nachlegen
+        NOW[0] += timedelta(seconds=30)
+        await ctl.async_evaluate()
+        assert len(to_trv()) == 1
+        for _ in range(20):  # 20 Minuten jede Minute auswerten
+            NOW[0] += timedelta(minutes=1)
+            await ctl.async_evaluate()
+        assert len(to_trv()) == 3, len(to_trv())  # 2× gleich, nach 15 Min. ein dritter Versuch
+        st = ctl.status()
+        u = st["rooms"]["kb"]["unconfirmed"]
+        assert u and u[0]["entity"] == "climate.trv" and u[0]["value"] == 7.0 and u[0]["current"] == 12.0 and u[0]["fails"] >= 2
+        assert st["radio"]["retry"][0]["entity"] == "climate.trv"
+        for _ in range(60):  # danach nur noch stündlich
+            NOW[0] += timedelta(minutes=1)
+            await ctl.async_evaluate()
+        assert len(to_trv()) == 4, len(to_trv())
+        # Wer funkt: Heizkörper vorn, Herkunft Heizwerk; eine Automation zählt mit
+        top = ctl.status()["radio"]["top"]
+        assert top[0]["entity"] == "climate.trv" and top[0]["day"] == 4 and top[0]["sources"][0]["name"] == "Heizwerk", top
+        await hass.services.async_call("climate", "set_temperature", {"entity_id": "climate.wth", "temperature": 22},
+                                       context=types.SimpleNamespace(id="x", user_id=None, parent_id="auto1"))
+        top = {o["entity"]: o for o in ctl.status()["radio"]["top"]}
+        assert top["climate.wth"]["sources"][0]["name"] == "Automation oder Skript"
+        # Wert steht endlich: Hinweis weg
+        NOW[0] += timedelta(minutes=2)
+        hass.set("climate.trv", "heat", {"current_temperature": 24.5, "temperature": 7.0, "model": "HMIP-eTRV"}, "Heizkörper Kleines Bad")
+        await ctl.async_evaluate()
+        assert not ctl.status()["rooms"]["kb"]["unconfirmed"] and not ctl.status()["radio"]["retry"]
+        return log
+
+    log = asyncio.run(run())
+    titles = [e["title"] for e in log.entries]
+    assert "Heizkörper Kleines Bad übernimmt den Sollwert nicht" in titles
+    assert "Heizkörper Kleines Bad übernimmt den Sollwert wieder" in titles
+
+
+def test_hmlinks_zusatz_aber_verknuepft(hw):
+    hm = importlib.import_module("hw.hmlinks") if (hw and False) else None
+    import importlib.util, pathlib
+    spec = importlib.util.spec_from_file_location("hml", pathlib.Path(__file__).parent.parent / "custom_components/hauswerk/hmlinks.py")
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    rooms = {"kb": {"climates": ["climate.wth", "climate.trv"], "assist_entities": ["climate.trv"]}}
+    analysis = {"kb": {"walls": [{"entity": "climate.wth", "peers": [{"x": 1}]}], "linked_trvs": ["climate.trv"], "unlinked_trvs": []}}
+    out = mod.findings(rooms, analysis, lambda e: e, {}, [])
+    assert any(f["level"] == "warn" and "Zusatzheizung" in f["text"] and f["entity"] == "climate.trv" for f in out), out
+
+
 def test_rolle_selbst(hw):
     """Heizkörper mit Rolle „Selbst“ folgt nicht dem Wandthermostat, sondern wird direkt gestellt."""
     async def run():

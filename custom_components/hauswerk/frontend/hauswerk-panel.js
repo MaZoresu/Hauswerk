@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.78.1";
+const VERSION = "0.79.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1176,6 +1176,8 @@ class HauswerkPanel extends HTMLElement {
         add("warn", "mdi:account-switch-outline", "Zweite Regelung stellt dasselbe Thermostat", `${r.name} · ${c.name} · ${c.by.join(", ")}`, "room-edit", { id: r.id, rtab: "devices" });
       for (const c of rs.pair_broken || [])
         add("info", "mdi:link-variant-off", "Heizkörper folgt dem Wandthermostat nicht", `${r.name} · ${this._entityName(c)} – Hauswerk stellt es selbst`, "room-edit", { id: r.id, rtab: "devices" });
+      for (const u of rs.unconfirmed || [])
+        add("warn", "mdi:sync-alert", "Thermostat übernimmt den Sollwert nicht", `${r.name} · ${this._entityName(u.entity)}: ${fmt(u.value)} °C ${u.fails}× gesendet, bleibt bei ${u.current != null ? `${fmt(u.current)} °C` : "–"}${u.next ? ` · nächster Versuch ${this._hhmm(u.next)}` : ""} – Gerät erreichbar? CCU-Verknüpfung?`, "settings-go", { sub: "radio" });
       for (const c of rs.duty_blocked || [])
         add("warn", "mdi:access-point-off", "Gerät darf gerade nicht funken", `${r.name} · ${this._entityName(c)} · Duty Cycle erreicht`, "settings-go", { sub: "radio" });
       if (rs.window_virtual) add("info", "mdi:window-open-variant", "Fenster vermutlich offen", `${r.name} · Temperatur fällt schnell – Fensterpause`, "tab", { tab: "overview" });
@@ -4955,6 +4957,24 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Zonen-Einstellung (Entwurf) mit Ventil-Liste – auch für ältere Einträge mit nur einem Ventil. */
+  _hhmm(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? "" : d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  /** Verlauf der Funk-Auslastung (24 Std., alle 5 Min.) als kleine Fläche mit Drossel-Grenze. */
+  _radioTrend(rd) {
+    const t = rd.trend || [];
+    if (t.length < 3) return "";
+    const W = 320, H = 70, lim = Number(rd.limit ?? 70);
+    const t0 = Date.parse(t[0][0]), t1 = Date.parse(t[t.length - 1][0]) || t0 + 1;
+    const x = (ts) => ((Date.parse(ts) - t0) / Math.max(1, t1 - t0)) * W, y = (v) => H - (Math.min(100, v) / 100) * H;
+    const pts = t.map(([ts, v]) => `${x(ts).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    const max = Math.max(...t.map((p) => p[1]));
+    return `<div class="rd-trend"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polygon points="0,${H} ${pts} ${W},${H}" fill="color-mix(in srgb, ${max >= lim ? "#f97316" : "#0ea5e9"} 22%, transparent)"></polygon><polyline points="${pts}" fill="none" stroke="${max >= lim ? "#f97316" : "#0ea5e9"}" stroke-width="1.6" vector-effect="non-scaling-stroke"></polyline><line x1="0" x2="${W}" y1="${y(lim)}" y2="${y(lim)}" stroke="#ef4444" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"></line></svg>
+      <div class="rd-ax"><span>${this._hhmm(t[0][0])}</span><span>höchstens ${fmt(max, 0)} % · Grenze ${fmt(lim, 0)} %</span><span>jetzt</span></div></div>`;
+  }
+
   _bwZoneCfg(zid) {
     const old = (this._settings.bw_zones || []).find((x) => x.zone === zid);
     const st = (this._status?.beetwerk?.zones || []).find((x) => x.zone === zid) || {};
@@ -7687,7 +7707,7 @@ class HauswerkPanel extends HTMLElement {
         (() => {
           const rd = s.radio || {};
           return { g: "System", id: "radio", x: true, icon: "mdi:access-point-network", c: rd.busy ? "#f97316" : "#64748b", title: "Funk-Auslastung",
-            val: rd.level != null ? `${fmt(rd.level, 0)} %` : "", sum: rd.level != null ? `${fmt(rd.level, 0)} % · ${rd.busy ? "ausgelastet – Hauswerk drosselt" : `drosselt ab ${fmt(rd.limit ?? 70, 0)} %`} · ${s.commands_hour ?? 0} Befehle/Std.`
+            val: rd.level != null ? `${fmt(rd.level, 0)} %` : "", sum: rd.level != null ? `${fmt(rd.level, 0)} % · ${rd.busy ? "ausgelastet – Hauswerk drosselt" : `drosselt ab ${fmt(rd.limit ?? 70, 0)} %`} · ${rd.calls_hour ?? s.commands_hour ?? 0} Befehle/Std.${rd.top?.[0]?.hour ? ` · meiste: ${rd.top[0].name}` : ""}`
               : (rd.entities || []).length ? "Sensor gerade ohne Wert" : "Kein Duty-Cycle-Sensor gefunden",
             warn: !!rd.busy, words: "funk duty cycle homematic ccu auslastung befehle drosseln" };
         })(),
@@ -8775,8 +8795,15 @@ class HauswerkPanel extends HTMLElement {
             <div class="rq-facts">
               <span style="--c:${rd.busy ? "#f97316" : "#22c55e"}"><ha-icon icon="mdi:access-point"></ha-icon>${rd.level != null ? `Jetzt ${fmt(rd.level, 0)} %` : "kein Wert"}</span>
               <span style="--c:${rd.busy ? "#f97316" : "#22c55e"}"><ha-icon icon="${rd.busy ? "mdi:speedometer-slow" : "mdi:check"}"></ha-icon>${rd.busy ? "ausgelastet – gedrosselt" : "frei"}</span>
-              <span style="--c:#64748b"><ha-icon icon="mdi:send-outline"></ha-icon>${this._status?.commands_hour ?? 0} Befehle in der letzten Stunde</span>
+              <span style="--c:#64748b"><ha-icon icon="mdi:send-outline"></ha-icon>${rd.calls_hour ?? this._status?.commands_hour ?? 0} Befehle an Funk-Geräte in der letzten Stunde</span>
             </div>
+            ${this._radioTrend(rd)}
+            ${(rd.retry || []).length ? `<div class="lbl">Übernimmt den Sollwert nicht – Hauswerk versucht es seltener</div><div class="evlist rd-list">${rd.retry.map((u) => `<div class="wrow"><ha-icon icon="mdi:sync-alert" style="color:#f97316"></ha-icon><span class="grow"><b>${esc(u.name)}</b><small>${esc(u.room || "")} · ${fmt(u.value)} °C ${u.fails}× gesendet, bleibt bei ${u.current != null ? fmt(u.current) + " °C" : "–"}${u.next ? ` · nächster Versuch ${this._hhmm(u.next)}` : ""}</small></span></div>`).join("")}</div>
+              <p class="muted small">Meist ist das Gerät schlecht erreichbar (Batterie, Funk) oder es ist in der CCU mit dem Wandthermostat verknüpft, das den Wert zurückstellt. Dann die Rolle im Raum auf „Folgt Wand“ stellen.</p>` : ""}
+            <div class="lbl">Wer funkt am meisten</div>
+            ${(rd.top || []).length ? `<div class="evlist rd-list">${rd.top.map((o) => `<div class="wrow"><ha-icon icon="${o.retry ? "mdi:sync-alert" : "mdi:radio-tower"}" style="color:${o.hour >= 20 || o.retry ? "#f97316" : "#64748b"}"></ha-icon><span class="grow"><b>${esc(o.name)}</b><small>${o.sources.map((x) => `${esc(x.name)} ${x.count}×`).join(" · ")}</small></span><em class="${o.hour >= 20 ? "bad" : ""}">${o.hour}/Std. · ${o.day}/24 Std.</em></div>`).join("")}</div>
+              <p class="muted small">Gezählt werden alle Befehle an Homematic-Geräte aus Home Assistant – von Hauswerk, Automationen, Skripten, der App und anderen Integrationen – seit dem letzten Neustart. Programme und Direktverknüpfungen in der CCU selbst sieht Home Assistant nicht.</p>`
+              : `<p class="muted small">Noch keine Befehle an Homematic-Geräte gezählt (seit dem letzten Neustart).</p>`}
             <p class="muted">Funkzentralen wie die Homematic-CCU dürfen nur begrenzt senden (Duty Cycle, 1 % der Zeit). Bei 100 % nimmt sie keine Befehle mehr an – Thermostate bleiben dann auf dem alten Wert. Ab der Grenze schickt Hauswerk nur noch Wechsel der Betriebsart (z. B. Fenster auf, Komfort beginnt) und Änderungen ab 1 °C, höchstens alle 15 Minuten je Thermostat, und lässt Ventil- und Kalibrier-Befehle weg. Meldet ein einzelnes Gerät „Duty Cycle erreicht“, bekommt es solange keine Befehle.</p>
             <label class="field narrow"><span><ha-icon icon="mdi:speedometer"></ha-icon> Drosseln ab</span>${minutes("radio_limit", 70, 30, 95, 5, "%")}</label>
             <div class="lbl">${(p.radio_entities || []).length ? "Gewählte Sensoren" : "Automatisch gefunden"} (höchster Wert zählt)</div>
@@ -14235,6 +14262,9 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .bwz-a .qbtn.hot { background:color-mix(in srgb, #0ea5e9 16%, transparent); border-color:color-mix(in srgb, #0ea5e9 50%, transparent); }
 .bwz-m { display:inline-flex; align-items:center; gap:6px; } .bwz-m b { font-variant-numeric:tabular-nums; min-width:44px; text-align:center; }
 :host([tablet]) .bwz-a .qbtn { min-height:52px; font-size:15px; }
+.rd-trend { margin:10px 0 4px; } .rd-trend svg { width:100%; height:70px; display:block; border-radius:10px; background:color-mix(in srgb, var(--muted) 8%, transparent); }
+.rd-list .wrow small { white-space:normal; overflow:visible; text-overflow:clip; }
+.rd-ax { display:flex; justify-content:space-between; font-size:11px; color:var(--muted); margin-top:3px; }
 .bw-timer { display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:14px; background:color-mix(in srgb, #0ea5e9 12%, transparent); color:#0369a1; }
 :host([dark]) .bw-timer { color:#7dd3fc; } .bw-timer ha-icon { --mdc-icon-size:24px; } .bw-timer b { font-size:22px; font-variant-numeric:tabular-nums; } .bw-timer small { margin-left:auto; color:var(--muted); }
 .bwz-v { display:flex; align-items:center; gap:8px; margin-bottom:6px; } .bwz-v select { flex:1; } .bwz-n { min-width:18px; color:var(--muted); font-weight:700; }

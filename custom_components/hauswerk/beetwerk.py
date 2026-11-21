@@ -299,7 +299,7 @@ class Beetwerk:
 
     async def _call(self, domain: str, service: str, entity_id: str) -> None:
         try:
-            await self.hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=False)
+            await self.hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=False, context=self.haus.own_context("Beetwerk"))
         except Exception as err:  # noqa: BLE001 - Dienst nicht verfügbar: nur protokollieren
             self.log.add("garden", f"Befehl an {self._name(entity_id)} fehlgeschlagen", str(err), module="beetwerk")
 
@@ -476,7 +476,7 @@ class Beetwerk:
 
     async def _call_data(self, domain: str, service: str, data: dict) -> None:
         try:
-            await self.hass.services.async_call(domain, service, data, blocking=False)
+            await self.hass.services.async_call(domain, service, data, blocking=False, context=self.haus.own_context("Beetwerk"))
         except Exception as err:  # noqa: BLE001 - Dienst nicht verfügbar
             self.log.add("garden", f"{domain}.{service} fehlgeschlagen", str(err), module="beetwerk")
 

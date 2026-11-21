@@ -125,6 +125,15 @@ def findings(rooms: dict[str, dict], analysis: dict[str, dict], name_of, devices
                 out.append({"level": "warn" if others else "info", "room": room_id, "entity": w["entity"],
                             "text": f"{name_of(w['entity'])} ist in der CCU mit keinem Gerät verknüpft"
                                     + (" – Heizkörper bzw. Fußbodenheizung folgen ihm nicht" if others else " – steuert es dort etwas?")})
+        for t in info["linked_trvs"]:
+            if t in set(room.get("assist_entities") or []):
+                out.append({"level": "warn", "room": room_id, "entity": t,
+                            "text": f"{name_of(t)} ist als Zusatzheizung gewählt, folgt in der CCU aber dem Wandthermostat – "
+                                    "beide stellen gegeneinander und belasten den Funk. Rolle „Folgt Wand“ wählen oder die Verknüpfung in der CCU lösen."})
+            elif t in set(room.get("pair_exclude") or []):
+                out.append({"level": "warn", "room": room_id, "entity": t,
+                            "text": f"{name_of(t)} soll Hauswerk selbst stellen, folgt in der CCU aber dem Wandthermostat – "
+                                    "beide stellen gegeneinander und belasten den Funk. Rolle „Folgt Wand“ wählen oder die Verknüpfung in der CCU lösen."})
         for t in info["unlinked_trvs"]:
             if t not in assist and info["walls"]:
                 out.append({"level": "info", "room": room_id, "entity": t,

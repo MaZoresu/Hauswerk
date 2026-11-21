@@ -655,7 +655,7 @@ class Rollwerk:
         return pos
 
     async def _call(self, domain: str, service: str, data: dict[str, Any]) -> None:
-        await self.hass.services.async_call(domain, service, data, context=Context())
+        await self.hass.services.async_call(domain, service, data, context=self.haus.own_context("Rollwerk"))
 
     async def _move(self, entity_id: str, position: int) -> None:
         state = self.hass.states.get(entity_id)

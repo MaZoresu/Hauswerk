@@ -1035,6 +1035,13 @@ def radio_should_send(
     return since_last is None or since_last >= min_interval
 
 
+def retry_wait(fails: int) -> float:
+    """Wartezeit vor dem nächsten Versuch, wenn ein Sollwert nicht übernommen wird: 2 Versuche sofort, dann 15 Min., dann stündlich."""
+    if fails < 2:
+        return 0.0
+    return 900.0 if fails == 2 else 3600.0
+
+
 # ------------------------------------------------------------ Mischbetrieb (Fußbodenheizung + Heizkörper)
 def assist_on(mode: str, room_temp: float | None, target: float | None, diff: float, was_on: bool) -> bool:
     """Soll der Heizkörper als Zusatzheizung mitheizen?

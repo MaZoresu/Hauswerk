@@ -12,7 +12,7 @@ from datetime import date, timedelta
 import logging
 from typing import Any
 
-from homeassistant.const import STATE_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import EVENT_CALL_SERVICE, STATE_HOME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import (
     async_call_later,
@@ -36,6 +36,9 @@ from .logic import distance_km, in_quiet_hours, is_vacation, keyword_match, keyw
 
 
 _LOGGER = logging.getLogger(__name__)
+
+RADIO_PLATFORMS = {"homematicip_local", "homematic", "homematicip_cloud"}
+RADIO_CALLS_MAX = 5000
 
 BAD_STATES = {STATE_UNAVAILABLE, STATE_UNKNOWN, None}
 PROXIMITY_TREND = 15 * 60  # Sekunden: so lange gilt „kommt näher“ nach der letzten Annäherung
@@ -129,6 +132,13 @@ class Haus:
         self.radio_level: float | None = None
         self.radio_entity: str | None = None
         self.radio_busy = False
+        # Wer funkt: Befehle an Funk-Geräte (Homematic) mit Herkunft, Verlauf der Auslastung, unbestätigte Sollwerte
+        self._radio_calls: list[tuple[float, str, str]] = []
+        self._radio_platform: dict[str, bool] = {}
+        self._radio_trend: list[tuple[float, float]] = []
+        self._own_ctx: dict[str, tuple[float, str]] = {}
+        self._parent_label: dict[str, str] = {}
+        self.radio_retry: dict[str, dict[str, Any]] = {}
         self._listeners: set[Callable[[], None]] = set()
         self.extra_status: dict[str, Callable[[], Any]] = {}  # weitere Module (z. B. Kraftwerk-Geräte)
         self._unsubs: list[Callable[[], None]] = []
@@ -176,6 +186,7 @@ class Haus:
     # ------------------------------------------------------------ Lebenszyklus
     async def async_start(self) -> None:
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
+        self._unsubs.append(self.hass.bus.async_listen(EVENT_CALL_SERVICE, self._on_radio_call))
         self._track()
         self._find_workday_calendar()
         self._find_waste_calendars()
@@ -989,6 +1000,86 @@ class Haus:
             )
         return self._radio_found
 
+    def own_context(self, module: str):
+        """Context für einen Befehl eines Hauswerk-Moduls – damit „Wer funkt“ ihn zuordnen kann."""
+        from homeassistant.core import Context
+        ctx = Context()
+        now = dt_util.utcnow().timestamp()
+        self._own_ctx[ctx.id] = (now, module)
+        if len(self._own_ctx) > 500:
+            self._own_ctx = {k: v for k, v in self._own_ctx.items() if now - v[0] < 600}
+        return ctx
+
+    def _is_radio(self, entity_id: str) -> bool:
+        """Entität eines Funk-Geräts mit Duty Cycle (Homematic / Homematic IP)?"""
+        known = self._radio_platform.get(entity_id)
+        if known is None:
+            entry = er.async_get(self.hass).async_get(entity_id)
+            known = entry is not None and getattr(entry, "platform", None) in RADIO_PLATFORMS
+            self._radio_platform[entity_id] = known
+        return known
+
+    def _call_source(self, context) -> str:
+        own = self._own_ctx.get(getattr(context, "id", None) or "")
+        if own:
+            return own[1]
+        if getattr(context, "user_id", None):
+            return "von Hand"
+        parent = getattr(context, "parent_id", None)
+        if parent:
+            if parent not in self._parent_label:
+                label = "Automation oder Skript"
+                for domain in ("automation", "script"):
+                    for state in self.hass.states.async_all(domain):
+                        if getattr(state.context, "id", None) == parent:
+                            label = f"{'Automation' if domain == 'automation' else 'Skript'} „{state.name}“"
+                            break
+                self._parent_label = dict(list(self._parent_label.items())[-200:])
+                self._parent_label[parent] = label
+            return self._parent_label[parent]
+        return "andere Integration"
+
+    @callback
+    def _on_radio_call(self, event: Event) -> None:
+        data = event.data or {}
+        if data.get("domain") in ("notify", "tts", "persistent_notification", "logbook", "system_log", "recorder"):
+            return
+        targets = (data.get("service_data") or {}).get("entity_id") or []
+        if isinstance(targets, str):
+            targets = [t.strip() for t in targets.split(",")]
+        try:
+            radio = [t for t in targets if isinstance(t, str) and "." in t and self._is_radio(t)]
+        except Exception:  # noqa: BLE001 - Zählen darf nie einen Dienstaufruf stören
+            return
+        if not radio:
+            return
+        now = dt_util.utcnow().timestamp()
+        src = self._call_source(event.context)
+        self._radio_calls = [c for c in self._radio_calls[-RADIO_CALLS_MAX:] if now - c[0] < 86400]
+        self._radio_calls.extend((now, t, src) for t in radio)
+
+    def radio_top(self, now: float | None = None) -> list[dict[str, Any]]:
+        """Geräte mit den meisten Befehlen (letzte Stunde, 24 Stunden) mit Herkunft."""
+        now = now or dt_util.utcnow().timestamp()
+        out: dict[str, dict[str, Any]] = {}
+        for ts, ent, src in self._radio_calls:
+            if now - ts >= 86400:
+                continue
+            o = out.setdefault(ent, {"entity": ent, "name": self._name(ent), "hour": 0, "day": 0, "sources": {}, "last": 0.0})
+            o["day"] += 1
+            if now - ts < 3600:
+                o["hour"] += 1
+            o["sources"][src] = o["sources"].get(src, 0) + 1
+            o["last"] = max(o["last"], ts)
+        for ent, r in self.radio_retry.items():
+            if ent in out:
+                out[ent]["retry"] = r
+        rows = sorted(out.values(), key=lambda o: (-o["hour"], -o["day"]))[:12]
+        for o in rows:
+            o["sources"] = sorted(({"name": k, "count": v} for k, v in o["sources"].items()), key=lambda x: -x["count"])
+            o["last"] = dt_util.utc_from_timestamp(o["last"]).isoformat()
+        return rows
+
     @callback
     def update_radio(self) -> None:
         level = None
@@ -1005,6 +1096,9 @@ class Haus:
             self.log.add("health", "Funk ausgelastet – Befehle werden gedrosselt" if busy else "Funk wieder frei",
                          f"{name}: {_de(level)} % (Grenze {limit:.0f} %)" if level is not None else None)
         self.radio_level, self.radio_entity, self.radio_busy = level, entity, busy
+        now = dt_util.utcnow().timestamp()
+        if level is not None and (not self._radio_trend or now - self._radio_trend[-1][0] >= 290):
+            self._radio_trend = [x for x in self._radio_trend if now - x[0] < 86400] + [(now, level)]
 
     def status(self) -> dict[str, Any]:
         return {
@@ -1028,5 +1122,9 @@ class Haus:
             "frost_low": self.frost_low,
             "notify_queued": len(self._queued),
             "radio": {"level": self.radio_level, "entity": self.radio_entity, "busy": self.radio_busy,
-                      "entities": self.radio_entities(), "limit": self.settings.get("radio_limit") or 70},
+                      "entities": self.radio_entities(), "limit": self.settings.get("radio_limit") or 70,
+                      "top": self.radio_top(),
+                      "calls_hour": len([c for c in self._radio_calls if dt_util.utcnow().timestamp() - c[0] < 3600]),
+                      "trend": [[dt_util.utc_from_timestamp(t).isoformat(), round(v, 1)] for t, v in self._radio_trend],
+                      "retry": [{"entity": k, "name": self._name(k), **v} for k, v in self.radio_retry.items()]},
         }
