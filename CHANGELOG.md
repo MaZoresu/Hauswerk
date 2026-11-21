@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.76.0 – 2026-11-21
+
+### Neu – Lüften mit Rollwerk
+- **Beim Lüften ganz öffnen:** Neue Option im Rollwerk-Profil unter Fenster & Lüften: Ist ein Fenster des Raums offen (Kontakt aus Heizwerk oder eigener „gekippt“-Kontakt), fährt der Rollladen ganz auf statt auf die Lüftungsstellung. Nach dem Schließen des Fensters fährt er zurück auf die Sollstellung (z. B. wieder zu). Ohne die Option wie bisher Lüftungsstellung.
+- **Fenster offen bei Sturm oder Regen:** Nachricht „Fenster offen – Sturm“ bzw. „Fenster offen – Regen“ je Fenster (Anlass Sturm unter Benachrichtigungen) – für Fenster in Räumen mit Rollläden. Bei Sturm fahren die Rollläden wie bisher hoch, bei Regen bleibt der Rollladen auf Lüftungsstellung und fährt nicht herunter.
+
+### Entfernt
+- **Kosten je Lüftung** (aus 0.75.0) samt Einstellung Wärmepreis – die Wärmemenge (kWh) beim Dauerkippen und im Bericht bleibt.
+
 ## 0.75.0 – 2026-11-21
 
 ### Neu – Lüften in Heizwerk

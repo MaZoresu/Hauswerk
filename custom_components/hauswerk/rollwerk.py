@@ -165,6 +165,7 @@ LIST_ITEM_LABEL: dict[str, str] = {
     "sunny": "Sonnig", "partlycloudy": "Teils bewölkt", "cloudy": "Bewölkt", "fog": "Nebel", "rainy": "Regen", "windy": "Windig", "exceptional": "Extrem",
     "ventilation_start_no_delay": "ohne Verzögerung beim Kippen", "ventilation_if_lower_enabled": "auch herunter auf Lüftungsstellung",
     "ventilation_after_shading_end": "nach Beschattung auf Lüftungsstellung", "shading_over_ventilation": "Beschattung vor Lüften",
+    "vent_full": "beim Lüften ganz öffnen",
     "lockout_tilted_closing": "beim Schließen", "lockout_tilted_shading_start": "bei Beschattungsbeginn", "lockout_tilted_shading_end": "bei Beschattungsende",
     "closing": "Schließen", "opening": "Öffnen", "allow_shading": "Beschattung im Schlaf", "allow_opening": "Öffnen im Schlaf", "ventilation": "Lüften",
     "fixed": "feste Uhrzeit", "timeout": "nach einiger Zeit", "in_position": "in Stellung",
@@ -998,6 +999,10 @@ class Rollwerk:
                 cat == "open" and rt.get("shade_ended_on") == today and "lockout_tilted_shading_end" in lock_tilted)
             if lock_here and pos is not None and (target is None or target < pos):
                 target, reason, cat = int(pos), f"{self._name(tilt_now[0])} gekippt – Aussperrschutz", "ventilation"
+            elif "vent_full" in vent_opts:
+                # Stoßlüften: ganz öffnen, nach dem Schließen des Fensters zurück auf die Sollstellung
+                if target is None or target < p_open:
+                    target, reason, cat = p_open, f"{self._name(tilt_now[0])} offen – lüften, ganz auf", "ventilation"
             elif target is None or target < p_vent or ("ventilation_if_lower_enabled" in vent_opts and (target or 0) > p_vent and cat != "open"):
                 target, reason, cat = p_vent, f"{self._name(tilt_now[0])} gekippt – lüften", "ventilation"
         rt["vent_active"] = is_open or tilted
@@ -1006,6 +1011,25 @@ class Rollwerk:
             target, reason, cat = None, "Lüften beendet – bleibt so", "none"
         rt["vent_was"] = rt["vent_active"]
         return target, reason, cat
+
+    def _wet_windows(self) -> None:
+        """Fenster (an Räumen mit Rollläden) offen bei Sturm oder Regen: Nachricht „Fenster schließen“ – je Fenster einmal."""
+        weather = self.hass.states.get(self.haus.weather_entity() or "")
+        rain = weather is not None and weather.state in ("rainy", "pouring", "snowy", "snowy-rainy", "hail", "lightning-rainy")
+        seen: set[str] = set()
+        for entity_id in self.settings.get("rw_covers") or []:
+            opens, tilts, _src = self.contacts(entity_id)
+            for c in opens + tilts:
+                if c in seen:
+                    continue
+                seen.add(c)
+                key = f"rw_wet:{c}"
+                if (self._storm or rain) and self._contact(c):
+                    what = "Sturm" if self._storm else "Regen"
+                    self.haus.notify(key, "storm", f"Fenster offen – {what}",
+                                     f"{self._name(c)}: bitte schließen – der Rollladen bleibt {'oben' if self._storm else 'auf Lüftungsstellung'}")
+                else:
+                    self.haus.clear(key)
 
     def _door_floor(self, entity_id: str, prof: dict, feats: set, pos: float | None, target: int | None,
                     reason: str, cat: str) -> tuple[int | None, str, str]:
@@ -1048,6 +1072,7 @@ class Rollwerk:
             else:
                 self.haus.clear("rw_storm")
         self._gust = gust
+        self._wet_windows()
         last_run = float(self._persist.get("last_run") or 0)
         recovery = self.settings.get("rw_recovery") or "never"
         for entity_id in self.settings.get("rw_covers") or []:

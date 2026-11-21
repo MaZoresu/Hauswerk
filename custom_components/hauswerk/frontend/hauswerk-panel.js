@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.75.0";
+const VERSION = "0.76.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -556,6 +556,7 @@ const RW_SHADE_CONDS = [["azimuth", "Richtung"], ["elevation", "Sonnenhöhe"], [
 const RW_WEATHER = [["sunny", "Sonnig"], ["partlycloudy", "Teils bewölkt"], ["cloudy", "Bewölkt"], ["fog", "Nebel"], ["rainy", "Regen"], ["windy", "Windig"], ["exceptional", "Extrem"]];
 const RW_VENT = [["ventilation_start_no_delay", "Beim Kippen ohne Verzögerung fahren"], ["ventilation_if_lower_enabled", "Auch herunterfahren auf Lüftungsstellung, wenn der Rollladen höher steht"],
   ["ventilation_after_shading_end", "Nach der Beschattung auf Lüftungsstellung statt ganz auf"], ["shading_over_ventilation", "Beschattung geht vor Lüften (auch bei gekipptem Fenster)"]];
+const RW_VENT_FULL = [["vent_full", "Beim Lüften ganz öffnen statt Lüftungsstellung – nach dem Schließen des Fensters zurück"]];
 const RW_LOCK_TILTED = [["lockout_tilted_closing", "beim Schließen"], ["lockout_tilted_shading_start", "beim Beginn der Beschattung"], ["lockout_tilted_shading_end", "beim Ende der Beschattung"]];
 const RW_RESIDENT = [["closing", "Schließen, wenn der Bewohner schlafen geht"], ["opening", "Öffnen, wenn der Bewohner aufwacht (wenn Zeit/Helligkeit passen)"],
   ["allow_shading", "Beschattung erlauben, während er schläft"], ["allow_opening", "Öffnen erlauben, während er schläft"]];
@@ -2182,7 +2183,6 @@ class HauswerkPanel extends HTMLElement {
     const amp = { ok: ["#22c55e", "kein Risiko"], warn: ["#f59e0b", "aufpassen"], bad: ["#ef4444", "Schimmelgefahr"] };
     const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 60 ? `vor ${Math.max(1, m)} Min.` : m < 1440 ? `vor ${Math.floor(m / 60)} Std.` : `vor ${Math.floor(m / 1440)} Tg.`; };
     const hh = (iso) => { const d = new Date(iso); const today = d.toDateString() === new Date().toDateString(); return `${today ? "" : "morgen "}${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`; };
-    const ct = (c) => (c == null ? "" : c < 100 ? `${fmt(c, c < 10 ? 1 : 0)} ct` : `${fmt(c / 100, 2)} €`);
     const card = (r) => {
       const s = st[r.id] || {};
       const a = s.air || {};
@@ -2192,7 +2192,7 @@ class HauswerkPanel extends HTMLElement {
         const pc = a.open.cool ? 100 : Math.min(100, (a.open.minutes / a.open.target) * 100);
         state = `<div class="vt-run ${a.open.done ? "done" : ""}"><div class="vt-bar"><i style="width:${pc}%"></i></div>
           <b>${a.open.done ? `Genug gelüftet – Fenster schließen` : a.open.cool ? `Kühlt seit ${Math.floor(a.open.minutes)} Min.` : `Lüftet ${Math.floor(a.open.minutes)} von ${a.open.target} Min.`}</b>
-          <small>${a.open.done ? esc(a.open.done) : a.open.cool ? "Hinweis kommt, sobald es draußen wärmer ist" : `Ende: Zeit um, Feuchte gesunken oder Raum zu kühl${a.open.learned ? " · Dauer gelernt" : ""}`}${a.open.kwh ? ` · bisher ca. ${fmt(a.open.kwh)} kWh, ${ct(a.open.ct)}` : ""}${a.long ? ` · gekippt kostet ca. ${ct(a.long.ct_h)}/Std.` : ""}</small></div>`;
+          <small>${a.open.done ? esc(a.open.done) : a.open.cool ? "Hinweis kommt, sobald es draußen wärmer ist" : `Ende: Zeit um, Feuchte gesunken oder Raum zu kühl${a.open.learned ? " · Dauer gelernt" : ""}`}${a.long ? ` · ca. ${fmt(a.long.kwh)} kWh Wärme` : ""}</small></div>`;
       } else if (s.vent) state = `<div class="vt-need"><ha-icon icon="mdi:weather-windy"></ha-icon><span><b>Jetzt ${s.vent.minutes} Min. stoßlüften${a.learned ? ` <em class="vt-learn" title="aus den letzten Lüftungen dieses Raums gelernt">gelernt</em>` : ""}</b><small>${esc((s.vent.reasons || []).join(" · "))}</small></span></div>`;
       else if (a.wait) state = `<div class="vt-wait"><ha-icon icon="mdi:weather-fog"></ha-icon><span><b>Feucht – aber Lüften trocknet gerade nicht</b><small>Draußen ist mehr Wasser in der Luft${a.wait.dry_at ? ` · ab ${hh(a.wait.dry_at)} Uhr trockener` : " · später noch einmal versuchen"}</small></span></div>`;
       else state = `<div class="vt-ok"><ha-icon icon="mdi:check-circle-outline"></ha-icon><span>${s.humidity == null && a.co2 == null ? "Ohne Feuchtesensor nur Lüft-Timer und Bilanz" : "Kein Lüften nötig"}</span></div>`;
@@ -2200,8 +2200,8 @@ class HauswerkPanel extends HTMLElement {
         s.humidity != null ? [`${fmt(s.humidity, 0)} %`, `Luftfeuchte · ab ${fmt(a.limit, 0)} % lüften`, s.humidity >= (a.limit || 99) ? "#f59e0b" : ""] : null,
         a.mold ? [`${a.mold.wall_rh} %`, `an der Außenwand (${fmt(a.mold.wall_temp)} °C) · ${amp[a.mold.level][1]}`, amp[a.mold.level][0]] : null,
         a.co2 != null ? [`${a.co2} ppm`, "CO₂", a.co2 >= (set.vent_co2 || 1000) ? "#f59e0b" : ""] : null,
-        a.last ? [ago(a.last.at), `zuletzt gelüftet · ${fmt(a.last.min, 0)} Min.${a.last.rh0 != null && a.last.rh1 != null ? ` · ${fmt(a.last.rh0, 0)} → ${fmt(a.last.rh1, 0)} %` : ""}${a.last.ct ? ` · ${ct(a.last.ct)}` : ""}`, ""] : null,
-        a.week?.count ? [`${a.week.count}×`, `7 Tage · ${a.week.minutes} Min.${a.week.kwh ? ` · ca. ${fmt(a.week.kwh)} kWh` : ""}${a.week.eur ? ` · ${fmt(a.week.eur, 2)} €` : ""}`, ""] : null,
+        a.last ? [ago(a.last.at), `zuletzt gelüftet · ${fmt(a.last.min, 0)} Min.${a.last.rh0 != null && a.last.rh1 != null ? ` · ${fmt(a.last.rh0, 0)} → ${fmt(a.last.rh1, 0)} %` : ""}`, ""] : null,
+        a.week?.count ? [`${a.week.count}×`, `7 Tage · ${a.week.minutes} Min.${a.week.kwh ? ` · ca. ${fmt(a.week.kwh)} kWh` : ""}`, ""] : null,
         a.tau ? [`${fmt(a.minutes, 0)} Min.`, "gelernte Lüftdauer", ""] : null,
         a.balance?.rh_morning != null ? [`${a.balance.rh_morning} %`, "morgens (Ø 3 Tage)", a.balance.level !== "ok" ? VB[a.balance.level][0] : ""] : null,
       ].filter(Boolean);
@@ -2221,7 +2221,7 @@ class HauswerkPanel extends HTMLElement {
       title: need.length ? need.map((r) => `${r.name}: ${st[r.id].air?.open?.done ? "Fenster schließen" : `${st[r.id].vent.minutes} Min. lüften`}`).join(" · ") : "Gerade muss nirgends gelüftet werden",
       side: `<button class="link" data-action="settings-go" data-sub="vent"><ha-icon icon="mdi:tune-variant"></ha-icon>Einstellen</button>`,
       lines: [
-        ...(plan?.times?.length ? [{ icon: "mdi:clock-check-outline", text: `Am besten lüften: ${plan.times.map((t) => `${hh(t.at)} (${fmt(t.temp, 0)}°, ${ct(t.ct)})`).join(" · ")}` }]
+        ...(plan?.times?.length ? [{ icon: "mdi:clock-check-outline", text: `Am besten lüften: ${plan.times.map((t) => `${hh(t.at)} Uhr (${fmt(t.temp, 0)} °C, ${t.minutes} Min.)`).join(" · ")}` }]
           : plan ? [{ icon: "mdi:weather-rainy", text: "Heute kaum trockene Luft ohne Regen – nur bei Bedarf kurz lüften" }] : []),
         { icon: "mdi:thermometer", text: `Richtwert Stoßlüften bei ${outT == null ? "–" : fmt(outT)} °C draußen: ${mins} Min. – mit Feuchtesensor lernt jeder Raum seine eigene Dauer` },
         { icon: "mdi:information-outline", text: "Kurz und weit öffnen statt kippen: tauscht die Luft, ohne Wände auszukühlen" }],
@@ -6690,6 +6690,7 @@ class HauswerkPanel extends HTMLElement {
         body = `${lbl("Tür ganz offen")}${choice("pos_lockout", [["", "Nicht herunterfahren"], ["30", "Höchstens 30 %"], ["50", "Höchstens 50 %"]], "rwp-lock")}
           ${note("So sperrt dich die Terrassentür nicht aus. Hochfahren geht immer.", "mdi:door-open")}
           <div class="wxrows">${row("vf", "Fenster gekippt: lüften", "Rollladen auf Lüftungsstellung", feat("ventilate"))}${has("ventilate") ? row("pv", "Lüftungsstellung", "", num("pos_ventilate", 30, 0, 100, 5, "%")) : ""}</div>
+          ${has("ventilate") ? `${checks("vent_options", RW_VENT_FULL)}${note("Fenster offen bei Sturm oder Regen: Nachricht „Fenster offen – Sturm/Regen“ (Anlass Sturm unter Benachrichtigungen). Bei Sturm fahren die Rollläden hoch, bei Regen bleibt der Rollladen auf Lüftungsstellung.", "mdi:weather-pouring")}` : ""}
           ${lbl("Kontakte")}${mine.length ? `<div class="evlist">${mine.map(([id, c]) => `<div class="ev"><ha-icon icon="mdi:window-shutter"></ha-icon><span class="grow"><b>${esc(this._entityName(id))}</b><small>${(() => { const own = c.contact_open || c.contact_tilted; const k = own ? { open: [c.contact_open].filter(Boolean), tilted: [c.contact_tilted].filter(Boolean) } : c.contacts === "none" ? { open: [], tilted: [] } : this._rwRoomContacts(this._rwRoomFor(id));
               return [k.open.length ? `offen: ${k.open.map((e) => esc(this._entityName(e))).join(", ")}` : "", k.tilted.length ? `gekippt: ${k.tilted.map((e) => esc(this._entityName(e))).join(", ")}` : ""].filter(Boolean).join(" · ") + (!own && (k.open.length || k.tilted.length) ? " · aus Heizwerk" : "") || "kein Kontakt"; })()}</small></span><button class="link" data-action="pop-open" data-pop="rwc:${esc(id)}">ändern</button></div>`).join("")}</div>` : note("Noch kein Rollladen nutzt dieses Profil.")}
           ${exBox(`${lbl("Lüften")}${checks("vent_options", RW_VENT)}${lbl("Aussperrschutz auch bei gekipptem Fenster")}${checks("lockout_tilted", RW_LOCK_TILTED)}`)}`;
@@ -7038,9 +7039,9 @@ class HauswerkPanel extends HTMLElement {
         const vr = rooms.filter((r) => st[r.id]?.air?.week?.count);
         if (!vr.length) return "";
         return `<section class="card">${this._sectionHead("mdi:weather-windy", "Lüften · 7 Tage", `<button class="link" data-action="tab" data-tab="vent">Lüften</button>`)}
-          <div class="table-wrap"><table><thead><tr><th>Raum</th><th>gelüftet</th><th>Dauer</th><th>Feuchte</th><th>Wärme</th><th>Kosten</th></tr></thead><tbody>
-          ${vr.map((r) => { const wk = st[r.id].air.week; return `<tr><td><span class="rdot" style="background:${this._roomColor(r.id)}"></span>${esc(r.name)}</td><td>${wk.count}×</td><td>${wk.minutes} Min.</td><td>${wk.rh_drop != null ? `−${wk.rh_drop} %-Pkt.` : "–"}</td><td>${wk.kwh ? `ca. ${fmt(wk.kwh)} kWh` : "–"}</td><td>${wk.eur != null ? `${fmt(wk.eur, 2)} €` : "–"}</td></tr>`; }).join("")}
-          </tbody></table></div><p class="muted small">Feuchte: Ø Rückgang je Lüftung. Wärme: grob geschätzt (ca. 20 W je Grad Unterschied, solange offen). Kosten mit dem Wärmepreis unter Lüften & Schimmelschutz.</p></section>`;
+          <div class="table-wrap"><table><thead><tr><th>Raum</th><th>gelüftet</th><th>Dauer</th><th>Feuchte</th><th>Wärme</th></tr></thead><tbody>
+          ${vr.map((r) => { const wk = st[r.id].air.week; return `<tr><td><span class="rdot" style="background:${this._roomColor(r.id)}"></span>${esc(r.name)}</td><td>${wk.count}×</td><td>${wk.minutes} Min.</td><td>${wk.rh_drop != null ? `−${wk.rh_drop} %-Pkt.` : "–"}</td><td>${wk.kwh ? `ca. ${fmt(wk.kwh)} kWh` : "–"}</td></tr>`; }).join("")}
+          </tbody></table></div><p class="muted small">Feuchte: Ø Rückgang je Lüftung. Wärme: grob geschätzt (ca. 20 W je Grad Unterschied, solange offen).</p></section>`;
       })()}
       ${this._powerReport(rooms, days)}
       ${this._valveHeat(rooms, rep, days)}
@@ -8641,9 +8642,7 @@ class HauswerkPanel extends HTMLElement {
             <p class="muted small">Empfohlen wird kurzes Stoßlüften nach Außentemperatur: unter 0 °C 5 Min., bis 10 °C 10 Min., bis 15 °C 15 Min., darüber 25 Min. Ist das Fenster offen, läuft in der Raumkachel ein Countdown; ist genug gelüftet (Zeit um, Feuchte deutlich gesunken oder Raum 3 °C kühler), kommt „Fenster schließen“.</p>
 <p class="muted small"><ha-icon icon="mdi:school-outline"></ha-icon>Mit Feuchtesensor lernt jeder Raum seine eigene Dauer: Aus jeder Lüftung misst Heizwerk, wie schnell die Feuchte zur Außenluft hin fällt (Luftwechsel). Ab drei Messungen gilt die gelernte Dauer – bis die Feuchte 10 % unter der Grenze liegt, höchstens 30 Min. Ist die Luft draußen nicht trockener (schwül, Nebel), kommt keine Lüft-Empfehlung wegen Feuchte, sondern „ab … Uhr trockener“.</p>
             <label class="field narrow"><span><ha-icon icon="mdi:window-open-variant"></ha-icon> „Kippen kostet Wärme“ nach</span>${minutes("vent_long_min", 30, 5, 240, 5)}</label>
-            <div class="lbl">Kosten</div>
-            <label class="field narrow"><span><ha-icon icon="mdi:currency-eur"></ha-icon> Wärmepreis (Gas, Öl, Wärmepumpe …)</span>${minutes("vent_price", 12, 0, 100, 0.5, "ct/kWh")}</label>
-            <p class="muted small">Für die Kosten je Lüftung, je Woche und „gekippt kostet … je Stunde“. Gerechnet wird grob mit 20 W je Grad Unterschied zwischen drinnen und draußen. Die besten Lüftzeiten des Tages kommen aus der Stunden-Vorhersage des Wetterdienstes (kein Regen, trockene Luft, wenig Wärmeverlust).</p>
+            <p class="muted small"><ha-icon icon="mdi:clock-check-outline"></ha-icon>Die besten Lüftzeiten des Tages kommen aus der Stunden-Vorhersage des Wetterdienstes (kein Regen, trockene Luft, wenig Wärmeverlust).</p>
             <div class="lbl">Anlässe</div>
             <div class="field"><span><ha-icon icon="mdi:weather-sunset-up"></ha-icon> Morgens lüften (Schlaf- und Kinderzimmer) ab</span>${segs("vent_morning", [["null", "Aus"], ["06:30", "6:30"], ["07:00", "7:00"], ["07:30", "7:30"], ["08:00", "8:00"]], "null")}</div>
             <label class="field narrow"><span><ha-icon icon="mdi:molecule-co2"></ha-icon> Lüften ab CO₂ (0 = aus)</span>${minutes("vent_co2", 1000, 0, 5000, 100, "ppm")}</label>

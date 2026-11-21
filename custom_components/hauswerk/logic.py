@@ -836,8 +836,7 @@ def vent_helps(in_temp: float | None, in_rh: float | None, out_temp: float | Non
     return abs_humidity(in_temp, in_rh) - abs_humidity(out_temp, out_rh) >= min_gain
 
 
-def vent_plan(hours: list[dict], now_ts: float, in_temp: float = 21.0, in_rh: float = 55.0,
-              price_ct: float = 12.0) -> list[dict]:
+def vent_plan(hours: list[dict], now_ts: float, in_temp: float = 21.0, in_rh: float = 55.0) -> list[dict]:
     """Beste Lüftzeiten der nächsten 24 Stunden aus der Stunden-Vorhersage: kein Regen, trockene Außenluft,
     möglichst wenig Wärmeverlust – je eine Zeit am Vormittag (6–12 Uhr) und am Nachmittag/Abend (12–22 Uhr).
 
@@ -862,7 +861,7 @@ def vent_plan(hours: list[dict], now_ts: float, in_temp: float = 21.0, in_rh: fl
         key = f"{slot}:{int((ts - now_ts) // 86400 + (1 if hour < 6 else 0))}"
         if key not in best or score < best[key]["score"]:
             best[key] = {"ts": ts, "hour": hour, "temp": round(temp, 1), "minutes": minutes, "kwh": kwh,
-                         "ct": round(kwh * price_ct, 1), "gain": round(gain, 1) if gain is not None else None, "score": score}
+                         "gain": round(gain, 1) if gain is not None else None, "score": score}
     out = sorted(best.values(), key=lambda x: x["ts"])[:3]
     for x in out:
         x.pop("score", None)

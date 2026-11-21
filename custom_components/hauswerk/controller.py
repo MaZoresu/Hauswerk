@@ -1657,13 +1657,6 @@ class Heizen:
                      f"Luftfeuchte um {rise:.0f} Prozentpunkte gestiegen", room_id, room.get("name"))
         return rt["override"]
 
-    def _vent_price(self) -> float:
-        """Wärmepreis in ct/kWh fürs Lüften (Gas, Öl, Wärmepumpe …; Einstellung Lüften › Wärmepreis)."""
-        try:
-            return float(self.settings.get("vent_price") or 12)
-        except (TypeError, ValueError):
-            return 12.0
-
     def _vent_plan(self) -> dict[str, Any] | None:
         """Beste Lüftzeiten der nächsten 24 h für das ganze Haus (Mittel der Räume mit Feuchtesensor)."""
         hours = getattr(self.haus, "hourly", None) or []
@@ -1679,7 +1672,7 @@ class Heizen:
         t_in = sum(temps) / len(temps) if temps else 21.0
         rh_in = sum(rhs) / len(rhs) if rhs else 55.0
         now = dt_util.utcnow().timestamp()
-        times = vent_plan(hours, now, t_in, rh_in, self._vent_price())
+        times = vent_plan(hours, now, t_in, rh_in)
         return {"times": [{**x, "at": dt_util.utc_from_timestamp(x["ts"]).isoformat()} for x in times], "rh_in": round(rh_in)}
 
     def _air(self, room_id: str, room: dict, rt: dict, room_temp: float | None, humidity: float | None,
@@ -1688,7 +1681,6 @@ class Heizen:
         name = room.get("name") or room_id
         base = float(self.settings.get("vent_rh") or 0)
         limit = vent_limit(room, base) if base else 0.0
-        price = self._vent_price()
         # Lüftdauer: gelernt aus den letzten Lüftungen des Raums, sonst Richtwert nach Außentemperatur
         minutes, learned = vent_learned_minutes(self.vent_tau.get(room_id) or [], room_temp, humidity, out_temp, out_rh,
                                                 limit or 65, vent_minutes(out_temp))
@@ -1787,13 +1779,9 @@ class Heizen:
             long_min = float(self.settings.get("vent_long_min") or 30)
             info["open"] = {"since": dt_util.utc_from_timestamp(session["start"]).isoformat(), "minutes": round(open_min, 1),
                             "target": session["target"], "done": session["done"], "cool": session["cool"],
-                            "learned": bool(session.get("learned")),
-                            "kwh": window_loss_kwh(open_min, session["t0"], out_temp),
-                            "ct": round(window_loss_kwh(open_min, session["t0"], out_temp) * price, 1)}
+                            "learned": bool(session.get("learned"))}
             if not self._summer and open_min >= long_min:
-                kwh = window_loss_kwh(open_min, room_temp, out_temp)
-                info["long"] = {"minutes": int(open_min), "kwh": kwh, "ct": round(kwh * price, 1),
-                                "ct_h": round(window_loss_kwh(60, room_temp, out_temp) * price, 1)}
+                info["long"] = {"minutes": int(open_min), "kwh": window_loss_kwh(open_min, room_temp, out_temp)}
         elif session:
             # Fenster zu: Lüftung in die Bilanz
             open_min = (now - session["start"]) / 60
@@ -1801,7 +1789,7 @@ class Heizen:
                 log = self.vent_log.setdefault(room_id, [])
                 kwh = window_loss_kwh(open_min, session["t0"], out_temp)
                 log.append({"at": round(session["start"]), "min": round(open_min, 1), "rh0": session["rh0"], "rh1": humidity,
-                            "t0": session["t0"], "t1": room_temp, "kwh": kwh, "ct": round(kwh * price, 1)})
+                            "t0": session["t0"], "t1": room_temp, "kwh": kwh})
                 # Luftwechsel lernen (nur echte Stoßlüftungen bis 45 Min.)
                 tau = vent_tau(open_min, session["t0"], session["rh0"], room_temp, humidity,
                                session.get("to", out_temp), session.get("rho", out_rh)) if open_min <= 45 else None
@@ -1829,14 +1817,12 @@ class Heizen:
         air = {
             "limit": limit, "minutes": minutes, "learned": learned, "tau": (sorted(self.vent_tau.get(room_id) or [])[len(self.vent_tau.get(room_id) or []) // 2]
                                                                             if len(self.vent_tau.get(room_id) or []) >= 3 else None),
-            "helps": helps, "wait": wait, "price": price,
+            "helps": helps, "wait": wait,
             "mold": mold, "co2": co2, "reasons": reasons, "kind": kind,
             "dew_point": advice["dew_point"] if advice else None, **info,
             "last": {"at": dt_util.utc_from_timestamp(last["at"]).isoformat(), "min": last["min"],
-                     "rh0": last.get("rh0"), "rh1": last.get("rh1"), "kwh": last.get("kwh"),
-                     "ct": last.get("ct", round((last.get("kwh") or 0) * price, 1))} if last else None,
+                     "rh0": last.get("rh0"), "rh1": last.get("rh1")} if last else None,
             "week": {"count": len(week), "minutes": round(sum(v["min"] for v in week)), "kwh": round(sum(v.get("kwh") or 0 for v in week), 1),
-                     "eur": round(sum(v.get("kwh") or 0 for v in week) * price / 100, 2),
                      "rh_drop": round(sum(drops) / len(drops)) if drops else None},
             "balance": balance,
         }

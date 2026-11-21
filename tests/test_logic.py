@@ -628,9 +628,9 @@ def test_lueften_lernen_hilft_beste_zeit():
     now = 1_000_000
     hours = [{"ts": now + i * 3600, "hour": (6 + i) % 24, "temp": t, "rh": 80, "rain": r} for i, (t, r) in
              enumerate([(2, False), (4, False), (6, True), (8, False), (9, False), (10, False), (11, False), (10, False), (8, False), (6, False), (5, False), (4, False)])]
-    plan = L.vent_plan(hours, now, 21, 55, 12)
+    plan = L.vent_plan(hours, now, 21, 55)
     assert [p["hour"] for p in plan] == [9, 14], plan  # 8 Uhr regnet; je Hälfte die Stunde mit dem kleinsten Wärmeverlust
-    assert all(p["minutes"] and p["ct"] >= 0 for p in plan)
+    assert all(p["minutes"] for p in plan)
     wet = [{**h, "rh": 100, "temp": 22} for h in hours]
     assert L.vent_plan(wet, now, 21, 55) == []
     assert L.next_dry_hour(hours, now, 21, 70)["hour"] == 7

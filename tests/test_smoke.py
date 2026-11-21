@@ -824,6 +824,30 @@ def test_rollwerk_raum_aus_heizwerk(hw):
     assert hass.calls[-1] == ("cover", "set_cover_position", {"entity_id": "cover.wz", "position": 30})
     assert "gekippt – lüften" in st["reason"]
 
+    async def more():
+        # „Beim Lüften ganz öffnen“: Fenster offen -> ganz auf; Fenster zu -> zurück (zu)
+        hass.set("cover.wz", "open", {"current_position": 30, "supported_features": 15}, "Rollladen Wohnzimmer")
+        await rw.async_evaluate()
+        prof = dict(rw.profiles["standard"], vent_options=["vent_full"])
+        await rw.async_save_profile("standard", prof)
+        full = (hass.calls[-1], rw.status()["covers"]["cover.wz"]["reason"], {k: v for k, v in rw._rt["cover.wz"].items() if k in ("sent", "target", "blocked", "manual_at", "cat")})
+        hass.set("cover.wz", "open", {"current_position": 100, "supported_features": 15}, "Rollladen Wohnzimmer")
+        # Regen bei offenem Fenster: Nachricht
+        hass.set("weather.home", "rainy", {"temperature": 12, "humidity": 95})
+        await rw.haus.async_save_settings({"weather_entity": "weather.home", "notify_targets": ["mobile_app_pixel"], "notify_quiet": False,
+                                           "notify_storm": "normal"})
+        await rw.async_evaluate()
+        await asyncio.sleep(0)
+        wet = "Fenster offen – Regen" in hass.sent()
+        hass.set("binary_sensor.wz_fenster", "off", {"device_class": "window"}, "Fenster Wohnzimmer")
+        await rw.async_evaluate()
+        return full, wet, hass.calls[-1]
+
+    full, wet, back = asyncio.run(more())
+    assert "ganz auf" in full[1] and (full[0][2].get("position") == 100 or full[0][1] == "open_cover"), full
+    assert wet
+    assert back[2].get("position") == 0 or back[1] == "close_cover", back
+
 
 def test_rollwerk_zwei_stufen(hw):
     """Abends: Stufe 1 (50 %) sobald die Sonne im Westen steht, Stufe 2 (zu) zur spätesten Zeit."""
@@ -1248,7 +1272,6 @@ def test_lueften_ausgebaut(hw):
         air = ctl.status()["rooms"]["bad"]["air"]
         assert len(ctl._data()["vent_tau"]["bad"]) == 3 and air["learned"] and air["tau"] and 3 <= air["minutes"] <= 30
         assert any(e["title"] == "Lüften gelernt" for e in log.entries)
-        assert air["last"]["ct"] > 0 and air["week"]["eur"] > 0 and air["price"] == 12
         # Draußen schwül: Lüften trocknet nicht – keine Empfehlung, sondern „später“
         hass.set("sensor.bad_h", "75", name="Bad Feuchte")
         hass.set("weather.home", "cloudy", {"temperature": 24.0, "humidity": 95})
@@ -1261,7 +1284,7 @@ def test_lueften_ausgebaut(hw):
                         "condition": "rainy" if i == 1 else "cloudy"} for i in range(24)]
         await haus._async_refresh_forecast(force=True)
         plan = ctl.status()["vent_plan"]
-        assert plan and plan["times"] and all(t["minutes"] and t["ct"] >= 0 for t in plan["times"])
+        assert plan and plan["times"] and all(t["minutes"] for t in plan["times"])
 
     asyncio.run(run())
 

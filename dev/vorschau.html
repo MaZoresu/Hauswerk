@@ -109,8 +109,8 @@ const hmLinksA1 = { walls: [{ entity: "climate.wohnzimmer", address: "WTHWZ", pe
     { address: "SWDOWZ", name: "Wohnzimmer Fenster links", model: "HMIP-SWDO", kind: "window", entity: null, in_room: false, channels: [1] }] }],
   linked_trvs: ["climate.wohnzimmer_heizkoerper"], unlinked_trvs: ["climate.wohnzimmer_heizkoerper2"], windows_ccu: [], fal: [] };
 const status = {
-  vent_plan: { rh_in: 58, times: [{ at: new Date(Date.now() + 2 * 3600e3).toISOString(), hour: 0, temp: 6, minutes: 10, kwh: 0.05, ct: 0.6, gain: 4.1 },
-    { at: new Date(Date.now() + 6 * 3600e3).toISOString(), hour: 0, temp: 8, minutes: 10, kwh: 0.04, ct: 0.5, gain: 3.8 }] },
+  vent_plan: { rh_in: 58, times: [{ at: new Date(Date.now() + 2 * 3600e3).toISOString(), hour: 0, temp: 6, minutes: 10, kwh: 0.05, gain: 4.1 },
+    { at: new Date(Date.now() + 6 * 3600e3).toISOString(), hour: 0, temp: 8, minutes: 10, kwh: 0.04, gain: 3.8 }] },
   hm_links: { available: true, at: new Date(Date.now() - 2 * 3600e3).toISOString(), error: null, rooms: { a1: hmLinksA1 },
     findings: [{ level: "warn", room: null, entity: null, text: "WTH Kinderzimmer Jonte ist in der CCU mit keinem Gerät verknüpft – Heizkörper bzw. Fußbodenheizung folgen ihm nicht" },
       { level: "info", room: null, entity: null, text: "A_Fußbodenheizung: Kanal 6 ist keinem Wandthermostat zugeordnet – Heizkreis ohne Regelung?" }], devices: {} },
@@ -124,7 +124,7 @@ const status = {
       fireplace: { state: "maybe", source: "verlauf", cause: "kamin?", rise: 0.7, minutes: 12, manual: false, signal: null },
       air: { limit: 65, minutes: 10, mold: { wall_temp: 14.9, wall_rh: 66, level: "ok" }, co2: 840, reasons: [], kind: null,
         open: { since: new Date(Date.now() - 4 * 60e3).toISOString(), minutes: 4.2, target: 10, done: null, cool: false },
-        last: { at: new Date(Date.now() - 20 * 3600e3).toISOString(), min: 12, rh0: 58, rh1: 49 }, week: { count: 6, minutes: 61, kwh: 1.1, eur: 0.13, rh_drop: 7 }, learned: true, tau: 4.5, price: 12, balance: { level: "bad", days: 3, rh_morning: 68, text: "3 Tage nicht gelüftet, Feuchte morgens 68 %" } },
+        last: { at: new Date(Date.now() - 20 * 3600e3).toISOString(), min: 12, rh0: 58, rh1: 49 }, week: { count: 6, minutes: 61, kwh: 1.1, rh_drop: 7 }, learned: true, tau: 4.5, balance: { level: "bad", days: 3, rh_morning: 68, text: "3 Tage nicht gelüftet, Feuchte morgens 68 %" } },
       battery_low: [{ id: "sensor.thermostat_wohnzimmer_batterie", name: "Thermostat Wohnzimmer Batterie", level: 14 }],
       valve: 100, valve_all: 100, cold_radiator: { minutes: 74, valve: 100, rise: 0.1 },
       followers: ["climate.wohnzimmer_heizkoerper"], pair_broken: [], duty_blocked: [], assist: { entities: ["climate.wohnzimmer_heizkoerper2"], on: true, diff: 0.5, room_temp: 20.4 },

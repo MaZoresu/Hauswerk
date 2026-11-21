@@ -301,7 +301,6 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("vent_co2"): vol.All(vol.Coerce(int), vol.Range(min=0, max=5000)),
         vol.Optional("vent_cool"): bool,
         vol.Optional("vent_long_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
-        vol.Optional("vent_price"): vol.All(vol.Coerce(float), vol.Range(min=0, max=100)),
     },
     extra=vol.REMOVE_EXTRA,
 )
