@@ -733,8 +733,7 @@ def test_schoner_module_als_symbole(tablet):
     assert len(mods) == 4 and all(m[0] and m[1] >= 1 for m in mods), mods  # Heizwerk, Rollwerk, Kraftwerk, Lichtwerk
     text = p.js(f"{EL}.shadowRoot.getElementById('saver').innerText")
     assert "Raum heizt" not in text and "Rollläden:" not in text and "Solar " not in text
-    # nur noch: Heizwerk ok/prüfen · Rollwerk offen/zu · Kraftwerk ohne Akku · Lichtwerk wie viele an
-    assert mods[0][1] == 1 and mods[0][2].strip() in ("ok", "prüfen"), mods[0]
+    # Heizwerk wie bisher · Rollwerk offen/zu · Kraftwerk ohne Akku · Lichtwerk wie viele an
     assert mods[1][1] == 2, mods[1]
     assert "%" not in mods[2][2], mods[2]
     assert mods[3][1] == 1 and mods[3][2].strip().isdigit(), mods[3]

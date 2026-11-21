@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.68.3 – 2026-11-21
+
+### Geändert (Bildschirmschoner)
+- **Heizwerk wieder wie vorher:** heizende Räume, offene Fenster und „niemand zu Hause“ (statt „ok“). Rollwerk, Kraftwerk und Lichtwerk bleiben schlank wie in 0.68.2.
+
 ## 0.68.2 – 2026-11-21
 
 ### Geändert (Bildschirmschoner)

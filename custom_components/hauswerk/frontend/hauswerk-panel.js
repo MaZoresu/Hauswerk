@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.68.2";
+const VERSION = "0.68.3";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2233,11 +2233,10 @@ class HauswerkPanel extends HTMLElement {
     const mods = [];
     const it = (icon, val, title) => `<span class="sv-i" title="${esc(title)}"><ha-icon icon="${icon}"></ha-icon>${val != null ? `<b>${esc(String(val))}</b>` : ""}</span>`;
     if (f.rooms.length) {
-      // Heizwerk: nur „ok“ – oder ein Achtung-Zeichen, wenn die Kopfkachel etwas zu beheben hat
-      const hb = this._briefParts(this._heatBriefHtml());
-      const bad = ["warn", "alert"].includes(hb?.tone);
-      mods.push(["heizen", [bad ? `<span class="sv-i" title="${esc(hb.title)}" style="color:${hb.color}"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><b>prüfen</b></span>`
-        : `<span class="sv-i" title="${esc(hb?.title || "")}"><ha-icon icon="mdi:check-circle-outline" style="color:#22c55e"></ha-icon><b>ok</b></span>`]]);
+      const x = [it("mdi:fire", f.heating, "heizen")];
+      if (f.open) x.push(it("mdi:window-open-variant", f.open, "Fenster offen"));
+      if (this._status?.away) x.push(it("mdi:home-export-outline", null, "niemand zu Hause"));
+      mods.push(["heizen", x]);
     }
     if (covers.length) {
       const pos = covers.map((c) => this._rwPos(c.st)).filter((v) => v != null);
