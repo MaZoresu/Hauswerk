@@ -89,8 +89,9 @@ Garten                      geplant, ausgegraut
 
 Unter *Einstellungen › Darstellung › Tabletmodus* je Gerät einschalten – oder als Start-Adresse `…/hauswerk?tablet` eintragen (z. B. in Fully Kiosk; `?tablet=0` schaltet ihn wieder aus).
 
-- **Unterleiste unten:** Die Modul-Tasten bleiben oben; die Unterleiste des Moduls (z. B. Räume · Bericht · Einstellungen) steht groß am unteren Rand.
-- **Kein Scrollen:** Jede Seite passt sich der Auflösung an – so groß wie gut lesbar, bei Listen zwei Spalten. Passt es nicht auf eine Seite, gibt es eine zweite zum Wischen (Punkte unten).
+- **Modul-Leiste links:** große Tasten für Start, Module und Einstellungen; die Unterseiten eines Moduls (z. B. Räume · Bericht · Einstellungen) stehen oben als Umschalter.
+- **Wand-Kacheln im festen Raster:** Räume, Rollläden und Lichter in 2–4 Spalten × 1–3 Reihen, keine Kachel angeschnitten, gleichmäßig auf die Seiten verteilt; je Kachel Name, eine große Zahl und eine Statuszeile, eingefärbt nach Zustand – Einzelheiten beim Antippen.
+- **Kein Scrollen:** Jede Seite passt sich der Auflösung an. Passt es nicht auf eine Seite, gibt es weitere zum Wischen (Punkte und „Seite 1 von 2“ unten).
 - **Hell/Dunkel nach Sonnenstand** (Standard am Tablet, je Gerät umstellbar) – Fully meldet den Dunkelmodus des Geräts meist nicht.
 - **Bildschirmschoner** nach 1–10 Minuten ohne Berührung: abgedunkelt mit großer Uhr, Datum, Wetter, Hausstand und Hinweisen; nachts noch dunkler, der Inhalt wandert gegen Einbrennen; neue Hinweise leuchten auf. Dabei geht es zurück zur Startseite. Antippen weckt auf, ohne etwas zu schalten.
 - **Seitenleiste:** Die Seitenleiste von Home Assistant wird im Tabletmodus ausgeblendet (☰ öffnet sie kurz); ohne Tabletmodus kommt sie wie vorher zurück.

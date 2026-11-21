@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.70.0 – 2026-11-21
+
+### Neu – Tabletmodus neu aufgeteilt
+- **Modul-Leiste links:** Start, Heizwerk, Rollwerk, Kraftwerk, Lichtwerk und unten Einstellungen als große Tasten (mindestens 64 px) am linken Rand, mit Zahl bei heizenden Räumen bzw. offenen Fenstern. Die Reiter oben entfallen.
+- **Unterseiten oben** als Umschalter (z. B. Räume · Lüften · Bericht · Einstellungen) statt der Leiste am unteren Rand – mehr Höhe für die Kacheln.
+- **Festes Seitenraster:** Räume, Rollläden und Lichter stehen in 2–4 Spalten × 1–3 Reihen, passend zur Bildschirmgröße. Keine Kachel wird angeschnitten; die Kacheln werden gleichmäßig auf die Seiten verteilt (5 → 3 + 2 statt 4 + 1). Seiten blättern seitwärts, unten steht „Seite 1 von 2“.
+- **Wand-Kacheln, lesbar aus Abstand:** je Kachel Name (19 px), eine große Zahl (48 px) und genau eine Statuszeile (16 px); die ganze Kachel ist in der Farbe des Zustands leicht eingefärbt. Einzelheiten (Zeitplan, Ursache, Ventil …) beim Antippen.
+  - **Heizwerk:** Raumtemperatur, „Soll 21,0 °C · Komfort bis 22:00“, Symbole für heizt, Fenster/Lüften, Kamin.
+  - **Rollwerk:** Fenster-Grafik, „55 %“ bzw. offen/zu, Grund (Beschattung, von Hand, Tür offen …) oder die nächste Fahrt; ↑ ■ ↓ als große Knöpfe.
+  - **Lichtwerk:** große Lampe zum Schalten (mit Melder-Symbol), „an“/„80 %“/„aus“, HmIP, von Hand oder Ursache und Ablauftimer.
+- Detailliert/Kompakt gibt es im Tablet nicht mehr – Handy und PC bleiben unverändert.
+
 ## 0.69.0 – 2026-11-21
 
 ### Neu – Startseite und Tablet

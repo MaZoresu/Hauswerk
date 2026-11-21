@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.69.0";
+const VERSION = "0.70.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -946,6 +946,7 @@ class HauswerkPanel extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>${STYLE}</style>
       <div id="sentinel" aria-hidden="true"></div>
+      <nav id="rail" class="rail" aria-label="Module"></nav>
       <header class="top" id="head"></header>
       <div class="app">
         <div id="chips"></div>
@@ -1064,12 +1065,26 @@ class HauswerkPanel extends HTMLElement {
     if (head) head.innerHTML = this._headHtml();
     const bnav = this.shadowRoot.getElementById("bnav");
     if (bnav) bnav.innerHTML = this._data && !this._error ? this._bnavHtml() : "";
+    const rail = this.shadowRoot.getElementById("rail");
+    if (rail) rail.innerHTML = this._data && !this._error && this._tablet ? this._railHtml() : "";
     const chips = this.shadowRoot.getElementById("chips");
     if (chips)
       chips.innerHTML =
         this._data && !this._error
           ? (MODULES[0].views.includes(this._tab) ? this._heatNavHtml() : "") + (MODULES[1].views.includes(this._tab) ? this._rwNavHtml() : "") + (MODULES[2].views.includes(this._tab) ? this._kwNavHtml() : "") + (MODULES[3].views.includes(this._tab) ? this._lwNavHtml() : "")
           : "";
+  }
+
+  /** Tablet: Modul-Leiste links – große Symbole, darunter der Name; Einstellungen unten. */
+  _railHtml() {
+    const mod = MODULES.find((m) => m.views.includes(this._tab));
+    const f = this._facts();
+    const dot = (id) => (id === "heizen" && f.open ? `<em class="warn">${f.open}</em>` : id === "heizen" && f.heating ? `<em class="ok">${f.heating}</em>` : "");
+    const item = (id, name, icon, target, on) => `<button class="ri ${on ? "on" : ""}" data-action="tab" data-tab="${target}" aria-label="${name}">${modIcon(icon)}<span>${name}</span>${dot(id)}</button>`;
+    return `${item("start", "Start", "mdi:view-dashboard-outline", "start", this._tab === "start")}
+      ${MODULES.map((m) => item(m.id, m.name, m.logo ? `logo:${m.logo}` : m.icon, mod?.id === m.id ? this._tab : m.views[0], mod?.id === m.id)).join("")}
+      <span class="grow"></span>
+      ${item("house", "Einstellungen", "mdi:cog-outline", "house", ["house", "log"].includes(this._tab))}`;
   }
 
   /** Untere Leiste fürs Handy: Start · Module · Einstellungen (Unterseiten eines Moduls über seine Unterleiste). */
@@ -1572,6 +1587,57 @@ class HauswerkPanel extends HTMLElement {
       pages.push([start, Math.max(end, start)]);
       return { pages, total: tin.getBoundingClientRect().height };
     };
+    // Wand-Kacheln: festes Seitenraster (2–4 Spalten × 1–3 Reihen), keine Kachel angeschnitten,
+    // Kacheln gleichmäßig auf die Seiten verteilt (5 → 3 + 2 statt 4 + 1); Seiten blättern seitwärts
+    const wg = tin.querySelector(".wgrid");
+    if (wg) {
+      base(f);
+      tin.style.height = "auto";
+      tin.style.columnWidth = "auto";
+      const tiles = [...wg.children];
+      const n = Math.max(1, tiles.length);
+      const top = wg.getBoundingClientRect().top - tin.getBoundingClientRect().top;
+      const avail = H / f - top;
+      const Wz = W / f;
+      const G = 14;
+      const opts = [];
+      for (let cols = 2; cols <= 4; cols++) for (let rws = 1; rws <= 3; rws++) {
+        const tw = (Wz - (cols - 1) * G) / cols, th = (avail - (rws - 1) * G) / rws;
+        if (tw < 230 || th < 150) continue;
+        const cap = cols * rws, pages = Math.ceil(n / cap);
+        opts.push({ cols, rws, pages, empty: pages * cap - n, th, tw });
+      }
+      if (!opts.length) opts.push({ cols: 2, rws: 1, pages: Math.ceil(n / 2), empty: 0, th: avail, tw: (Wz - G) / 2 });
+      // wenig Seiten, wenig Lücken, dann große Kacheln
+      // Seitenverhältnis nahe 1,6 (breiter als hoch) – keine riesigen, fast leeren Kacheln
+      const asp = (x) => Math.abs(Math.log(x.tw / Math.min(x.th, 320) / 1.6));
+      opts.sort((a, b) => a.pages - b.pages || a.empty - b.empty || asp(a) - asp(b));
+      const o = opts[0];
+      o.th = Math.min(o.th, 320);
+      const per = Math.ceil(n / o.pages);
+      wg.style.gridTemplateColumns = `repeat(${o.cols * o.pages}, ${o.tw}px)`;
+      wg.style.gridTemplateRows = `repeat(${o.rws}, ${o.th}px)`;
+      wg.style.columnGap = `${G}px`;
+      wg.style.rowGap = `${G}px`;
+      wg.style.width = `${Wz}px`;
+      tiles.forEach((t, i) => {
+        const pg = Math.floor(i / per), k = i % per;
+        t.style.gridColumn = String(pg * o.cols + (k % o.cols) + 1);
+        t.style.gridRow = String(Math.floor(k / o.cols) + 1);
+      });
+      wg.dataset.cols = o.cols;
+      wg.dataset.rows = o.rws;
+      this._tWall = { stride: Wz + G, z: f };
+      this._tRowMode = "wall";
+      this._tZoom = { ...(this._tZoom || {}), [tab]: f };
+      this._tPages = o.pages;
+      const page = Math.min(this._tPage[tab] || 0, o.pages - 1);
+      this._tPage[tab] = page;
+      this._tShow(page);
+      const dots = this.shadowRoot.getElementById("tdots");
+      if (dots) dots.innerHTML = o.pages > 1 ? Array.from({ length: o.pages }, (_, k) => `<button class="${k === page ? "on" : ""}" data-action="tpage" data-i="${k}" aria-label="Seite ${k + 1}"></button>`).join("") + `<span class="tpg">Seite ${page + 1} von ${o.pages}</span>` : "";
+      return;
+    }
     // Kachel-Raster (Räume, Rollläden detailliert): feste Spalten, genau 2 Reihen je Seite, in beiden Modulen gleich
     const grid = rows && W >= 900 ? tin.querySelector(".rooms:not(.compact), .rw-grid.tgrid") : null;
     if (grid) {
@@ -1673,6 +1739,16 @@ class HauswerkPanel extends HTMLElement {
     const tin = box?.firstElementChild;
     if (!box || !tin) return;
     const z = this._tZoom?.[this._tab] || 1;
+    if (this._tRowMode === "wall") {
+      const wg = tin.querySelector(".wgrid");
+      box.scrollLeft = 0;
+      tin.style.transform = "";
+      tin.style.clipPath = "";
+      if (wg) wg.style.transform = page ? `translateX(${-page * this._tWall.stride}px)` : "";
+      const lbl = this.shadowRoot.querySelector("#tdots .tpg");
+      if (lbl) lbl.textContent = `Seite ${page + 1} von ${this._tPages}`;
+      return;
+    }
     if (this._tRowMode) {
       const r = this._tRows;
       const [s, e] = r?.pages?.[page] || [0, 0];
@@ -3076,14 +3152,16 @@ class HauswerkPanel extends HTMLElement {
 
       <div class="shead outer">
         <ha-icon icon="mdi:floor-plan"></ha-icon><h3>Räume</h3><span class="count">${n}</span><span class="grow"></span>
-        ${n ? `<div class="vtog" role="group" aria-label="Ansicht">
+        ${n && !this._tablet ? `<div class="vtog" role="group" aria-label="Ansicht">
           <button class="${compact ? "" : "on"}" data-action="room-view" data-v="detail" title="Detailliert"><ha-icon icon="mdi:view-agenda-outline"></ha-icon><span>Detailliert</span></button>
           <button class="${compact ? "on" : ""}" data-action="room-view" data-v="compact" title="Kompakt"><ha-icon icon="mdi:view-grid-outline"></ha-icon><span>Kompakt</span></button>
         </div>` : ""}
         ${this._admin && n ? `<button class="link" data-action="room-new"><ha-icon icon="mdi:plus"></ha-icon>Raum</button>` : ""}
       </div>
       ${
-        n
+        n && this._tablet
+          ? `<div class="wgrid">${rooms.map((r) => this._roomWall(r)).join("")}</div>`
+          : n
           ? `<div class="rooms ${compact ? "compact" : ""}">${rooms.map((r) => (compact ? this._roomMini(r) : this._roomCard(r))).join("")}</div>`
           : `<section class="card empty">
               <ha-icon icon="mdi:home-plus-outline"></ha-icon>
@@ -3787,6 +3865,78 @@ class HauswerkPanel extends HTMLElement {
     return html.trim() ? `<div class="rm-ind">${html}</div>` : "";
   }
 
+  // ------------------------------------------------------------ Tablet: Wand-Kacheln (groß, eine Statuszeile, Rest beim Antippen)
+  _wallTile({ act, color, ic, area, name, flags = "", value, unit = "", status = "", ctl = "", cls = "" }) {
+    return `<article class="card wt ${cls}" style="--wc:${color}" ${act} role="button" tabindex="0">
+      <div class="wt-h">${ic}<span class="wt-n">${area ? `<small>${esc(area)}</small>` : ""}<b>${esc(name)}</b></span>${flags ? `<span class="wt-f">${flags}</span>` : ""}</div>
+      <div class="wt-v"><b>${value}</b>${unit ? `<small>${unit}</small>` : ""}</div>
+      ${status ? `<div class="wt-s">${status}</div>` : ""}
+      ${ctl ? `<div class="wt-ctl">${ctl}</div>` : ""}
+    </article>`;
+  }
+
+  _roomWall(room) {
+    if (!(room.climates || []).length) return this._roomSetup(room, true);
+    const s = this._status?.rooms?.[room.id] || {};
+    const m = MODE[s.mode || "aus"] || MODE.aus;
+    const info = room.enabled === false ? null : this._schedInfo(room, s);
+    const fl = [];
+    if (s.heating) fl.push(`<ha-icon icon="mdi:fire" style="color:#f97316" title="heizt"></ha-icon>`);
+    const vc = this._ventChip(s);
+    if (vc) fl.push(`<ha-icon icon="${vc[0]}" style="color:${vc[2]}" title="${esc(vc[3])}"></ha-icon>`);
+    else if (s.windows_open) fl.push(`<ha-icon icon="mdi:window-open-variant" style="color:${C.air}" title="Fenster offen"></ha-icon>`);
+    const fc = this._fireChip(s);
+    if (fc) fl.push(`<ha-icon icon="${fc[0]}" style="color:${fc[2]}" title="${esc(fc[3])}"></ha-icon>`);
+    return this._wallTile({
+      act: `id="room-${room.id}" data-action="room-quick" data-id="${room.id}"`, color: m.c,
+      ic: `<span class="wt-ic"><ha-icon icon="${esc(roomIcon(room))}"></ha-icon></span>`, name: room.name, flags: fl.join(""),
+      value: fmt(s.room_temp), unit: "°C",
+      status: `<span>Soll <b style="color:${tint(tempColor(s.target))}">${fmt(s.target)} °C</b></span><span class="wt-dim">${esc(info?.text || s.mode_label || "Automatik aus")}</span>`,
+      cls: s.mode === "aus" ? "off" : "",
+    });
+  }
+
+  _coverWall(c, area) {
+    const p = this._rwPos(c.st);
+    const bad = !c.st || ["unavailable", "unknown"].includes(c.st.state);
+    const moving = c.st?.state === "opening" ? "fährt hoch" : c.st?.state === "closing" ? "fährt runter" : "";
+    const cat = c.rs.cat;
+    const flag = cat === "storm" ? ["mdi:weather-windy-variant", "Sturmschutz", "#ef4444"] : c.rs.contact_open ? ["mdi:door-open", "Tür offen", "#f59e0b"]
+      : cat === "shading" ? ["mdi:sun-thermometer-outline", "Beschattung", "#f97316"] : c.rs.manual ? ["mdi:hand-back-right-outline", "von Hand", C.hand]
+      : c.rs.contact_tilted ? ["mdi:window-open-variant", "gekippt", C.air] : c.cfg.auto === false ? ["mdi:robot-off-outline", "Automatik aus", C.rest] : null;
+    const nx = c.cfg.auto !== false ? this._rwNextShort(c.rs.next) : "";
+    const btn = (a, i, t) => `<button class="wbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="${a}" title="${t}" ${bad ? "disabled" : ""}><ha-icon icon="${i}"></ha-icon></button>`;
+    return this._wallTile({
+      act: `data-action="pop-open" data-pop="rwpos:${esc(c.id)}"`, color: flag ? flag[2] : p != null && p <= 5 ? "#3b82f6" : C.rest,
+      ic: bad ? `<span class="wt-ic"><ha-icon icon="mdi:window-shutter-alert"></ha-icon></span>` : `<span class="wt-win">${this._rwWin(c, p)}</span>`,
+      area, name: this._entityName(c.id),
+      value: bad ? "–" : moving ? "…" : p == null ? esc(c.st.state) : p >= 95 ? "offen" : p <= 5 ? "zu" : fmt(p, 0), unit: !bad && !moving && p != null && p > 5 && p < 95 ? "%" : "",
+      status: bad ? "nicht erreichbar" : moving || (flag ? `<span style="color:${flag[2]}"><ha-icon icon="${flag[0]}"></ha-icon>${flag[1]}</span>` : nx ? `<span class="wt-dim">als Nächstes ${nx}</span>` : ""),
+      ctl: btn("open", "mdi:arrow-up", "hoch") + btn("stop", "mdi:stop", "Stopp") + btn("close", "mdi:arrow-down", "runter"),
+      cls: bad ? "bad" : "",
+    });
+  }
+
+  _lightWall(l, area) {
+    const bad = !l.st || ["unavailable", "unknown"].includes(l.st.state);
+    const on = l.st?.state === "on";
+    const pct = this._lwPct(l);
+    const mot = this._lwMotion(l);
+    const dim = l.id.startsWith("light.") && (l.ls.modes || []).some((m) => m !== "onoff");
+    const st = bad ? "nicht erreichbar"
+      : l.ls.ccu ? `<span style="color:#0ea5e9"><ha-icon icon="mdi:link-variant"></ha-icon>HmIP</span>`
+      : l.ls.manual && l.cfg.auto !== false ? `<span style="color:${C.hand}"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>von Hand</span>`
+      : l.cfg.auto !== false && l.ls.cause ? `<span class="wt-dim">${esc(l.ls.cause)}</span>` : "";
+    const timer = on && l.ls.off?.at ? `<span style="color:${C.ok}"><ha-icon icon="mdi:timer-outline"></ha-icon><span data-lw-until="${esc(l.ls.off.at)}">${this._lwLeft(l.ls.off.at)}</span></span>` : "";
+    return this._wallTile({
+      act: `data-action="pop-open" data-pop="lwbri:${esc(l.id)}"`, color: on ? this._lwColor(l) : C.rest,
+      ic: `<button class="wt-bulb ${on ? "on" : ""}" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" ${bad ? "disabled" : ""} title="${on ? "Aus" : "An"}" style="--lc:${this._lwColor(l)}"><ha-icon icon="${bad ? "mdi:lightbulb-alert-outline" : on ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}"></ha-icon>${mot ? `<span class="lw-mot"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</button>`,
+      area: area !== this._lwName(l) ? area : "", name: this._lwName(l),
+      value: bad ? "–" : on ? (dim && pct != null ? fmt(pct, 0) : "an") : "aus", unit: !bad && on && dim && pct != null ? "%" : "",
+      status: [st, timer].filter(Boolean).join(""), cls: `${on ? "on" : ""} ${bad ? "bad" : ""}`,
+    });
+  }
+
   _roomMini(room) {
     if (!(room.climates || []).length) return this._roomSetup(room, true);
     const s = this._status?.rooms?.[room.id] || {};
@@ -4389,6 +4539,7 @@ class HauswerkPanel extends HTMLElement {
         <button class="${view === "rooms" ? "on" : ""}" data-action="lw-view" data-v="rooms" title="Räume"><ha-icon icon="mdi:floor-plan"></ha-icon><span>Räume</span></button>
       </div></div>`;
     const sorted = [...groups.entries()].sort((a, b) => (a[0] === "Ohne Raum") - (b[0] === "Ohne Raum") || a[0].localeCompare(b[0], "de"));
+    if (this._tablet) return head + `<div class="wgrid">${sorted.map(([area, list]) => list.map((l) => this._lightWall(l, area)).join("")).join("")}</div>`;
     if (view === "rooms") return head + tog + `<div class="rw-grid ${this._tablet ? "tgrid" : ""}">${sorted.map(([area, list]) => this._lwRoomTile(area, list)).join("")}</div>`;
     if (this._tablet && !compact) return head + tog + `<div class="rw-grid tgrid">${sorted.map(([area, list]) => list.map((l) => tile(l, area)).join("")).join("")}</div>`;
     // meist nur ein Licht je Raum: ein gemeinsames Raster, der Raum steht in der Kachel (statt fast leerer Zeilen)
@@ -5943,9 +6094,9 @@ class HauswerkPanel extends HTMLElement {
         <button class="${compact ? "on" : ""}" data-action="rw-view" data-v="compact" title="Kompakt"><ha-icon icon="mdi:view-grid-outline"></ha-icon><span>Kompakt</span></button>
       </div></div>`;
     // Tabletmodus, detailliert: ein gemeinsames Raster (2 Reihen je Seite, wie die Heizwerk-Räume), Raum steht in der Kachel
-    if (this._tablet && !compact) {
+    if (this._tablet) {
       const sorted = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"));
-      return head + tog + `<div class="rw-grid tgrid">${sorted.map(([area, list]) => list.map((c) => tile(c, area)).join("")).join("")}</div>`;
+      return head + `<div class="wgrid">${sorted.map(([area, list]) => list.map((c) => this._coverWall(c, area)).join("")).join("")}</div>`;
     }
     return head + tog + [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"))
       .map(([area, list]) => `<div class="rw-area ${compact ? "compact" : ""}"><h3>${esc(area)}</h3><div class="rw-grid ${compact ? "compact" : ""}">${list.map((c) => (compact ? mini(c) : tile(c))).join("")}</div></div>`).join("");
@@ -12714,12 +12865,24 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 :host([embedded]) { min-height:calc(100vh - var(--header-height, 56px)); }
 :host([embedded][tablet]) { height:calc(100vh - var(--header-height, 56px)); height:calc(100dvh - var(--header-height, 56px)); }
 :host([tablet]) .top { position:relative; flex:none; padding-left:20px; padding-right:20px; }
-:host([tablet]) .mtabs { display:flex !important; }
+:host([tablet]) .mtabs { display:none !important; }
+/* Modul-Leiste links */
+.rail { display:none; }
+:host([tablet]) { padding-left:104px; box-sizing:border-box; }
+:host([tablet]) .rail { display:flex; flex-direction:column; gap:6px; position:fixed; left:0; top:0; bottom:0; width:104px; padding:14px 10px calc(14px + env(safe-area-inset-bottom)); box-sizing:border-box;
+  background:var(--card); border-right:1px solid var(--line); z-index:5; }
+.rail .ri { all:unset; cursor:pointer; position:relative; display:flex; flex-direction:column; align-items:center; gap:6px; padding:10px 4px; border-radius:16px; min-height:64px; justify-content:center; color:var(--muted); }
+.rail .ri .mlogo, .rail .ri > ha-icon { width:34px; height:34px; --mdc-icon-size:30px; }
+.rail .ri span { font-size:13px; font-weight:600; text-align:center; line-height:1.1; }
+.rail .ri.on { background:color-mix(in srgb, var(--accent) 16%, transparent); color:var(--text); box-shadow:inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 55%, transparent); }
+.rail .ri em { position:absolute; top:6px; right:10px; min-width:18px; height:18px; padding:0 4px; box-sizing:border-box; border-radius:99px; font-size:11px; font-style:normal; font-weight:700; display:grid; place-items:center; color:#fff; background:#f97316; }
+.rail .ri em.warn { background:#06b6d4; }
+.rail .grow { flex:1; }
 :host([tablet]) .top .ttl span { display:none; }
 :host([tablet]) .app { flex:1; min-height:0; width:100%; max-width:none; margin:0; padding:10px 20px 0; display:flex; flex-direction:column; }
 :host([tablet]) #main { order:1; flex:1; min-height:0; overflow:hidden; position:relative; }
 :host([tablet]) #tdots { order:2; }
-:host([tablet]) #chips { order:3; flex:none; }
+:host([tablet]) #chips { order:0; flex:none; }
 :host([tablet]) .tpages { height:100%; overflow:hidden; touch-action:pan-y pinch-zoom; }
 :host([tablet]) .tin { column-fill:auto; }
 :host([tablet]) .tpages.tflip { animation:tflip .18s ease-out; }
@@ -12732,13 +12895,39 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 :host([tablet]) .tpages .rw-area .rw-c { width:300px; }
 :host([tablet]) .tpages h3, :host([tablet]) .tpages .shead, :host([tablet]) .tpages .sub-h { break-after:avoid; }
 .tdots { display:none; }
+:host([tablet]) .tdots .tpg { margin-left:12px; font-size:13px; color:var(--muted); align-self:center; }
+/* Wand-Kacheln */
+:host([tablet]) .wgrid { display:grid; transition:transform .25s ease; }
+.wt { display:flex; flex-direction:column; gap:6px; padding:16px 18px; box-sizing:border-box; overflow:hidden; cursor:pointer; min-width:0;
+  background:color-mix(in srgb, var(--wc) 13%, var(--card)); border:1px solid color-mix(in srgb, var(--wc) 40%, var(--line)); border-left:5px solid var(--wc); }
+.wt.off, .wt.bad { opacity:.75; }
+.wt-h { display:flex; align-items:center; gap:10px; min-width:0; }
+.wt-ic { width:40px; height:40px; border-radius:12px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--wc) 22%, transparent); color:var(--wc); }
+.wt-ic ha-icon { --mdc-icon-size:24px; }
+.wt-win { flex:none; display:flex; }
+.wt-n { flex:1; min-width:0; display:flex; flex-direction:column; }
+.wt-n small { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wt-n b { font-size:19px; font-weight:650; line-height:1.15; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.wt-f { display:flex; gap:4px; flex:none; } .wt-f ha-icon { --mdc-icon-size:24px; }
+.wt-v { display:flex; align-items:baseline; gap:4px; margin-top:auto; line-height:1; }
+.wt-v b { font-size:48px; font-weight:300; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+.wt-v small { font-size:20px; color:var(--muted); }
+.wt-s { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:16px; line-height:1.3; min-height:21px; overflow:hidden; max-height:42px; }
+.wt-s span { display:inline-flex; align-items:center; gap:4px; } .wt-s ha-icon { --mdc-icon-size:18px; }
+.wt-dim { color:var(--muted); }
+.wt-ctl { display:flex; gap:10px; margin-top:4px; }
+.wbtn { all:unset; cursor:pointer; flex:1; height:48px; border-radius:14px; display:grid; place-items:center; background:color-mix(in srgb, var(--text) 8%, transparent); }
+.wbtn ha-icon { --mdc-icon-size:26px; } .wbtn:disabled { opacity:.4; }
+.wt-bulb { all:unset; cursor:pointer; position:relative; width:52px; height:52px; border-radius:16px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--text) 8%, transparent); color:var(--muted); }
+.wt-bulb.on { background:color-mix(in srgb, var(--lc) 30%, transparent); color:var(--lc); box-shadow:0 0 22px color-mix(in srgb, var(--lc) 45%, transparent); }
+.wt-bulb ha-icon { --mdc-icon-size:30px; }
 :host([tablet]) .tdots { display:flex; justify-content:center; gap:4px; min-height:22px; padding:8px 0 0; }
 .tdots button { all:unset; cursor:pointer; width:12px; height:12px; border-radius:99px; background:var(--track); background-clip:content-box; padding:12px 10px; margin:-12px 0; transition:width .15s; }
 .tdots button.on { width:30px; background:var(--accent); background-clip:content-box; }
 :host([tablet]) .bnav { display:none !important; }
-/* Unterleiste unten: groß zum Antippen */
-:host([tablet]) #chips nav { margin:8px 0 calc(10px + env(safe-area-inset-bottom)); padding:6px; gap:6px; }
-:host([tablet]) #chips nav button { padding:14px 12px; font-size:16px; }
+/* Unterseiten oben als Umschalter */
+:host([tablet]) #chips nav { margin:0 0 10px; padding:5px; gap:5px; }
+:host([tablet]) #chips nav button { padding:11px 12px; font-size:16px; min-height:44px; box-sizing:border-box; }
 :host([tablet]) #chips nav button ha-icon { --mdc-icon-size:22px; }
 :host([tablet]) .app { padding-bottom:0; }
 :host([tablet]) .savebar { position:sticky; bottom:0; }

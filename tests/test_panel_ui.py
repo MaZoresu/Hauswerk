@@ -559,14 +559,17 @@ def test_tablet_ohne_scrollen(tablet):
         main = p.js(f"(() => {{ const m = {EL}.shadowRoot.getElementById('main'); return [m.scrollHeight, m.clientHeight]; }})()")
         assert main[0] <= main[1] + 1, f"{view}: Inhalt scrollt {main}"
         assert p.js(f"{EL}._tPages") <= (1 if view in ("shutset", "house") else 2), f"{view}: {p.js(f'{EL}._tPages')} Seiten"
-        # Modul-Tasten oben, nur die Unterleiste (Räume · Bericht · Einstellungen) unten
-        r = p.js(f"""(() => {{ const r = {EL}.shadowRoot; const m = r.querySelector('.mtabs').getBoundingClientRect();
-            const sub = r.querySelector('#chips nav'); return [m.height, m.bottom, r.getElementById('main').getBoundingClientRect().top,
-            r.getElementById('main').getBoundingClientRect().bottom, sub ? sub.getBoundingClientRect().top : null, getComputedStyle(r.getElementById('bnav')).display]; }})()""")
-        assert r[0] > 0 and r[1] <= r[2], f"{view}: Modul-Tasten nicht oben {r}"
-        assert r[5] == "none", f"{view}: untere Modul-Leiste sichtbar"
+        # Modul-Leiste links (große Tasten), Unterseiten oben als Umschalter, keine Leisten unten
+        r = p.js(f"""(() => {{ const r = {EL}.shadowRoot; const rail = r.getElementById('rail').getBoundingClientRect();
+            const main = r.getElementById('main').getBoundingClientRect(); const sub = r.querySelector('#chips nav');
+            const btn = r.querySelector('#rail .ri').getBoundingClientRect();
+            return [rail.width, rail.right, main.left, sub ? sub.getBoundingClientRect().bottom : null, main.top, getComputedStyle(r.getElementById('bnav')).display,
+              getComputedStyle(r.querySelector('.mtabs')).display, btn.height]; }})()""")
+        assert r[0] > 60 and r[1] <= r[2] + 1, f"{view}: Modul-Leiste nicht links {r}"
+        assert r[5] == "none" and r[6] == "none", f"{view}: alte Leisten sichtbar {r}"
+        assert r[7] >= 60, f"{view}: Modul-Tasten zu klein {r}"
         if view not in ("start", "house"):
-            assert r[4] is not None and r[4] >= r[3], f"{view}: Unterleiste nicht unten {r}"
+            assert r[3] is not None and r[3] <= r[4] + 1, f"{view}: Unterleiste nicht oben {r}"
         p.ok(f"Tablet {view}")
     # Einstellungen immer auf einer Seite
     for view in ("settings", "shutset", "kwset", "house"):
@@ -761,8 +764,8 @@ def test_tablet_alle_raeume_sichtbar(browser, server):
         p.js(f"(i) => {{ {EL}._tPage.overview = -1; {EL}._tabletGo(i); }}", i)
         p.wait(100)
         vis = p.js(f"""(() => {{ const m = {EL}.shadowRoot.getElementById('main').getBoundingClientRect();
-            return [...{EL}.shadowRoot.querySelectorAll('.rooms > article')].filter((a) => {{ const r = a.getBoundingClientRect();
-              return r.top >= m.top - 1 && r.bottom <= m.bottom + 1; }}).map((a) => a.id); }})()""")
+            return [...{EL}.shadowRoot.querySelectorAll('.wgrid > article')].filter((a) => {{ const r = a.getBoundingClientRect();
+              return r.top >= m.top - 1 && r.bottom <= m.bottom + 1 && r.left >= m.left - 1 && r.right <= m.right + 1; }}).map((a) => a.id); }})()""")
         seen.update(vis)
     assert len(seen) == 5, f"nur {len(seen)} von 5 Räumen sichtbar"
     assert p.js(f"getComputedStyle({EL}.shadowRoot.querySelector('.tin')).columnWidth") in ("auto", "")
@@ -787,27 +790,41 @@ def test_rollwerk_kompakt(panel):
 
 
 def test_tablet_gleiche_leisten_und_kacheln(browser, server):
-    """Tablet: alle Kopfleisten gleich hoch; Räume und Rollläden im gleichen Raster mit 2 Reihen je Seite."""
+    """Tablet: alle Kopfleisten gleich hoch; Wand-Kacheln im festen Seitenraster, keine angeschnitten,
+    gleichmäßig verteilt (5 → 3 + 2), große Schrift."""
     page = browser.new_page(viewport={"width": 1180, "height": 760})
     page.goto(f"{server}/dev/vorschau.html?tablet")
     page.wait_for_function(f"{EL} && {EL}._data")
     p = Panel(page)
     p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
-    heights, tiles = {}, {}
-    for view in ("overview", "shutters", "kwflow"):
+    heights = {}
+    for view in ("overview", "shutters", "kwflow", "lights"):
         p.view(view)
         p.wait(300)
         heights[view] = p.js(f"Math.round({EL}.shadowRoot.querySelector('.brief').getBoundingClientRect().height)")
-        if view != "kwflow":
-            tiles[view] = p.js(f"""(() => {{ const g = {EL}.shadowRoot.querySelector('.tgrid'); const r = g.firstElementChild.getBoundingClientRect();
-                const m = {EL}.shadowRoot.getElementById('main').getBoundingClientRect();
-                const rows = new Set([...g.children].map((c) => Math.round(c.getBoundingClientRect().top)).filter((t) => t >= m.top - 1 && t < m.bottom));
-                return [Math.round(r.width), Math.round(r.height), rows.size]; }})()""")
+        if view == "kwflow":
+            continue
+        cut = p.js(f"""(() => {{ const m = {EL}.shadowRoot.getElementById('main').getBoundingClientRect(); const pg = {EL}._tPage[{EL}._tab] || 0;
+            const per = Math.ceil({EL}.shadowRoot.querySelectorAll('.wgrid > *').length / {EL}._tPages);
+            return [...{EL}.shadowRoot.querySelectorAll('.wgrid > *')].slice(pg * per, pg * per + per).filter((a) => {{ const r = a.getBoundingClientRect();
+              return r.left < m.left - 1 || r.right > m.right + 1 || r.bottom > m.bottom + 1; }}).length; }})()""")
+        assert cut == 0, f"{view}: {cut} Kacheln angeschnitten"
+        fs = p.js(f"[parseFloat(getComputedStyle({EL}.shadowRoot.querySelector('.wt-v b')).fontSize), parseFloat(getComputedStyle({EL}.shadowRoot.querySelector('.wt-n b')).fontSize)]")
+        assert fs[0] >= 40 and fs[1] >= 16, fs
     assert len(set(heights.values())) == 1, heights
-    assert abs(tiles["overview"][0] - tiles["shutters"][0]) <= 2 and abs(tiles["overview"][1] - tiles["shutters"][1]) <= 2, tiles
-    assert all(t[2] <= 2 for t in tiles.values()), tiles
+    # gleichmäßig verteilen: 5 Kacheln auf kleinem Bildschirm (2 Seiten) → 3 + 2
+    p.js(f"""() => {{ const d = {EL}._data, s = {EL}._status; const src = Object.keys(d.rooms)[0];
+      for (let i = 0; i < 3; i++) {{ d.rooms['z' + i] = {{ ...d.rooms[src], id: 'z' + i, name: 'Raum ' + i }}; s.rooms['z' + i] = {{ ...s.rooms[src] }}; }} }}""")
+    page.set_viewport_size({"width": 760, "height": 560})
+    p.view("overview")
+    p.wait(400)
+    n = p.js(f"{EL}._tPages")
+    cols = [p.js(f"[...{EL}.shadowRoot.querySelectorAll('.wgrid > *')].map((t) => +t.style.gridColumn)")]
+    if n == 2:
+        c = int(p.js(f"{EL}.shadowRoot.querySelector('.wgrid').dataset.cols"))
+        first = sum(1 for x in cols[0] if x <= c)
+        assert abs(first - (5 - first)) <= 1, cols
     page.close()
-
 
 def test_neue_widgets_lage_ereignisse_termine(panel):
     panel.js(f"""(kw) => {{ Object.assign({EL}._data.settings, kw, {{ calendars: ['calendar.muell'] }});
