@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.78.0";
+const VERSION = "0.78.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4893,7 +4893,8 @@ class HauswerkPanel extends HTMLElement {
       big: bat != null ? `${fmt(bat, 0)}<span> %</span>` : "", title, side: setBtn,
       lines: [
         ...(reasons.length ? [{ icon: "mdi:pause-octagon-outline", text: `Gerade nicht mähen: ${reasons.join(", ")}` }] : []),
-        ...(bs.watering ? [{ icon: "mdi:sprinkler-variant", text: "Bewässerung läuft – Mäher wartet" }] : []),
+        ...(bs.water_until ? [{ icon: "mdi:timer-sand", text: `Bewässerung läuft – fertig um ${new Date(bs.water_until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} Uhr · Mäher wartet` }]
+          : bs.watering ? [{ icon: "mdi:sprinkler-variant", text: "Bewässerung läuft – Mäher wartet" }] : []),
         ...(blades != null && blades >= (this._data.settings.bw_blades_days || 60) ? [{ icon: "mdi:saw-blade", text: `Messer seit ${fmt(blades, 0)} Tagen – bald wechseln` }] : []),
       ],
     });
@@ -4919,17 +4920,19 @@ class HauswerkPanel extends HTMLElement {
     const zoneHtml = !zones.length ? "" : `<section class="card bw-c bw-zones">
       <div class="bw-h"><span class="bw-ic" style="--c:#0ea5e9"><ha-icon icon="mdi:sprinkler-variant"></ha-icon></span><span class="grow"><b>Bewässerung</b>
         <small>${this._data.settings.bw_water_auto ? `Gießplan: täglich ${esc(this._data.settings.bw_water_time || "05:00")} Uhr${bs.next_water ? ` · als Nächstes ${new Date(bs.next_water).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : ""}` : "Gießplan aus – gegossen wird von Hand oder über deine Automationen"}${soil != null ? ` · Boden ${fmt(soil, 0)} %` : ""}</small></span></div>
+      ${bs.water_until ? `<div class="bw-timer"><ha-icon icon="mdi:timer-sand"></ha-icon><span>Fertig in <b data-lw-until="${esc(bs.water_until)}">${this._lwLeft(bs.water_until)}</b></span><small>alle Ventile nacheinander</small></div>` : ""}
       <div class="bw-act">${zones.some((z) => z.running_until) || bs.queue ? `<button class="qbtn" data-action="bw-stop"><ha-icon icon="mdi:stop"></ha-icon>Gießen stoppen</button>`
-        : zones.some((z) => (z.duration || 0) > 0 && z.valve) ? `<button class="qbtn hot" data-action="bw-water"><ha-icon icon="mdi:sprinkler-variant"></ha-icon>Alle mit Bedarf gießen</button>` : ""}</div>
+        : zones.some((z) => (z.duration || 0) > 0 && (z.valves || []).length) ? `<button class="qbtn hot" data-action="bw-water"><ha-icon icon="mdi:sprinkler-variant"></ha-icon>Alle mit Bedarf gießen</button>` : ""}</div>
       ${zones.map((z) => {
         const min = z.duration ? Math.max(1, Math.round(z.duration / 60)) : 0;
-        const vs = z.valve ? this._hass.states[z.valve] : null;
+        const vl = z.valves || [];
+        const bad = vl.filter((v) => this._hass.states[v]?.state === "unavailable");
         const bucket = z.bucket != null ? Number(z.bucket) : null;
         return `<div class="bwz ${z.running_until ? "run" : ""}">
-          <div class="bwz-h"><b>${esc(z.name)}</b><small>${z.running_until ? `<span style="color:#0ea5e9">gießt noch <span data-lw-until="${esc(z.running_until)}">${this._lwLeft(z.running_until)}</span></span>`
-            : min ? `braucht ${min} Min. Wasser` : "kein Bedarf"}${bucket != null ? ` · Bilanz ${bucket > 0 ? "+" : ""}${fmt(bucket, 1)} mm` : ""}${z.valve ? ` · ${esc(this._entityName(z.valve))}${vs && vs.state === "unavailable" ? " (nicht erreichbar)" : ""}` : ` · <button class="link inline" data-action="tab" data-tab="gardenset">Ventil zuordnen</button>`}</small></div>
+          <div class="bwz-h"><b>${esc(z.name)}</b><small>${z.running_until ? `<span style="color:#0ea5e9">gießt${z.parts > 1 ? ` Ventil ${z.part}/${z.parts} (${esc(this._entityName(z.running_valve))})` : ""} noch <span data-lw-until="${esc(z.running_until)}">${this._lwLeft(z.running_until)}</span>${z.parts > 1 && z.zone_until ? ` · Zone fertig in <span data-lw-until="${esc(z.zone_until)}">${this._lwLeft(z.zone_until)}</span>` : ""}</span>`
+            : z.waiting ? `<span style="color:#0ea5e9">wartet – kommt gleich dran</span>` : min ? `braucht ${min} Min. Wasser${vl.length > 1 ? ` je Ventil (${vl.length * min} Min.)` : ""}` : "kein Bedarf"}${bucket != null ? ` · Bilanz ${bucket > 0 ? "+" : ""}${fmt(bucket, 1)} mm` : ""}${vl.length ? ` · ${vl.map((v) => esc(this._entityName(v))).join(" → ")}${bad.length ? " (nicht erreichbar)" : ""}` : ` · <button class="link inline" data-action="tab" data-tab="gardenset">Ventil zuordnen</button>`}</small></div>
           <div class="bwz-a">
-            ${z.valve && !z.running_until ? `<button class="qbtn ${min ? "hot" : ""}" data-action="bw-water" data-zone="${esc(z.zone)}" data-min="${min || 10}"><ha-icon icon="mdi:water-outline"></ha-icon>${min || 10} Min. gießen</button>` : ""}
+            ${vl.length && !z.running_until && !z.waiting ? `<button class="qbtn ${min ? "hot" : ""}" data-action="bw-water" data-zone="${esc(z.zone)}" data-min="${min || 10}"><ha-icon icon="mdi:water-outline"></ha-icon>${min || 10} Min. gießen</button>` : ""}
             ${z.multiplier != null && z.multiplier_entity ? `<span class="bwz-m" title="Multiplikator: mehr oder weniger Wasser als berechnet"><button class="sbtn" data-action="bw-mult" data-e="${esc(z.multiplier_entity)}" data-v="${Math.max(0.1, Math.round((Number(z.multiplier) - 0.05) * 100) / 100)}">−</button><b>×${fmt(Number(z.multiplier), 2)}</b><button class="sbtn" data-action="bw-mult" data-e="${esc(z.multiplier_entity)}" data-v="${Math.round((Number(z.multiplier) + 0.05) * 100) / 100}">+</button></span>` : ""}
             <button class="qbtn" data-action="bw-si" data-s="calculate" data-e="${esc(z.zone)}" title="Bedarf neu berechnen"><ha-icon icon="mdi:calculator-variant-outline"></ha-icon>Berechnen</button>
             <button class="qbtn" data-action="bw-si" data-s="set_bucket" data-e="${esc(z.zone)}" title="Wasserbilanz auf 0 setzen (z. B. nach Gießen von Hand)"><ha-icon icon="mdi:restore"></ha-icon>Bilanz 0</button>
@@ -4949,6 +4952,19 @@ class HauswerkPanel extends HTMLElement {
       ].filter(Boolean).map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>
     </section>`;
     return head + `<div class="bw-grid">${mower}${water}</div>`;
+  }
+
+  /** Zonen-Einstellung (Entwurf) mit Ventil-Liste – auch für ältere Einträge mit nur einem Ventil. */
+  _bwZoneCfg(zid) {
+    const old = (this._settings.bw_zones || []).find((x) => x.zone === zid);
+    const st = (this._status?.beetwerk?.zones || []).find((x) => x.zone === zid) || {};
+    return { zone: zid, valves: [...(old?.valves || (old?.valve ? [old.valve] : st.valves || []))], auto: old ? old.auto !== false : st.auto !== false };
+  }
+
+  _bwZoneSave(cur) {
+    this._settings.bw_zones = [...(this._settings.bw_zones || []).filter((x) => x.zone !== cur.zone), { zone: cur.zone, valves: cur.valves, auto: cur.auto }];
+    this._instantSave("bw_zones");
+    this._refreshSettings();
   }
 
   _bwRows(p) {
@@ -9052,7 +9068,13 @@ class HauswerkPanel extends HTMLElement {
               <label class="field narrow"><span><ha-icon icon="mdi:clock-outline"></ha-icon> Startzeit</span><input type="time" data-set="bw_water_time" value="${esc(p.bw_water_time || "05:00")}" ${dis}></label>
               ${head("mdi:sprinkler-variant", "Zonen aus Smart Irrigation")}
               ${zs.map((z) => `<div class="bwz-cfg"><b>${esc(z.name)}</b><small>${z.duration ? `braucht ${Math.round(z.duration / 60)} Min.` : "kein Bedarf"}${z.throughput ? ` · ${fmt(z.throughput, 0)} l/min` : ""}${z.size ? ` · ${fmt(z.size, 0)} m²` : ""}</small>
-                <label class="field"><span>Ventil${z.guessed && z.valve && !cfg(z.zone).valve ? " (gefunden über den Namen)" : ""}</span><select data-bwz="valve" data-zone="${esc(z.zone)}" ${dis}><option value="">– keins –</option>${valves.map((v) => `<option value="${esc(v)}" ${z.valve === v ? "selected" : ""}>${esc(this._entityName(v))}</option>`).join("")}</select></label>
+                ${(() => {
+                  const cur = (cfg(z.zone).valves || (cfg(z.zone).valve ? [cfg(z.zone).valve] : null)) || z.valves || [];
+                  const list = cur.length ? cur : [""];
+                  return `<div class="field"><span>${list.length > 1 ? "Ventile – gehen nacheinander an, jedes für die berechnete Zeit" : `Ventil${z.guessed && z.valve ? " (gefunden über den Namen)" : ""}`}</span>
+                    ${list.map((val, i) => `<div class="bwz-v"><span class="bwz-n">${list.length > 1 ? `${i + 1}.` : ""}</span><select data-bwz="valve" data-zone="${esc(z.zone)}" data-i="${i}" ${dis}><option value="">– keins –</option>${valves.map((v) => `<option value="${esc(v)}" ${val === v ? "selected" : ""}>${esc(this._entityName(v))}</option>`).join("")}</select>${list.length > 1 ? `<button class="icon" data-action="bw-zv-del" data-zone="${esc(z.zone)}" data-i="${i}" title="Ventil entfernen" ${dis}><ha-icon icon="mdi:close"></ha-icon></button>` : ""}</div>`).join("")}
+                    ${cur.length && cur.length < 6 ? `<button class="link" data-action="bw-zv-add" data-zone="${esc(z.zone)}" ${dis}><ha-icon icon="mdi:plus"></ha-icon>Weiteres Ventil (bei zu wenig Wasserdruck)</button>` : ""}</div>`;
+                })()}
                 <label class="check small"><span>Im Gießplan</span><span class="switch"><input type="checkbox" data-bwz="auto" data-zone="${esc(z.zone)}" ${z.auto ? "checked" : ""} ${dis}><span></span></span></label></div>`).join("")}
               <p class="muted small"><ha-icon icon="mdi:open-in-new"></ha-icon>Wetterquellen, Berechnung, Fläche, Durchfluss und Bodenart stellst du in <a href="/smart-irrigation" target="_top">Smart Irrigation</a> ein.</p>
               ${(bs.automations || []).length ? `${head("mdi:robot-outline", "Bisherige Bewässerungs-Automationen")}
@@ -10199,13 +10221,12 @@ class HauswerkPanel extends HTMLElement {
       return;
     }
     if (t.dataset.bwz && this._settings && isChange) {
-      const zid = t.dataset.zone;
-      const list = [...(this._settings.bw_zones || []).filter((x) => x.zone !== zid)];
-      const cur = (this._settings.bw_zones || []).find((x) => x.zone === zid) || { zone: zid, valve: null, auto: true };
-      if (t.dataset.bwz === "valve") cur.valve = t.value || null;
-      else cur.auto = t.checked;
-      this._settings.bw_zones = [...list, cur];
-      this._instantSave("bw_zones");
+      const cur = this._bwZoneCfg(t.dataset.zone);
+      if (t.dataset.bwz === "valve") {
+        cur.valves[Number(t.dataset.i || 0)] = t.value || "";
+        cur.valves = cur.valves.filter((v, i, a) => v && a.indexOf(v) === i);
+      } else cur.auto = t.checked;
+      this._bwZoneSave(cur);
       return;
     }
     if (t.dataset.lwl === "profile" && this._pop?.draft?.cfg) {
@@ -10871,6 +10892,20 @@ class HauswerkPanel extends HTMLElement {
         if (this._status) this._status.beetwerk = res.status;
         this._renderMain();
         this._toast("Gießen gestoppt");
+        break;
+      }
+      case "bw-zv-add": {
+        const cur = this._bwZoneCfg(el.dataset.zone);
+        cur.valves.push("");
+        // leeres Feld nur im Entwurf anzeigen, gespeichert wird erst mit gewähltem Ventil
+        this._settings.bw_zones = [...(this._settings.bw_zones || []).filter((x) => x.zone !== cur.zone), cur];
+        this._renderPop();
+        break;
+      }
+      case "bw-zv-del": {
+        const cur = this._bwZoneCfg(el.dataset.zone);
+        cur.valves.splice(Number(el.dataset.i), 1);
+        this._bwZoneSave(cur);
         break;
       }
       case "bw-mult":
@@ -14200,6 +14235,9 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .bwz-a .qbtn.hot { background:color-mix(in srgb, #0ea5e9 16%, transparent); border-color:color-mix(in srgb, #0ea5e9 50%, transparent); }
 .bwz-m { display:inline-flex; align-items:center; gap:6px; } .bwz-m b { font-variant-numeric:tabular-nums; min-width:44px; text-align:center; }
 :host([tablet]) .bwz-a .qbtn { min-height:52px; font-size:15px; }
+.bw-timer { display:flex; align-items:center; gap:10px; padding:10px 14px; border-radius:14px; background:color-mix(in srgb, #0ea5e9 12%, transparent); color:#0369a1; }
+:host([dark]) .bw-timer { color:#7dd3fc; } .bw-timer ha-icon { --mdc-icon-size:24px; } .bw-timer b { font-size:22px; font-variant-numeric:tabular-nums; } .bw-timer small { margin-left:auto; color:var(--muted); }
+.bwz-v { display:flex; align-items:center; gap:8px; margin-bottom:6px; } .bwz-v select { flex:1; } .bwz-n { min-width:18px; color:var(--muted); font-weight:700; }
 .bwz-cfg { padding:10px 0; border-bottom:1px solid var(--line); } .bwz-cfg > b { display:block; } .bwz-cfg > small { color:var(--muted); }
 .bw-act .qbtn.hot { background:color-mix(in srgb, #16a34a 18%, transparent); border-color:color-mix(in srgb, #16a34a 50%, transparent); color:#15803d; }
 :host([dark]) .bw-act .qbtn.hot { color:#86efac; }

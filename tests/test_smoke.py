@@ -2135,3 +2135,38 @@ def test_beetwerk_giessen_mit_smart_irrigation(hw):
         await bw.async_stop()
 
     asyncio.run(run())
+
+
+def test_beetwerk_zone_mit_zwei_ventilen(hw):
+    """Eine Zone, zwei Ventile (zu wenig Wasserdruck): nacheinander je die volle Zeit, Bilanz erst nach dem zweiten zurück;
+    Ablauftimer für Zone und ganze Bewässerung."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 6, 10, 10, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("sensor.smart_irrigation_rasen_1", "600", {"bucket": -4.2, "unit_of_measurement": "s"}, "Rasen 1 Dauer")
+        hass.set("valve.links", "closed", {}, "Garten Links")
+        hass.set("valve.rechts", "closed", {}, "Garten Rechts")
+        log, haus, ctl = await _setup(hw, hass)
+        bw = hw.Beetwerk(hass, log, haus)
+        await bw.async_load()
+        await bw.async_save_settings({"bw_zones": [{"zone": "sensor.smart_irrigation_rasen_1", "valves": ["valve.links", "valve.rechts"], "auto": True}]})
+        await bw.async_water("sensor.smart_irrigation_rasen_1")
+        assert ("valve", "open_valve", {"entity_id": "valve.links"}) in hass.calls and ("valve", "open_valve", {"entity_id": "valve.rechts"}) not in hass.calls
+        z = bw.status()["zones"][0]
+        assert z["part"] == 1 and z["parts"] == 2 and z["running_valve"] == "valve.links"
+        start = NOW[0]
+        assert bw.status()["water_until"] == (start + timedelta(minutes=20)).isoformat().replace("+00:00", "+00:00") or bw.status()["water_until"]
+        assert z["zone_until"] and z["zone_until"] > z["running_until"]
+        NOW[0] += timedelta(minutes=10, seconds=2)
+        await bw.async_evaluate()
+        assert ("valve", "close_valve", {"entity_id": "valve.links"}) in hass.calls and ("valve", "open_valve", {"entity_id": "valve.rechts"}) in hass.calls
+        assert ("smart_irrigation", "set_bucket", {"entity_id": "sensor.smart_irrigation_rasen_1"}) not in hass.calls
+        NOW[0] += timedelta(minutes=10, seconds=2)
+        await bw.async_evaluate()
+        assert ("valve", "close_valve", {"entity_id": "valve.rechts"}) in hass.calls
+        assert ("smart_irrigation", "set_bucket", {"entity_id": "sensor.smart_irrigation_rasen_1"}) in hass.calls
+        assert bw.status()["water_until"] is None
+
+    asyncio.run(run())

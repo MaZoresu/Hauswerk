@@ -40,7 +40,7 @@ BW_DEFAULTS: dict[str, Any] = {
     "bw_resume_until": "19:00",  # danach nicht mehr starten
     "bw_blades_days": 60,    # Hinweis „Messer wechseln“ ab … Tagen
     # Bewässerung mit Smart Irrigation: Zonen (Dauer-Sensor) und je Zone das echte Ventil
-    "bw_zones": [],          # [{"zone": "sensor.smart_irrigation_rasen_1", "valve": "valve.…" | "switch.…", "auto": True}]
+    "bw_zones": [],          # [{"zone": "sensor.smart_irrigation_rasen_1", "valves": ["valve.…", "switch.…"], "auto": True}] – Ventile nacheinander
     "bw_water_auto": False,  # Beetwerk gießt selbst (statt eigener Automationen)
     "bw_water_time": "05:00",  # Startzeit
     "bw_water_skip": True,   # nicht gießen, wenn es regnet oder in den nächsten 6 Std. Regen kommt
@@ -217,9 +217,10 @@ class Beetwerk:
         if (self._persist.get("run") or {}).get("cur"):
             return True
         for z in self.zones():
-            v = self.hass.states.get(z["valve"]) if z.get("valve") else None
-            if v is not None and v.state in ("open", "opening", "on"):
-                return True
+            for valve in z.get("valves") or []:
+                v = self.hass.states.get(valve)
+                if v is not None and v.state in ("open", "opening", "on"):
+                    return True
         st = self.hass.states.get(ent["watering"]) if ent.get("watering") else None
         if st is not None and st.state == "on":
             return True
@@ -311,7 +312,12 @@ class Beetwerk:
         out = []
         for zid in list(chosen) + [e for e in found if e not in chosen]:
             cfg = chosen.get(zid) or {}
-            out.append({"zone": zid, "valve": cfg.get("valve") or self._guess_valve(zid), "guessed": not cfg.get("valve"),
+            valves = [v for v in (cfg.get("valves") or ([cfg["valve"]] if cfg.get("valve") else [])) if v]
+            guessed = not valves
+            if guessed:
+                g = self._guess_valve(zid)
+                valves = [g] if g else []
+            out.append({"zone": zid, "valves": valves, "valve": valves[0] if valves else None, "guessed": guessed,
                         "auto": cfg.get("auto", True) is not False})
         return out
 
@@ -338,7 +344,10 @@ class Beetwerk:
         mult = self.hass.states.get(f"number.smart_irrigation_{base}_multiplier")
         need = self.hass.states.get(f"binary_sensor.smart_irrigation_{base}_irrigation_needed")
         valve = self.hass.states.get(z["valve"]) if z.get("valve") else None
-        cur = (self._persist.get("run") or {}).get("cur") or {}
+        run = self._persist.get("run") or {}
+        cur = run.get("cur") or {}
+        mine = cur.get("zone") == z["zone"]
+        queued = [q for q in run.get("queue") or [] if q["zone"] == z["zone"]]
         return {
             **z, "name": (a.get("friendly_name") or base).removesuffix(" Dauer"),
             "duration": _num(st), "bucket": a.get("bucket"), "max_bucket": a.get("maximum_bucket"),
@@ -346,7 +355,13 @@ class Beetwerk:
             "need": None if need is None else need.state == "on", "state": a.get("state"), "last_calculated": a.get("last_calculated"),
             "throughput": a.get("throughput"), "size": a.get("size"),
             "valve_state": valve.state if valve is not None else None,
-            "running_until": dt_util.utc_from_timestamp(cur["until"]).isoformat() if cur.get("zone") == z["zone"] else None,
+            "running_until": dt_util.utc_from_timestamp(cur["until"]).isoformat() if mine else None,
+            # Ablauftimer der ganzen Zone (alle Ventile nacheinander) und welches Ventil gerade läuft
+            "zone_until": dt_util.utc_from_timestamp(cur["until"] + sum(q["seconds"] for q in queued)).isoformat() if mine else None,
+            "running_valve": cur.get("valve") if mine else None,
+            "part": cur.get("part") if mine else None, "parts": cur.get("parts") if mine else None,
+            "waiting": bool(queued) and not mine,
+            "valve_states": {v: (self.hass.states.get(v).state if self.hass.states.get(v) is not None else None) for v in z.get("valves") or []},
         }
 
     def _rain_soon(self) -> bool:
@@ -362,19 +377,28 @@ class Beetwerk:
         for z in self.zones():
             if zone and z["zone"] != zone:
                 continue
-            if not z.get("valve"):
+            valves = z.get("valves") or []
+            if not valves:
                 continue
             calc = _num(self.hass.states.get(z["zone"])) or 0
             secs = float(seconds) if seconds else calc
             if secs <= 0:
                 continue
-            queue.append({"zone": z["zone"], "valve": z["valve"], "seconds": round(secs), "reset": not seconds or abs(secs - calc) < 1})
+            # Ventile nacheinander, jedes für die volle Zeit; Wasserbilanz erst nach dem letzten zurücksetzen
+            reset = not seconds or abs(secs - calc) < 1
+            for i, v in enumerate(valves):
+                queue.append({"zone": z["zone"], "valve": v, "seconds": round(secs), "part": i + 1, "parts": len(valves),
+                              "reset": reset and i == len(valves) - 1})
         if not queue:
             return "nichts zu gießen"
         run = self._persist.get("run") or {}
         run["queue"] = (run.get("queue") or []) + queue
         self._persist["run"] = run
-        self.log.add("garden", "Bewässerung gestartet", ", ".join(f"{self._name(q['zone']).removesuffix(' Dauer')} {q['seconds'] // 60} Min." for q in queue)
+        def what(q: dict) -> str:
+            part = f" ({q['part']}/{q['parts']} {self._name(q['valve'])})" if q.get("parts", 1) > 1 else ""
+            return f"{self._name(q['zone']).removesuffix(' Dauer')}{part} {q['seconds'] // 60} Min."
+
+        self.log.add("garden", "Bewässerung gestartet", ", ".join(what(q) for q in queue)
                      + (f" · {by}" if by else ""), module="beetwerk")
         # Mäher währenddessen in die Station
         mower = self.mower()
@@ -402,7 +426,8 @@ class Beetwerk:
             await self._valve(cur["valve"], False)
             if cur.get("reset"):
                 await self._call_data("smart_irrigation", "set_bucket", {"entity_id": cur["zone"]})
-            self.log.add("garden", f"{self._name(cur['zone']).removesuffix(' Dauer')} gegossen", f"{round((now - cur['start']) / 60)} Min."
+            part = f" · Ventil {cur['part']}/{cur['parts']} {self._name(cur['valve'])}" if cur.get("parts", 1) > 1 else ""
+            self.log.add("garden", f"{self._name(cur['zone']).removesuffix(' Dauer')} gegossen", f"{round((now - cur['start']) / 60)} Min.{part}"
                          + (" · Wasserbilanz zurückgesetzt" if cur.get("reset") else ""), module="beetwerk")
             run["cur"] = cur = None
         if not cur and run.get("queue"):
@@ -434,7 +459,7 @@ class Beetwerk:
             self.log.add("garden", "Bewässerung ausgelassen", "Regen jetzt oder in den nächsten 6 Std.", module="beetwerk")
             self._save()
             return
-        zones = [z for z in self.zones() if z.get("auto") and z.get("valve") and (_num(self.hass.states.get(z["zone"])) or 0) > 0]
+        zones = [z for z in self.zones() if z.get("auto") and z.get("valves") and (_num(self.hass.states.get(z["zone"])) or 0) > 0]
         if not zones:
             self.log.add("garden", "Heute kein Gießen nötig", "Wasserbilanz aller Zonen im Plus", module="beetwerk")
             self._save()
@@ -465,6 +490,15 @@ class Beetwerk:
                 out.append({"id": eid, "name": getattr(st, "name", None) or eid, "on": st.state == "on" if st is not None else False})
         return out
 
+    def _water_until(self) -> str | None:
+        """Ablauftimer der ganzen Bewässerung: Ende der laufenden plus aller wartenden Ventile."""
+        run = self._persist.get("run") or {}
+        cur = run.get("cur")
+        if not cur and not run.get("queue"):
+            return None
+        end = (cur["until"] if cur else dt_util.utcnow().timestamp()) + sum(q["seconds"] for q in run.get("queue") or [])
+        return dt_util.utc_from_timestamp(end).isoformat()
+
     def next_water(self) -> str | None:
         if not self.settings.get("bw_water_auto"):
             return None
@@ -492,6 +526,7 @@ class Beetwerk:
             "water_end": dt_util.utc_from_timestamp(self._water_end).isoformat() if self._water_end and now - self._water_end < 86400 else None,
             "zones": [self._zone_info(z) for z in self.zones()],
             "queue": len(((self._persist.get("run") or {}).get("queue")) or []),
+            "water_until": self._water_until(),
             "next_water": self.next_water(),
             "automations": self.automations(),
         }

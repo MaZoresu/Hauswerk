@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.78.1 – 2026-11-21
+
+### Neu (Beetwerk › Bewässerung)
+- **Mehrere Ventile je Zone** (z. B. bei zu wenig Wasserdruck): Unter Einstellungen › Beetwerk › Bewässerung je Zone „Weiteres Ventil“. Die Ventile gehen nacheinander an, jedes für die berechnete Zeit; die Wasserbilanz wird erst zurückgesetzt, wenn das letzte fertig ist. Das Protokoll nennt Ventil 1/2, 2/2.
+- **Ablauftimer:** Während gegossen wird, zeigt die Seite Garten groß „Fertig in 19:59“ (alle Ventile), je Zone „gießt Ventil 1/2 (Garten Links) noch 9:59 · Zone fertig in 19:59“, wartende Zonen „kommt gleich dran“; in der Kopfkachel „fertig um 05:40 Uhr“.
+
 ## 0.78.0 – 2026-11-21
 
 ### Neu – Beetwerk gießt mit Smart Irrigation

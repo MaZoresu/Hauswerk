@@ -1979,4 +1979,19 @@ def test_beetwerk_zonen_giessen(panel):
     p.page.locator('hauswerk-panel #pop select[data-bwz="valve"][data-zone="sensor.smart_irrigation_beet_links"]').select_option("valve.rasen")
     p.wait(300)
     saved = [x for x in p.sent() if x["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
-    assert saved["bw_zones"] == [{"zone": "sensor.smart_irrigation_beet_links", "valve": "valve.rasen", "auto": True}], saved
+    assert saved["bw_zones"] == [{"zone": "sensor.smart_irrigation_beet_links", "valves": ["valve.rasen"], "auto": True}], saved
+    # zweites Ventil für Rasen 1 (zu wenig Wasserdruck): nacheinander
+    p.click('#pop [data-action="bw-zv-add"][data-zone="sensor.smart_irrigation_rasen_1"]')
+    p.page.locator('hauswerk-panel #pop select[data-bwz="valve"][data-zone="sensor.smart_irrigation_rasen_1"][data-i="1"]').select_option("valve.rasen_rechts")
+    p.wait(300)
+    saved = [x for x in p.sent() if x["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]["bw_zones"]
+    assert {"zone": "sensor.smart_irrigation_rasen_1", "valves": ["valve.rasen", "valve.rasen_rechts"], "auto": True} in saved, saved
+    assert "nacheinander" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    p.js(f"{EL}._closePop()")
+    # Ablauftimer: Bewässerung läuft
+    p.js(f"""() => {{ const b = {EL}._status.beetwerk; const t = new Date(Date.now() + 600e3).toISOString(); b.water_until = new Date(Date.now() + 1200e3).toISOString();
+        Object.assign(b.zones[0], {{ valves: ['valve.rasen', 'valve.rasen_rechts'], running_until: t, zone_until: b.water_until, running_valve: 'valve.rasen', part: 1, parts: 2 }}); }}""")
+    p.view("garden")
+    p.wait(300)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "Fertig in" in txt and "Ventil 1/2" in txt and "Zone fertig in" in txt and "Gießen stoppen" in txt, txt
