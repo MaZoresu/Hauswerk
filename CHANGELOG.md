@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.80.1 – 2026-11-21
+
+### Behoben
+- **Hauswerk startete mit 0.80.0 nicht:** Ein Befehl für die Mäher-Zeitpläne war vor seiner Rechteprüfung eingetragen – Home Assistant konnte die Integration nicht laden. Bitte direkt auf 0.80.1 aktualisieren. Alles Neue aus 0.80.0 steht unten.
+
 ## 0.80.0 – 2026-11-21
 
 ### Neu – Beetwerk: mehr für den Mähroboter

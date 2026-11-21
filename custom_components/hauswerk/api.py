@@ -385,32 +385,6 @@ async def ws_bw_water(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"], {"result": res, "status": bw.status()})
 
 
-@websocket_api.websocket_command({vol.Required("type"): "hauswerk/beetwerk/busy", vol.Optional("hours"): _opt(vol.All(vol.Coerce(float), vol.Range(min=0.25, max=24))),
-                                  vol.Optional("until"): _opt(vol.In(["evening"]))})
-@websocket_api.async_response
-async def ws_bw_busy(hass: HomeAssistant, connection, msg) -> None:
-    """Beetwerk: „Garten belegt“ – Mäher bleibt in der Station (… Stunden oder bis heute Abend); ohne Angabe aufheben."""
-    bw = _bw(hass)
-    if bw is None:
-        return _not_ready(connection, msg)
-    await bw.async_busy(msg.get("hours"), msg.get("until"), by=_who(connection))
-    connection.send_result(msg["id"], {"status": bw.status()})
-
-
-@websocket_api.websocket_command({vol.Required("type"): "hauswerk/beetwerk/timer", vol.Required("timer"): vol.All(vol.Coerce(int), vol.Range(min=1, max=14)),
-                                  vol.Required("enable"): bool, vol.Required("start"): _hm, vol.Required("end"): _hm,
-                                  vol.Required("days"): vol.All([vol.In(["mo", "tu", "we", "th", "fr", "sa", "su"])], vol.Length(max=7))})
-@require_editor
-@websocket_api.async_response
-async def ws_bw_timer(hass: HomeAssistant, connection, msg) -> None:
-    """Beetwerk: Zeitplan am Mäher ändern (Robonect)."""
-    bw = _bw(hass)
-    if bw is None:
-        return _not_ready(connection, msg)
-    await bw.async_timer(msg["timer"], msg["enable"], msg["start"], msg["end"], msg["days"], by=_who(connection))
-    connection.send_result(msg["id"], {"status": bw.status()})
-
-
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/beetwerk/stop"})
 @websocket_api.async_response
 async def ws_bw_stop(hass: HomeAssistant, connection, msg) -> None:
@@ -473,6 +447,32 @@ def require_editor(func):
 
 def _not_ready(connection, msg) -> None:
     connection.send_error(msg["id"], "not_ready", "Hauswerk ist nicht eingerichtet")
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/beetwerk/busy", vol.Optional("hours"): _opt(vol.All(vol.Coerce(float), vol.Range(min=0.25, max=24))),
+                                  vol.Optional("until"): _opt(vol.In(["evening"]))})
+@websocket_api.async_response
+async def ws_bw_busy(hass: HomeAssistant, connection, msg) -> None:
+    """Beetwerk: „Garten belegt“ – Mäher bleibt in der Station (… Stunden oder bis heute Abend); ohne Angabe aufheben."""
+    bw = _bw(hass)
+    if bw is None:
+        return _not_ready(connection, msg)
+    await bw.async_busy(msg.get("hours"), msg.get("until"), by=_who(connection))
+    connection.send_result(msg["id"], {"status": bw.status()})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/beetwerk/timer", vol.Required("timer"): vol.All(vol.Coerce(int), vol.Range(min=1, max=14)),
+                                  vol.Required("enable"): bool, vol.Required("start"): _hm, vol.Required("end"): _hm,
+                                  vol.Required("days"): vol.All([vol.In(["mo", "tu", "we", "th", "fr", "sa", "su"])], vol.Length(max=7))})
+@require_editor
+@websocket_api.async_response
+async def ws_bw_timer(hass: HomeAssistant, connection, msg) -> None:
+    """Beetwerk: Zeitplan am Mäher ändern (Robonect)."""
+    bw = _bw(hass)
+    if bw is None:
+        return _not_ready(connection, msg)
+    await bw.async_timer(msg["timer"], msg["enable"], msg["start"], msg["end"], msg["days"], by=_who(connection))
+    connection.send_result(msg["id"], {"status": bw.status()})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/heizen/get"})
