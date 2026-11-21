@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.74.1";
+const VERSION = "0.74.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4774,6 +4774,16 @@ class HauswerkPanel extends HTMLElement {
     return [...by.entries()].map(([p, l]) => `<div class="pop-tl">${by.size > 1 ? `<small class="muted">${esc(this._lwProfName(p))}</small>` : ""}${this._lwDayBar(l)}</div>`).join("");
   }
 
+  /** Bis zu 24 mdi-Symbole passend zur Eingabe (englischer Name oder deutsches Stichwort). */
+  _mdiSuggest(q) {
+    q = String(q || "").trim().toLowerCase().replace(/^mdi:/, "");
+    if (q.length < 2) return [];
+    const words = q.split(/[\s,]+/).filter(Boolean).map((w) => Object.entries(MDI_DE).find(([de]) => w.startsWith(de) || de.startsWith(w))?.[1] || w);
+    const hit = MDI_SUGGEST.filter((n) => words.every((w) => n.includes(w)));
+    const exact = /^[a-z0-9-]+$/.test(q) && !hit.includes(q) ? [q] : [];
+    return [...hit, ...exact].slice(0, 24).map((n) => `mdi:${n}`);
+  }
+
   /** Symbol einer Leuchte: eigenes (Leuchte › Einstellungen › Symbol), sonst Glühbirne an/aus; nicht erreichbar mit Warnzeichen. */
   _lwIco(l, on = false, bad = false) {
     if (bad) return "mdi:lightbulb-alert-outline";
@@ -4938,7 +4948,8 @@ class HauswerkPanel extends HTMLElement {
               ${LW_ICON_CHOICES.map((i) => `<button class="ic-pick ${d.cfg.icon === i ? "on" : ""}" data-action="lwl-icon" data-v="${i}" title="${i.replace("mdi:", "")}" ${dis}><ha-icon icon="${i}"></ha-icon></button>`).join("")}
               ${d.cfg.icon && !LW_ICON_CHOICES.includes(d.cfg.icon) ? `<button class="ic-pick on" data-action="lwl-icon" data-v="${esc(d.cfg.icon)}"><ha-icon icon="${esc(d.cfg.icon)}"></ha-icon></button>` : ""}
             </div>
-            <input type="text" class="ic-own" maxlength="64" data-lwl="icon" value="${esc(d.cfg.icon && !LW_ICON_CHOICES.includes(d.cfg.icon) ? d.cfg.icon : "")}" placeholder="eigenes Symbol, z. B. mdi:lamp" ${dis}>
+            <input type="text" class="ic-own" maxlength="64" data-lwl="icon" value="${esc(d.cfg.icon && !LW_ICON_CHOICES.includes(d.cfg.icon) ? d.cfg.icon : "")}" placeholder="eigenes Symbol suchen, z. B. lampe, kerze, mdi:lamp" autocomplete="off" ${dis}>
+            <div class="icons ic-sug" id="ic-sug"></div>
           </div>
           ${(this._lwStatus?.report?.lights?.[eid]?.power_src === "sensor") ? `<p class="muted small"><ha-icon icon="mdi:flash-outline"></ha-icon>Leistung gemessen am Gerät: ${fmt(this._lwStatus.report.lights[eid].power ?? 0, 1)} W</p>`
             : `<label class="field"><span><ha-icon icon="mdi:flash-outline"></ha-icon> Leistung (für den Bericht, leer = nur Brenndauer)</span><div class="unit"><input type="number" min="0" max="5000" step="0.5" data-lwl="watt" value="${d.cfg.watt ?? ""}" placeholder="z. B. 9" ${dis}><i>W</i></div></label>`}
@@ -9967,10 +9978,16 @@ class HauswerkPanel extends HTMLElement {
       if (isChange) this._renderPop();
       return;
     }
+    // eigenes Symbol: beim Verlassen nur gültige mdi-Namen übernehmen (sonst überschreibt z. B. „kerze“ den gerade angetippten Vorschlag)
+    if (t.dataset.lwl === "icon" && isChange && !/^mdi:[a-z0-9-]+$/.test(String(t.value).trim().toLowerCase())) return;
     if (t.dataset.lwl && this._pop?.draft?.cfg) {
       this._pop.draft.cfg[t.dataset.lwl] = t.type === "checkbox" ? t.checked : t.value || null;
-      // eigenes Symbol: nach dem Tippen die Auswahl aktualisieren
-      if (t.dataset.lwl === "icon" && isChange) this._renderPop();
+      // eigenes Symbol: beim Tippen Vorschläge zeigen (antippen übernimmt)
+      if (t.dataset.lwl === "icon") {
+        const box = this.shadowRoot.getElementById("ic-sug");
+        if (box && !isChange) box.innerHTML = this._mdiSuggest(t.value).map((i) => `<button class="ic-pick" data-action="lwl-icon" data-v="${i}" title="${i}"><ha-icon icon="${i}"></ha-icon></button>`).join("");
+        if (isChange && /^mdi:[a-z0-9-]+$/.test(String(t.value).trim().toLowerCase())) this._renderPop();
+      }
       return;
     }
     if (t.dataset.lwbri !== undefined && this._pop?.draft) {
@@ -11687,6 +11704,13 @@ const SET_FINE = ["calibration", "liming", "demand", "radio", "protect", "boost"
 // Lüft-Bilanz je Raum: Ampel
 const VB = { ok: ["#22c55e", "gut gelüftet"], warn: ["#f59e0b", "bald lüften"], bad: ["#ef4444", "zu selten gelüftet"] };
 const LW_POPS = ["lwadd", "lwgeneral", "lwauto", "lwlinks"];
+// Vorschläge beim Eintippen eines eigenen Symbols (mdi-Namen, dazu deutsche Stichworte)
+const MDI_SUGGEST = `lightbulb lightbulb-outline lightbulb-on lightbulb-on-outline lightbulb-group lightbulb-group-outline lightbulb-spot lightbulb-variant lightbulb-variant-outline lightbulb-cfl lightbulb-fluorescent-tube lightbulb-night lightbulb-night-outline ceiling-light ceiling-light-outline ceiling-light-multiple ceiling-light-multiple-outline ceiling-fan ceiling-fan-light chandelier light-recessed track-light track-light-off wall-sconce wall-sconce-outline wall-sconce-round wall-sconce-round-outline wall-sconce-flat wall-sconce-flat-outline floor-lamp floor-lamp-outline floor-lamp-dual floor-lamp-dual-outline floor-lamp-torchiere floor-lamp-torchiere-outline desk-lamp lamp lamp-outline lamps lamps-outline lava-lamp led-strip led-strip-variant led-on led-off led-outline string-lights candle candelabra candelabra-fire outdoor-lamp coach-lamp coach-lamp-variant post-lamp lighthouse globe-light globe-light-outline spotlight spotlight-beam light-flood-down light-flood-up light-switch light-switch-off motion-sensor television-ambient-light christmas-tree christmas-tree-outline pine-tree star star-outline weather-night moon-waning-crescent white-balance-sunny sun-wireless sun-wireless-outline power-socket-eu power-socket-de power-plug power-plug-outline toggle-switch toggle-switch-outline bell bell-outline bell-ring bell-ring-outline doorbell speaker speaker-wireless music music-note radio fan fan-off air-purifier air-conditioner heat-wave radiator fireplace fire television television-classic monitor laptop desktop-tower-monitor router-wireless printer fridge fridge-outline stove coffee-maker coffee-maker-outline kettle microwave washing-machine tumble-dryer dishwasher robot-vacuum water-boiler water-pump door door-open garage garage-open gate fence window-shutter window-open-variant blinds curtains home home-outline home-floor-1 home-floor-2 home-roof sofa sofa-outline bed bed-outline bed-king bunk-bed bathtub shower toilet desk chair-rolling table-furniture stairs flower flower-outline sprout tree palm-tree grass watering-can pool hot-tub umbrella-beach car car-electric ev-station bicycle dog cat paw baby-carriage teddy-bear gamepad-variant book-open-variant`.split(" ");
+const MDI_DE = { lampe: "lamp", leuchte: "light", licht: "light", birne: "lightbulb", decke: "ceiling", wand: "wall", stehlampe: "floor-lamp", tisch: "desk", schreibtisch: "desk",
+  kerze: "candle", kette: "string", streifen: "strip", aussen: "outdoor", außen: "outdoor", garten: "flower", baum: "tree", weihnacht: "christmas", stern: "star", nacht: "night", sonne: "sun",
+  steckdose: "socket", stecker: "plug", schalter: "switch", gong: "bell", klingel: "bell", glocke: "bell", lautsprecher: "speaker", musik: "music", ventilator: "fan", lüfter: "fan",
+  fernseher: "television", tv: "television", kühlschrank: "fridge", herd: "stove", kaffee: "coffee", wasch: "washing", trockner: "dryer", spül: "dishwasher", tür: "door", tor: "gate",
+  fenster: "window", rollladen: "shutter", vorhang: "curtains", sofa: "sofa", bett: "bed", bad: "bathtub", dusche: "shower", treppe: "stairs", auto: "car", hund: "dog", katze: "cat", kind: "baby", spiel: "gamepad", buch: "book", kamin: "fireplace", heizung: "radiator", bewegung: "motion" };
 // Symbole für Leuchten (Leuchte › Einstellungen › Symbol)
 const LW_ICON_CHOICES = ["mdi:ceiling-light", "mdi:ceiling-light-multiple", "mdi:chandelier", "mdi:light-recessed", "mdi:track-light", "mdi:wall-sconce", "mdi:wall-sconce-round",
   "mdi:floor-lamp", "mdi:desk-lamp", "mdi:lamp", "mdi:lava-lamp", "mdi:led-strip-variant", "mdi:string-lights", "mdi:candle", "mdi:outdoor-lamp", "mdi:coach-lamp",
@@ -12374,6 +12398,7 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .dtab i { position:absolute; top:8px; left:24px; width:7px; height:7px; border-radius:50%; background:var(--accent); }
 .icons { display:flex; flex-wrap:wrap; gap:6px; }
 .ic-own { margin-top:8px; width:100%; }
+.ic-sug { margin-top:8px; } .ic-sug:empty { display:none; }
 .ic-pick { all:unset; cursor:pointer; position:relative; width:42px; height:42px; display:grid; place-items:center; border-radius:12px; border:1px solid var(--line2); color:var(--muted); }
 .ic-pick:hover { color:var(--text); border-color:var(--accent); }
 .ic-pick.on { color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 14%, transparent); }

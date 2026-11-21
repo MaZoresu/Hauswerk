@@ -1879,3 +1879,19 @@ def test_lichtwerk_eigenes_symbol(panel):
     p.view("lights")
     p.wait(300)
     assert p.has('ha-icon[icon="mdi:ceiling-light"]')
+
+
+def test_lichtwerk_symbol_vorschlaege(panel):
+    """Eigenes Symbol: beim Tippen Vorschläge (auch deutsch), antippen übernimmt."""
+    p = panel
+    p.js(f"() => {EL}._openPop('lwl:light.flur_og')")
+    p.wait()
+    p.page.locator('hauswerk-panel #pop input[data-lwl="icon"]').fill("kerze")
+    p.wait(100)
+    sug = p.js(f"[...{EL}.shadowRoot.querySelectorAll('#ic-sug [data-v]')].map((b) => b.dataset.v)")
+    assert "mdi:candle" in sug, sug
+    p.click('#ic-sug [data-v="mdi:candle"]')
+    assert p.js(f"{EL}._pop.draft.cfg.icon") == "mdi:candle"
+    p.page.locator('hauswerk-panel #pop input[data-lwl="icon"]').fill("ceiling")
+    p.wait(100)
+    assert "mdi:ceiling-light" in p.js(f"[...{EL}.shadowRoot.querySelectorAll('#ic-sug [data-v]')].map((b) => b.dataset.v)")

@@ -2,7 +2,10 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
-## 0.74.1 – 2026-11-21
+## 0.74.2 – 2026-11-21
+
+### Neu (Lichtwerk)
+- **Vorschläge beim eigenen Symbol:** Beim Eintippen erscheinen passende Symbole zum Antippen – nach englischem Namen („lamp“, „ceiling“) oder deutschem Stichwort („Lampe“, „Kerze“, „Decke“, „Gong“, „Steckdose“, „Weihnacht“ …), aus rund 200 Symbolen für Licht, Haus und Geräte. Ein beliebiger anderer mdi-Name lässt sich weiter direkt eintragen.
 
 ### Geändert (Lichtwerk)
 - **„Kein Profil“ je Leuchte:** In der Profil-Auswahl der Leuchte (und „Profil für alle“ im Raum) gibt es oben „Kein Profil“ – Lichtwerk zeigt die Leuchte dann nur an und schaltet sie nicht; HmIP-Direktverknüpfungen schalten weiter. Ersetzt den Schalter „Profil aktiv“; das bisherige Profil bleibt gemerkt. In der Liste steht „Kein Profil – nur anzeigen“ mit der Marke KEIN PROFIL.
@@ -199,6 +202,7 @@ Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Rele
 
 ## 0.65.4 – 2026-11-20
 
+
 ### Geändert (Lichtwerk)
 - **HmIP auch bei abgeschaltetem Profil:** Eine Direktverknüpfung in der CCU schaltet unabhängig von Lichtwerk. Deshalb zeigen auch Leuchten ohne aktives Profil das Melder-Symbol ihrer HmIP-Bewegungsmelder und „HmIP · …“, wenn die CCU sie geschaltet hat (Kachel, kompakte Ansicht, Kopfkachel, Helligkeitsfenster). Melder aus dem Profil, „von Hand“ und Ursachen bleiben bei Profil aus weiter weg.
 
@@ -211,12 +215,14 @@ Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Rele
 
 ## 0.65.2 – 2026-11-20
 
+
 ### Geändert (Lichtwerk)
 - **„HmIP“ statt „von Hand“:** Schaltet eine Homematic-Direktverknüpfung (Bewegungsmelder, Taster) eine Leuchte, steht an Kachel, Kopfkachel, Helligkeitsfenster und im Protokoll „HmIP · S_Bewegung:Windfang“ bzw. „Windfang Wand: HmIP an/aus“ – nicht mehr „von Hand“. „Automatik übernimmt“ entfällt dann.
 - Auch das **Ausschalten nach der Nachlaufzeit** der CCU wird erkannt (Melder seit höchstens 30 Min. ruhig) – selbst wenn Lichtwerk das Einschalten nicht mitbekommen hat.
 - Bei abgeschaltetem Profil zeigt die Kachel auch „von Hand“ bzw. „HmIP“ nicht mehr an.
 
 ## 0.65.1 – 2026-11-20
+
 
 ### Geändert (Lichtwerk)
 - **Profil aus = keine Angaben an der Kachel:** Ist das Profil an einer Leuchte abgeschaltet, zeigt die Kachel nur noch Name, Zustand und Helligkeit – kein „Profil … aus“, kein „Profil einschalten“, keine Ursache. Auch das Helligkeitsfenster zeigt dann weder Ursache noch Profil-Schalter.
@@ -248,6 +254,7 @@ Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Rele
 - **„Kanal hinzufügen“** steht jetzt oben im Reiter Empfänger und springt direkt zur Auswahl (die sich dabei öffnet) – kein Scrollen mehr. Die Auswahl-Chips stehen linksbündig.
 
 ## 0.63.1 – 2026-11-20
+
 
 ### Geändert (Lichtwerk)
 - **Profil an einer Leuchte abschalten** – direkt im Helligkeitsfenster (Tipp auf den Namen), im Einstellungsfenster der Leuchte („Profil aktiv“) und wieder einschalten mit „Profil einschalten“ an der Kachel. Die Leuchte bleibt in Lichtwerk und lässt sich schalten, Lichtwerk schaltet sie nur nicht mehr; Profil und Einstellungen bleiben erhalten, andere Leuchten mit demselben Profil laufen weiter.
