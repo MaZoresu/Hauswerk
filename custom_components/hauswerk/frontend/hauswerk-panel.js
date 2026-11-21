@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.68.4";
+const VERSION = "0.68.5";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -114,7 +114,7 @@ const NK_KINDS = [
   { k: "battery", g: "Heizwerk", icon: "mdi:battery-alert-variant-outline", c: C.alert, title: "Batterie schwach", def: "normal", ex: ["Batterie schwach", "Fensterkontakt Bad (Bad): 12 %"], text: "Batterien an Thermostaten, Fensterkontakten und Raumsensoren. Die Grenze gilt auch für die Glocke." },
   { k: "cold", g: "Heizwerk", icon: "mdi:radiator-off", c: C.alert, title: "Heizkörper bleibt kalt", def: "normal", ex: ["Heizkörper bleibt kalt", "Küche: Ventil seit 1 Std. offen, Raum wird nicht wärmer"], text: "Ventil eine Stunde ≥ 90 % offen, Raum unter Soll und wird nicht wärmer – Luft, Ventilstift oder Heizung prüfen." },
   { k: "vent", g: "Lüften", icon: "mdi:weather-windy", c: C.air, title: "Lüften empfohlen", def: "off", ex: ["Lüften empfohlen", "Bad: Luftfeuchte 72 % – 10 Min. stoßlüften"], text: "Feucht, Schimmelgefahr, CO₂ oder morgens – mit empfohlener Dauer, einmal je Anlass." },
-  { k: "vent_done", g: "Lüften", icon: "mdi:window-closed-variant", c: C.alert, title: "Fenster schließen", def: "normal", ex: ["Fenster schließen", "Bad: genug gelüftet (10 Min. um)"], text: "Zeit um, Feuchte gesunken oder Raum ausgekühlt." },
+  { k: "vent_done", g: "Lüften", icon: "mdi:window-closed-variant", c: C.alert, title: "Fenster schließen", def: "normal", ex: ["Fenster schließen", "Bad: genug gelüftet (10 Min. um)"], text: "Zeit um, Feuchte gesunken oder Raum ausgekühlt. Je Raum höchstens 2× am Tag gesendet, danach nur unter der Glocke." },
   { k: "storm", g: "Rollwerk", icon: "mdi:weather-windy-variant", c: C.alert, title: "Sturm", def: "normal", ex: ["Sturm – Rollläden fahren hoch", "Böen 82 km/h (Grenze 70 km/h)"], text: "Der Sturmschutz fährt alle Rollläden hoch. Erledigt, sobald er endet." },
   { k: "cover", g: "Rollwerk", icon: "mdi:window-shutter-alert", c: C.alert, title: "Rollladen nicht erreichbar", def: "normal", ex: ["Rollladen nicht erreichbar", "Küche links meldet sich seit 15 Min. nicht – Funk oder Strom prüfen"], text: "Ein Rollladen meldet sich so lange nicht (gleiche Zeit wie bei Thermostaten)." },
   { k: "light_away", g: "Lichtwerk", icon: "mdi:home-lightbulb-outline", c: "#6366f1", title: "Licht an, niemand zu Hause", def: "normal", ex: ["Licht an, niemand zu Hause", "Wohnzimmer, Küche – brennt seit 30 Min."], text: "Brennt Licht so lange (Lichtwerk › Einstellungen), obwohl niemand zu Hause ist – nicht im Urlaub mit Anwesenheits-Simulation." },

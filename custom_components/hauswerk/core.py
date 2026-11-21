@@ -761,7 +761,7 @@ class Haus:
 
     @callback
     def notify(self, key: str, kind: str, title: str, message: str,
-               room: str | None = None, room_name: str | None = None) -> None:
+               room: str | None = None, room_name: str | None = None, quiet_why: str | None = None) -> None:
         """Nachricht je nach Art: aufs Handy (normal oder wichtig), nur ins Protokoll oder gar nicht.
 
         Dieselbe Nachricht (key) kommt erst wieder, wenn sie mit clear() erledigt ist oder
@@ -771,6 +771,8 @@ class Haus:
         mode = self.notify_mode(kind)
         if mode == "off":
             return
+        if quiet_why:
+            mode = "log"  # nicht senden, nur Glocke und Protokoll (z. B. schon oft genug gesendet)
         self._active.add(key)
         now = dt_util.utcnow().timestamp()
         if key in self._queued or now - self._sent.get(key, 0) < NOTIFY_REPEAT:
@@ -779,7 +781,9 @@ class Haus:
         important = mode == "important"
         chosen = self.channels_for(kind)
         targets = [c for c in chosen if c not in set(self.settings.get("notify_off") or [])]
-        if mode == "log":
+        if quiet_why:
+            how = f"nur Glocke – {quiet_why}"
+        elif mode == "log":
             how = "nur Protokoll"
         elif chosen and not targets:
             how = "nur hier – alle Empfänger pausiert"

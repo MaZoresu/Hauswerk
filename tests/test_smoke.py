@@ -1217,6 +1217,21 @@ def test_lueften_ausgebaut(hw):
         week = ctl.status()["rooms"]["bad"]["air"]["week"]
         assert week["count"] == 1 and week["minutes"] >= 35 and week["rh_drop"] == 12
         assert ctl._data()["vent_log"]["bad"][0]["rh0"] == 72
+        # „Fenster schließen“ je Raum und Tag höchstens zweimal senden, danach nur Glocke
+        for _ in range(2):
+            hass.set("sensor.bad_h", "72", name="Bad Feuchte")
+            NOW[0] += timedelta(minutes=5)
+            hass.set("binary_sensor.bad_fenster", "on", name="Bad Fenster")
+            await ctl.async_evaluate()
+            NOW[0] += timedelta(minutes=11)
+            hass.set("sensor.bad_h", "60", name="Bad Feuchte")
+            await ctl.async_evaluate()
+            await asyncio.sleep(0)
+            assert ctl.status()["rooms"]["bad"]["air"]["open"]["done"]
+            hass.set("binary_sensor.bad_fenster", "off", name="Bad Fenster")
+            await ctl.async_evaluate()
+        assert hass.sent().count("Fenster schließen") == 2
+        assert any("nur Glocke – heute schon 2× gesendet" in (e.get("why") or "") for e in log.entries if e["title"] == "Fenster schließen")
 
     asyncio.run(run())
 

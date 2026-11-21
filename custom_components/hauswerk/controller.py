@@ -169,6 +169,7 @@ class Heizen:
         self._links: dict[str, dict] = {}
         self._link_findings: list[dict] = []
         self._links_next = 0.0
+        self._ventdone_sent: dict[str, tuple[str, int]] = {}  # „Fenster schließen“ je Raum: (Tag, wie oft gesendet)
         self._dev_duty: dict[str, list[str]] = {}
         # Gesendete Befehle (Zeitpunkte) für die Funk-Anzeige
         self._sent_at: list[float] = []
@@ -1720,7 +1721,14 @@ class Heizen:
                 if why:
                     session["done"] = why
                     self.log.add("window", "Genug gelüftet – Fenster schließen", why, room_id, name)
-                    self.haus.notify(done_key, "vent_done", "Fenster schließen", f"{name}: genug gelüftet ({why})", room_id, name)
+                    # je Raum und Tag höchstens zweimal senden, danach nur Hinweis in der Glocke
+                    day = dt_util.as_local(dt_util.utcnow()).date().isoformat()
+                    cnt = self._ventdone_sent.get(room_id)
+                    n = cnt[1] if cnt and cnt[0] == day else 0
+                    self.haus.notify(done_key, "vent_done", "Fenster schließen", f"{name}: genug gelüftet ({why})", room_id, name,
+                                     quiet_why=f"heute schon {n}× gesendet" if n >= 2 else None)
+                    if n < 2:
+                        self._ventdone_sent[room_id] = (day, n + 1)
             long_min = float(self.settings.get("vent_long_min") or 30)
             info["open"] = {"since": dt_util.utc_from_timestamp(session["start"]).isoformat(), "minutes": round(open_min, 1),
                             "target": session["target"], "done": session["done"], "cool": session["cool"]}

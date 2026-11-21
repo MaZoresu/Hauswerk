@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.68.5 – 2026-11-21
+
+### Geändert (Lüften)
+- **„Fenster schließen“ höchstens zweimal am Tag senden – je Raum.** Danach kommt die Meldung nur noch als Hinweis unter der Hauswerk-Glocke (und im Bildschirmschoner); im Protokoll steht „nur Glocke – heute schon 2× gesendet“. Ab Mitternacht zählt es neu.
+
 ## 0.68.4 – 2026-11-21
 
 ### Behoben (Benachrichtigungen)
