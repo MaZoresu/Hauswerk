@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.73.0";
+const VERSION = "0.73.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -442,16 +442,16 @@ const HEAT_VIEWS = [
   { id: "plans", slug: "heizplaene", name: "Heizpläne", icon: "mdi:calendar-clock", hidden: true }, // über Einstellungen › Heizpläne
   { id: "room", slug: "raum", name: "Raum", icon: "mdi:door", hidden: true }, // Raum-Detailseite
   { id: "report", slug: "bericht", name: "Bericht", icon: "mdi:chart-bar" },
-  { id: "settings", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
+  { id: "settings", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true }, // nur noch unter Einstellungen
 ];
 const SHUT_VIEWS = [
   { id: "shutters", slug: "rolllaeden", name: "Rollläden", icon: "mdi:window-shutter" },
-  { id: "shutset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
+  { id: "shutset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true },
 ];
 const LW_VIEWS = [
   { id: "lights", slug: "licht", name: "Licht", icon: "mdi:lightbulb-group-outline" },
   { id: "lwrep", slug: "bericht", name: "Bericht", icon: "mdi:chart-bar" },
-  { id: "lightset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
+  { id: "lightset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true },
 ];
 // Abschnitte des Lichtwerk-Profils (wie die Bereiche des Blueprints „Smart Light“)
 const LW_SECTIONS = [
@@ -480,13 +480,15 @@ const KW_VIEWS = [
   { id: "kwflow", slug: "energiefluss", name: "Energiefluss", icon: "mdi:transmission-tower" },
   { id: "kwdev", slug: "geraete", name: "Geräte", icon: "mdi:washing-machine" },
   { id: "kwrep", slug: "verlauf", name: "Verlauf", icon: "mdi:chart-bar" },
-  { id: "kwset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant" },
+  { id: "kwset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true },
 ];
+// Einstellungsseiten der Module: nur noch über Einstellungen (Zahnrad) erreichbar, nicht in der Unterleiste der Module
+const SET_VIEWS = ["house", "settings", "shutset", "kwset", "lightset", "plans"];
 const MODULES = [
-  { id: "heizen", no: 1, name: "Heizwerk", icon: "mdi:radiator", logo: "heizen", views: HEAT_VIEWS.map((v) => v.id) },
-  { id: "rollwerk", no: 2, name: "Rollwerk", icon: "mdi:window-shutter", logo: "rollwerk", views: SHUT_VIEWS.map((v) => v.id) },
-  { id: "kraftwerk", no: 3, name: "Kraftwerk", icon: "mdi:solar-power-variant", logo: "kraftwerk", views: KW_VIEWS.map((v) => v.id) },
-  { id: "lichtwerk", no: 4, name: "Lichtwerk", icon: "mdi:lightbulb-outline", logo: "lichtwerk", views: LW_VIEWS.map((v) => v.id) },
+  { id: "heizen", no: 1, name: "Heizwerk", icon: "mdi:radiator", logo: "heizen", views: HEAT_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
+  { id: "rollwerk", no: 2, name: "Rollwerk", icon: "mdi:window-shutter", logo: "rollwerk", views: SHUT_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
+  { id: "kraftwerk", no: 3, name: "Kraftwerk", icon: "mdi:solar-power-variant", logo: "kraftwerk", views: KW_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
+  { id: "lichtwerk", no: 4, name: "Lichtwerk", icon: "mdi:lightbulb-outline", logo: "lichtwerk", views: LW_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
 ];
 const SUB_VIEWS = [...HEAT_VIEWS, ...SHUT_VIEWS, ...KW_VIEWS, ...LW_VIEWS];
 // Symbol eines Verbrauchers nach seinem Namen (erster Treffer zählt)
@@ -1087,7 +1089,7 @@ class HauswerkPanel extends HTMLElement {
     return `${item("start", "Start", "mdi:view-dashboard-outline", "start", this._tab === "start")}
       ${MODULES.map((m) => item(m.id, m.name, m.logo ? `logo:${m.logo}` : m.icon, mod?.id === m.id ? this._tab : m.views[0], mod?.id === m.id)).join("")}
       <span class="grow"></span>
-      ${item("house", "Einstellungen", "mdi:cog-outline", "house", ["house", "log"].includes(this._tab))}`;
+      ${item("house", "Einstellungen", "mdi:cog-outline", "house", [...SET_VIEWS, "log"].includes(this._tab))}`;
   }
 
   /** Untere Leiste fürs Handy: Start · Module · Einstellungen (Unterseiten eines Moduls über seine Unterleiste). */
@@ -1102,7 +1104,7 @@ class HauswerkPanel extends HTMLElement {
         item(m.views.includes(this._tab) ? this._tab : m.views[0], m.views, m.logo ? `logo:${m.logo}` : m.icon, m.name,
           m.id === "heizen" && f && (f.open || f.heating) ? `<em class="${f.open ? "warn" : ""}">${f.open || f.heating}</em>` : "")
       ),
-      item("house", ["house", "log"], "mdi:cog-outline", "Einstellungen"),
+      item("house", [...SET_VIEWS, "log"], "mdi:cog-outline", "Einstellungen"),
     ].join("");
   }
 
@@ -1201,7 +1203,7 @@ class HauswerkPanel extends HTMLElement {
     const mod = MODULES.find((m) => m.views.includes(this._tab));
     const sub = SUB_VIEWS.find((v) => v.id === this._tab);
     const roomName = this._tab === "room" ? this._data?.rooms?.[this._roomId]?.name : null;
-    const title = mod ? `${mod.name}${roomName ? ` · ${roomName}` : sub ? ` · ${sub.name}` : ""}` : this._tab === "house" ? "Einstellungen" : this._tab === "log" ? "Protokoll" : "Start";
+    const title = mod ? `${mod.name}${roomName ? ` · ${roomName}` : sub ? ` · ${sub.name}` : ""}` : SET_VIEWS.includes(this._tab) ? "Einstellungen" : this._tab === "log" ? "Protokoll" : "Start";
     const f = this._data ? this._facts() : null;
     const badge = (id) => {
       if (!f || id !== "heizen") return "";
@@ -1230,7 +1232,7 @@ class HauswerkPanel extends HTMLElement {
             return `<button class="bell ${warn ? "warn" : h.length ? "info" : ""}" data-action="hints-open" title="${h.length ? `${h.length} Hinweis${h.length > 1 ? "e" : ""}` : "Keine Hinweise"}" aria-label="Hinweise">
               <ha-icon icon="${h.length ? "mdi:bell-badge-outline" : "mdi:bell-outline"}"></ha-icon>${warn ? `<em>${warn}</em>` : h.length ? "<i></i>" : ""}</button>`;
           })()}
-          ${this._data ? `<button class="bell gear ${["house", "log"].includes(this._tab) ? "on" : ""}" data-action="tab" data-tab="house" title="Hauswerk-Einstellungen (für alle Module)" aria-label="Einstellungen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
+          ${this._data ? `<button class="bell gear ${[...SET_VIEWS, "log"].includes(this._tab) ? "on" : ""}" data-action="tab" data-tab="house" title="Hauswerk-Einstellungen (für alle Module)" aria-label="Einstellungen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
         </div>
       </div>
       <nav class="mtabs">
@@ -1579,6 +1581,20 @@ class HauswerkPanel extends HTMLElement {
     const tab = this._tab;
     // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
     const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
+    // Einstellungen: vollständig und scrollbar (zwei Spalten, keine Karte wird geteilt oder abgeschnitten)
+    const scroll = ["settings", "shutset", "kwset", "lightset", "house"].includes(tab);
+    box.classList.toggle("tscroll", scroll);
+    if (scroll) {
+      Object.assign(tin.style, { zoom: f, width: "", height: "", columnWidth: "", columnGap: "", transform: "", clipPath: "" });
+      tin.classList.remove("two");
+      tin.querySelectorAll(".brief").forEach((b) => { b.style.zoom = ""; });
+      this._tRowMode = false;
+      this._tPages = 1;
+      this._tPage[tab] = 0;
+      const dots = this.shadowRoot.getElementById("tdots");
+      if (dots) dots.innerHTML = "";
+      return;
+    }
     const onePage = ["settings", "shutset", "kwset", "lightset", "house"].includes(tab);
     const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66, ...(onePage ? [0.6, 0.55] : [])].map((z) => Math.round(z * f * 100) / 100);
     const maxZ = Math.max(f, Math.min(1.4 * f, (W / 820) * f));
@@ -4526,7 +4542,7 @@ class HauswerkPanel extends HTMLElement {
 
   // ------------------------------------------------------------ Lichtwerk
   _lwNavHtml() {
-    return `<nav class="heatnav">${LW_VIEWS.map((v) => `<button class="hnav ${this._tab === v.id ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span></button>`).join("")}</nav>`;
+    return `<nav class="heatnav">${LW_VIEWS.filter((v) => !v.hidden).map((v) => `<button class="hnav ${this._tab === v.id ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span></button>`).join("")}</nav>`;
   }
 
   /** Lichter mit Einstellung (cfg), Zustand (st) und Status aus Lichtwerk (ls). */
@@ -6119,7 +6135,7 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _kwNavHtml() {
-    return `<nav class="heatnav">${KW_VIEWS.map((v) => `<button class="hnav ${this._tab === v.id ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span></button>`).join("")}</nav>`;
+    return `<nav class="heatnav">${KW_VIEWS.filter((v) => !v.hidden).map((v) => `<button class="hnav ${this._tab === v.id ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span></button>`).join("")}</nav>`;
   }
 
   /** Mini-Fenster mit Stellung; Marke = wohin die Automatik fahren würde (wenn es abweicht). */
@@ -6209,7 +6225,7 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _rwNavHtml() {
-    return `<nav class="heatnav">${SHUT_VIEWS.map((v) => `<button class="hnav ${this._tab === v.id ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span></button>`).join("")}</nav>`;
+    return `<nav class="heatnav">${SHUT_VIEWS.filter((v) => !v.hidden).map((v) => `<button class="hnav ${this._tab === v.id ? "on" : ""}" data-action="tab" data-tab="${v.id}"><ha-icon icon="${v.icon}"></ha-icon><span>${v.name}</span></button>`).join("")}</nav>`;
   }
 
   _viewShutters() {
@@ -13343,6 +13359,11 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 :host([tablet]) #tdots { order:2; }
 :host([tablet]) #chips { order:0; flex:none; }
 :host([tablet]) .tpages { height:100%; overflow:hidden; touch-action:pan-y pinch-zoom; }
+:host([tablet]) .tpages.tscroll { overflow-y:auto; overscroll-behavior:contain; }
+:host([tablet]) .tscroll .tin { column-fill:balance; padding-bottom:24px; }
+:host([tablet]) .tscroll #set-list { column-count:2; column-gap:16px; }
+:host([tablet]) .tscroll #set-list > * { break-inside:avoid; display:block; margin:0 0 14px; }
+:host([tablet][setdock]) .tscroll #set-list { column-count:1; }
 :host([tablet]) .tin { column-fill:auto; }
 :host([tablet]) .tpages.tflip { animation:tflip .18s ease-out; }
 @keyframes tflip { from { opacity:.35; } to { opacity:1; } }

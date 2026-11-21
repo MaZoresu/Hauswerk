@@ -560,6 +560,8 @@ def test_tablet_ohne_scrollen(tablet):
         assert p.js("document.scrollingElement.scrollHeight <= innerHeight + 1"), f"{view}: Seite scrollt"
         main = p.js(f"(() => {{ const m = {EL}.shadowRoot.getElementById('main'); return [m.scrollHeight, m.clientHeight]; }})()")
         assert main[0] <= main[1] + 1, f"{view}: Inhalt scrollt {main}"
+        if view in ("shutset", "house"):  # Einstellungen: vollständig, innen scrollbar statt abgeschnitten
+            assert p.js(f"{EL}.shadowRoot.querySelector('.tpages').classList.contains('tscroll')")
         assert p.js(f"{EL}._tPages") <= (1 if view in ("shutset", "house") else 2), f"{view}: {p.js(f'{EL}._tPages')} Seiten"
         # Modul-Leiste links (große Tasten), Unterseiten oben als Umschalter, keine Leisten unten
         r = p.js(f"""(() => {{ const r = {EL}.shadowRoot; const rail = r.getElementById('rail').getBoundingClientRect();
@@ -570,7 +572,7 @@ def test_tablet_ohne_scrollen(tablet):
         assert r[0] > 60 and r[1] <= r[2] + 1, f"{view}: Modul-Leiste nicht links {r}"
         assert r[5] == "none" and r[6] == "none", f"{view}: alte Leisten sichtbar {r}"
         assert r[7] >= 60, f"{view}: Modul-Tasten zu klein {r}"
-        if view not in ("start", "house"):
+        if view not in ("start", "house", "shutset"):  # Einstellungen haben keine Modul-Unterleiste
             assert r[3] is not None and r[3] <= r[4] + 1, f"{view}: Unterleiste nicht oben {r}"
         p.ok(f"Tablet {view}")
     # Einstellungen immer auf einer Seite

@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.73.1 – 2026-11-21
+
+### Geändert
+- **Einstellungen nur noch an einer Stelle:** Die Reiter „Einstellungen“ in Heizwerk, Rollwerk, Kraftwerk und Lichtwerk entfallen. Alle Einstellungen stehen unter dem Zahnrad (bzw. „Einstellungen“ in der Leiste) mit den Reitern Haus · Heizwerk · Rollwerk · Kraftwerk · Lichtwerk · System; dort ist dann das Zahnrad markiert. Alte Adressen wie `/hauswerk/rollwerk/einstellungen` funktionieren weiter.
+
+### Behoben (Tabletmodus)
+- **Einstellungen abgeschnitten:** Die Einstellungsseiten wurden auf eine Bildschirmseite gezwängt – Gruppen wurden zwischen den Spalten geteilt und unten abgeschnitten. Jetzt stehen sie vollständig in zwei Spalten (keine Gruppe geteilt) und lassen sich innen scrollen; ist rechts eine Einstellung geöffnet, in einer Spalte.
+
 ## 0.73.0 – 2026-11-21
 
 ### Neu – Einstellungen übersichtlicher
