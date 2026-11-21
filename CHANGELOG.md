@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.81.1 – 2026-11-21
+
+### Geändert (Beetwerk › Garten)
+- **Zeitplan und Mähzeiten gehören zum Mähroboter:** Sie stehen jetzt unten in der Karte des Mähroboters statt als eigene Kacheln – Zeitplan (Wochenleiste, an/aus, ändern) und Mähzeiten (Stunden je Tag, Ladevorgänge, Fehler). Die Seite Garten hat damit nur noch zwei Karten: Mähroboter und Bewässerung.
+
 ## 0.81.0 – 2026-11-21
 
 ### Neu – Benachrichtigungen mit Emoji

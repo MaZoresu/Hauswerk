@@ -1963,7 +1963,10 @@ def test_beetwerk_maeher_erweitert(panel):
     p.view("garden")
     p.wait(300)
     txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
-    assert "Mäht seit 42 Min." in txt and "Garten frei" in txt and "Zeitpläne" in txt and "Statistik" in txt and "3× Mäher steckt fest" in txt, txt
+    assert "Mäht seit 42 Min." in txt and "Garten frei" in txt and "Zeitplan" in txt and "Mähzeiten" in txt and "3× Mäher steckt fest" in txt, txt
+    # Zeitplan und Mähzeiten stehen in der Karte des Mähers – keine eigenen Kacheln
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.bw-mow .bw-sub').length") == 2
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.bw-grid > section').length") == 2
     assert "Messer drehen 14 %" in txt
     assert p.js(f"{EL}.shadowRoot.querySelector('.bw-art.st-mowing svg') != null")
     assert p.js(f"{EL}.shadowRoot.querySelectorAll('.bwt-r').length") == 7

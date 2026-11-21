@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.81.0";
+const VERSION = "0.81.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4926,7 +4926,6 @@ class HauswerkPanel extends HTMLElement {
       ],
     });
     const mower = !E.mower ? "" : this._bwMowerCard(bs, svc);
-    const extra = E.mower ? this._bwTimersCard(bs) + this._bwStatsCard(bs) : "";
     const zones = bs.zones || [];
     const zoneHtml = !zones.length ? "" : `<section class="card bw-c bw-zones">
       <div class="bw-h"><span class="bw-ic" style="--c:#0ea5e9"><ha-icon icon="mdi:sprinkler-variant"></ha-icon></span><span class="grow"><b>Bewässerung</b>
@@ -4962,7 +4961,7 @@ class HauswerkPanel extends HTMLElement {
         E.bucket && this._bwNum(E.bucket) != null ? [`${fmt(this._bwNum(E.bucket), 1)} mm`, "Wasserbilanz (Smart Irrigation)", ""] : null,
       ].filter(Boolean).map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>
     </section>`;
-    return head + `<div class="bw-grid">${mower}${water}${extra}</div>`;
+    return head + `<div class="bw-grid">${mower}${water}</div>`;
   }
 
   /** Zustand des Mähers in Worten, Farbe und Symbol – für Karte, Widget und Bildschirmschoner. */
@@ -5054,8 +5053,9 @@ class HauswerkPanel extends HTMLElement {
         blades != null ? [`${fmt(blades, 0)} Tage`, "Messer im Einsatz", blades >= (set.bw_blades_days || 60) ? "#f59e0b" : ""] : null,
         hours != null ? [`${fmt(hours, 0)} Std.`, "Betriebsstunden", ""] : null,
         soil != null ? [`${fmt(soil, 0)} %`, `Bodenfeuchte · Pause ab ${set.bw_soil_wet ?? 85} %`, soil >= (set.bw_soil_wet ?? 85) ? "#0ea5e9" : ""] : null,
-        bs.stats ? [`${fmt(bs.stats.week_hours, 1)} Std.`, "gemäht in 7 Tagen", ""] : null,
       ].filter(Boolean).map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>
+      ${this._bwTimersCard(bs)}
+      ${this._bwStatsCard(bs)}
     </section>`;
   }
 
@@ -5081,13 +5081,13 @@ class HauswerkPanel extends HTMLElement {
     const DL = Object.fromEntries(DAYS);
     const shown = tms.filter((t) => t.on || t.days.length);
     const free = tms.find((t) => !t.on && !t.days.length);
-    return `<section class="card bw-c">
-      <div class="bw-h"><span class="bw-ic" style="--c:#16a34a"><ha-icon icon="mdi:calendar-clock"></ha-icon></span><span class="grow"><b>Zeitpläne</b><small>${on.length ? `${on.length} aktiv` : "keiner aktiv"} · grau = Igelschutz (dunkel)</small></span></div>
+    return `<div class="bw-sub">
+      <div class="bw-sub-h"><ha-icon icon="mdi:calendar-clock"></ha-icon><b>Zeitplan</b><small>${on.length ? `${on.length} aktiv` : "keiner aktiv"} · gestreift = Igelschutz</small></div>
       <div class="bwt">${rows}<div class="bwt-ax"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div></div>
       <div class="evlist">${shown.map((t) => `<div class="ev"><label class="switch"><input type="checkbox" data-bwtm="${esc(t.entity)}" ${t.on ? "checked" : ""}><span></span></label><span class="grow"><b>${esc(t.start)}–${esc(t.end)}</b><small>Zeitplan ${t.id} · ${t.days.map((d) => DL[d]).join(", ") || "kein Tag"}</small></span>
         ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="bwtimer:${t.id}" title="Ändern"><ha-icon icon="mdi:pencil-outline"></ha-icon></button>` : ""}</div>`).join("") || `<p class="muted small">Noch kein Zeitplan am Mäher.</p>`}</div>
       ${this._admin && free ? `<button class="link" data-action="pop-open" data-pop="bwtimer:${free.id}"><ha-icon icon="mdi:plus"></ha-icon>Zeitplan hinzufügen</button>` : ""}
-    </section>`;
+    </div>`;
   }
 
   /** Statistik: Mähstunden je Tag (14 Tage), Ladevorgänge, Fehler mit Häufigkeit und Uhrzeit. */
@@ -5097,12 +5097,12 @@ class HauswerkPanel extends HTMLElement {
     const days = st.days || [];
     const max = Math.max(1, ...days.map((d) => d.hours));
     const bars = days.map((d) => `<span class="bws-b" title="${new Date(d.day).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "short" })}: ${fmt(d.hours, 1)} Std.${d.errors ? ` · ${d.errors} Fehler` : ""}"><i style="height:${(d.hours / max) * 100}%;${d.errors ? `background:${C.alert}` : ""}"></i><small>${new Date(d.day).toLocaleDateString("de-DE", { weekday: "narrow" })}</small></span>`).join("");
-    return `<section class="card bw-c">
-      <div class="bw-h"><span class="bw-ic" style="--c:#16a34a"><ha-icon icon="mdi:chart-bar"></ha-icon></span><span class="grow"><b>Statistik</b><small>letzte 14 Tage · gezählt seit dem Update</small></span></div>
+    return `<div class="bw-sub">
+      <div class="bw-sub-h"><ha-icon icon="mdi:chart-bar"></ha-icon><b>Mähzeiten</b><small>letzte 14 Tage</small></div>
       <div class="vt-f"><span><b>${fmt(st.week_hours, 1)} Std.</b><small>gemäht · 7 Tage</small></span><span><b>${st.week_charges}</b><small>Ladevorgänge</small></span><span ${st.week_errors ? `style="--c:${C.alert}" class="on"` : ""}><b>${st.week_errors}</b><small>Fehler</small></span></div>
       <div class="bws">${bars}</div>
       ${(st.errors || []).length ? `<div class="lbl">Häufigste Fehler · 7 Tage</div><div class="evlist">${st.errors.map((e) => `<div class="ev"><ha-icon icon="mdi:alert-circle-outline" style="color:${C.alert}"></ha-icon><span class="grow"><b>${e.count}× ${esc(e.text)}</b><small>meist ${e.from === e.to ? `um ${e.from} Uhr` : `${e.from}–${e.to + 1} Uhr`}</small></span></div>`).join("")}</div>` : ""}
-    </section>`;
+    </div>`;
   }
 
   _w_mower(w, z) {
@@ -14516,6 +14516,8 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 @media (prefers-reduced-motion: reduce) { .bw-art * { animation:none !important; } }
 .bw-guard { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; border-radius:14px; background:color-mix(in srgb, var(--muted) 8%, transparent); }
 .bw-guard-a { flex-basis:100%; } .bw-guard .grow b { display:block; font-size:14px; } .bw-guard .grow small { color:var(--muted); font-size:12px; } .bw-ic.sm { width:34px; height:34px; border-radius:11px; } .bw-ic.sm ha-icon { --mdc-icon-size:20px; }
+.bw-sub { display:flex; flex-direction:column; gap:10px; padding-top:12px; border-top:1px solid var(--line, color-mix(in srgb, var(--muted) 20%, transparent)); }
+.bw-sub-h { display:flex; align-items:center; gap:8px; } .bw-sub-h ha-icon { --mdc-icon-size:20px; color:#16a34a; } .bw-sub-h b { font-size:15px; } .bw-sub-h small { color:var(--muted); font-size:12px; margin-left:auto; }
 .bwt { display:flex; flex-direction:column; gap:5px; }
 .bwt-r { display:grid; grid-template-columns:26px 1fr; align-items:center; gap:8px; font-size:12px; color:var(--muted); } .bwt-r.today span { color:var(--fg); font-weight:700; }
 .bwt-bar { position:relative; height:14px; border-radius:7px; background:color-mix(in srgb, var(--muted) 12%, transparent); overflow:hidden; }
