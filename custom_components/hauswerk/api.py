@@ -269,6 +269,12 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("bw_watch"): bool,
         vol.Optional("bw_watch_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
         vol.Optional("bw_battery_min"): vol.All(vol.Coerce(int), vol.Range(min=30, max=95)),
+        vol.Optional("bw_plan"): bool,
+        vol.Optional("bw_plan_hours"): vol.All(vol.Coerce(float), vol.Range(min=1, max=60)),
+        vol.Optional("bw_plan_season"): bool,
+        vol.Optional("bw_plan_from"): _hm,
+        vol.Optional("bw_plan_to"): _hm,
+        vol.Optional("bw_plan_days"): vol.All([vol.In(["mo", "tu", "we", "th", "fr", "sa", "su"])], vol.Length(min=1, max=7)),
         # Lichtwerk
         vol.Optional("lw_lights"): vol.All([vol.All(str, vol.Match(r"^(light|switch|input_boolean)\.[a-z0-9_]+$"))], vol.Length(max=80)),
         vol.Optional("lw_lux_sensor"): _opt(SENSOR),

@@ -2252,6 +2252,62 @@ def test_beetwerk_garten_frei_igel_hitze_waechter(hw):
     asyncio.run(run())
 
 
+def test_beetwerk_maehplan(hw):
+    """Mähplan: Wochenziel auf die erlaubten Tage verteilt, Regenstunden ausgelassen, in die Robonect-Zeitpläne
+    geschrieben (je Wochentag zwei); beim Abschalten kommen die alten Zeitpläne zurück; Pause endet mit „Auto“."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 6, 10, 6, 0, tzinfo=timezone.utc)  # Mi 07:00 lokal (Test-Zeitzone UTC+1)
+        hass = Hass()
+        ents = ["lawn_mower.robonect", "button.automower_auto", "button.automower_eod"] + [f"switch.automower_timer_{i}" for i in range(1, 15)]
+        for eid in ents:
+            REG[eid] = types.SimpleNamespace(entity_id=eid, device_id="mower", domain=eid.split(".")[0], disabled_by=None, device_class=None, original_device_class=None)
+        hass.set("lawn_mower.robonect", "docked", {}, "Automower")
+        for i in range(1, 15):
+            hass.set(f"switch.automower_timer_{i}", "on" if i == 1 else "off", {"id": i, "start": "08:00", "end": "14:10" if i == 1 else "10:00",
+                                                                                 "weekdays": {"mo": i == 1}}, f"Timer {i}")
+        hass.set("weather.home", "sunny", {"temperature": 20, "humidity": 50})
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"weather_entity": "weather.home"})
+        start = NOW[0].timestamp()
+        haus.hourly = [{"ts": start + k * 3600, "hour": (7 + k) % 24, "temp": 20, "rh": 50, "rain": k in (4, 5)} for k in range(48)]  # 11–12 Uhr Regen
+        bw = hw.Beetwerk(hass, log, haus)
+        await bw.async_load()
+        await bw.async_start()
+        await bw.async_save_settings({"bw_plan": True, "bw_plan_hours": 12, "bw_night": False}, by="Test")
+        plan = bw.status()["plan"]
+        assert plan and plan["mode"] == "timers" and plan["target"] == 12.0
+        today = plan["days"][0]
+        assert today["wd"] == "we" and today["windows"] == [[540, 660]], today  # 9–11 Uhr, vor dem Regen
+        assert any(b[2] == "rain" for b in today["bad"])
+        assert plan["days"][4]["wd"] == "su" and plan["days"][4]["windows"] == []  # Sonntag nicht erlaubt
+        writes = [c[2] for c in hass.calls if c[:2] == ("robonect", "timer")]
+        assert {"entity_id": "lawn_mower.robonect", "timer": "5", "enable": True, "start": "09:00", "end": "11:00", "weekdays": ["we"]} in writes, writes
+        assert any(w["timer"] == "1" and w["enable"] is True and w["weekdays"] == ["mo"] for w in writes)
+        # Pause (Regen) endet: mit Mähplan „Auto“ statt „Mähen“
+        hass.set("lawn_mower.robonect", "mowing", {}, "Automower")
+        hass.set("weather.home", "rainy", {"temperature": 20, "humidity": 90})
+        await bw.async_evaluate()
+        hass.set("lawn_mower.robonect", "docked", {}, "Automower")
+        hass.set("weather.home", "sunny", {"temperature": 20, "humidity": 50})
+        NOW[0] += timedelta(minutes=61)
+        await bw.async_evaluate()
+        NOW[0] += timedelta(minutes=61)
+        await bw.async_evaluate()
+        assert ("button", "press", {"entity_id": "button.automower_auto"}) in hass.calls
+        assert ("lawn_mower", "start_mowing", {"entity_id": "lawn_mower.robonect"}) not in hass.calls
+        # Abschalten: alte Zeitpläne zurück
+        n = len(hass.calls)
+        await bw.async_save_settings({"bw_plan": False}, by="Test")
+        back = [c[2] for c in hass.calls[n:] if c[:2] == ("robonect", "timer")]
+        assert {"entity_id": "lawn_mower.robonect", "timer": "1", "enable": True, "start": "08:00", "end": "14:10", "weekdays": ["mo"]} in back
+        assert bw.status()["plan"] is None
+        await bw.async_stop()
+
+    asyncio.run(run())
+
+
 def test_beetwerk_giessen_mit_smart_irrigation(hw):
     """Beetwerk gießt: Zonen aus Smart Irrigation, Ventil mit gleichem Namen gefunden, Dauer berechnet, danach
     Ventil zu und Wasserbilanz zurück; Gießplan zur Startzeit, bei Regen ausgelassen; Mäher fährt solange in die Station."""

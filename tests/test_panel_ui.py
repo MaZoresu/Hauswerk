@@ -2008,6 +2008,29 @@ def test_beetwerk_maeher_erweitert(panel):
     assert "bw-art" in html and "gemäht · 7 Tage" in html and "Zur Station" in html
 
 
+def test_beetwerk_maehplan(panel):
+    """Mähplan: Einstellung (Wochenziel, Tage sofort gespeichert) und Plan der nächsten 7 Tage in der Karte des Mähers."""
+    p = panel
+    p.view("gardenset")
+    p.wait()
+    assert "Mähplan" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+    p.js(f"() => {EL}._openPop('bwplan')")
+    p.wait()
+    p.click('#pop [data-action="bw-plan-day"][data-k="sa"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
+    assert saved == {"bw_plan_days": ["mo", "tu", "we", "th", "fr"]}, saved
+    p.js(f"{EL}._closePop()")
+    p.js(f"""() => {{ {EL}._data.settings.bw_plan = true; const d = new Date().toISOString().slice(0, 10);
+        {EL}._status.beetwerk.plan = {{ mode: 'timers', target: 9.6, factor: 0.8, planned: 2, backlog: 0,
+          days: [{{ date: d, wd: 'mo', allowed: true, windows: [[540, 660]], hours: 2, bad: [[720, 840, 'rain']] }}] }}; }}""")
+    p.view("garden")
+    p.wait(300)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('.bw-mow').innerText")
+    assert "Mähplan" in txt and "9,6 Std." in txt and "09:00–11:00" in txt, txt
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.bw-mow .bwt-bar .bwp-rain').length") == 1
+
+
 def test_beetwerk_zonen_giessen(panel):
     """Beetwerk › Garten: Zonen aus Smart Irrigation mit Bedarf, Gießen, Multiplikator, Berechnen;
     Einstellungen: Gießplan, Ventil je Zone (sofort gespeichert), bisherige Automationen abschalten."""

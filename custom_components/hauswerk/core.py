@@ -976,7 +976,7 @@ class Haus:
             return
         rainy = {"rainy", "pouring", "snowy", "snowy-rainy", "hail", "lightning-rainy"}
         out = []
-        for h in list(((response or {}).get(entity_id) or {}).get("forecast") or [])[:36]:
+        for h in list(((response or {}).get(entity_id) or {}).get("forecast") or [])[:72]:
             moment, _ = parse_when(h.get("datetime")) if h.get("datetime") else (None, False)
             if moment is None:
                 continue

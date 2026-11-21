@@ -2,6 +2,16 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.82.0 – 2026-11-21
+
+### Neu – Beetwerk plant die Mähzeiten nach Wetter (Mähplan)
+- **Wochenziel statt fester Zeiten** (Einstellungen › Beetwerk › Mähplan): z. B. 12 Std. je Woche, Mähtage Mo–Sa, erlaubt 9–19 Uhr. Nach Wachstum passt Beetwerk das Ziel an die vorhergesagte Temperatur an (unter 5 °C 20 %, ab 15 °C voll, über 26 °C etwas weniger).
+- **Mähen in den trockenen Stunden:** Aus der Stunden-Vorhersage legt Beetwerk die Mähzeiten so, dass nicht bei Regen und 2 Std. danach, nicht bei Frost oder Hitze, nicht im Dunkeln (Igelschutz) und nicht nach dem Gießen gemäht wird. Stündlich neu gerechnet.
+- **Nachholen:** Was an den letzten Tagen ausgefallen ist (Regen, Kinder im Garten …), legt Beetwerk auf die nächsten guten Stunden – höchstens zwei Tagesmengen.
+- **Robust:** Der Plan wird in die Zeitpläne des Mähers geschrieben (Robonect: je Wochentag zwei, Zeitplan 1–14) – nur was sich ändert. Der Mäher fährt danach auch, wenn Home Assistant gerade nicht läuft. Deine bisherigen Zeitpläne merkt sich Beetwerk und stellt sie beim Ausschalten wieder her. Mäher ohne Zeitpläne startet Beetwerk selbst und holt sie am Ende heim.
+- **In der Karte des Mähroboters:** Mähplan der nächsten 7 Tage als Leisten mit Mähzeiten, Regen, Nässe, Hitze und Igelschutz; Ziel, geplant, gemäht und was nachgeholt wird.
+- Pausen bleiben als Sicherheitsnetz: Danach schaltet Beetwerk den Mäher mit Mähplan in den Automatik-Modus (statt „Mähen“), damit er wieder seinen Zeitplänen folgt.
+
 ## 0.81.1 – 2026-11-21
 
 ### Geändert (Beetwerk › Garten)

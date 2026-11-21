@@ -20,6 +20,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import GARDEN_STORAGE_KEY
+from .logic import MOW_DAYS, plan_mowing
 from .core import Haus
 from .log import Protokoll, log_settings
 
@@ -60,6 +61,13 @@ BW_DEFAULTS: dict[str, Any] = {
     "bw_watch": True,
     "bw_watch_min": 20,
     "bw_battery_min": 70,    # Hinweis „Akku altert“ unter … % der Kapazität im Neuzustand
+    # Mähplan: Beetwerk legt die Mähzeiten nach Wetter fest und schreibt sie in die Zeitpläne des Mähers
+    "bw_plan": False,
+    "bw_plan_hours": 12,     # Wochenziel in Stunden (Hochsaison)
+    "bw_plan_season": True,  # Wochenziel nach Wachstum (Temperatur) anpassen
+    "bw_plan_from": "09:00",
+    "bw_plan_to": "19:00",
+    "bw_plan_days": ["mo", "tu", "we", "th", "fr", "sa"],
 }
 BW_KEYS = frozenset(BW_DEFAULTS)
 RAINY = ("rainy", "pouring", "snowy", "snowy-rainy", "hail", "lightning-rainy")
@@ -94,6 +102,8 @@ class Beetwerk:
         self._was_watering = False
         self._calm_since: float | None = None
         self._stop_timer = None
+        self._plan: dict | None = None
+        self._plan_at = 0.0
         haus.extra_status["beetwerk"] = self.status
 
     async def async_load(self) -> None:
@@ -127,9 +137,24 @@ class Beetwerk:
         if not changed:
             return
         log_settings(self.log, settings, changed, by, module="beetwerk", old=self.settings)
+        was = bool(self.settings.get("bw_plan"))
         self.settings.update(settings)
         self._dev = None
+        self._plan_at = 0.0  # Mähplan neu rechnen
+        now_on = bool(self.settings.get("bw_plan"))
+        ent = self.entities()
+        if now_on and not was:
+            # bisherige Zeitpläne merken – beim Abschalten des Mähplans kommen sie zurück
+            self._persist["timers_backup"] = self.timers(ent)
+            self.log.add("garden", "Mähplan eingeschaltet", "Beetwerk legt die Mähzeiten nach Wetter fest; bisherige Zeitpläne gemerkt", module="beetwerk")
+        elif was and not now_on:
+            for t in self._persist.pop("timers_backup", None) or []:
+                await self._async_write_timer(t["id"], t["on"], t["start"] or "08:00", t["end"] or "10:00", t["days"])
+            self._plan = None
+            self.log.add("garden", "Mähplan ausgeschaltet", "bisherige Zeitpläne am Mäher wiederhergestellt", module="beetwerk")
         self._save()
+        if now_on:
+            await self._async_mow_plan(ent, force=True)
 
     # ------------------------------------------------------------ Entitäten
     def _ids(self, domain: str) -> list[str]:
@@ -386,6 +411,8 @@ class Beetwerk:
         winter = self._on(ent.get("winter"))
         await self._async_pause(ent, mower, state, reasons, paused, winter, now, today)
         self._track(ent, mower, state, now)
+        if self.settings.get("bw_plan") and not winter:
+            await self._async_mow_plan(ent)
         # Fehler: „braucht Hilfe“
         err = self.error_text(ent, state)
         if err:
@@ -452,7 +479,11 @@ class Beetwerk:
             h, m = (int(x) for x in until.split(":")[:2])
             if self.settings.get("bw_resume", True) and now - self._calm_since >= wait and local.hour * 60 + local.minute < h * 60 + m:
                 if state in ("docked", "paused"):
-                    await self._call("lawn_mower", "start_mowing", mower)
+                    if self.settings.get("bw_plan") and ent.get("auto"):
+                        # Mähplan: zurück in den Automatik-Modus – der Mäher folgt wieder seinen Zeitplänen
+                        await self._call("button", "press", ent["auto"])
+                    else:
+                        await self._call("lawn_mower", "start_mowing", mower)
                     self.log.add("garden", "Mähpause vorbei – Mäher startet wieder", paused.get("why"), module="beetwerk")
                 self._persist["paused"] = None
                 self._calm_since = None
@@ -622,6 +653,123 @@ class Beetwerk:
             "cap_max": self._persist.get("cap_max"),
         }
 
+    # ------------------------------------------------------------ Mähplan
+    def _done_by_day(self) -> dict[str, float]:
+        """Gemähte Stunden je Tag – nur Tage mit Messung."""
+        out = {}
+        for k, d in (self._persist.get("stats") or {}).items():
+            if "hours0" in d and "hours1" in d and d["hours1"] >= d["hours0"]:
+                out[k] = max(d["hours1"] - d["hours0"], d.get("min", 0) / 60)
+            else:
+                out[k] = d.get("min", 0) / 60
+        return out
+
+    def _plan_cfg(self) -> dict[str, Any]:
+        s = self.settings
+        def mins(v: str, d: int) -> int:
+            try:
+                h, m = (int(x) for x in str(v).split(":")[:2])
+                return h * 60 + m
+            except (TypeError, ValueError):
+                return d
+        pause = set(s.get("bw_pause") or [])
+        return {"hours_week": float(s.get("bw_plan_hours") or 0), "from": mins(s.get("bw_plan_from"), 540), "to": mins(s.get("bw_plan_to"), 1140),
+                "days": list(s.get("bw_plan_days") or MOW_DAYS), "season": s.get("bw_plan_season", True) is not False,
+                "frost": float(s.get("bw_frost") or 3) if "frost" in pause else None,
+                "heat": float(s.get("bw_heat_temp") or 30) if s.get("bw_heat", True) else None,
+                "wet": 2 if "rain" in pause else 0, "margin": int(s.get("bw_night_margin") or 0)}
+
+    def _sun_minutes(self) -> tuple[int, int] | None:
+        if not self.settings.get("bw_night", True):
+            return None
+        _st, setting, rising = self._sun()
+        if setting is None or rising is None:
+            return None
+        r, t = dt_util.as_local(rising), dt_util.as_local(setting)
+        return r.hour * 60 + r.minute, t.hour * 60 + t.minute
+
+    def _water_block(self) -> list[tuple[int, int]]:
+        """Täglich gesperrt: Gießplan plus „nach dem Bewässern nicht mähen“."""
+        if not self.settings.get("bw_water_auto"):
+            return []
+        try:
+            h, m = (int(x) for x in str(self.settings.get("bw_water_time") or "05:00").split(":")[:2])
+        except ValueError:
+            return []
+        total = sum((_num(self.hass.states.get(z["zone"])) or 0) * max(1, len(z.get("valves") or [])) for z in self.zones() if z.get("auto")) / 60
+        start = h * 60 + m
+        return [(start, min(1440, int(start + total + float(self.settings.get("bw_water_after") or 0))))]
+
+    def mow_plan(self) -> dict | None:
+        return self._plan
+
+    async def _async_mow_plan(self, ent: dict, force: bool = False) -> None:
+        """Stündlich (und nach jeder Änderung): Mähplan rechnen und in die Zeitpläne des Mähers schreiben."""
+        now = dt_util.utcnow().timestamp()
+        if not force and now - self._plan_at < 3600:
+            await self._async_plan_direct(ent, now)
+            return
+        self._plan_at = now
+        plan = plan_mowing(dt_util.now(), getattr(self.haus, "hourly", None) or [], self._plan_cfg(), self._done_by_day(),
+                           self._sun_minutes(), self._water_block())
+        old = self._plan
+        self._plan = plan
+        timers = self.timers(ent)
+        plan["mode"] = "timers" if len(timers) >= 14 else "direct"
+        if plan["mode"] == "timers":
+            await self._async_plan_write(plan, timers)
+        if old is None or [d["windows"] for d in old["days"]] != [d["windows"] for d in plan["days"]]:
+            def hm(m: int) -> str:
+                return f"{m // 60:02d}:{m % 60:02d}"
+            txt = " · ".join(f"{d['wd'].capitalize()} " + ", ".join(f"{hm(a)}–{hm(b)}" for a, b in d["windows"]) for d in plan["days"] if d["windows"])
+            self.log.add("garden", "Mähplan aktualisiert", f"Ziel {plan['target']:.1f} Std./Woche · geplant {plan['planned']:.1f} Std. · {txt or 'keine Mähzeit'}", module="beetwerk")
+        await self._async_plan_direct(ent, now)
+        self._save()
+
+    async def _async_plan_write(self, plan: dict, timers: list[dict]) -> None:
+        """Je Wochentag zwei Zeitpläne (Mo = 1 und 2 … So = 13 und 14) – nur schreiben, was sich ändert."""
+        cur = {t["id"]: t for t in timers}
+        def hm(m: int) -> str:
+            m = min(m, 1439)
+            return f"{m // 60:02d}:{m % 60:02d}"
+        for d in plan["days"]:
+            idx = MOW_DAYS.index(d["wd"])
+            for k in range(2):
+                tid = idx * 2 + k + 1
+                w = d["windows"][k] if k < len(d["windows"]) else None
+                want = (True, hm(w[0]), hm(w[1]), [d["wd"]]) if w else (False, (cur.get(tid) or {}).get("start") or "08:00", (cur.get(tid) or {}).get("end") or "10:00", [d["wd"]])
+                have = cur.get(tid) or {}
+                if (bool(have.get("on")), have.get("start"), have.get("end"), list(have.get("days") or [])) != want and not (not want[0] and not have.get("on")):
+                    await self._async_write_timer(tid, *want)
+
+    async def _async_write_timer(self, timer: int, enable: bool, start: str, end: str, days: list[str]) -> None:
+        mower = self.mower()
+        if mower:
+            await self._call_data("robonect", "timer", {"entity_id": mower, "timer": str(timer), "enable": bool(enable),
+                                                         "start": start, "end": end, "weekdays": [d for d in MOW_DAYS if d in days]})
+
+    async def _async_plan_direct(self, ent: dict, now: float) -> None:
+        """Mäher ohne Zeitpläne: Beetwerk startet ihn zu Beginn eines Mähfensters und holt ihn am Ende heim."""
+        plan = self._plan
+        mower = ent.get("mower")
+        if not plan or plan.get("mode") != "direct" or not mower:
+            return
+        st = self.hass.states.get(mower)
+        state = st.state if st is not None else None
+        local = dt_util.now()
+        today = plan["days"][0] if plan["days"] and plan["days"][0]["date"] == local.date().isoformat() else None
+        m = local.hour * 60 + local.minute
+        inside = any(a <= m < b for a, b in (today or {}).get("windows") or [])
+        key = f"{local.date().isoformat()}:{next((a for a, b in (today or {}).get('windows') or [] if a <= m < b), '')}"
+        if inside and state == "docked" and not self._persist.get("paused") and self._persist.get("direct_started") != key:
+            self._persist["direct_started"] = key
+            await self._call("lawn_mower", "start_mowing", mower)
+            self.log.add("garden", "Mähplan: Mäher startet", "Mähfenster beginnt", module="beetwerk")
+        elif not inside and state == "mowing" and self._persist.get("direct_started", "").startswith(local.date().isoformat()):
+            self._persist["direct_started"] = None
+            await self._call("lawn_mower", "dock", mower)
+            self.log.add("garden", "Mähplan: Mäher fährt heim", "Mähfenster vorbei", module="beetwerk")
+
     def timers(self, ent: dict) -> list[dict[str, Any]]:
         """Zeitpläne des Mähers (Robonect: 14 Timer mit Start, Ende, Wochentagen)."""
         out = []
@@ -641,8 +789,7 @@ class Beetwerk:
         mower = self.mower()
         if not mower:
             return
-        await self._call_data("robonect", "timer", {"entity_id": mower, "timer": str(timer), "enable": bool(enable),
-                                                     "start": start, "end": end, "weekdays": [d for d in DAY_KEYS if d in days]})
+        await self._async_write_timer(timer, enable, start, end, days)
         self.log.add("garden", f"Zeitplan {timer} geändert", f"{'an' if enable else 'aus'} · {start}–{end} · "
                      + (", ".join({'mo': 'Mo', 'tu': 'Di', 'we': 'Mi', 'th': 'Do', 'fr': 'Fr', 'sa': 'Sa', 'su': 'So'}[d] for d in DAY_KEYS if d in days) or "kein Tag")
                      + (f" · {by}" if by else ""), module="beetwerk")
@@ -902,6 +1049,7 @@ class Beetwerk:
             "timers": self.timers(ent),
             "next_start": self._next_start(ent),
             "since": dt_util.utc_from_timestamp(self._persist["last_state_at"]).isoformat() if self._persist.get("last_state_at") else None,
+            "plan": self._plan if self.settings.get("bw_plan") else None,
         }
 
     def _sun_times(self) -> dict[str, str | None]:

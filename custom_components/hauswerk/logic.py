@@ -1516,3 +1516,134 @@ def with_emoji(title: str, kind: str | None = None) -> str:
         return title
     emo = notify_emoji(title, kind)
     return f"{emo} {title}" if emo else title
+
+
+# ---------------------------------------------------------------- Beetwerk: Mähplan
+MOW_MONTH = {1: 0.2, 2: 0.2, 3: 0.5, 4: 0.8, 5: 1.0, 6: 1.0, 7: 0.9, 8: 0.85, 9: 0.8, 10: 0.6, 11: 0.3, 12: 0.2}
+MOW_DAYS = ("mo", "tu", "we", "th", "fr", "sa", "su")
+
+
+def mow_growth(temp: float | None, month: int) -> float:
+    """Wie schnell der Rasen wächst (0–1): aus der mittleren Tagestemperatur, sonst nach Monat."""
+    if temp is None:
+        return MOW_MONTH.get(month, 0.8)
+    if temp < 5:
+        return 0.2
+    if temp < 10:
+        return 0.2 + (temp - 5) / 5 * 0.5
+    if temp < 15:
+        return 0.7 + (temp - 10) / 5 * 0.3
+    if temp <= 26:
+        return 1.0
+    return max(0.7, 1.0 - (temp - 26) / 6 * 0.3)
+
+
+def plan_mowing(now_local, hours: list[dict], cfg: dict, done: dict[str, float],
+                sun: tuple[int, int] | None = None, blocked: list[tuple[int, int]] | None = None) -> dict:
+    """Mähplan der nächsten 7 Tage: Wochenziel (nach Wachstum) auf die erlaubten Tage verteilt, in trockene,
+    nicht zu kalte/heiße Stunden gelegt; Ausgefallenes der letzten Tage wird nachgeholt.
+
+    now_local: lokale Zeit jetzt; hours: Stunden-Vorhersage [{ts, hour, temp, rain}] (ts in s, lokale Stunde);
+    cfg: hours_week, from, to (Minuten), days (mo…su), season, frost, heat, wet (Std. nach Regen), margin;
+    done: gemähte Stunden je Tag (ISO-Datum); sun: (Aufgang, Untergang) in Minuten oder None (kein Igelschutz);
+    blocked: täglich gesperrte Zeiten (z. B. Bewässerung) in Minuten.
+    """
+    from datetime import datetime, timedelta  # noqa: PLC0415 - logic.py bleibt ohne Home Assistant importierbar
+
+    allowed = [d for d in MOW_DAYS if d in set(cfg.get("days") or MOW_DAYS)] or list(MOW_DAYS)
+    frm, to = int(cfg.get("from", 540)), int(cfg.get("to", 1140))
+    today = now_local.date()
+    # Vorhersage je (Datum, Stunde)
+    fc: dict[tuple, dict] = {}
+    for h in hours or []:
+        try:
+            local = datetime.fromtimestamp(h["ts"], now_local.tzinfo)
+        except (KeyError, TypeError, ValueError, OSError):
+            continue
+        fc[(local.date(), local.hour)] = h
+    day_temps = [h["temp"] for (d, hr), h in fc.items() if h.get("temp") is not None and frm // 60 <= hr < max(frm // 60 + 1, to // 60)]
+    mean = sum(day_temps) / len(day_temps) if day_temps else None
+    factor = mow_growth(mean, now_local.month) if cfg.get("season", True) else 1.0
+    target = float(cfg.get("hours_week") or 0) * factor
+    quota = target / len(allowed) if allowed else 0
+    # Nachholen: was an erlaubten Tagen der letzten Woche fehlte (oder zu viel war), höchstens 2 Tagesmengen
+    backlog = 0.0
+    for i in range(1, 8):
+        d = today - timedelta(days=i)
+        if MOW_DAYS[d.weekday()] in allowed and d.isoformat() in done:  # nur Tage mit Messung
+            backlog += quota - float(done[d.isoformat()] or 0)
+    backlog = max(0.0, min(backlog, 2 * quota))
+    margin = int(cfg.get("margin") or 0)
+    wet = int(cfg.get("wet", 2))
+    frost, heat = cfg.get("frost"), cfg.get("heat")
+    now_min = now_local.hour * 60 + now_local.minute
+    carry = backlog + max(0.0, quota - float(done.get(today.isoformat(), 0) or 0)) - quota  # heute schon Gemähtes zählt
+    out_days = []
+    for i in range(7):
+        d = today + timedelta(days=i)
+        wd = MOW_DAYS[d.weekday()]
+        slots = []  # (Beginn, Grund oder None)
+        for s in range(frm, to, 30):
+            why = None
+            if i == 0 and s + 30 <= now_min:
+                why = "vorbei"
+            elif sun and (s < sun[0] + margin or s + 30 > sun[1] - margin):
+                why = "night"
+            elif any(a <= s < b or a < s + 30 <= b for a, b in blocked or []):
+                why = "water"
+            else:
+                h = fc.get((d, s // 60))
+                if h is not None:
+                    if h.get("rain"):
+                        why = "rain"
+                    elif any((fc.get((d, s // 60 - k)) or {}).get("rain") for k in range(1, wet + 1)):
+                        why = "wet"
+                    elif frost is not None and h.get("temp") is not None and h["temp"] < frost:
+                        why = "frost"
+                    elif heat is not None and h.get("temp") is not None and h["temp"] >= heat:
+                        why = "heat"
+            slots.append((s, why))
+        need = 0.0
+        if wd in allowed:
+            need = max(0.0, quota + carry)
+        windows: list[list[int]] = []
+        if need > 0:
+            runs, cur = [], None
+            for s, why in slots:
+                if why is None:
+                    cur = [s, s + 30] if cur is None else [cur[0], s + 30]
+                else:
+                    if cur:
+                        runs.append(cur)
+                    cur = None
+            if cur:
+                runs.append(cur)
+            need_min = max(60, round(need * 60 / 30) * 30)
+            fit = [r for r in runs if r[1] - r[0] >= need_min]
+            if fit:
+                windows = [[fit[0][0], fit[0][0] + need_min]]
+            else:
+                left = need_min
+                for r in sorted(runs, key=lambda r: r[0] - r[1])[:2]:
+                    if r[1] - r[0] < 60 or left <= 0:
+                        continue
+                    take = min(r[1] - r[0], max(60, left))
+                    windows.append([r[0], r[0] + take])
+                    left -= take
+                windows.sort()
+        planned = sum(b - a for a, b in windows) / 60
+        carry = (need - planned) if wd in allowed else carry
+        carry = max(0.0, carry)
+        bad = []
+        for s, why in slots:
+            if why in (None, "vorbei"):
+                continue
+            if bad and bad[-1][2] == why and bad[-1][1] == s:
+                bad[-1][1] = s + 30
+            else:
+                bad.append([s, s + 30, why])
+        out_days.append({"date": d.isoformat(), "wd": wd, "allowed": wd in allowed, "windows": windows,
+                         "hours": round(planned, 2), "bad": bad})
+    return {"target": round(target, 1), "factor": round(factor, 2), "quota": round(quota, 2), "backlog": round(backlog, 2),
+            "mean_temp": None if mean is None else round(mean, 1), "days": out_days,
+            "planned": round(sum(x["hours"] for x in out_days), 1)}
