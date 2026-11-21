@@ -2,6 +2,24 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.73.0 – 2026-11-21
+
+### Neu – Einstellungen übersichtlicher
+- **Ein Einstieg:** Oben in jeden Einstellungen die Reiter Haus · Heizwerk · Rollwerk · Kraftwerk · Lichtwerk · System. Zahnrad und die Reiter „Einstellungen“ der Module landen auf derselben Seite, nur im passenden Reiter. Die Zeilen „Module“ und „Zentrale Einstellungen“ entfallen.
+- **Nach Häufigkeit geordnet:** oben „Oft gebraucht“ (Anwesenheit, Urlaub & Abwesenheit, Benachrichtigungen, Heizpläne, Tablet), darunter die Bereiche (Einrichten, Darstellung, Heizen, Räume …), ganz unten zugeklappt „Feinheiten“ (Frostschutz, Boost, Entkalken, Kalibrierung, Wärmeanforderung, Funk, Nach Neustart, Protokoll …).
+- **Prüfen:** Was Aufmerksamkeit braucht (z. B. keine Personen gewählt, Homematic-Hinweise, Sensor nicht erreichbar), steht oben in einem eigenen Block.
+- **Wert rechts:** jede Zeile mit ihrem Wert rechtsbündig – „2 Personen“, „5,0 °C“, „30 Min.“, „lernend“, „Mo 10:00“ –, die Beschreibung einzeilig darunter.
+- **Doppeltes zusammengelegt:**
+  - **Urlaub & Abwesenheit** ist ein Fenster: wann Urlaub ist (Zeitraum/Kalender) und darunter, was Heizwerk tut (absenken, Thermostate aus, Urlaubstemperatur, Frostschutz) – mit Verweis auf die Profile von Rollwerk und Lichtwerk. Erreichbar unter Haus und unter Heizwerk.
+  - **Homematic-Verknüpfungen** von Heizwerk und Lichtwerk in einem Fenster unter System (umschaltbar).
+  - **Lüften & Schimmelschutz** steht nur noch im Reiter Lüften („Einstellen“); die Suche findet es weiter.
+- **Dieses Tablet:** eigene Zeile bzw. eigenes Fenster für Startseite, Kacheln, Bildschirmschoner, Nacht, Sperre und „Zurück zur Startseite“ – auf anderen Geräten „Als Tablet verwenden“. Darstellung verweist darauf.
+- **Sofort gespeichert:** Schalter, Auswahllisten und Umschalter in den Einstellungs-Fenstern speichern ohne „Speichern“ – mit Meldung „Gespeichert · Rückgängig“. Zahlen- und Textfelder weiter mit „Speichern“.
+- **Lange Fenster mit Sprungmarken** (z. B. Darstellung, Benachrichtigungen, Urlaub & Abwesenheit); auf breiten Bildschirmen stehen die Abschnitte zweispaltig.
+- **PC und Tablet quer (ab 1100 px):** Das Fenster einer Einstellung öffnet rechts neben der Liste statt darüber – die Liste bleibt sichtbar.
+- **Experte** als kleiner Schalter neben der Suche statt der großen Karte; Experten-Zeilen tragen ein kleines Symbol.
+- **Suche findet auch Werte** („17 °C“, „lernend“), ein Treffer öffnet das Fenster direkt an der passenden Stelle und hebt sie kurz hervor. Ohne Suche steht oben „Zuletzt geändert“ mit den letzten drei Einstellungen dieses Bereichs.
+
 ## 0.72.6 – 2026-11-21
 
 ### Geändert (Tabletmodus, Heizwerk)

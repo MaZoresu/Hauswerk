@@ -486,10 +486,12 @@ def test_experte_je_modul(panel, view, mod, rows):
     """Jedes Modul hat oben in den Einstellungen den Haken „Experteneinstellungen“; nur damit erscheinen dessen Profi-Einstellungen."""
     panel.js(f"() => ['haus', 'heizen', 'rollwerk', 'kraftwerk'].forEach((m) => {EL}._setExpert(m, false))")
     panel.view(view)
+    if view == "house":
+        panel.click('.sn[data-sys="1"]')  # Funk-Auslastung steht unter System
     pops = lambda: panel.js(f"[...{EL}.shadowRoot.querySelectorAll('.srow[data-action=\"pop-open\"]')].map((x) => x.dataset.pop)")
-    assert panel.js(f"{EL}.shadowRoot.querySelector('.xcard').dataset.mod") == mod
+    assert panel.js(f"{EL}.shadowRoot.querySelector('.xsw').dataset.mod") == mod
     assert not set(rows) & set(pops()), pops()
-    panel.click(".xcard")
+    panel.click(".xsw")
     assert panel.js(f"{EL}._expertOn('{mod}')") is True
     assert set(rows) <= set(pops()), pops()
     assert panel.js(f"localStorage.getItem('hauswerk.experte.{mod}')") == "1"
@@ -501,7 +503,7 @@ def test_experte_je_modul(panel, view, mod, rows):
         panel.wait()
         assert panel.has('#pop [data-k="kw_grid_invert"], #pop input[data-set="kw_grid_invert"]') or "Vorzeichen umdrehen" in panel.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
         panel.js(f"{EL}._closePop()")
-    panel.click(".xcard")
+    panel.click(".xsw")
     assert not set(rows) & set(pops())
     panel.ok(f"Experte {mod}")
 
@@ -592,7 +594,7 @@ def test_tablet_ohne_scrollen(tablet):
 def test_tablet_bildschirmschoner(tablet):
     p = tablet
     p.view("overview")
-    p.js(f"() => {{ {EL}._openPop('look'); }}")
+    p.js(f"() => {{ {EL}._openPop('tablet'); }}")
     p.wait()
     assert "Tabletmodus" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
     p.click('#pop [data-action="tablet-opt"][data-k="saver"][data-v="1"]')
@@ -612,7 +614,7 @@ def test_tablet_bildschirmschoner(tablet):
     assert p.js(f"{EL}.shadowRoot.getElementById('saver').hidden")
     assert len(p.sent()) == n and not p.js(f"{EL}._pop")
     # Tabletmodus ausschalten
-    p.js(f"() => {{ {EL}._openPop('look'); }}")
+    p.js(f"() => {{ {EL}._openPop('tablet'); }}")
     p.wait()
     p.click('#pop [data-action="tablet-toggle"]')
     assert not p.js(f"{EL}.hasAttribute('tablet')")
@@ -629,7 +631,7 @@ def test_tablet_seitenleiste(tablet):
     p.js(f"() => {{ localStorage.removeItem('hauswerk.tablet.sidebar_prev'); localStorage.setItem('dockedSidebar', '\"docked\"'); {EL}._tabletApply(); }}")
     assert p.js("window.hwDock") == ["always_hidden"]
     assert p.js(f"getComputedStyle({EL}.shadowRoot.querySelector('.menu')).display") != "none"
-    p.js(f"() => {{ {EL}._openPop('look'); }}")
+    p.js(f"() => {{ {EL}._openPop('tablet'); }}")
     p.wait()
     p.click('#pop [data-action="tablet-toggle"]')
     assert p.js("window.hwDock") == ["always_hidden", "docked"]
@@ -894,7 +896,7 @@ def test_tablet_hell_dunkel_nach_sonne(tablet):
     assert dark(), "nachts nicht dunkel"
     sun("above_horizon")
     assert not dark(), "tagsüber nicht hell"
-    p.js(f"() => {{ {EL}._openPop('look'); }}")
+    p.js(f"() => {{ {EL}._openPop('tablet'); }}")
     p.wait()
     p.click('#pop [data-action="tablet-opt"][data-k="theme"][data-v="dark"]')
     assert dark() and p.js("localStorage.getItem('hauswerk.tablet.theme')") == "dark"
@@ -943,7 +945,7 @@ def test_muellabholung_und_standardkalender(panel):
     p.click('#pop [data-action="set-seg"][data-key="notify_waste"][data-v="important"]')
     p.click('#pop [data-action="pop-save"]')
     p.wait(300)
-    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
+    saved = {k: v for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save" for k, v in m["settings"].items()}  # Auswahl speichert sofort
     assert saved["waste_remind"] == "19:00" and saved["notify_waste"] == "important" and "Papier" in saved["waste_hidden"]
     p.js(f"() => {{ {EL}._openPop('calendars'); }}")
     p.wait()
@@ -1057,7 +1059,7 @@ def test_lueften_seite_und_kacheln(panel):
     p.click('#pop [data-action="set-seg"][data-key="notify_vent"][data-v="normal"]')
     p.click('#pop [data-action="pop-save"]')
     p.wait(300)
-    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
+    saved = {k: v for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save" for k, v in m["settings"].items()}  # Auswahl speichert sofort
     assert saved["vent_morning"] == "07:00" and saved["notify_vent"] == "normal"
 
 
@@ -1445,10 +1447,13 @@ def test_homematic_verknuepfungen(panel):
     p.wait(300)
     saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/room/save"][-1]["room"]
     assert saved["window_ccu"] is False
-    p.view("settings")
+    p.view("house")
+    p.click('.sn[data-sys="1"]')  # Homematic-Verknüpfungen stehen unter Einstellungen › System
     p.wait()
     assert "Homematic-Verknüpfungen" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
-    p.js(f"() => {{ {EL}._openPop('hmlinks'); }}")
+    p.js(f"() => {{ {EL}._openPop('hm'); }}")
+    p.wait()
+    assert p.has('#pop [data-action="hm-tab"][data-v="light"]')
     p.wait()
     body = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
     assert "Kanal 6 ist keinem Wandthermostat zugeordnet" in body and "Wohnzimmer" in body
@@ -1463,10 +1468,11 @@ def test_lichtwerk_ccu_verknuepfungen(panel):
     hints = p.js(f"{EL}._hints()")
     h = [x for x in hints if x["data"].get("sub") == "lwlinks"]
     assert any(x["lvl"] == "warn" and x["text"] == "Flur OG: Bewegung Flur OG schaltet schon in der CCU" for x in h)
-    p.view("lightset")
+    p.view("house")
+    p.click('.sn[data-sys="1"]')
     p.wait()
     assert "Homematic-Verknüpfungen" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
-    p.js(f"() => {{ {EL}._openPop('lwlinks'); }}")
+    p.js(f"() => {{ {EL}._openPop('hm', {{ t: 'light' }}); }}")
     p.wait()
     body = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
     assert "S_Bewegung:Vorgarten" in body and "Bewegung Flur OG" in body and "nur eigene Taster" in body
@@ -1787,3 +1793,62 @@ def test_raumkacheln_kompakt_feste_plaetze(browser, server):
         return [Math.round(r.querySelector('.rm-temp').getBoundingClientRect().top - t), Math.round(r.querySelector('.dbar, .rm-nobar').getBoundingClientRect().top - t)]; }})""")
     assert len(pos) >= 3 and len({tuple(x) for x in pos}) == 1, pos
     page.close()
+
+
+def test_einstellungen_neu_geordnet(panel):
+    """Einstellungen: Reiter für alle Bereiche, Prüfen, Oft gebraucht, Feinheiten, Werte rechts, sofort speichern mit Rückgängig,
+    Zuletzt geändert, Urlaub & Abwesenheit in einem Fenster, Dieses Tablet, Suchtreffer, Sprungmarken."""
+    p = panel
+    p.js("() => localStorage.removeItem('hauswerk.set.recent')")
+    p.view("house")
+    p.wait()
+    tabs = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.setnav .sn')].map((b) => b.textContent.trim())")
+    assert tabs == ["Haus", "Heizwerk", "Rollwerk", "Kraftwerk", "Lichtwerk", "System"], tabs
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+    assert "OFT GEBRAUCHT" in txt.upper() and "Dieses Tablet" not in txt and "Als Tablet verwenden" in txt and "Funk-Auslastung" not in txt
+    assert p.has(".srow .sr-v")
+    # Prüfen: ohne Personen oben
+    p.js(f"() => {{ {EL}._data.settings.persons = []; {EL}._renderMain(); }}")
+    assert "Anwesenheit" in p.js(f"{EL}.shadowRoot.querySelector('.sg-warn').innerText")
+    # System
+    p.click('.sn[data-sys="1"]')
+    assert "Berechtigungen" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+    # sofort speichern + Rückgängig
+    p.js(f"() => {EL}._openPop('access')")
+    p.wait()
+    n = len(p.sent())
+    p.click('#pop input[data-set="allow_users"]')
+    p.wait(300)
+    saves = [m for m in p.sent()[n:] if m["type"] == "hauswerk/heizen/settings/save"]
+    assert saves and list(saves[-1]["settings"]) == ["allow_users"], saves
+    assert p.has('#toast [data-action="set-undo"]')
+    p.click('#toast [data-action="set-undo"]')
+    p.wait(300)
+    undo = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
+    assert undo["allow_users"] in (False, None) and saves[-1]["settings"]["allow_users"] is True, (undo, saves)
+    p.js(f"{EL}._closePop()")
+    p.wait()
+    assert p.has(".sg-recent")
+    # Urlaub & Abwesenheit: ein Fenster mit Heizwerk-Abschnitt; „absence“ führt dorthin
+    p.view("settings")
+    p.js(f"() => {EL}._openPop('absence')")
+    p.wait()
+    body = p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    assert "Urlaub & Abwesenheit" in body and "Heizwerk" in body and "Wenn niemand da ist" in body and "Urlaub automatisch erkennen" in body
+    p.js(f"{EL}._closePop()")
+    # Feinheiten zugeklappt
+    assert p.has("details.sg-fine:not([open])")
+    # Suche: Treffer springt im Fenster an die Stelle
+    p.js(f"() => {{ {EL}._setQuery = 'Frostschutz'; {EL}._renderMain(); }}")
+    p.js(f"() => {EL}._openPop('vacation')")
+    p.wait(100)
+    assert p.has("#pop .set-hit")
+    p.js(f"{EL}._closePop()")
+    # Darstellung: Sprungmarken; Tablet eigenes Fenster
+    p.view("house")
+    p.js(f"() => {EL}._openPop('look')")
+    p.wait()
+    assert p.has("#pop .pjump button") and p.has('#pop [data-pop="tablet"]')
+    p.js(f"() => {EL}._openPop('tablet')")
+    p.wait()
+    assert p.has('#pop [data-action="tablet-toggle"]')
