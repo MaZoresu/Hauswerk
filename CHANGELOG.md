@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.72.5 – 2026-11-21
+
+### Geändert (Tabletmodus, Heizwerk)
+- **Betriebsart mit Symbol in der Raumkachel:** Die Statuszeile zeigt jetzt zuerst, ob der Raum gerade auf Komfort (Sofa) oder Eco (Blatt) steht – bzw. Vorheizen, Fenster, Von Hand, Abwesend … –, dahinter den nächsten Wechsel: „Komfort · bis 21:00“, „Eco · Komfort ab 18:00“.
+
 ## 0.72.4 – 2026-11-21
 
 ### Geändert

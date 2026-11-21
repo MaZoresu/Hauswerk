@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.72.4";
+const VERSION = "0.72.5";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -3999,7 +3999,14 @@ class HauswerkPanel extends HTMLElement {
       act: `id="room-${room.id}" data-action="room-quick" data-id="${room.id}"`, color: m.c,
       ic: `<span class="wt-ic"><ha-icon icon="${esc(roomIcon(room))}"></ha-icon></span>`, name: room.name, flags: fl.join(""),
       value: s.room_temp != null ? `${fmt(s.room_temp)}°` : "–",
-      status: `<span style="color:${m.c}">${esc(["komfort", "eco", "vorheizen"].includes(s.mode) ? info?.text || s.mode_label || "" : s.mode_label || info?.text || "Automatik aus")}</span>`,
+      status: (() => {
+        // Betriebsart mit Symbol, dahinter der nächste Wechsel: „Komfort · bis 21:00“, „Eco · Komfort ab 18:00“
+        const lbl = s.mode_label || "Automatik aus";
+        let nx = ["komfort", "eco", "vorheizen"].includes(s.mode) ? info?.text || "" : "";
+        if (s.mode === "komfort") nx = nx.replace(/^Komfort (bis|ab) /, "$1 ");
+        if (nx && /^Komfortzeit läuft$/.test(nx)) nx = "";
+        return `<span style="color:${tint(m.c)}"><ha-icon icon="${m.i}"></ha-icon><b>${esc(lbl)}</b></span>${nx ? `<span class="wt-dim" style="margin-left:6px">· ${esc(nx)}</span>` : ""}`;
+      })(),
       cls: s.mode === "aus" ? "off" : "",
     });
   }
