@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.82.1 – 2026-11-21
+
+### Behoben (Lichtwerk)
+- **Licht ging nach einem Neustart von Home Assistant an:** Bei Profilen mit dem Auslöser „Rollläden schließen“ meldeten sich die Rollläden nach dem Neustart zuerst als „nicht verfügbar“ – Lichtwerk wertete das als „offen“. Ihr erstes „geschlossen“ danach galt als Schließen: Das Licht ging an, auch wenn es vorher von Hand ausgeschaltet war. Jetzt zählt nur ein Schließen aus einem bekannten Stand (offen → geschlossen).
+
 ## 0.82.0 – 2026-11-21
 
 ### Neu – Beetwerk plant die Mähzeiten nach Wetter (Mähplan)

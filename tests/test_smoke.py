@@ -1683,6 +1683,52 @@ def test_lichtwerk_logik(hw):
     assert L.decide(motion_on=True) == ("on", "Bewegung")
 
 
+def test_lichtwerk_rolllaeden_nach_neustart(hw):
+    """Auslöser „Rollläden schließen“: echtes Schließen schaltet ein; nach einem Neustart melden sich die Rollläden
+    erst „nicht verfügbar“, dann „geschlossen“ – das ist kein Schließen und darf das Licht nicht einschalten."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 16, 21, 0, tzinfo=timezone.utc)  # 22:00 Ortszeit
+        hass = Hass()
+        hass.set("light.wz", "off", {"supported_color_modes": ["color_temp"]}, "Wohnzimmer")
+        hass.set("cover.wz", "open", {}, "Rollladen Wohnzimmer")
+        log, haus, ctl = await _setup(hw, hass)
+        lw = hw.Lichtwerk(hass, log, haus)
+        await lw.async_load()
+        lw._sun_fn = lambda offset=0: None
+        lw._covers_near = lambda eid: ["cover.wz"]
+        await lw.async_save_profile("standard", {"name": "Abendlicht", "on_sun": False, "off_sun": False, "on_time": False, "off_time": False,
+                                                 "on_covers": True})
+        await lw.async_save_settings({"lw_lights": ["light.wz"]})
+        await lw.async_evaluate()
+        on = ("light", "turn_on")
+        assert not any(c[:2] == on for c in hass.calls)
+        hass.set("cover.wz", "closed", {}, "Rollladen Wohnzimmer")
+        NOW[0] += timedelta(minutes=1)
+        await lw.async_evaluate()
+        assert any(c[:2] == on for c in hass.calls)  # echtes Schließen
+        # von Hand aus, dann Neustart
+        hass.set("light.wz", "off", {"supported_color_modes": ["color_temp"]}, "Wohnzimmer")
+        lw._rt["light.wz"]["manual"] = {"since": NOW[0].timestamp(), "until": None, "state": "off"}
+        await lw.async_stop()
+        n = len(hass.calls)
+        hass.set("cover.wz", "unavailable", {}, "Rollladen Wohnzimmer")
+        lw2 = hw.Lichtwerk(hass, log, haus)
+        await lw2.async_load()
+        lw2._sun_fn = lambda offset=0: None
+        lw2._covers_near = lambda eid: ["cover.wz"]
+        NOW[0] += timedelta(minutes=30)
+        await lw2.async_evaluate()
+        hass.set("cover.wz", "closed", {}, "Rollladen Wohnzimmer")
+        NOW[0] += timedelta(minutes=1)
+        await lw2.async_evaluate()
+        assert not any(c[:2] == on for c in hass.calls[n:]), hass.calls[n:]
+        await lw2.async_stop()
+
+    asyncio.run(run())
+
+
 def test_lichtwerk(hw):
     """Ablauf: Uhrzeit an/aus, von Hand (Automatik wartet bis zum Wechsel), Neustart, Bewegung mit Nachtlicht,
     niemand zu Hause, Benachrichtigung, Status mit Tagesplan und nächster Schaltung."""

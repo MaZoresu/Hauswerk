@@ -638,10 +638,14 @@ class Lichtwerk:
         rt["ent"] = ent
         if prof.get("on_covers"):
             covers = self._covers_near(eid)
-            closed = bool(covers) and all((self.hass.states.get(c) is not None and self.hass.states.get(c).state == "closed") for c in covers)
-            if closed and rt.get("covers_closed") is False and now_min >= 720:
-                crossed = (True, "Rollläden geschlossen")
-            rt["covers_closed"] = closed
+            states = [self.hass.states.get(c) for c in covers]
+            # Nur mit bekanntem Stand aller Rollläden: nach einem Neustart sind sie kurz „nicht verfügbar“ – das ist
+            # kein „offen“, sonst gilt ihr erstes „geschlossen“ als Schließen und schaltet das Licht ein.
+            if covers and all(x is not None and x.state not in BAD for x in states):
+                closed = all(x.state == "closed" for x in states)
+                if closed and rt.get("covers_closed") is False and now_min >= 720:
+                    crossed = (True, "Rollläden geschlossen")
+                rt["covers_closed"] = closed
         if crossed is not None:
             on, reason = crossed
             if on != rt.get("latch") or reason != rt.get("latch_reason"):
