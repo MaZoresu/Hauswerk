@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.71.1";
+const VERSION = "0.72.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1317,10 +1317,10 @@ class HauswerkPanel extends HTMLElement {
     }
   }
 
-  /** Tablet: Details (Standard) oder Wand-Kacheln (groß). „Automatisch“: Wand bis zur ersten Berührung, danach Details bis zum Bildschirmschoner. */
+  /** Tablet: Wand-Kacheln (groß, Standard) oder Details. „Automatisch“: Wand bis zur ersten Berührung, danach Details bis zum Bildschirmschoner. */
   _wall() {
     if (!this._tablet) return false;
-    const m = this._tabletOpt("tview", "detail");
+    const m = this._tabletOpt("tview", "wall");
     return m === "wall" || (m === "auto" && !this._touched);
   }
 
@@ -1360,7 +1360,7 @@ class HauswerkPanel extends HTMLElement {
       const act = () => (this._lastAct = Date.now());
       // erste Berührung nach dem Aufwecken: im Modus „Automatisch“ von Wand-Kacheln zu Details
       window.addEventListener("pointerdown", (e) => {
-        if (!this._tablet || this._touched || this._tabletOpt("tview", "detail") !== "auto") return;
+        if (!this._tablet || this._touched || this._tabletOpt("tview", "wall") !== "auto") return;
         if (e.composedPath().some((n) => n.id === "saver")) return;
         this._touched = true;
         setTimeout(() => this._renderMain(), 0);
@@ -1522,7 +1522,7 @@ class HauswerkPanel extends HTMLElement {
       ${on ? `
       <div class="field"><span>Hell / Dunkel auf diesem Tablet</span><div class="segs small">${[["sun", "Nach Sonnenstand"], ["global", "Wie Darstellung"], ["light", "Hell"], ["dark", "Dunkel"]].map(([v, l]) => opt("theme", v, l, this._tabletOpt("theme", "sun"))).join("")}</div></div>
       <p class="muted small">„Nach Sonnenstand“ wird dunkel, sobald die Sonne untergeht (sun.sun), und morgens wieder hell. „Wie Home Assistant“ klappt in Fully oft nicht, weil das Tablet den Dunkelmodus nicht meldet.</p>
-      <div class="field"><span>Kacheln</span><div class="segs small">${[["detail", "Details"], ["auto", "Automatisch"], ["wall", "Immer groß"]].map(([v, l]) => opt("tview", v, l, this._tabletOpt("tview", "detail"))).join("")}</div></div>
+      <div class="field"><span>Kacheln</span><div class="segs small">${[["wall", "Groß"], ["auto", "Automatisch"], ["detail", "Details"]].map(([v, l]) => opt("tview", v, l, this._tabletOpt("tview", "wall"))).join("")}</div></div>
       <p class="muted small">„Automatisch“: große Wand-Kacheln (lesbar aus Abstand), nach der ersten Berührung die Kacheln mit allen Details – bis zum Bildschirmschoner.</p>
       <div class="field"><span>Startseite</span><div class="segs small">${[["wall", "Wand-Startseite"], ["widgets", "Widgets"]].map(([v, l]) => opt("tstart", v, l, this._tabletOpt("tstart", "wall"))).join("")}</div></div>
       <div class="field"><span>Zurück zur Startseite nach</span><div class="segs small">${[["0", "Nie"], ["1", "1 Min."], ["2", "2 Min."], ["5", "5 Min."]].map(([v, l]) => opt("home", v, l, this._tabletOpt("home", "2"))).join("")}</div></div>
@@ -3998,8 +3998,8 @@ class HauswerkPanel extends HTMLElement {
     return this._wallTile({
       act: `id="room-${room.id}" data-action="room-quick" data-id="${room.id}"`, color: m.c,
       ic: `<span class="wt-ic"><ha-icon icon="${esc(roomIcon(room))}"></ha-icon></span>`, name: room.name, flags: fl.join(""),
-      value: fmt(s.room_temp), unit: "°C",
-      status: `<span>Soll <b style="color:${tint(tempColor(s.target))}">${fmt(s.target)} °C</b></span><span class="wt-dim">${esc(info?.text || s.mode_label || "Automatik aus")}</span>`,
+      value: s.room_temp != null ? `${fmt(s.room_temp)}°` : "–",
+      status: `<span style="color:${m.c}">${esc(["komfort", "eco", "vorheizen"].includes(s.mode) ? info?.text || s.mode_label || "" : s.mode_label || info?.text || "Automatik aus")}</span>`,
       cls: s.mode === "aus" ? "off" : "",
     });
   }
@@ -4013,14 +4013,17 @@ class HauswerkPanel extends HTMLElement {
       : cat === "shading" ? ["mdi:sun-thermometer-outline", "Beschattung", "#f97316"] : c.rs.manual ? ["mdi:hand-back-right-outline", "von Hand", C.hand]
       : c.rs.contact_tilted ? ["mdi:window-open-variant", "gekippt", C.air] : c.cfg.auto === false ? ["mdi:robot-off-outline", "Automatik aus", C.rest] : null;
     const nx = c.cfg.auto !== false ? this._rwNextShort(c.rs.next) : "";
-    const btn = (a, i, t) => `<button class="wbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="${a}" title="${t}" ${bad ? "disabled" : ""}><ha-icon icon="${i}"></ha-icon></button>`;
+    const btn = (a, i, t) => {
+      const stop = (a === "open" && c.st?.state === "opening") || (a === "close" && c.st?.state === "closing");
+      return `<button class="wbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="${stop ? "stop" : a}" title="${stop ? "Stopp" : t}" ${bad ? "disabled" : ""}><ha-icon icon="${stop ? "mdi:stop" : i}"></ha-icon></button>`;
+    };
     return this._wallTile({
       act: `data-action="pop-open" data-pop="rwpos:${esc(c.id)}"`, color: flag ? flag[2] : p != null && p <= 5 ? "#3b82f6" : C.rest,
       ic: bad ? `<span class="wt-ic"><ha-icon icon="mdi:window-shutter-alert"></ha-icon></span>` : `<span class="wt-win">${this._rwWin(c, p)}</span>`,
-      area, name: this._entityName(c.id),
-      value: bad ? "–" : moving ? "…" : p == null ? esc(c.st.state) : p >= 95 ? "offen" : p <= 5 ? "zu" : fmt(p, 0), unit: !bad && !moving && p != null && p > 5 && p < 95 ? "%" : "",
+      area: area && area.toLowerCase() !== this._entityName(c.id).toLowerCase() ? area : "", name: this._entityName(c.id),
+      value: bad ? "–" : p == null ? esc(c.st.state) : `${fmt(p, 0)} %`,
       status: bad ? "nicht erreichbar" : moving || (flag ? `<span style="color:${flag[2]}"><ha-icon icon="${flag[0]}"></ha-icon>${flag[1]}</span>` : nx ? `<span class="wt-dim">als Nächstes ${nx}</span>` : ""),
-      ctl: btn("open", "mdi:arrow-up", "hoch") + btn("stop", "mdi:stop", "Stopp") + btn("close", "mdi:arrow-down", "runter"),
+      ctl: btn("open", "mdi:arrow-up", "hoch") + btn("close", "mdi:arrow-down", "runter"),
       cls: bad ? "bad" : "",
     });
   }
@@ -4035,14 +4038,18 @@ class HauswerkPanel extends HTMLElement {
     const fl = list.map((c) => c.rs.cat === "storm" ? ["mdi:weather-windy-variant", "Sturmschutz", "#ef4444"] : c.rs.contact_open ? ["mdi:door-open", "Tür offen", "#f59e0b"]
       : c.rs.cat === "shading" ? ["mdi:sun-thermometer-outline", "Beschattung", "#f97316"] : c.rs.manual ? ["mdi:hand-back-right-outline", "von Hand", C.hand] : null).find(Boolean);
     const nx = list.map((c) => (c.cfg.auto !== false ? this._rwNextShort(c.rs.next) : "")).find(Boolean);
-    const btn = (a, i, t) => `<button class="wbtn" data-action="rw-cmd" data-ids="${esc(ids)}" data-a="${a}" title="${t} – alle im Raum" ${ok.length ? "" : "disabled"}><ha-icon icon="${i}"></ha-icon></button>`;
+    const run = (dir) => ok.some((c) => c.st.state === dir);
+    const btn = (a, i, t) => {
+      const stop = (a === "open" && run("opening")) || (a === "close" && run("closing"));
+      return `<button class="wbtn" data-action="rw-cmd" data-ids="${esc(ids)}" data-a="${stop ? "stop" : a}" title="${stop ? "Stopp" : t} – alle im Raum" ${ok.length ? "" : "disabled"}><ha-icon icon="${stop ? "mdi:stop" : i}"></ha-icon></button>`;
+    };
     const avg = pos.filter((p) => p != null);
     return this._wallTile({
       act: `data-action="pop-open" data-pop="rwarea:${esc(area)}"`, color: fl ? fl[2] : shut === list.length ? "#3b82f6" : C.rest,
       ic: `<span class="wt-win">${this._rwWin(list[0], avg.length ? avg.reduce((a, b) => a + b, 0) / avg.length : null)}</span>`, name: area,
-      value: open === list.length ? "offen" : shut === list.length ? "zu" : String(open), unit: open === list.length || shut === list.length ? `· ${list.length} Rollläden` : `/ ${list.length} offen`,
+      value: avg.length ? `${fmt(avg.reduce((a, b) => a + b, 0) / avg.length, 0)} %` : "–", unit: `${open} von ${list.length} offen`,
       status: fl ? `<span style="color:${fl[2]}"><ha-icon icon="${fl[0]}"></ha-icon>${fl[1]}</span>` : nx ? `<span class="wt-dim">als Nächstes ${nx}</span>` : "",
-      ctl: btn("open", "mdi:arrow-up", "hoch") + btn("stop", "mdi:stop", "Stopp") + btn("close", "mdi:arrow-down", "runter"),
+      ctl: btn("open", "mdi:arrow-up", "hoch") + btn("close", "mdi:arrow-down", "runter"),
     });
   }
 
@@ -4057,9 +4064,9 @@ class HauswerkPanel extends HTMLElement {
     return this._wallTile({
       act: `data-action="pop-open" data-pop="lwarea:${esc(area)}"`, color: on.length ? this._lwColor(lead) : C.rest,
       ic: `<button class="wt-bulb ${on.length ? "on" : ""}" data-action="lw-cmd" data-ids="${esc((on.length ? on : ok).map((l) => l.id).join(","))}" data-a="${on.length ? "off" : "on"}" ${ok.length ? "" : "disabled"} title="${on.length ? "Alle aus" : "Alle an"}" style="--lc:${this._lwColor(lead)}"><ha-icon icon="${on.length ? "mdi:lightbulb-group" : "mdi:lightbulb-group-outline"}"></ha-icon>${mot ? `<span class="lw-mot"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</button>`,
-      name: area, value: on.length ? String(on.length) : "aus", unit: on.length ? `/ ${list.length} an` : `· ${list.length} Lichter`,
-      status: [on.length ? `<span class="wt-dim">${esc(on.map((l) => this._lwName(l)).join(", "))}</span>` : "",
-        t ? `<span style="color:${C.ok}"><ha-icon icon="mdi:timer-outline"></ha-icon><span data-lw-until="${esc(t)}">${this._lwLeft(t)}</span></span>` : ""].filter(Boolean).join(""),
+      name: area, value: String(on.length), unit: `von ${list.length} an`,
+      status: t ? `<span style="color:${C.ok}"><ha-icon icon="mdi:timer-outline"></ha-icon><span data-lw-until="${esc(t)}">${this._lwLeft(t)}</span></span>`
+        : on.length ? `<span class="wt-dim">${esc(on.map((l) => this._lwName(l)).join(", "))}</span>` : "",
       cls: on.length ? "on" : "",
     });
   }
@@ -4080,7 +4087,7 @@ class HauswerkPanel extends HTMLElement {
       ic: `<button class="wt-bulb ${on ? "on" : ""}" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="${on ? "off" : "on"}" ${bad ? "disabled" : ""} title="${on ? "Aus" : "An"}" style="--lc:${this._lwColor(l)}"><ha-icon icon="${bad ? "mdi:lightbulb-alert-outline" : on ? "mdi:lightbulb-on" : "mdi:lightbulb-outline"}"></ha-icon>${mot ? `<span class="lw-mot"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</button>`,
       area: area !== this._lwName(l) ? area : "", name: this._lwName(l),
       value: bad ? "–" : on ? (dim && pct != null ? fmt(pct, 0) : "an") : "aus", unit: !bad && on && dim && pct != null ? "%" : "",
-      status: [st, timer].filter(Boolean).join(""), cls: `${on ? "on" : ""} ${bad ? "bad" : ""}`,
+      status: timer || st, cls: `${on ? "on" : ""} ${bad ? "bad" : ""}`,
     });
   }
 
@@ -13108,15 +13115,15 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .wt-v { display:flex; align-items:baseline; gap:4px; margin-top:auto; line-height:1; }
 .wt-v b { font-size:48px; font-weight:300; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
 .wt-v small { font-size:20px; color:var(--muted); }
-.wt-s { display:flex; flex-wrap:wrap; gap:4px 12px; font-size:16px; line-height:1.3; min-height:21px; overflow:hidden; max-height:42px; }
-.wt-s span { display:inline-flex; align-items:center; gap:4px; } .wt-s ha-icon { --mdc-icon-size:18px; }
+.wt-s { display:block; font-size:16px; line-height:1.3; min-height:21px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.wt-s span { display:inline-flex; align-items:center; gap:4px; vertical-align:middle; } .wt-s ha-icon { --mdc-icon-size:18px; }
 .wt-dim { color:var(--muted); }
 .wt-ctl { display:flex; gap:10px; margin-top:4px; }
 .wbtn { all:unset; cursor:pointer; flex:1; height:48px; border-radius:14px; display:grid; place-items:center; background:color-mix(in srgb, var(--text) 8%, transparent); }
 .wbtn ha-icon { --mdc-icon-size:26px; } .wbtn:disabled { opacity:.4; }
-.wt-bulb { all:unset; cursor:pointer; position:relative; width:52px; height:52px; border-radius:16px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--text) 8%, transparent); color:var(--muted); }
+.wt-bulb { all:unset; cursor:pointer; position:relative; width:64px; height:64px; border-radius:16px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--text) 8%, transparent); color:var(--muted); }
 .wt-bulb.on { background:color-mix(in srgb, var(--lc) 30%, transparent); color:var(--lc); box-shadow:0 0 22px color-mix(in srgb, var(--lc) 45%, transparent); }
-.wt-bulb ha-icon { --mdc-icon-size:30px; }
+.wt-bulb ha-icon { --mdc-icon-size:36px; }
 :host([tablet]) .tdots { display:flex; justify-content:center; gap:4px; min-height:22px; padding:8px 0 0; }
 .tdots button { all:unset; cursor:pointer; width:12px; height:12px; border-radius:99px; background:var(--track); background-clip:content-box; padding:12px 10px; margin:-12px 0; transition:width .15s; }
 .tdots button.on { width:30px; background:var(--accent); background-clip:content-box; }

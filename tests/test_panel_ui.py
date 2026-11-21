@@ -1699,7 +1699,7 @@ def test_tablet_wand_startseite_und_details(tablet):
     ersten Berührung, danach Details; Rollläden und Lichter je Raum mit Sammel-Fenster; Seiten-Pfeile; Kraftwerk in zwei Spalten."""
     p = tablet
     p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
-    assert p.js(f"{EL}._wall()") is False  # Standard: Detailkacheln
+    assert p.js(f"{EL}._wall()") is True  # Standard: Wand-Kacheln
     p.js("localStorage.setItem('hauswerk.tablet.tview', 'auto')")
     p.view("start")
     p.wait(300)
@@ -1716,11 +1716,25 @@ def test_tablet_wand_startseite_und_details(tablet):
     p.wait(300)
     tiles = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.wgrid > .wt')].map((t) => t.dataset.pop)")
     assert "rwarea:Küche" in tiles, tiles
+    # Punkt 4: große Zahl in %, nur ↑ ↓, genau eine Statuszeile
+    rw = p.js(f"""(() => {{ const t = {EL}.shadowRoot.querySelector('.wgrid > .wt[data-pop="rwarea:Küche"]');
+        return {{ v: t.querySelector('.wt-v b').textContent, n: t.querySelectorAll('.wbtn').length, fs: parseFloat(getComputedStyle(t.querySelector('.wt-v b')).fontSize),
+                  ws: getComputedStyle(t.querySelector('.wt-s') || t).whiteSpace }}; }})()""")
+    assert rw["v"].endswith("%") and rw["n"] == 2 and rw["fs"] >= 40, rw
     p.js(f"() => {{ {EL}._openPop('rwarea:Küche'); }}")
     p.wait()
     assert p.js(f"{EL}.shadowRoot.querySelectorAll('#pop .lwr').length") == 3
     p.js(f"{EL}._closePop()")
     p.js(f"() => {{ {EL}._touched = false; }}")
+    p.js(f"() => {{ for (const ls of Object.values({EL}._lwStatus.lights)) ls.area = 'Flur'; }}")
+    p.view("lights")
+    p.wait(300)
+    lw = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.wgrid > .wt[data-pop^=\"lwarea:\"] .wt-v small')].map((s) => s.textContent)")
+    assert lw and all(x.startswith("von ") and x.endswith(" an") for x in lw), lw
+    p.view("overview")
+    p.wait(300)
+    st = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.wgrid > .wt')].map((t) => [t.querySelector('.wt-v b').textContent, t.querySelector('.wt-s')?.offsetHeight || 0])")
+    assert st and all(v.endswith("°") or v == "–" for v, _ in st) and all(h <= 24 for _, h in st), st
     p.view("kwflow")
     p.wait(400)
     assert p.has(".kw2")

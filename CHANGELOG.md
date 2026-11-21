@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.72.0 – 2026-11-21
+
+### Geändert – Tabletmodus: Wand-Kacheln nach festem Muster
+- **Wieder Standard im Tablet:** Heizwerk, Rollwerk und Lichtwerk zeigen große Wand-Kacheln. Die Detailkacheln gibt es unter Darstellung › Tabletmodus › Kacheln („Details“ oder „Automatisch“).
+- **Jede Kachel:** Name, eine große Zahl (48 px) und genau eine Statuszeile (16 px). Zeitleisten, Ursachen und Ventilwerte erst beim Antippen im Fenster.
+  - **Heizwerk:** „21,4°“ und „Komfort bis 21:00“ (bei Abweichung z. B. „Fenster offen“, „Von Hand“).
+  - **Rollwerk:** Fenster-Grafik, „50 %“ groß, darunter nur ↑ und ↓ als große Knöpfe. Fährt der Rollladen, wird der Knopf seiner Richtung zu Stopp. Räume mit mehreren Rollläden: Mittel in % und „2 von 3 offen“.
+  - **Lichtwerk:** Raumkachel mit „2 von 3 an“ und großem Schalter (64 px) für alle Lichter des Raums; Statuszeile Ablauftimer, sonst welche Lichter an sind.
+
 ## 0.71.1 – 2026-11-21
 
 ### Geändert
