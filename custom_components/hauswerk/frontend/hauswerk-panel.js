@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.76.0";
+const VERSION = "0.76.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -5286,7 +5286,7 @@ class HauswerkPanel extends HTMLElement {
     if (!this._kwBLoading) {
       this._kwBLoading = true;
       const start = new Date(Date.now() - 7 * 86400000);
-      const ids = [house, ...(p.kw_consumers || [])];
+      const ids = [house, ...this._kwConsIds(p)];
       this._hass.callWS({ type: "recorder/statistics_during_period", start_time: start.toISOString(), statistic_ids: ids, period: "5minute", types: ["mean"], units: { power: "W" } })
         .then((res) => {
           const night = (x) => { const d = new Date(typeof x.start === "number" ? x.start : Date.parse(x.start)); return d.getHours() < 5 ? d.toLocaleDateString("sv") : null; };
@@ -5297,7 +5297,7 @@ class HauswerkPanel extends HTMLElement {
             return vals.length ? vals[Math.floor(vals.length / 2)] : null;
           };
           const w = perNight(house, (v) => Math.min(...v));
-          const cons = (p.kw_consumers || []).map((id) => ({ id, name: this._kwConsName(id, p), w: perNight(id, (v) => v.reduce((a, b) => a + b, 0) / v.length) }))
+          const cons = this._kwConsIds(p).map((id) => ({ id, name: this._kwConsName(id, p), w: perNight(id, (v) => v.reduce((a, b) => a + b, 0) / v.length) }))
             .filter((x) => x.w != null && x.w >= 3).sort((a, b) => b.w - a.w);
           this._kwB = { at: Date.now(), data: w != null && (!p.kw_home ? w > 0 : true) ? { w: Math.max(0, w), cons, src: p.kw_home ? "Hausverbrauch" : "Netzbezug" } : null };
         })
@@ -5344,19 +5344,32 @@ class HauswerkPanel extends HTMLElement {
     const bh = Math.min(dis, h - sh);
     const gh = Math.max(0, h - sh - bh);
     const bg = Math.max(0, dis - bh);
-    const cons = (p.kw_consumers || []).map((id) => ({ id, name: this._kwConsName(id, p), icon: this._kwConsIcon(id, p), w: W(id) })).sort((a, b) => (b.w ?? -1) - (a.w ?? -1));
+    const cons = this._kwConsIds(p).map((id) => ({ id, name: this._kwConsName(id, p), icon: this._kwConsIcon(id, p), w: W(id) })).sort((a, b) => (b.w ?? -1) - (a.w ?? -1));
     return { solar, grid, batt, soc, home, measured: measured != null, f: { sh, sb, sg, gh, gb, bh, bg }, cons,
       has: { solar: solarIds.length > 0, grid: !!p.kw_grid, batt: !!p.kw_battery } };
   }
 
   /** Name eines Verbrauchers: eigener Name, sonst Name der Entität. */
   _kwConsName(id, p = this._data?.settings || {}) {
-    return String(p.kw_names?.[id] || "").trim() || this._entityName(id);
+    return String(p.kw_names?.[id] || "").trim() || this._kwAppOf(id, p)?.name || this._entityName(id);
+  }
+
+  /** Gerät der Fertigerkennung (Kraftwerk › Geräte) mit diesem Leistungssensor. */
+  _kwAppOf(id, p = this._data?.settings || {}) {
+    return (p.kw_appliances || []).find((a) => a.power === id) || null;
+  }
+
+  /** Verbraucher: gewählte plus automatisch die Leistungssensoren der Geräte aus der Fertigerkennung. */
+  _kwConsIds(p = this._data?.settings || {}) {
+    const own = p.kw_consumers || [];
+    return [...own, ...(p.kw_appliances || []).map((a) => a.power).filter((e) => e && !own.includes(e))].filter((e, i, a) => a.indexOf(e) === i);
   }
 
   /** Symbol nach dem Namen (eigener Name zuerst, dann Name und ID der Entität). */
   _kwConsIcon(id, p = this._data?.settings || {}) {
-    const hay = [p.kw_names?.[id], this._entityName(id), id].filter(Boolean).map((x) => String(x).toLowerCase());
+    const app = this._kwAppOf(id, p);
+    if (app && !p.kw_names?.[id] && APP_TYPES[app.type]?.icon) return APP_TYPES[app.type].icon;
+    const hay = [p.kw_names?.[id], app?.name, this._entityName(id), id].filter(Boolean).map((x) => String(x).toLowerCase());
     for (const h of hay) for (const [re, icon] of KW_ICONS) if (re.test(h)) return icon;
     return "mdi:power-plug-outline";
   }
@@ -5915,7 +5928,7 @@ class HauswerkPanel extends HTMLElement {
       { g: "Leistung jetzt", id: "kwhome", icon: "mdi:home-lightning-bolt-outline", c: "#0ea5e9", title: "Hausverbrauch",
         sum: p.kw_home ? `${names([p.kw_home])} · jetzt ${this._kwFmt(fl.home)}` : `errechnet aus Solar, Netz und Batterie${fl.home != null ? ` · jetzt ${this._kwFmt(fl.home)}` : ""}`, words: "haus verbrauch last" },
       { g: "Leistung jetzt", id: "kwcons", icon: "mdi:power-plug-outline", c: "#64748b", title: "Verbraucher",
-        sum: (p.kw_consumers || []).length ? p.kw_consumers.map((id) => this._kwConsName(id, p)).join(", ") : "z. B. Wärmepumpe, Wallbox, Waschmaschine – optional", words: "verbraucher wärmepumpe wallbox steckdose geräte" },
+        sum: this._kwConsIds(p).length ? this._kwConsIds(p).map((id) => this._kwConsName(id, p)).join(", ") : "z. B. Wärmepumpe, Wallbox, Waschmaschine – optional", words: "verbraucher wärmepumpe wallbox steckdose geräte" },
       { g: "Tageswerte", act: "kw-energy", icon: "mdi:chart-box-outline", c: "#10b981", title: "Energie-Dashboard von Home Assistant",
         sum: !P ? "wird gelesen …" : P.ok ? [P.solar.length ? "Solar ✓" : "", P.imp.length ? "Netzbezug ✓" : "", P.exp.length ? "Einspeisung ✓" : "", P.bin.length || P.bout.length ? "Batterie ✓" : "", P.cost.length || P.priceImp != null ? "Preise ✓" : "ohne Preise"].filter(Boolean).join(" · ") : "Noch nicht eingerichtet – dort Netz und Solar eintragen",
         warn: !!P && !P.ok, words: "energie dashboard kwh zähler preis kosten statistik" },
@@ -6026,7 +6039,13 @@ class HauswerkPanel extends HTMLElement {
             <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Leer lassen = Name aus Home Assistant. Das Symbol wählt Kraftwerk nach dem Namen, z. B. Wärmepumpe, Wallbox, Waschmaschine, Trockner, Spülmaschine, Kühlschrank, Herd, Heizstab, Klima, Pool, Fernseher, Server, Licht.</p>` : "";
         return { icon: "mdi:power-plug-outline", c: "#64748b", title: "Verbraucher", sub: "Kraftwerk · optional",
           body: `<p class="muted">Einzelne Geräte mit Leistungsmessung, z. B. Wärmepumpe, Wallbox, Waschmaschine oder Mess-Steckdosen. Sie erscheinen unter dem Energiefluss mit ihrem Anteil am Hausverbrauch.</p>
-            <div class="field"><span><ha-icon icon="mdi:power-plug-outline"></ha-icon> Verbraucher</span>${this._picker("kw_consumers", ids)}</div>${names}` };
+            <div class="field"><span><ha-icon icon="mdi:power-plug-outline"></ha-icon> Verbraucher</span>${this._picker("kw_consumers", ids)}</div>${names}
+            ${(() => {
+              const apps = (p.kw_appliances || []).filter((a) => a.power && !ids.includes(a.power));
+              return apps.length ? `<div class="lbl">Aus der Fertigerkennung – automatisch dabei</div><div class="kwnames">${apps.map((a) => `
+                <div class="kwname"><span class="kc-ic"><ha-icon icon="${this._kwConsIcon(a.power, p)}"></ha-icon></span><span class="grow"><b>${esc(a.name)}</b>
+                  <small>${esc(a.power)} · jetzt ${this._kwFmt(this._kwW(a.power))} · Name und Symbol unter <button class="link inline" data-action="tab" data-tab="kwdev">Kraftwerk › Geräte</button></small></span></div>`).join("")}</div>` : "";
+            })()}` };
       }
     }
     return { icon: "mdi:help", c: "#94a3b8", title: id, body: "" };
@@ -8037,7 +8056,7 @@ class HauswerkPanel extends HTMLElement {
     }
     // Kraftwerk
     const kp = this._data.settings;
-    for (const id of kp.kw_consumers || []) add("Geräte", this._kwConsIcon(id, kp), "#0ea5e9", this._kwConsName(id, kp), `Verbraucher · ${this._kwFmt(this._kwW(id))}`, `kraftwerk strom ${id}`, a("pop-open", { pop: "kwcons" }));
+    for (const id of this._kwConsIds(kp)) add("Geräte", this._kwConsIcon(id, kp), "#0ea5e9", this._kwConsName(id, kp), `Verbraucher · ${this._kwFmt(this._kwW(id))}`, `kraftwerk strom ${id}`, a("pop-open", { pop: "kwcons" }));
     // Einstellungen aller Module
     const scopes = [["house", "Hauswerk"], ["heat", "Heizwerk"], ...(this._data.rollwerk ? [["rw", "Rollwerk"]] : []), ["kw", "Kraftwerk"], ...(this._data.lichtwerk ? [["lw", "Lichtwerk"]] : [])];
     for (const [scope, label] of scopes) {
@@ -9838,7 +9857,7 @@ class HauswerkPanel extends HTMLElement {
       this._renderPop();
       return;
     }
-    if (["outside_sensor", "weather_entity", "sun_entity", "vacation_calendar", "import_calendar", "w_weather"].includes(field)) {
+    if (["outside_sensor", "weather_entity", "sun_entity", "vacation_calendar", "import_calendar", "w_weather", "kw_consumers"].includes(field)) {
       this._refreshSettings();
       return;
     }

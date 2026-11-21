@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.76.1 – 2026-11-21
+
+### Behoben (Kraftwerk › Verbraucher)
+- **Name sofort vergeben:** Ein neu hinzugefügter Verbraucher bekommt gleich sein Namensfeld unter „Namen und Symbole“ – nicht erst nach Speichern und erneutem Öffnen.
+
+### Neu
+- **Geräte der Fertigerkennung sind automatisch Verbraucher:** Waschmaschine, Trockner & Co. aus Kraftwerk › Geräte erscheinen mit ihrem Namen und Symbol unter „Verbraucher jetzt“, in der Grundlast und in der Suche – ohne sie zusätzlich als Verbraucher einzutragen. Im Fenster Verbraucher stehen sie unter „Aus der Fertigerkennung – automatisch dabei“.
+
 ## 0.76.0 – 2026-11-21
 
 ### Neu – Lüften mit Rollwerk

@@ -1911,3 +1911,20 @@ def test_lueften_gelernt_beste_zeit(panel):
     assert "Am besten lüften:" in txt and " Uhr (" in txt and "ct" not in txt and "€" not in txt
     assert "Lüften trocknet gerade nicht" in txt and "trockener" in txt
     assert "gelernte Lüftdauer" in txt
+
+
+def test_kraftwerk_verbraucher_name_sofort_und_geraete(panel):
+    """Verbraucher: neu gewählter Sensor bekommt sofort ein Namensfeld; Geräte der Fertigerkennung sind automatisch Verbraucher."""
+    p = panel
+    p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    p.js(f"() => {EL}._openPop('kwcons')")
+    p.wait()
+    p.js(f"""() => {{ const r = {EL}.shadowRoot; const b = document.createElement('button'); b.dataset.action = 'pick-add';
+        b.dataset.field = 'kw_consumers'; b.dataset.id = 'sensor.steckdose_trockner_leistung'; r.getElementById('pop').append(b); b.click(); }}""")
+    p.wait(200)
+    assert p.has('#pop input[data-kwname="sensor.steckdose_trockner_leistung"]')
+    # Waschmaschine (Fertigerkennung) steht als automatisch dabei
+    assert "Aus der Fertigerkennung" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    p.js(f"{EL}._closePop()")
+    ids = p.js(f"{EL}._kwFlow({EL}._data.settings).cons.map((c) => c.name)")
+    assert "Waschmaschine" in ids and "Trockner" in ids, ids
