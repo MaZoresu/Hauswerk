@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.81.0 – 2026-11-21
+
+### Neu – Benachrichtigungen mit Emoji
+- Vor jedem Titel steht dezent ein passendes Emoji – auf einen Blick erkennbar: 🪟 Fenster lange offen / Fenster schließen, 🌧️ Fenster offen – Regen, 💨 Sturm, ❄️ Frost, 🪫 Batterie schwach, 📡 nicht erreichbar, 🌡️ Heizkörper bleibt kalt, 🌬️ Lüften empfohlen, 💡 Licht an, niemand zu Hause, 🆘 Mähroboter braucht Hilfe, 🧒 Mäher fährt heim, 🌙 nachts nicht in der Station, 🔧 Wartung, 🌱 Saison starten, 🗑️ Müllabfuhr, 🧺 Waschmaschine fertig, 👕 Trockner, 🍽️ Spülmaschine, ✅ andere Geräte fertig, 📬 gebündelte Meldungen, 👋 Testnachricht.
+- Nur im Titel, der Text bleibt sachlich; Ansagen über Lautsprecher bleiben ohne. Abschaltbar unter Benachrichtigungen › Empfänger › „Emojis in Benachrichtigungen“. Die Vorschau je Anlass zeigt es mit.
+
 ## 0.80.1 – 2026-11-21
 
 ### Behoben

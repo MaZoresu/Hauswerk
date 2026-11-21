@@ -1485,3 +1485,34 @@ def predict_open_close(prof: dict, up: tuple[int, int] | None, down: tuple[int, 
         if out[k] is not None:
             out[k] = int(math.ceil(out[k] - 1e-6))  # zur vollen Minute, in der es soweit ist
     return out
+
+
+# Benachrichtigungen: dezent ein Emoji vor dem Titel – erst nach Stichwort im Titel, sonst nach Anlass.
+EMOJI_WORDS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("regen",), "🌧️"), (("sturm",), "💨"), (("winterpause", "frost"), "❄️"), (("saison starten",), "🌱"),
+    (("bleibt kalt",), "🌡️"), (("batterie", "akku"), "🪫"), (("nicht erreichbar",), "📡"),
+    (("fenster",), "🪟"), (("lüften",), "🌬️"), (("braucht hilfe",), "🆘"), (("fährt heim",), "🧒"),
+    (("nachts",), "🌙"), (("messer", "wartung"), "🔧"), (("mähroboter", "mäher"), "🤖"), (("licht", "leuchte"), "💡"),
+    (("müll",), "🗑️"), (("waschmaschine",), "🧺"), (("trockner",), "👕"), (("spül", "geschirr"), "🍽️"),
+    (("meldungen",), "📬"), ((" fertig",), "✅"), (("testnachricht", "hauswerk"), "👋"),
+)
+EMOJI_KINDS = {"window": "🪟", "offline": "📡", "frost": "❄️", "battery": "🪫", "cold": "🌡️", "vent": "🌬️",
+               "vent_done": "🪟", "storm": "💨", "cover": "📡", "light_away": "💡", "light_offline": "📡",
+               "mower": "🤖", "mower_care": "🔧", "mower_guard": "🧒", "waste": "🗑️", "appliance": "✅"}
+
+
+def notify_emoji(title: str, kind: str | None = None) -> str:
+    """Passendes Emoji für eine Benachrichtigung („“ = keins)."""
+    low = f" {title.lower()}"
+    for words, emo in EMOJI_WORDS:
+        if any(w in low for w in words):
+            return emo
+    return EMOJI_KINDS.get(kind or "", "")
+
+
+def with_emoji(title: str, kind: str | None = None) -> str:
+    """Titel mit Emoji davor – nicht doppelt, wenn schon eins dasteht."""
+    if not title or not title[0].isalnum():
+        return title
+    emo = notify_emoji(title, kind)
+    return f"{emo} {title}" if emo else title

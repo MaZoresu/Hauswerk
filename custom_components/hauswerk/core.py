@@ -32,7 +32,7 @@ from .const import (
     NOTIFY_REPEAT,
 )
 from .log import Protokoll, log_settings
-from .logic import distance_km, in_quiet_hours, is_vacation, keyword_match, keywords
+from .logic import distance_km, in_quiet_hours, is_vacation, keyword_match, keywords, with_emoji
 
 
 _LOGGER = logging.getLogger(__name__)
@@ -666,7 +666,7 @@ class Haus:
 
     @callback
     def send(self, channels: list[str], title: str, message: str, important: bool = False, key: str | None = None,
-             image: str | None = None) -> list[str]:
+             image: str | None = None, kind: str | None = None) -> list[str]:
         """Eine Nachricht an Kanäle schicken – gemeinsam für alle Module. Nicht nutzbare Kanäle werden übersprungen
         (Protokoll), dieselbe Nachricht an denselben Kanal innerhalb von 2 Minuten nur einmal (Schutz vor Doppeln
         durch Neuladen/Wiederverbinden). Ansagen in der Ruhezeit nur, wenn wichtig. Rückgabe: gesendete Kanäle."""
@@ -695,10 +695,11 @@ class Haus:
                 if win and len(win) == 2 and not in_quiet_hours(now_min, win[0], win[1]):
                     continue  # außerhalb der Zeiten dieses Kanals nur Wichtiges
             self._recent[(ch, title, message)] = now
-            if ch in bundle and not important and self._bundle_add(ch, title, message, now):
+            if ch in bundle and not important and self._bundle_add(ch, self._deco(title, kind), message, now):
                 sent.append(ch)
                 continue
-            self.hass.async_create_task(self._async_channel(ch, title, message, important, key, image=image))
+            shown = title if voice else self._deco(title, kind)
+            self.hass.async_create_task(self._async_channel(ch, shown, message, important, key, image=image))
             sent.append(ch)
         return sent
 
@@ -721,7 +722,7 @@ class Haus:
                 if len(items) == 1:
                     t, m = items[0]
                 else:
-                    t, m = f"Hauswerk: {len(items)} Meldungen", "\n".join(f"• {a}: {c}" for a, c in items)
+                    t, m = self._deco(f"Hauswerk: {len(items)} Meldungen"), "\n".join(f"• {a}: {c}" for a, c in items)
                 self.hass.async_create_task(self._async_channel(ch, t, m))
             b["timer"] = async_call_later(self.hass, max(1, 300 - (now - b["last"])), flush)
         return True
@@ -810,7 +811,7 @@ class Haus:
             self._queued[key] = (title, message, room, room_name, kind)
             how = f"Ruhezeit – wird um {self.settings.get('notify_quiet_to')} gesendet, falls noch aktuell"
         else:
-            sent = self.send(targets, title, message, important, key, image=image)
+            sent = self.send(targets, title, message, important, key, image=image, kind=kind)
             how = f"{'wichtig ' if important else ''}gesendet an {', '.join(self.channel_name(c) for c in sent) or '– (kein Kanal erreichbar)'}"
         state = "log" if mode == "log" or not targets else "held" if key in self._queued else "sent"
         self._hist(title, message, kind, state, how)
@@ -851,9 +852,13 @@ class Haus:
         for key, (title, message, room, room_name, *rest) in queued.items():
             if key in self._active:
                 kind = rest[0] if rest else None
-                sent = self.send(self.channels_for(kind), title, message, False, key)
+                sent = self.send(self.channels_for(kind), title, message, False, key, kind=kind)
                 self._hist(title, message, kind, "sent", "nach der Ruhezeit gesendet")
                 self.log.add("notify", title, f"{message} · nach der Ruhezeit gesendet an {', '.join(self.channel_name(c) for c in sent)}", room, room_name)
+
+    def _deco(self, title: str, kind: str | None = None) -> str:
+        """Dezent ein Emoji vor den Titel (abschaltbar unter Benachrichtigungen)."""
+        return with_emoji(title, kind) if self.settings.get("notify_emoji", True) else title
 
     @staticmethod
     def _ha_id(key: str) -> str:
@@ -861,7 +866,7 @@ class Haus:
 
     @callback
     def _send(self, title: str, message: str, important: bool = False, key: str | None = None, kind: str | None = None) -> None:
-        self.send(self.channels_for(kind), title, message, important, key)
+        self.send(self.channels_for(kind), title, message, important, key, kind=kind)
 
     async def _async_send(self, target: str, payload: dict[str, Any]) -> None:
         try:
@@ -888,7 +893,7 @@ class Haus:
                 out.append({"channel": ch, "ok": False, "error": "nicht erreichbar"})
                 continue
             try:
-                await self._async_channel(ch, title, message, raise_errors=True)
+                await self._async_channel(ch, title if ch.startswith(("tts:", "sat:")) else self._deco(title), message, raise_errors=True)
                 out.append({"channel": ch, "ok": True})
             except Exception as err:  # noqa: BLE001
                 out.append({"channel": ch, "ok": False, "error": str(err) or type(err).__name__})

@@ -634,3 +634,16 @@ def test_lueften_lernen_hilft_beste_zeit():
     wet = [{**h, "rh": 100, "temp": 22} for h in hours]
     assert L.vent_plan(wet, now, 21, 55) == []
     assert L.next_dry_hour(hours, now, 21, 70)["hour"] == 7
+
+
+def test_notify_emoji():
+    """Dezent ein Emoji vor dem Titel: nach Stichwort, sonst nach Anlass; nicht doppelt."""
+    assert L.with_emoji("Fenster offen – Regen", "storm") == "🌧️ Fenster offen – Regen"
+    assert L.with_emoji("Sturm – Rollläden fahren hoch", "storm") == "💨 Sturm – Rollläden fahren hoch"
+    assert L.with_emoji("Thermostat nicht erreichbar", "offline").startswith("📡")
+    assert L.with_emoji("Heizkörper bleibt kalt", "cold").startswith("🌡️")
+    assert L.with_emoji("Mähroboter braucht Hilfe", "mower").startswith("🆘")
+    assert L.with_emoji("Waschmaschine fertig").startswith("🧺") and L.with_emoji("Wama fertig").startswith("✅")
+    assert L.with_emoji("Mähroboter: Winterpause einlegen?", "mower_care").startswith("❄️")
+    assert L.with_emoji("🪟 schon da", "window") == "🪟 schon da"
+    assert L.with_emoji("Irgendwas", "unbekannt") == "Irgendwas"

@@ -164,8 +164,8 @@ class Hass:
         return asyncio.ensure_future(coro)
 
     def sent(self):
-        """Gesendete Nachrichten (Titel)."""
-        return [d["title"] for dom, _s, d in self.calls if dom == "notify"]
+        """Gesendete Nachrichten (Titel, ohne das Emoji davor – das prüft test_benachrichtigung_emoji)."""
+        return [d["title"].split(" ", 1)[1] if d.get("title") and not d["title"][0].isalnum() else d.get("title") for dom, _s, d in self.calls if dom == "notify"]
 
     def set(self, eid, state, attrs=None, name=None):
         self.st[eid] = State(eid, state, attrs, name)
@@ -447,7 +447,7 @@ def test_benachrichtigungsart(hw):
         haus.notify("battery:x", "battery", "Batterie schwach", "12 %")
         await asyncio.sleep(0)
         pushes = [(s, d) for dom, s, d in hass.calls if dom == "notify"]
-        assert [d["title"] for _s, d in pushes] == ["Frost erwartet"]  # Fenster nur Protokoll, Batterie aus
+        assert [d["title"] for _s, d in pushes] == ["❄️ Frost erwartet"]  # Fenster nur Protokoll, Batterie aus
         assert pushes[0][1]["data"]["push"]["interruption-level"] == "time-sensitive"
         created = [d for dom, s, d in hass.calls if (dom, s) == ("persistent_notification", "create")]
         assert created and created[0]["notification_id"] == "hauswerk_frost"
@@ -1489,8 +1489,10 @@ def test_benachrichtigungskanaele(hw):
         # Standard-Kanäle für andere Anlässe: App-Dienst + notify-Entität
         haus.notify("frost", "frost", "Frost", "heute Nacht −5 °C")
         await asyncio.sleep(0)
-        assert ("notify", "send_message", {"entity_id": "notify.iphone", "title": "Frost", "message": "heute Nacht −5 °C"}) in hass.calls
-        assert [c[1] for c in hass.calls if c[0] == "notify" and c[2].get("title") == "Frost"] == ["mobile_app_pixel", "send_message"]
+        assert ("notify", "send_message", {"entity_id": "notify.iphone", "title": "❄️ Frost", "message": "heute Nacht −5 °C"}) in hass.calls
+        # Ansagen ohne Emoji
+        assert all(not str(d.get("message", "")).startswith(("❄", "🪟")) for dom, _s, d in hass.calls if dom == "tts")
+        assert [c[1] for c in hass.calls if c[0] == "notify" and c[2].get("title") == "❄️ Frost"] == ["mobile_app_pixel", "send_message"]
         # gleiche Nachricht gleich nochmal über send(): kein Doppel
         n = len(hass.calls)
         haus.send(["ent:notify.iphone"], "Frost", "heute Nacht −5 °C")
@@ -1585,7 +1587,7 @@ def test_benachrichtigung_ausbau(hw):
         timers[0]()
         await asyncio.sleep(0)
         last = [c for c in hass.calls if c[1] == "mobile_app_pixel"][-1][2]
-        assert last["title"] == "Hauswerk: 2 Meldungen" and "C: drei" in last["message"] and "D: vier" in last["message"]
+        assert last["title"] == "📬 Hauswerk: 2 Meldungen" and "C: drei" in last["message"] and "D: vier" in last["message"]
         # Zustand je Kanal und Verlauf
         assert haus.notify_health["svc:mobile_app_pixel"]["ok"] is True
         await haus.async_save_settings({"notify_hours": {}, "notify_bundle": [], "notify_storm": "important"})
@@ -2195,6 +2197,7 @@ def test_beetwerk_garten_frei_igel_hitze_waechter(hw):
         await asyncio.sleep(0)
         assert dock in hass.calls
         assert "Mäher fährt heim" in hass.sent()
+        assert any(c[0] == "notify" and c[2].get("title") == "🧒 Mäher fährt heim" for c in hass.calls), [c for c in hass.calls if c[0] == "notify"]
         assert any(c[0] == "notify" and (c[2].get("data") or {}).get("image") == "/api/camera_proxy/camera.garten_fliessend" for c in hass.calls)
         hass.set("lawn_mower.robonect", "docked", {}, "Automower")
         hass.set("binary_sensor.garten_person", "off", {}, "Garten Person")

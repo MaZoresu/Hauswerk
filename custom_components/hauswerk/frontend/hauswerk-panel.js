@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.80.1";
+const VERSION = "0.81.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -106,6 +106,17 @@ const LEGEND = [
   ["Allgemein", "mdi:bell-badge-outline", C.sun, "Hinweise", "Oben rechts: Hinweise aller Module, rot = Achtung."],
   ["Allgemein", "mdi:account-group-outline", "#e879f9", "Gäste / Party", "Gilt fürs ganze Haus."],
 ];
+/** Emoji vor dem Titel einer Benachrichtigung – wie notify_emoji() in logic.py (Vorschau). */
+const NK_EMOJI_WORDS = [[["regen"], "🌧️"], [["sturm"], "💨"], [["winterpause", "frost"], "❄️"], [["saison starten"], "🌱"], [["bleibt kalt"], "🌡️"], [["batterie", "akku"], "🪫"],
+  [["nicht erreichbar"], "📡"], [["fenster"], "🪟"], [["lüften"], "🌬️"], [["braucht hilfe"], "🆘"], [["fährt heim"], "🧒"], [["nachts"], "🌙"], [["messer", "wartung"], "🔧"],
+  [["mähroboter", "mäher"], "🤖"], [["licht", "leuchte"], "💡"], [["müll"], "🗑️"], [["waschmaschine"], "🧺"], [["trockner"], "👕"], [["spül", "geschirr"], "🍽️"], [["meldungen"], "📬"], [[" fertig"], "✅"], [["testnachricht", "hauswerk"], "👋"]];
+const NK_EMOJI_KINDS = { window: "🪟", offline: "📡", frost: "❄️", battery: "🪫", cold: "🌡️", vent: "🌬️", vent_done: "🪟", storm: "💨", cover: "📡", light_away: "💡", light_offline: "📡", mower: "🤖", mower_care: "🔧", mower_guard: "🧒", waste: "🗑️", appliance: "✅" };
+const nkEmoji = (title, kind) => {
+  const low = ` ${String(title).toLowerCase()}`;
+  const hit = NK_EMOJI_WORDS.find(([w]) => w.some((x) => low.includes(x)));
+  const e = hit ? hit[1] : NK_EMOJI_KINDS[kind] || "";
+  return e ? `${e} ${title}` : title;
+};
 /** Anlässe für Benachrichtigungen: k = Einstellung notify_<k>, g = Modul, def = Standard, ex = Beispielmeldung. */
 const NK_KINDS = [
   { k: "window", g: "Heizwerk", icon: "mdi:window-open-variant", c: C.air, title: "Fenster lange offen", def: "normal", ex: ["Fenster lange offen", "Wohnzimmer: seit 30 Min. offen"], text: "Steht ein Fenster so lange offen, kommt eine Nachricht – einmal je Öffnen." },
@@ -7585,7 +7596,7 @@ class HauswerkPanel extends HTMLElement {
     // ---------- Reiter „Anlässe“
     const preview = (x, chs) => {
       const voice = voiceOf(chs);
-      return `<div class="nk-prev"><div class="nk-phone"><ha-icon icon="mdi:home-automation"></ha-icon><span class="grow"><b>${esc(x.ex[0])}</b><small>${esc(x.ex[1])}</small></span><em>jetzt</em></div>
+      return `<div class="nk-prev"><div class="nk-phone"><ha-icon icon="mdi:home-automation"></ha-icon><span class="grow"><b>${esc(p.notify_emoji !== false ? nkEmoji(x.ex[0], x.k) : x.ex[0])}</b><small>${esc(x.ex[1])}</small></span><em>jetzt</em></div>
         ${this._admin && chs.length ? `<div class="nk-pa">
           <button class="secondary small" data-action="nk-try" data-k="${x.k}" ${dis}><ha-icon icon="mdi:send-outline"></ha-icon>So senden</button>
           ${voice.length ? `<button class="secondary small" data-action="nk-try" data-k="${x.k}" data-voice="1" ${dis}><ha-icon icon="mdi:account-voice"></ha-icon>Probehören</button>` : ""}</div>` : ""}</div>`;
@@ -7679,6 +7690,7 @@ class HauswerkPanel extends HTMLElement {
         ${this._admin ? `<button class="secondary small" data-action="nk-add-open"><ha-icon icon="mdi:plus"></ha-icon>Kanal hinzufügen</button>` : ""}</div>
       ${failing.length ? `<div class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon><span class="grow">Nicht zugestellt: ${failing.map((c) => esc(chInfo(c).label)).join(", ")}</span>${this._admin ? `<button class="secondary small" data-action="ch-test1" data-ch="${esc(failing.join(","))}">Testen</button>` : ""}</div>` : ""}
       ${used.length ? `<div class="nk-cards">${used.map(card).join("")}</div>` : `<p class="muted">Noch kein Kanal gewählt – unten hinzufügen.</p>`}
+      <div class="wxrows">${this._setRow("nemo", "Emojis in Benachrichtigungen", "dezent eins vor dem Titel, z. B. 🪟 🤖 ✅", sw("notify_emoji"), "Ein passendes Emoji vor dem Titel macht Meldungen auf einen Blick erkennbar – 🪟 Fenster, ❄️ Frost, 🪫 Batterie, 📡 nicht erreichbar, 🤖 Mähroboter, 🧺 Waschmaschine fertig … Ansagen über Lautsprecher bleiben ohne.")}</div>
       ${anyVoice ? `<div class="wxrows">${this._setRow("nva", "Ansagen nur, wenn jemand zu Hause ist", "sonst nur Wichtiges", sw("notify_voice_away"), "Ist niemand zu Hause (Hauswerk › Anwesenheit), sagt Hauswerk nichts an – außer bei „Wichtig“. Ruhezeit gilt für Ansagen immer.")}</div>` : ""}
       <section class="nk-addsec ${addOpen ? "open" : ""}" id="nk-add">
         <button class="nk-addh" data-action="nk-add-toggle" aria-expanded="${addOpen}"><ha-icon icon="mdi:plus-circle-outline"></ha-icon><span class="grow">Kanal hinzufügen · Standard-Kanäle</span><ha-icon icon="mdi:chevron-${addOpen ? "up" : "down"}"></ha-icon></button>
