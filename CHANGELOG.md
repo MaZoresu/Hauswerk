@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.72.4 – 2026-11-21
+
+### Geändert
+- **Tagesleiste in den Fenstern besser lesbar:** Uhrzeiten unter der Leiste (z. B. Rollwerk › Raum, „Höhe einstellen“) mit mehr Abstand zur Leiste und größerer Schrift (15 px); Stufe 1 rutscht in eine eigene Zeile, damit sich nichts überlappt. Profilnamen über der Leiste ebenfalls größer.
+
 ## 0.72.3 – 2026-11-21
 
 ### Geändert (Heizwerk, kompakte Raumkacheln)

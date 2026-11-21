@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.72.3";
+const VERSION = "0.72.4";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -13148,7 +13148,12 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .wt-s { display:block; font-size:16px; line-height:1.3; min-height:21px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .wt-s span { display:inline-flex; align-items:center; gap:4px; vertical-align:middle; } .wt-s ha-icon { --mdc-icon-size:18px; }
 .wt-dim { color:var(--muted); }
-.pop-tl { margin:4px 0 12px; display:flex; flex-direction:column; gap:4px; } .pop-tl > small { font-size:12px; }
+.pop-tl { margin:4px 0 14px; display:flex; flex-direction:column; gap:4px; } .pop-tl > small { font-size:14px; }
+.pop-tl .rwday-bar { height:14px; }
+.pop-tl .rwday-lab { height:46px !important; margin-top:8px; font-size:15px; font-weight:600; color:var(--text); }
+.pop-tl .rwday-lab span.s1 { top:22px; }
+.pop-tl .dscale { margin-top:6px; font-size:14px; }
+.pop-tl + .pop-tl { margin-top:8px; }
 .wt-ctl { display:flex; gap:10px; margin-top:4px; }
 .wbtn { all:unset; cursor:pointer; flex:1; height:48px; border-radius:14px; display:grid; place-items:center; background:color-mix(in srgb, var(--text) 8%, transparent); }
 .wbtn ha-icon { --mdc-icon-size:26px; } .wbtn:disabled { opacity:.4; }
