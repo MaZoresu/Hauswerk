@@ -639,6 +639,7 @@ def test_tablet_seitenleiste(tablet):
 def test_tablet_eigene_startseite(tablet):
     """Im Anpassen-Modus am Tablet: „Eigene“ legt eine Tablet-Startseite an, Handy/PC bleiben unverändert."""
     p = tablet
+    p.js("localStorage.setItem('hauswerk.tablet.tstart', 'widgets')")
     p.view("start")
     p.click('[data-action="w-edit"]')
     assert p.has(".tstart")
@@ -663,6 +664,7 @@ def test_tablet_eigene_startseite(tablet):
 
 def test_tablet_sperren_und_groesse(tablet):
     p = tablet
+    p.js("localStorage.setItem('hauswerk.tablet.tstart', 'widgets')")
     p.view("start")
     assert p.has('[data-action="w-edit"]')
     p.js("localStorage.setItem('hauswerk.tablet.lock', '1')")
@@ -1687,3 +1689,38 @@ def test_lueft_bilanz_ampel(panel):
     p.js(f"() => {{ delete {EL}._status.rooms.a1.air.open; delete {EL}._status.rooms.a1.vent; }}")
     h = [x for x in p.js(f"{EL}._hints()") if x["text"] == "Zu selten gelüftet"]
     assert h and h[0]["lvl"] == "warn" and "3 Tage nicht gelüftet, Feuchte morgens 68 %" in h[0]["sub"]
+
+
+
+def test_tablet_wand_startseite_und_details(tablet):
+    """Tablet: Wand-Startseite (Uhr, Jetzt wichtig, Modul-Kacheln) ohne Seiten; „Automatisch“ zeigt Wand-Kacheln bis zur
+    ersten Berührung, danach Details; Rollläden und Lichter je Raum mit Sammel-Fenster; Seiten-Pfeile; Kraftwerk in zwei Spalten."""
+    p = tablet
+    p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    p.view("start")
+    p.wait(300)
+    assert p.has(".wstart .ws-time") and p.js(f"{EL}._tPages") == 1
+    names = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.ws-r .wt-n b')].map((b) => b.textContent)")
+    assert names[:4] == ["Heizwerk", "Rollwerk", "Kraftwerk", "Lichtwerk"] and "Termine" in names and "Anwesenheit" in names, names
+    p.page.locator("hauswerk-panel .ws-r .wt").first.click()
+    p.wait(300)
+    assert p.js(f"{EL}._tab") == "overview"
+    # erste Berührung → Details
+    assert p.js(f"{EL}._touched") is True and not p.has(".wgrid") and p.has(".rooms")
+    p.js(f"() => {{ {EL}._touched = false; {EL}._renderMain(); }}")
+    p.view("shutters")
+    p.wait(300)
+    tiles = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.wgrid > .wt')].map((t) => t.dataset.pop)")
+    assert "rwarea:Küche" in tiles, tiles
+    p.js(f"() => {{ {EL}._openPop('rwarea:Küche'); }}")
+    p.wait()
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('#pop .lwr').length") == 3
+    p.js(f"{EL}._closePop()")
+    p.js(f"() => {{ {EL}._touched = false; }}")
+    p.view("kwflow")
+    p.wait(400)
+    assert p.has(".kw2")
+    # Zurück zur Startseite nach 2 Min. ohne Berührung (vor dem Schoner)
+    p.js(f"() => {{ localStorage.setItem('hauswerk.tablet.saver', '10'); {EL}._lastAct = Date.now() - 130000; {EL}._homed = false; {EL}._saverTick(); }}")
+    p.wait(200)
+    assert p.js(f"{EL}._tab") == "start" and p.js(f"{EL}.shadowRoot.getElementById('saver').hidden") is True

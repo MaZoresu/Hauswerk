@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.70.0";
+const VERSION = "0.71.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -772,6 +772,8 @@ class HauswerkPanel extends HTMLElement {
     }, 15000);
     // Ablauftimer der Lichter (aus in m:ss) sekündlich, ohne neu zu zeichnen
     this._tick = setInterval(() => {
+      const wc = this.shadowRoot.querySelector("[data-wsclock]");
+      if (wc) wc.textContent = new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
       for (const el of this.shadowRoot.querySelectorAll("[data-lw-until]")) el.textContent = this._lwLeft(el.dataset.lwUntil);
     }, 1000);
     this._timer = setInterval(() => {
@@ -1315,6 +1317,13 @@ class HauswerkPanel extends HTMLElement {
     }
   }
 
+  /** Tablet: Wand-Kacheln (groß) oder Details. „Automatisch“: Wand bis zur ersten Berührung, danach Details bis zum Bildschirmschoner. */
+  _wall() {
+    if (!this._tablet) return false;
+    const m = this._tabletOpt("tview", "auto");
+    return m === "wall" || (m === "auto" && !this._touched);
+  }
+
   _tabletOpt(key, dflt) {
     try {
       const v = localStorage.getItem(`hauswerk.tablet.${key}`);
@@ -1349,6 +1358,13 @@ class HauswerkPanel extends HTMLElement {
     if (!this._actBound) {
       this._actBound = true;
       const act = () => (this._lastAct = Date.now());
+      // erste Berührung nach dem Aufwecken: im Modus „Automatisch“ von Wand-Kacheln zu Details
+      window.addEventListener("pointerdown", (e) => {
+        if (!this._tablet || this._touched || this._tabletOpt("tview", "auto") !== "auto") return;
+        if (e.composedPath().some((n) => n.id === "saver")) return;
+        this._touched = true;
+        setTimeout(() => this._renderMain(), 0);
+      }, { capture: true, passive: true });
       for (const ev of ["pointerdown", "keydown", "wheel", "touchstart"]) window.addEventListener(ev, act, { capture: true, passive: true });
       window.addEventListener("resize", () => this._tablet && this._tabletFit(true));
       document.addEventListener("visibilitychange", () => this._tablet && document.visibilityState === "visible" && this._keepAwake());
@@ -1506,6 +1522,10 @@ class HauswerkPanel extends HTMLElement {
       ${on ? `
       <div class="field"><span>Hell / Dunkel auf diesem Tablet</span><div class="segs small">${[["sun", "Nach Sonnenstand"], ["global", "Wie Darstellung"], ["light", "Hell"], ["dark", "Dunkel"]].map(([v, l]) => opt("theme", v, l, this._tabletOpt("theme", "sun"))).join("")}</div></div>
       <p class="muted small">„Nach Sonnenstand“ wird dunkel, sobald die Sonne untergeht (sun.sun), und morgens wieder hell. „Wie Home Assistant“ klappt in Fully oft nicht, weil das Tablet den Dunkelmodus nicht meldet.</p>
+      <div class="field"><span>Kacheln</span><div class="segs small">${[["auto", "Automatisch"], ["wall", "Immer groß"], ["detail", "Immer Details"]].map(([v, l]) => opt("tview", v, l, this._tabletOpt("tview", "auto"))).join("")}</div></div>
+      <p class="muted small">„Automatisch“: große Wand-Kacheln (lesbar aus Abstand), nach der ersten Berührung die Kacheln mit allen Details – bis zum Bildschirmschoner.</p>
+      <div class="field"><span>Startseite</span><div class="segs small">${[["wall", "Wand-Startseite"], ["widgets", "Widgets"]].map(([v, l]) => opt("tstart", v, l, this._tabletOpt("tstart", "wall"))).join("")}</div></div>
+      <div class="field"><span>Zurück zur Startseite nach</span><div class="segs small">${[["0", "Nie"], ["1", "1 Min."], ["2", "2 Min."], ["5", "5 Min."]].map(([v, l]) => opt("home", v, l, this._tabletOpt("home", "2"))).join("")}</div></div>
       <div class="field"><span>Bildschirmschoner nach</span><div class="segs small">${[["0", "Aus"], ["1", "1 Min."], ["2", "2 Min."], ["5", "5 Min."], ["10", "10 Min."]].map(([v, l]) => opt("saver", v, l, saver)).join("")}</div></div>
       <p class="muted small">Abgedunkelt mit großer Uhr, Datum, Wetter mit Vorhersage, Hausstand, nächsten Rollladen-Fahrten, Terminen und Hinweisen; Warnungen erscheinen groß. Der Inhalt wandert jede Minute ein Stück gegen Einbrennen. Dabei geht es zurück zur Startseite. Antippen weckt auf, ohne etwas zu schalten.</p>
       <div class="field"><span>Nachts</span><div class="segs small">${[["dim", "Abgedunkelt"], ["black", "Schwarz, kleine Uhr"], ["off", "Display aus"]].map(([v, l]) => opt("night", v, l, this._tabletOpt("night", "dim"))).join("")}</div></div>
@@ -1589,6 +1609,20 @@ class HauswerkPanel extends HTMLElement {
     };
     // Wand-Kacheln: festes Seitenraster (2–4 Spalten × 1–3 Reihen), keine Kachel angeschnitten,
     // Kacheln gleichmäßig auf die Seiten verteilt (5 → 3 + 2 statt 4 + 1); Seiten blättern seitwärts
+    const ws = tin.querySelector(".wstart");
+    if (ws) {
+      base(f);
+      tin.style.height = "auto";
+      tin.style.columnWidth = "auto";
+      ws.style.height = `${H / f}px`;
+      this._tRowMode = "wall";
+      this._tWall = { stride: 0, z: f };
+      this._tPages = 1;
+      this._tPage[tab] = 0;
+      const dots = this.shadowRoot.getElementById("tdots");
+      if (dots) dots.innerHTML = "";
+      return;
+    }
     const wg = tin.querySelector(".wgrid");
     if (wg) {
       base(f);
@@ -1635,7 +1669,9 @@ class HauswerkPanel extends HTMLElement {
       this._tPage[tab] = page;
       this._tShow(page);
       const dots = this.shadowRoot.getElementById("tdots");
-      if (dots) dots.innerHTML = o.pages > 1 ? Array.from({ length: o.pages }, (_, k) => `<button class="${k === page ? "on" : ""}" data-action="tpage" data-i="${k}" aria-label="Seite ${k + 1}"></button>`).join("") + `<span class="tpg">Seite ${page + 1} von ${o.pages}</span>` : "";
+      if (dots) dots.innerHTML = o.pages > 1 ? `<button class="tpn" data-action="tpage-step" data-d="-1" aria-label="Seite zurück"><ha-icon icon="mdi:chevron-left"></ha-icon></button>`
+        + Array.from({ length: o.pages }, (_, k) => `<button class="${k === page ? "on" : ""}" data-action="tpage" data-i="${k}" aria-label="Seite ${k + 1}"></button>`).join("")
+        + `<span class="tpg">Seite ${page + 1} von ${o.pages}</span><button class="tpn" data-action="tpage-step" data-d="1" aria-label="Nächste Seite"><ha-icon icon="mdi:chevron-right"></ha-icon></button>` : "";
       return;
     }
     // Kachel-Raster (Räume, Rollläden detailliert): feste Spalten, genau 2 Reihen je Seite, in beiden Modulen gleich
@@ -1844,7 +1880,17 @@ class HauswerkPanel extends HTMLElement {
     const el = this.shadowRoot.getElementById("saver");
     if (!el) return;
     if (!el.hidden) return this._saverRender();
-    if (min > 0 && this._data && Date.now() - (this._lastAct || 0) >= min * 60000) this._saverShow();
+    const idle = Date.now() - (this._lastAct || 0);
+    if (min > 0 && this._data && idle >= min * 60000) return this._saverShow();
+    const home = Number(this._tabletOpt("home", "2"));
+    if (home > 0 && this._data && idle >= home * 60000 && !this._homed) {
+      this._homed = true;
+      if (this._pop) this._closePopQuiet();
+      this._touched = false;
+      if (this._tab !== "start" && !(this._tab === "plans" && this._plan?.dirty)) this._setView("start");
+      else this._renderMain();
+    }
+    if (idle < 30000) this._homed = false;
   }
 
   _saverShow() {
@@ -1856,6 +1902,7 @@ class HauswerkPanel extends HTMLElement {
     this._wEdit = false;
     if (this._tab !== "start" && !(this._tab === "plans" && this._plan?.dirty)) this._setView("start");
     this._tPage.start = 0;
+    this._touched = false;
     this._saverSeen = new Set([...this._hints(), ...this._urgent()].map((h) => `${h.text}|${h.sub}`));
     this._saverNew = {};
     this._saverAlert = false;
@@ -2432,10 +2479,10 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** „Jetzt wichtig“: höchstens drei Punkte zum Erledigen – Öffnen bzw. „Gesehen“ und „Erledigt“ (für heute ausblenden). */
-  _nowBox(warn) {
+  _nowBox(warn, full = false) {
     const open = warn.filter((h) => !this._acked(h));
     if (!open.length) return "";
-    if (this._tablet) {
+    if (this._tablet && !full) {
       // Tablet: eine Zeile, damit die Seite ohne Scrollen passt
       const h = open[0];
       const data = Object.entries(h.data || {}).map(([k, v]) => `data-${k}="${esc(v)}"`).join(" ");
@@ -2459,8 +2506,69 @@ class HauswerkPanel extends HTMLElement {
       ${open.slice(0, 3).map(row).join("")}</section>`;
   }
 
+  /** Tablet: Wand-Startseite – links Uhr, Wetter und „Jetzt wichtig“, rechts je Modul eine große Kachel. Eine Seite, kein Scrollen. */
+  _wallStart() {
+    const now = new Date();
+    const w = this._weather();
+    const f = this._facts();
+    const st = this._status?.rooms || {};
+    const set = this._data.settings || {};
+    const warn = this._hints().filter((h) => h.lvl === "warn");
+    const tiles = [];
+    const go = (tab) => `data-action="tab" data-tab="${tab}"`;
+    const logo = (id) => `<span class="wt-ic logo">${MODULE_LOGOS[id] || ""}</span>`;
+    if (f.rooms.length) {
+      const temps = f.rooms.map((r) => st[r.id]?.room_temp).filter((t) => t != null);
+      const avg = temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null;
+      tiles.push(this._wallTile({ act: go("overview"), color: f.open ? C.air : f.heating ? "#f97316" : C.ok, ic: logo("heizen"), name: "Heizwerk",
+        value: fmt(avg), unit: "°C Ø", status: `<span>${f.heating ? `<ha-icon icon="mdi:fire" style="color:#f97316"></ha-icon>${f.heating} heizen` : "alles warm"}</span>${f.open ? `<span style="color:${C.air}"><ha-icon icon="mdi:window-open-variant"></ha-icon>${f.open} offen</span>` : ""}` }));
+    }
+    const covers = this._data.rollwerk ? this._rwCovers() : [];
+    if (covers.length) {
+      const pos = covers.map((c) => this._rwPos(c.st)).filter((v) => v != null);
+      const open = pos.filter((v) => v >= 95).length, shut = pos.filter((v) => v <= 5).length;
+      const nx = covers.map((c) => (c.cfg.auto !== false ? this._rwNextShort(c.rs.next) : "")).find(Boolean);
+      tiles.push(this._wallTile({ act: go("shutters"), color: "#3b82f6", ic: logo("rollwerk"), name: "Rollwerk", value: String(open), unit: `offen · ${shut} zu`,
+        status: nx ? `<span class="wt-dim">als Nächstes ${nx}</span>` : "" }));
+    }
+    if ((set.kw_solar || []).length || set.kw_grid) {
+      const fl = this._kwFlow();
+      const imp = (fl.grid ?? 0) > 0;
+      tiles.push(this._wallTile({ act: go("kwflow"), color: "#eab308", ic: logo("kraftwerk"), name: "Kraftwerk", value: fl.solar != null ? this._kwFmt(fl.solar).replace(/ (k?W)$/, "") : "–", unit: fl.solar != null ? `${(this._kwFmt(fl.solar).match(/k?W$/) || ["W"])[0]} Solar` : "",
+        status: fl.grid != null ? `<span><ha-icon icon="${imp ? "mdi:transmission-tower-import" : "mdi:transmission-tower-export"}"></ha-icon>${imp ? "Bezug" : "Einspeisung"} ${this._kwFmt(Math.abs(fl.grid))}</span>` : "" }));
+    }
+    if (this._data.lichtwerk && this._lwLights().length) {
+      const ls = this._lwLights();
+      const on = ls.filter((l) => l.st?.state === "on").length;
+      tiles.push(this._wallTile({ act: go("lights"), color: on ? "#facc15" : C.rest, ic: logo("lichtwerk"), name: "Lichtwerk", value: String(on), unit: `/ ${ls.length} an`,
+        status: on ? `<span class="wt-dim">${esc(ls.filter((l) => l.st?.state === "on").map((l) => this._lwName(l)).slice(0, 3).join(", "))}</span>` : "" }));
+    }
+    // Termine (Müll zuerst) und Anwesenheit
+    this._calLoad?.();
+    const waste = this._status?.waste_due;
+    const ev = (this._cal || []).filter((e) => e.allDay || new Date(e.start) > now - 30 * 60000).slice(0, 2);
+    tiles.push(this._wallTile({ act: `data-action="pop-open" data-pop="calendars"`, color: waste ? "#22c55e" : "#64748b", ic: `<span class="wt-ic"><ha-icon icon="${waste ? "mdi:trash-can-outline" : "mdi:calendar-month-outline"}"></ha-icon></span>`, name: "Termine",
+      value: waste ? (waste.when === "heute" ? "Heute" : "Morgen") : String(ev.length), unit: waste ? "Müll" : "heute/morgen",
+      status: waste ? `<span>${esc((waste.types || []).join(", "))}</span>` : ev.map((e) => `<span class="wt-dim">${esc(e.title)}</span>`).join("") }));
+    const home = (set.persons || []).filter((id) => ["home", "on"].includes(this._hass.states[id]?.state));
+    tiles.push(this._wallTile({ act: `data-action="pop-open" data-pop="presence"`, color: this._status?.away ? "#94a3b8" : C.ok, ic: `<span class="wt-ic"><ha-icon icon="${this._status?.away ? "mdi:home-export-outline" : "mdi:home-account"}"></ha-icon></span>`, name: "Anwesenheit",
+      value: this._status?.away ? "weg" : String(home.length), unit: this._status?.away ? "niemand da" : "zu Hause",
+      status: home.length ? `<span class="wt-dim">${esc(home.map((id) => this._entityName(id)).join(", "))}</span>` : "" }));
+    return `<div class="wstart">
+      <div class="ws-l">
+        <div class="ws-time" data-wsclock>${now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</div>
+        <div class="ws-date">${now.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })}</div>
+        ${w ? `<div class="ws-wx"><ha-icon icon="${w.icon}"></ha-icon><b>${fmt(w.temp)}°</b><span>${esc(w.label)}</span></div>` : ""}
+        ${this._nowBox(warn, true) || `<div class="ws-ok"><ha-icon icon="mdi:check-circle-outline"></ha-icon>Alles in Ordnung</div>`}
+        <button class="link tiny ws-sw" data-action="tablet-opt" data-k="tstart" data-v="widgets"><ha-icon icon="mdi:view-dashboard-edit-outline"></ha-icon>Widgets anzeigen</button>
+      </div>
+      <div class="ws-r" style="--n:${tiles.length}">${tiles.join("")}</div>
+    </div>`;
+  }
+
   // ------------------------------------------------------------ Start (Zuhause mit Modul-Kacheln)
   _viewStart() {
+    if (this._tablet && this._tabletOpt("tstart", "wall") === "wall" && this._data && !this._wEdit) return this._wallStart();
     const f = this._facts();
     const n = f.rooms.length;
     const warn = this._hints().filter((h) => h.lvl === "warn");
@@ -3152,14 +3260,14 @@ class HauswerkPanel extends HTMLElement {
 
       <div class="shead outer">
         <ha-icon icon="mdi:floor-plan"></ha-icon><h3>Räume</h3><span class="count">${n}</span><span class="grow"></span>
-        ${n && !this._tablet ? `<div class="vtog" role="group" aria-label="Ansicht">
+        ${n && !this._wall() ? `<div class="vtog" role="group" aria-label="Ansicht">
           <button class="${compact ? "" : "on"}" data-action="room-view" data-v="detail" title="Detailliert"><ha-icon icon="mdi:view-agenda-outline"></ha-icon><span>Detailliert</span></button>
           <button class="${compact ? "on" : ""}" data-action="room-view" data-v="compact" title="Kompakt"><ha-icon icon="mdi:view-grid-outline"></ha-icon><span>Kompakt</span></button>
         </div>` : ""}
         ${this._admin && n ? `<button class="link" data-action="room-new"><ha-icon icon="mdi:plus"></ha-icon>Raum</button>` : ""}
       </div>
       ${
-        n && this._tablet
+        n && this._wall()
           ? `<div class="wgrid">${rooms.map((r) => this._roomWall(r)).join("")}</div>`
           : n
           ? `<div class="rooms ${compact ? "compact" : ""}">${rooms.map((r) => (compact ? this._roomMini(r) : this._roomCard(r))).join("")}</div>`
@@ -3917,6 +4025,45 @@ class HauswerkPanel extends HTMLElement {
     });
   }
 
+  /** Rollläden eines Raums als eine Wand-Kachel (ein Rollladen: seine eigene Kachel). */
+  _coverAreaWall(area, list) {
+    if (list.length === 1) return this._coverWall(list[0], area);
+    const pos = list.map((c) => this._rwPos(c.st));
+    const ok = list.filter((c) => c.st && !["unavailable", "unknown"].includes(c.st.state));
+    const open = pos.filter((p) => p != null && p >= 95).length, shut = pos.filter((p) => p != null && p <= 5).length;
+    const ids = ok.map((c) => c.id).join(",");
+    const fl = list.map((c) => c.rs.cat === "storm" ? ["mdi:weather-windy-variant", "Sturmschutz", "#ef4444"] : c.rs.contact_open ? ["mdi:door-open", "Tür offen", "#f59e0b"]
+      : c.rs.cat === "shading" ? ["mdi:sun-thermometer-outline", "Beschattung", "#f97316"] : c.rs.manual ? ["mdi:hand-back-right-outline", "von Hand", C.hand] : null).find(Boolean);
+    const nx = list.map((c) => (c.cfg.auto !== false ? this._rwNextShort(c.rs.next) : "")).find(Boolean);
+    const btn = (a, i, t) => `<button class="wbtn" data-action="rw-cmd" data-ids="${esc(ids)}" data-a="${a}" title="${t} – alle im Raum" ${ok.length ? "" : "disabled"}><ha-icon icon="${i}"></ha-icon></button>`;
+    const avg = pos.filter((p) => p != null);
+    return this._wallTile({
+      act: `data-action="pop-open" data-pop="rwarea:${esc(area)}"`, color: fl ? fl[2] : shut === list.length ? "#3b82f6" : C.rest,
+      ic: `<span class="wt-win">${this._rwWin(list[0], avg.length ? avg.reduce((a, b) => a + b, 0) / avg.length : null)}</span>`, name: area,
+      value: open === list.length ? "offen" : shut === list.length ? "zu" : String(open), unit: open === list.length || shut === list.length ? `· ${list.length} Rollläden` : `/ ${list.length} offen`,
+      status: fl ? `<span style="color:${fl[2]}"><ha-icon icon="${fl[0]}"></ha-icon>${fl[1]}</span>` : nx ? `<span class="wt-dim">als Nächstes ${nx}</span>` : "",
+      ctl: btn("open", "mdi:arrow-up", "hoch") + btn("stop", "mdi:stop", "Stopp") + btn("close", "mdi:arrow-down", "runter"),
+    });
+  }
+
+  /** Lichter eines Raums als eine Wand-Kachel (ein Licht: seine eigene Kachel). */
+  _lightAreaWall(area, list) {
+    if (list.length === 1) return this._lightWall(list[0], area);
+    const ok = list.filter((l) => l.st && !["unavailable", "unknown"].includes(l.st.state));
+    const on = ok.filter((l) => l.st.state === "on");
+    const mot = list.some((l) => this._lwMotion(l));
+    const t = on.map((l) => l.ls.off?.at).filter(Boolean).sort()[0];
+    const lead = on[0] || list[0];
+    return this._wallTile({
+      act: `data-action="pop-open" data-pop="lwarea:${esc(area)}"`, color: on.length ? this._lwColor(lead) : C.rest,
+      ic: `<button class="wt-bulb ${on.length ? "on" : ""}" data-action="lw-cmd" data-ids="${esc((on.length ? on : ok).map((l) => l.id).join(","))}" data-a="${on.length ? "off" : "on"}" ${ok.length ? "" : "disabled"} title="${on.length ? "Alle aus" : "Alle an"}" style="--lc:${this._lwColor(lead)}"><ha-icon icon="${on.length ? "mdi:lightbulb-group" : "mdi:lightbulb-group-outline"}"></ha-icon>${mot ? `<span class="lw-mot"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</button>`,
+      name: area, value: on.length ? String(on.length) : "aus", unit: on.length ? `/ ${list.length} an` : `· ${list.length} Lichter`,
+      status: [on.length ? `<span class="wt-dim">${esc(on.map((l) => this._lwName(l)).join(", "))}</span>` : "",
+        t ? `<span style="color:${C.ok}"><ha-icon icon="mdi:timer-outline"></ha-icon><span data-lw-until="${esc(t)}">${this._lwLeft(t)}</span></span>` : ""].filter(Boolean).join(""),
+      cls: on.length ? "on" : "",
+    });
+  }
+
   _lightWall(l, area) {
     const bad = !l.st || ["unavailable", "unknown"].includes(l.st.state);
     const on = l.st?.state === "on";
@@ -4539,7 +4686,7 @@ class HauswerkPanel extends HTMLElement {
         <button class="${view === "rooms" ? "on" : ""}" data-action="lw-view" data-v="rooms" title="Räume"><ha-icon icon="mdi:floor-plan"></ha-icon><span>Räume</span></button>
       </div></div>`;
     const sorted = [...groups.entries()].sort((a, b) => (a[0] === "Ohne Raum") - (b[0] === "Ohne Raum") || a[0].localeCompare(b[0], "de"));
-    if (this._tablet) return head + `<div class="wgrid">${sorted.map(([area, list]) => list.map((l) => this._lightWall(l, area)).join("")).join("")}</div>`;
+    if (this._wall()) return head + `<div class="wgrid">${sorted.map(([area, list]) => this._lightAreaWall(area, list)).join("")}</div>`;
     if (view === "rooms") return head + tog + `<div class="rw-grid ${this._tablet ? "tgrid" : ""}">${sorted.map(([area, list]) => this._lwRoomTile(area, list)).join("")}</div>`;
     if (this._tablet && !compact) return head + tog + `<div class="rw-grid tgrid">${sorted.map(([area, list]) => list.map((l) => tile(l, area)).join("")).join("")}</div>`;
     // meist nur ein Licht je Raum: ein gemeinsames Raster, der Raum steht in der Kachel (statt fast leerer Zeilen)
@@ -4731,6 +4878,12 @@ class HauswerkPanel extends HTMLElement {
           <button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
           ${this._admin ? `<button class="primary" data-action="lwl-save" data-id="${esc(eid)}"><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>` : ""}`,
       };
+    }
+    if (id.startsWith("lwarea:")) {
+      const area = id.slice(7);
+      const list = this._lwLights().filter((l) => (l.ls.area || "Ohne Raum") === area);
+      return { icon: "mdi:lightbulb-group-outline", c: "#6366f1", title: esc(area), sub: `${list.length} Lichter`,
+        body: this._lwRoomTile(area, list), foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     }
     if (id.startsWith("lwroom:")) {
       const area = id.slice(7);
@@ -5359,8 +5512,7 @@ class HauswerkPanel extends HTMLElement {
     const st = P?.ok ? this._kwStats("today") : null;
     const today = !P ? `<div class="chart-empty"><div class="spinner"></div></div>`
       : !P.ok ? "" : st?.total ? this._kwKpis(st.total, P) : `<div class="chart-empty"><div class="spinner"></div></div>`;
-    return `
-      <div id="kw-brief">${this._kwBrief(fl, st)}</div>
+    const flowHtml = `
       <section class="card kw-flow">
         ${this._sectionHead("mdi:flash-outline", "Jetzt", `<span class="kw-live"><i></i>live</span>`)}
         ${this._kwDiagram(fl)}
@@ -5370,10 +5522,17 @@ class HauswerkPanel extends HTMLElement {
           const hm = (d) => d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
           return `<div class="kw-batt ${bt.empty ? "bad" : ""}"><ha-icon icon="${bt.empty ? "mdi:battery-alert-variant-outline" : "mdi:battery-clock-outline"}"></ha-icon><span>Akku ${fl.soc != null ? `${fmt(fl.soc, 0)} % · ` : ""}${fmt(bt.wh / 1000, 2)} kWh gespeichert${bt.until ? (bt.empty ? ` – leer ca. ${hm(bt.until)}, vor Sonnenaufgang (${hm(bt.sunrise)})` : ` – reicht bei ${this._kwFmt(bt.load)} bis ca. ${hm(bt.until)}`) : (fl.batt ?? 0) < -20 ? " – lädt" : " – liefert gerade nicht"}</span></div>`;
         })()}
-      </section>
+      </section>`;
+    const consHtml = fl.cons.length && (!this._tablet || fl.cons.some((c) => (c.w ?? 0) >= 50)) ? `<section class="card">${this._sectionHead("mdi:power-plug-outline", "Verbraucher jetzt")}<div id="kw-cons" class="kc">${this._kwConsHtml(fl)}</div></section>` : "";
+    const todayHtml = P && !P.ok ? this._kwEnergyHint() : `<section class="card">${this._sectionHead("mdi:calendar-today", "Heute", `<button class="link tiny" data-action="tab" data-tab="kwrep"><span>Verlauf</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`)}${today}</section>`;
+    if (this._tablet) return `<div id="kw-brief">${this._kwBrief(fl, st)}</div>
+      <div class="kw2"><div>${flowHtml}${consHtml}</div><div>${todayHtml}${this._kwForecastCard(fl)}</div></div>`;
+    return `
+      <div id="kw-brief">${this._kwBrief(fl, st)}</div>
+      ${flowHtml}
       ${this._kwForecastCard(fl)}
-      ${fl.cons.length ? `<section class="card">${this._sectionHead("mdi:power-plug-outline", "Verbraucher jetzt")}<div id="kw-cons" class="kc">${this._kwConsHtml(fl)}</div></section>` : ""}
-      ${P && !P.ok ? this._kwEnergyHint() : `<section class="card">${this._sectionHead("mdi:calendar-today", "Heute", `<button class="link tiny" data-action="tab" data-tab="kwrep"><span>Verlauf</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`)}${today}</section>`}`;
+      ${consHtml}
+      ${todayHtml}`;
   }
 
   /** Solar-Prognose als Stundenbalken mit Grundlast-Linie. */
@@ -6094,9 +6253,13 @@ class HauswerkPanel extends HTMLElement {
         <button class="${compact ? "on" : ""}" data-action="rw-view" data-v="compact" title="Kompakt"><ha-icon icon="mdi:view-grid-outline"></ha-icon><span>Kompakt</span></button>
       </div></div>`;
     // Tabletmodus, detailliert: ein gemeinsames Raster (2 Reihen je Seite, wie die Heizwerk-Räume), Raum steht in der Kachel
-    if (this._tablet) {
+    if (this._wall()) {
       const sorted = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"));
-      return head + `<div class="wgrid">${sorted.map(([area, list]) => list.map((c) => this._coverWall(c, area)).join("")).join("")}</div>`;
+      return head + `<div class="wgrid">${sorted.map(([area, list]) => this._coverAreaWall(area, list)).join("")}</div>`;
+    }
+    if (this._tablet && !compact) {
+      const sorted = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"));
+      return head + tog + `<div class="rw-grid tgrid">${sorted.map(([area, list]) => list.map((c) => tile(c, area)).join("")).join("")}</div>`;
     }
     return head + tog + [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "de"))
       .map(([area, list]) => `<div class="rw-area ${compact ? "compact" : ""}"><h3>${esc(area)}</h3><div class="rw-grid ${compact ? "compact" : ""}">${list.map((c) => (compact ? mini(c) : tile(c))).join("")}</div></div>`).join("");
@@ -7843,7 +8006,19 @@ class HauswerkPanel extends HTMLElement {
     if (String(id).startsWith("rwpos:")) return this._rwPosPop(id.slice(6));
     if (String(id).startsWith("kwapp:")) return this._kwAppPop(id.slice(6));
     if (String(id).startsWith("lwp:")) { const [, pid, sec] = String(id).split(":"); return this._lwpPop(pid, LW_SECTIONS.some(([x]) => x === sec) ? sec : "on"); }
-    if (String(id).startsWith("lwbri:") || String(id).startsWith("lwl:") || String(id).startsWith("lwroom:") || LW_POPS.includes(id)) return this._lwPop(id);
+    if (String(id).startsWith("lwbri:") || String(id).startsWith("lwl:") || String(id).startsWith("lwroom:") || String(id).startsWith("lwarea:") || LW_POPS.includes(id)) return this._lwPop(id);
+    if (String(id).startsWith("rwarea:")) {
+      const area = id.slice(7);
+      const list = this._rwCovers().filter((c) => (c.rs.area || "Ohne Raum") === area);
+      const row = (c) => {
+        const p = this._rwPos(c.st);
+        const bad = !c.st || ["unavailable", "unknown"].includes(c.st.state);
+        const b = (a, i) => `<button class="sbtn" data-action="rw-cmd" data-ids="${esc(c.id)}" data-a="${a}" ${bad ? "disabled" : ""}><ha-icon icon="${i}"></ha-icon></button>`;
+        return `<div class="lwr">${this._rwWin(c, p)}<button class="lwr-n" data-action="pop-open" data-pop="rwpos:${esc(c.id)}"><b>${esc(this._entityName(c.id))}</b><small>${bad ? "nicht erreichbar" : p == null ? esc(c.st.state) : p >= 95 ? "offen" : p <= 5 ? "zu" : `${fmt(p, 0)} %`}${c.rs.reason && c.cfg.auto !== false ? ` · ${esc(c.rs.reason)}` : ""}</small></button>${b("open", "mdi:arrow-up")}${b("stop", "mdi:stop")}${b("close", "mdi:arrow-down")}</div>`;
+      };
+      return { icon: "mdi:window-shutter", c: "#3b82f6", title: esc(area), sub: `${list.length} Rollläden`,
+        body: `<div class="lw-room"><div class="lwr-list">${list.map(row).join("")}</div></div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+    }
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (KW_POPS.includes(id)) return this._kwPop(id);
     if (id === "setup") return this._setupPop();
@@ -10925,12 +11100,16 @@ class HauswerkPanel extends HTMLElement {
         this._renderMain();
         break;
       }
+      case "tpage-step":
+        this._tabletGo((this._tPage[this._tab] || 0) + Number(el.dataset.d));
+        break;
       case "tablet-opt":
         this._tabletSet(el.dataset.k, el.dataset.v);
         if (el.dataset.k === "sidebar") this._tabletSidebar(el.dataset.v === "1");
         if (el.dataset.k === "theme") this._applyLook(this._pop?.id === "look" ? this._settings : null);
         this._lastAct = Date.now();
-        this._renderPop();
+        if (this._pop) this._renderPop();
+        if (["tview", "tstart"].includes(el.dataset.k)) { this._touched = false; this._renderMain(); }
         break;
       case "saver-test":
         this._closePopQuiet();
@@ -12895,6 +13074,23 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 :host([tablet]) .tpages .rw-area .rw-c { width:300px; }
 :host([tablet]) .tpages h3, :host([tablet]) .tpages .shead, :host([tablet]) .tpages .sub-h { break-after:avoid; }
 .tdots { display:none; }
+:host([tablet]) .tdots .tpn { all:unset; cursor:pointer; width:48px; height:40px; margin:-8px 4px 0; display:grid; place-items:center; border-radius:12px; background:color-mix(in srgb, var(--text) 7%, transparent); }
+:host([tablet]) .tdots .tpn ha-icon { --mdc-icon-size:26px; }
+/* Wand-Startseite */
+.wstart { display:grid; grid-template-columns:minmax(300px, 36%) 1fr; gap:18px; box-sizing:border-box; padding-bottom:4px; }
+.ws-l { display:flex; flex-direction:column; gap:10px; min-height:0; overflow:hidden; }
+.ws-time { font-size:96px; font-weight:200; line-height:.95; letter-spacing:-.03em; font-variant-numeric:tabular-nums; }
+.ws-date { font-size:22px; font-weight:500; color:var(--muted); }
+.ws-wx { display:flex; align-items:center; gap:10px; font-size:20px; } .ws-wx ha-icon { --mdc-icon-size:40px; } .ws-wx b { font-size:34px; font-weight:400; }
+.ws-l .now-box { margin:6px 0 0; flex:1; min-height:0; overflow:hidden; }
+.ws-l .now-t b { font-size:16px; } .ws-l .now-t small { font-size:13px; }
+.ws-ok { display:flex; align-items:center; gap:8px; font-size:18px; color:#22c55e; margin-top:8px; } .ws-ok ha-icon { --mdc-icon-size:26px; }
+.ws-sw { align-self:flex-start; margin-top:auto; }
+.ws-r { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); grid-auto-rows:minmax(0, 1fr); gap:14px; min-height:0; }
+.wt-ic.logo { background:none; } .wt-ic.logo svg, .wt-ic.logo .mlogo { width:40px; height:40px; border-radius:22%; }
+/* Kraftwerk im Querformat: zwei Spalten */
+.kw2 { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); gap:14px; align-items:start; }
+.kw2 > div { display:flex; flex-direction:column; gap:14px; } .kw2 > div > .card { margin:0; }
 :host([tablet]) .tdots .tpg { margin-left:12px; font-size:13px; color:var(--muted); align-self:center; }
 /* Wand-Kacheln */
 :host([tablet]) .wgrid { display:grid; transition:transform .25s ease; }
@@ -12927,7 +13123,7 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 :host([tablet]) .bnav { display:none !important; }
 /* Unterseiten oben als Umschalter */
 :host([tablet]) #chips nav { margin:0 0 10px; padding:5px; gap:5px; }
-:host([tablet]) #chips nav button { padding:11px 12px; font-size:16px; min-height:44px; box-sizing:border-box; }
+:host([tablet]) #chips nav button { padding:12px 12px; font-size:16px; min-height:48px; box-sizing:border-box; }
 :host([tablet]) #chips nav button ha-icon { --mdc-icon-size:22px; }
 :host([tablet]) .app { padding-bottom:0; }
 :host([tablet]) .savebar { position:sticky; bottom:0; }
