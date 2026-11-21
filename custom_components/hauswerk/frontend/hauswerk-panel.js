@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.72.5";
+const VERSION = "0.72.6";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4005,7 +4005,7 @@ class HauswerkPanel extends HTMLElement {
         let nx = ["komfort", "eco", "vorheizen"].includes(s.mode) ? info?.text || "" : "";
         if (s.mode === "komfort") nx = nx.replace(/^Komfort (bis|ab) /, "$1 ");
         if (nx && /^Komfortzeit läuft$/.test(nx)) nx = "";
-        return `<span style="color:${tint(m.c)}"><ha-icon icon="${m.i}"></ha-icon><b>${esc(lbl)}</b></span>${nx ? `<span class="wt-dim" style="margin-left:6px">· ${esc(nx)}</span>` : ""}`;
+        return `<span style="color:${tint(m.c)}"><ha-icon icon="${m.i}"></ha-icon><b>${esc(lbl)}${s.target != null && s.mode !== "aus" ? ` ${fmt(s.target)}°` : ""}</b></span>${nx ? `<span class="wt-dim" style="margin-left:6px">· ${esc(nx)}</span>` : ""}`;
       })(),
       cls: s.mode === "aus" ? "off" : "",
     });

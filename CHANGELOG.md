@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.72.6 – 2026-11-21
+
+### Geändert (Tabletmodus, Heizwerk)
+- **Soll-Temperatur in der Raumkachel:** hinter der Betriebsart steht die eingestellte Soll-Temperatur – „Komfort 21,0° · bis 21:00“, „Eco 18,0° · Komfort ab 18:00“.
+
 ## 0.72.5 – 2026-11-21
 
 ### Geändert (Tabletmodus, Heizwerk)
