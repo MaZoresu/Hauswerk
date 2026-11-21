@@ -47,6 +47,7 @@ from .logic import (
     compensated,
     battery_level,
     cold_radiator,
+    vent_balance,
     compute_target,
     demand_state,
     VALVE_ATTRS,
@@ -203,6 +204,7 @@ class Heizen:
         self.outside_hours: dict[str, list] = stored.get("outside_hours") or {}
         # Lüftungen je Raum (14 Tage): Beginn, Dauer, Feuchte und Temperatur vorher/nachher, Wärmeverlust
         self.vent_log: dict[str, list] = stored.get("vent_log") or {}
+        self.rh_morning: dict[str, dict[str, float]] = stored.get("rh_morning") or {}  # Raum → Tag → höchste Feuchte 5–9 Uhr
         # „Kamin in Betrieb“ von Hand: Raum → gilt bis (Zeitstempel); übersteht Neustarts
         self.fire_manual: dict[str, float] = stored.get("fire_manual") or {}
         self._plans_fixed = self._fix_schedules()
@@ -261,6 +263,7 @@ class Heizen:
             "demand": self.demand,
             "outside_hours": self.outside_hours,
             "vent_log": self.vent_log,
+            "rh_morning": self.rh_morning,
             "fire_manual": self.fire_manual,
         }
 
@@ -1432,7 +1435,8 @@ class Heizen:
             rt["warm"] = result["mode"] == "warm"
             valve, valve_all = self._valves(room_id)
             run, cold = cold_radiator(valve, room_temp, result["target"], result["mode"], open_since is not None,
-                                      rt.get("cold_run"), now)
+                                      rt.get("cold_run"), now, closed_ago=(now - closed_since) if closed_since else None,
+                                      floor=room.get("type") == "flaeche" or bool(room.get("assist_entities")))
             rt["cold_run"] = run
             self._assist(room, rt, result, room_temp)
             rt["window_ccu"] = self._window_ccu(room, result, virtual)
@@ -1749,6 +1753,16 @@ class Heizen:
         week = [v for v in self.vent_log.get(room_id) or [] if v["at"] >= now - 7 * 86400]
         drops = [v["rh0"] - v["rh1"] for v in week if v.get("rh0") is not None and v.get("rh1") is not None]
         last = (self.vent_log.get(room_id) or [None])[-1]
+        # Morgen-Feuchte (5–9 Uhr, höchster Wert je Tag) für die Lüft-Bilanz; 10 Tage
+        if humidity is not None and 5 <= local.hour < 9:
+            days = self.rh_morning.setdefault(room_id, {})
+            key = local.date().isoformat()
+            if humidity > days.get(key, -1):
+                days[key] = round(humidity, 1)
+                for old in sorted(days)[:-10]:
+                    days.pop(old, None)
+        balance = vent_balance(last["at"] if last else None, self.rh_morning.get(room_id) or {}, limit, mold, now,
+                               local.date().isoformat()) if limit and humidity is not None and room.get("windows") else None
         air = {
             "limit": limit, "minutes": minutes, "mold": mold, "co2": co2, "reasons": reasons, "kind": kind,
             "dew_point": advice["dew_point"] if advice else None, **info,
@@ -1756,6 +1770,7 @@ class Heizen:
                      "rh0": last.get("rh0"), "rh1": last.get("rh1")} if last else None,
             "week": {"count": len(week), "minutes": round(sum(v["min"] for v in week)), "kwh": round(sum(v.get("kwh") or 0 for v in week), 1),
                      "rh_drop": round(sum(drops) / len(drops)) if drops else None},
+            "balance": balance,
         }
         vent = None
         if need:

@@ -214,6 +214,9 @@ Zeigt, woher der Strom kommt und wohin er fließt (Kraftwerk › Energiefluss):
 - **Einstellungen:** nur die Leistungs-Sensoren (W/kW) für Solar, Netz (mit Vorzeichen oder Bezug/Einspeisung getrennt, Vorzeichen umkehrbar), Batterie (+ Ladestand), Hausverbrauch (sonst errechnet) und Verbraucher. **Automatisch erkennen** schlägt sie vor – aus dem Energie-Dashboard, von denselben Geräten wie die dort eingetragenen Zähler oder nach Namen.
 - **Nichts doppelt:** Zähler (kWh) und Preise kommen aus dem **Energie-Dashboard von Home Assistant** und dessen Statistik.
 - **Widget „Energie“** für die Startseite: klein Solar und Netz, mittel vier Werte und Autarkie heute, groß mit Energiefluss und Tageswerten.
+- **Solar-Prognose** aus dem Energie-Dashboard (z. B. Forecast.Solar): Stundenbalken mit Grundlast-Linie und „Heute ab 11 Uhr ca. 1,8 kW Überschuss“.
+- **Grundlast** (Verlauf): niedrigster Verbrauch nachts, Kosten im Jahr, welche Verbraucher dazu beitragen.
+- **Akku-Rest:** gespeicherte Energie und „reicht bis ca. 04:30“ – rot, wenn er vor Sonnenaufgang leer ist.
 
 # Modul Lichtwerk
 

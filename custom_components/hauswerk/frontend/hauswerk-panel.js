@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.68.5";
+const VERSION = "0.69.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -232,6 +232,7 @@ const PICKERS = {
   kw_grid_export: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "power" },
   kw_battery: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "power" },
   kw_battery_soc: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "battery" },
+  kw_battery_energy: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "energy_storage" },
   kw_home: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "power" },
   kw_consumers: { scope: "settings", multi: true, domains: ["sensor"], deviceClass: "power" },
   outside_sensor: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "temperature" },
@@ -973,6 +974,7 @@ class HauswerkPanel extends HTMLElement {
       root.addEventListener("pointerdown", (e) => this._rwWinDrag(e));
       root.addEventListener("pointerdown", (e) => this._tSwipeStart(e));
       root.addEventListener("pointerdown", (e) => this._unlockPress(e));
+      root.addEventListener("pointerdown", (e) => this._svAckPress(e));
       if (!this._keyBound) {
         this._keyBound = true;
         window.addEventListener("keydown", (e) => {
@@ -1109,7 +1111,7 @@ class HauswerkPanel extends HTMLElement {
     const add = (lvl, icon, text, sub, action, data = {}) => out.push({ lvl, icon, text, sub, action, data });
     for (const [aid, a] of Object.entries(s.appliances || {})) {
       const c = (this._data?.settings?.kw_appliances || []).find((x) => x.id === aid);
-      if (c && a.state === "done") add("warn", APP_TYPES[c.type]?.icon || "mdi:check-circle-outline", `${c.name} fertig`, a.last ? `${this._durTxt(a.last.dur)} · ${fmt(a.last.wh / 1000, 2)} kWh – ausräumen` : "ausräumen", "tab", { tab: "kwdev" });
+      if (c && a.state === "done") add("warn", APP_TYPES[c.type]?.icon || "mdi:check-circle-outline", `${c.name} fertig`, a.last ? `${this._durTxt(a.last.dur)} · ${fmt(a.last.wh / 1000, 2)} kWh – ausräumen` : "ausräumen", "tab", { tab: "kwdev", app: aid });
     }
     if (s.waste_due) add("info", this._calIcon(s.waste_due.types[0])[0], `${s.waste_due.when === "morgen" ? "Morgen" : "Heute"} Müllabfuhr`, s.waste_due.types.join(" · "), "settings-go", { sub: "calendars" });
     for (const r of this._rooms()) {
@@ -1132,6 +1134,7 @@ class HauswerkPanel extends HTMLElement {
       if (air.open?.done) add("warn", "mdi:window-closed-variant", "Fenster schließen – genug gelüftet", `${r.name} · ${air.open.done}`, "tab", { tab: "vent" });
       else if (air.long) add("info", "mdi:window-open-variant", "Fenster lange offen – Kippen kostet Wärme", `${r.name} · ${air.long.minutes} Min., ca. ${fmt(air.long.kwh)} kWh – lieber kurz stoßlüften`, "tab", { tab: "vent" });
       if (rs.vent) add("info", "mdi:weather-windy", `Jetzt ${rs.vent.minutes} Min. lüften`, `${r.name} · ${(rs.vent.reasons || []).join(", ")}${rs.vent.outside_g != null ? ` · draußen ${fmt(rs.vent.outside_g)} statt ${fmt(rs.vent.inside_g)} g/m³` : ""}`, "tab", { tab: "vent" });
+      if (air.balance && air.balance.level !== "ok" && !rs.vent && !air.open) add(air.balance.level === "bad" ? "warn" : "info", "mdi:weather-windy", air.balance.level === "bad" ? "Zu selten gelüftet" : "Bald lüften", `${r.name}: ${air.balance.text}`, "tab", { tab: "vent" });
       if (air.mold?.level === "bad" && !rs.vent) add("warn", "mdi:alert-octagon-outline", "Schimmelgefahr", `${r.name} · an Außenwänden ca. ${air.mold.wall_rh} % Luftfeuchte – lüften, Möbel von Außenwänden abrücken`, "tab", { tab: "vent" });
       else if (rs.humidity >= 70) add("info", "mdi:water-alert", `Luftfeuchte ${fmt(rs.humidity, 0)} %`, `${r.name} · Lüften bringt gerade wenig, draußen ist es ähnlich feucht`, "settings-go", { sub: "vent" });
       if (rs.cold_radiator && (s.cold_rooms || []).length < 2)
@@ -1834,6 +1837,51 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Wichtiges für den Bildschirmschoner: Warnungen, Sturm, offenes Fenster bei Regen. */
+  /** Für heute quittierte Hinweise (je Gerät): ausgeblendet in „Jetzt wichtig“ und im Bildschirmschoner, nicht unter der Glocke. */
+  /** Bildschirmschoner: Hinweis lange drücken (0,7 s) → für heute ausblenden. */
+  _svAckPress(e) {
+    const el = e.composedPath().find((n) => n.dataset?.ack != null && n.closest?.("#saver"));
+    if (!el) return;
+    const key = el.dataset.ack;
+    const t = setTimeout(() => {
+      this._ack(key);
+      this._svPressed = Date.now();
+      el.classList.add("acked");
+      setTimeout(() => this._saverRender(), 350);
+    }, 700);
+    const stop = () => { clearTimeout(t); window.removeEventListener("pointerup", stop); window.removeEventListener("pointercancel", stop); };
+    window.addEventListener("pointerup", stop);
+    window.addEventListener("pointercancel", stop);
+  }
+
+  _ackStore() {
+    const day = new Date().toLocaleDateString("sv");
+    try {
+      const d = JSON.parse(localStorage.getItem("hauswerk.ack") || "{}");
+      return d.day === day ? d : { day, keys: [] };
+    } catch (e) {
+      return { day, keys: [] };
+    }
+  }
+
+  _ackKey(h) {
+    return `${h.text}|${h.sub || ""}`;
+  }
+
+  _acked(h) {
+    return this._ackStore().keys.includes(this._ackKey(h));
+  }
+
+  _ack(key) {
+    const d = this._ackStore();
+    if (!d.keys.includes(key)) d.keys.push(key);
+    try {
+      localStorage.setItem("hauswerk.ack", JSON.stringify(d));
+    } catch (e) {
+      /* ohne Speicher */
+    }
+  }
+
   _urgent() {
     const out = this._hints().filter((h) => h.lvl === "warn").map((h) => ({ ...h }));
     if (this._rwStatus?.storm) out.unshift({ lvl: "warn", live: true, icon: "mdi:weather-windy-variant", text: "Sturm", sub: "Rollläden fahren hoch" });
@@ -1992,9 +2040,10 @@ class HauswerkPanel extends HTMLElement {
         a.co2 != null ? [`${a.co2} ppm`, "CO₂", a.co2 >= (set.vent_co2 || 1000) ? "#f59e0b" : ""] : null,
         a.last ? [ago(a.last.at), `zuletzt gelüftet · ${fmt(a.last.min, 0)} Min.${a.last.rh0 != null && a.last.rh1 != null ? ` · ${fmt(a.last.rh0, 0)} → ${fmt(a.last.rh1, 0)} %` : ""}`, ""] : null,
         a.week?.count ? [`${a.week.count}×`, `7 Tage · ${a.week.minutes} Min.${a.week.kwh ? ` · ca. ${fmt(a.week.kwh)} kWh` : ""}`, ""] : null,
+        a.balance?.rh_morning != null ? [`${a.balance.rh_morning} %`, "morgens (Ø 3 Tage)", a.balance.level !== "ok" ? VB[a.balance.level][0] : ""] : null,
       ].filter(Boolean);
       return `<article class="card vt-c" data-action="room-page" data-id="${esc(r.id)}" role="button" tabindex="0">
-        <div class="vt-h"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><b>${esc(r.name)}</b>${chip ? `<span class="vt-chip" style="--c:${chip[2]}" title="${esc(chip[3])}"><ha-icon icon="${chip[0]}"></ha-icon>${esc(chip[1])}</span>` : ""}</div>
+        <div class="vt-h"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><b>${esc(r.name)}</b>${a.balance ? `<span class="vt-amp" style="--c:${VB[a.balance.level][0]}" title="Lüft-Bilanz: ${esc(a.balance.text)}"><i></i>${VB[a.balance.level][1]}</span>` : ""}${chip ? `<span class="vt-chip" style="--c:${chip[2]}" title="${esc(chip[3])}"><ha-icon icon="${chip[0]}"></ha-icon>${esc(chip[1])}</span>` : ""}</div>
         ${state}
         ${facts.length ? `<div class="vt-f">${facts.map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>` : ""}
       </article>`;
@@ -2196,8 +2245,8 @@ class HauswerkPanel extends HTMLElement {
     const mode = this._tabletOpt("night", "dim");
     const w = this._weather();
     // neue Hinweise merken (5 Minuten hervorgehoben)
-    const urgent = this._urgent();
-    const hints = this._hints().filter((h) => h.lvl !== "warn");
+    const urgent = this._urgent().filter((h) => !this._acked(h));
+    const hints = this._hints().filter((h) => h.lvl !== "warn" && !this._acked(h));
     for (const h of [...urgent, ...hints]) {
       const k = `${h.text}|${h.sub}`;
       if (!this._saverSeen.has(k)) { this._saverSeen.add(k); this._saverNew[k] = t; }
@@ -2219,8 +2268,8 @@ class HauswerkPanel extends HTMLElement {
     const dark = night && mode !== "dim";
     // nachts nur Akutes (Sturm, Regen bei offenem Fenster) und Neues
     const shownUrgent = dark ? urgent.filter((h) => h.live || fresh(h)) : urgent;
-    const more = (n, one, many) => `<small class="sv-more">und ${n} ${n === 1 ? one : many}</small>`;
-    const urgentHtml = shownUrgent.length ? `<div class="sv-urgent">${shownUrgent.slice(0, 2).map((h) => `<div class="sv-u ${fresh(h) ? "new" : ""}"><ha-icon icon="${h.icon}"></ha-icon><span><b>${esc(h.text)}</b>${h.sub ? `<small>${esc(h.sub)}</small>` : ""}</span></div>`).join("")}${shownUrgent.length > 2 ? more(shownUrgent.length - 2, "weitere Warnung", "weitere Warnungen") : ""}</div>` : "";
+    const more = (n, one, many) => `<button class="sv-more" data-sv="hints">und ${n} ${n === 1 ? one : many} <ha-icon icon="mdi:chevron-right"></ha-icon></button>`;
+    const urgentHtml = shownUrgent.length ? `<div class="sv-urgent">${shownUrgent.slice(0, 2).map((h) => `<div class="sv-u ${fresh(h) ? "new" : ""}" data-ack="${esc(this._ackKey(h))}"><ha-icon icon="${h.icon}"></ha-icon><span><b>${esc(h.text)}</b>${h.sub ? `<small>${esc(h.sub)}</small>` : ""}</span></div>`).join("")}${shownUrgent.length > 2 ? more(shownUrgent.length - 2, "weitere Warnung", "weitere Warnungen") : ""}</div>` : "";
     // Nacht „schwarz“ bzw. „Display aus“: nur kleine Uhr und Warnungen
     if (dark) {
       el.innerHTML = `<div class="sv-in" style="transform:translate(${dx}vw, ${dy}vh)"><div class="sv-time small">${time}</div>${urgentHtml}</div>`;
@@ -2264,7 +2313,10 @@ class HauswerkPanel extends HTMLElement {
       if (items.length) fcHtml = `<div class="sv-fc">${items.map((x) => `<span><small>${new Date(x.datetime).toLocaleTimeString("de-DE", { hour: "2-digit" })}</small><ha-icon icon="${(WEATHER[x.condition] || ["mdi:weather-partly-cloudy"])[0]}"></ha-icon><b>${fmt(x.temperature, 0)}°</b></span>`).join("")}</div>`;
     }
     const day = (d) => { const x = new Date(d); const td = new Date(); td.setHours(0, 0, 0, 0); const diff = Math.round((new Date(x.getFullYear(), x.getMonth(), x.getDate()) - td) / 86400000); return diff <= 0 ? "Heute" : diff === 1 ? "Morgen" : x.toLocaleDateString("de-DE", { weekday: "short" }); };
-    const cal = (this._cal || []).filter((e) => e.allDay || new Date(e.start) > now - 30 * 60000);
+    // Müll heute/morgen steht schon als Hinweis da: denselben Termin nicht doppelt zeigen
+    const waste = this._status?.waste_due;
+    const dupe = (e) => waste && (waste.types || []).some((x) => String(e.title).toLowerCase().includes(String(x).toLowerCase())) && ["Heute", "Morgen"].includes(day(e.start));
+    const cal = (this._cal || []).filter((e) => (e.allDay || new Date(e.start) > now - 30 * 60000) && !dupe(e));
     const side = [
       ...cal.slice(0, 3).map((e) => `<div class="sv-row"><ha-icon icon="${this._calIcon(e.title)[0]}" style="color:${this._calIcon(e.title)[1]}"></ha-icon><span><b>${day(e.start)}${e.allDay ? "" : ` ${new Date(e.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</b><small>${esc(e.title)}</small></span></div>`),
     ];
@@ -2277,8 +2329,8 @@ class HauswerkPanel extends HTMLElement {
         ${mods.length ? `<div class="sv-mods">${mods.map(([m, x]) => `<div class="sv-mod"><span class="sv-logo">${MODULE_LOGOS[m] || ""}</span>${x.join("")}</div>`).join("")}</div>` : ""}
         ${urgentHtml}
         ${side.length ? `<div class="sv-side">${side.join("")}</div>` : ""}
-        ${smallHints.length ? `<div class="sv-hints">${smallHints.map((h) => `<div class="sv-h ${fresh(h) ? "new" : ""}"><ha-icon icon="${h.icon}"></ha-icon><span><b>${esc(h.text)}</b>${h.sub ? `<small>${esc(h.sub)}</small>` : ""}</span></div>`).join("")}${hints.length > smallHints.length ? more(hints.length - smallHints.length, "weiterer Hinweis", "weitere Hinweise") : ""}</div>` : ""}
-        <div class="sv-tap">Antippen zum Aufwecken</div>
+        ${smallHints.length ? `<div class="sv-hints">${smallHints.map((h) => `<div class="sv-h ${fresh(h) ? "new" : ""}" data-ack="${esc(this._ackKey(h))}"><ha-icon icon="${h.icon}"></ha-icon><span><b>${esc(h.text)}</b>${h.sub ? `<small>${esc(h.sub)}</small>` : ""}</span></div>`).join("")}${hints.length > smallHints.length ? more(hints.length - smallHints.length, "weiterer Hinweis", "weitere Hinweise") : ""}</div>` : ""}
+        <div class="sv-tap">Antippen zum Aufwecken · Hinweis lange drücken: für heute ausblenden</div>
       </div>`;
   }
 
@@ -2303,6 +2355,34 @@ class HauswerkPanel extends HTMLElement {
     return `<div class="shead"><ha-icon icon="${icon}"></ha-icon><h3>${title}</h3><span class="grow"></span>${right}</div>`;
   }
 
+  /** „Jetzt wichtig“: höchstens drei Punkte zum Erledigen – Öffnen bzw. „Gesehen“ und „Erledigt“ (für heute ausblenden). */
+  _nowBox(warn) {
+    const open = warn.filter((h) => !this._acked(h));
+    if (!open.length) return "";
+    if (this._tablet) {
+      // Tablet: eine Zeile, damit die Seite ohne Scrollen passt
+      const h = open[0];
+      const data = Object.entries(h.data || {}).map(([k, v]) => `data-${k}="${esc(v)}"`).join(" ");
+      return `<div class="hstrip now-strip"><ha-icon icon="mdi:alert-circle-outline"></ha-icon>
+        <button class="now-t grow" data-action="${h.action}" data-hint="1" ${data}><b>${esc(h.text)}</b>${h.sub ? ` · ${esc(h.sub)}` : ""}</button>
+        ${h.data?.app ? `<button class="primary small" data-action="app-act" data-id="${esc(h.data.app)}" data-a="ack">Gesehen</button>` : `<button class="secondary small" data-action="now-ack" data-key="${esc(this._ackKey(h))}">Erledigt</button>`}
+        ${open.length > 1 ? `<button class="link tiny" data-action="hints-open">+${open.length - 1}</button>` : ""}</div>`;
+    }
+    const row = (h) => {
+      const data = Object.entries(h.data || {}).map(([k, v]) => `data-${k}="${esc(v)}"`).join(" ");
+      const can = this._admin || !["room-edit", "plan-open", "plan-sel"].includes(h.action);
+      const done = h.data?.app
+        ? `<button class="primary small" data-action="app-act" data-id="${esc(h.data.app)}" data-a="ack"><ha-icon icon="mdi:check"></ha-icon>Gesehen</button>`
+        : `<button class="secondary small" data-action="now-ack" data-key="${esc(this._ackKey(h))}" title="Für heute ausblenden"><ha-icon icon="mdi:check"></ha-icon>Erledigt</button>`;
+      return `<div class="now-r"><span class="sr-ic"><ha-icon icon="${h.icon}"></ha-icon></span>
+        <button class="now-t" ${can ? `data-action="${h.action}" data-hint="1" ${data}` : "disabled"}><b>${esc(h.text)}</b>${h.sub ? `<small>${esc(h.sub)}</small>` : ""}</button>${done}</div>`;
+    };
+    return `<section class="card now-box">
+      <div class="now-h"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><b>Jetzt wichtig</b><span class="grow"></span>
+        ${open.length > 3 ? `<button class="link tiny" data-action="hints-open">alle ${open.length}<ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}</div>
+      ${open.slice(0, 3).map(row).join("")}</section>`;
+  }
+
   // ------------------------------------------------------------ Start (Zuhause mit Modul-Kacheln)
   _viewStart() {
     const f = this._facts();
@@ -2311,12 +2391,7 @@ class HauswerkPanel extends HTMLElement {
     const list = this._widgets();
     const edit = this._wEdit && this._admin;
     return `
-      ${warn.length && !list.some((w) => w.type === "hints") ? `
-      <button class="hstrip" data-action="hints-open">
-        <ha-icon icon="mdi:alert-circle-outline"></ha-icon>
-        <span class="grow"><b>${warn.length} Hinweis${warn.length > 1 ? "e" : ""}</b> · ${esc(warn[0].text)}${warn[0].sub ? ` (${esc(warn[0].sub)})` : ""}${warn.length > 1 ? " …" : ""}</span>
-        <span class="hs-go">Anzeigen<ha-icon icon="mdi:chevron-right"></ha-icon></span>
-      </button>` : ""}
+      ${this._nowBox(warn)}
 
       ${(() => {
         if (!this._admin) return "";
@@ -4740,6 +4815,98 @@ class HauswerkPanel extends HTMLElement {
     return sign && w < 0 ? `−${t}` : sign && w > 0 ? `+${t}` : t;
   }
 
+  // ---- Akku-Rest, Solar-Prognose, Grundlast
+  /** Akku: gespeicherte Energie (Wh) aus einem Energie-Sensor am Gerät oder Kapazität × Ladestand; wie lange er noch reicht. */
+  _kwBatt(fl, p = this._data?.settings || {}) {
+    if (!fl.has.batt && !p.kw_battery_soc) return null;
+    let sensor = p.kw_battery_energy;
+    if (!sensor && p.kw_battery_soc) {
+      const ents = this._hass.entities || {};
+      const dev = ents[p.kw_battery_soc]?.device_id;
+      sensor = dev ? Object.keys(ents).find((id) => ents[id].device_id === dev && id.startsWith("sensor.") && this._hass.states[id]?.attributes?.device_class === "energy_storage") : null;
+    }
+    let wh = null;
+    const st = sensor && this._hass.states[sensor];
+    if (st && Number.isFinite(parseFloat(st.state))) wh = parseFloat(st.state) * (String(st.attributes?.unit_of_measurement || "Wh").toLowerCase() === "kwh" ? 1000 : 1);
+    else if (p.kw_battery_kwh && fl.soc != null) wh = p.kw_battery_kwh * 1000 * (fl.soc / 100);
+    if (wh == null) return null;
+    const cap = p.kw_battery_kwh ? p.kw_battery_kwh * 1000 : fl.soc > 1 ? wh / (fl.soc / 100) : null;
+    const reserve = cap ? cap * ((p.kw_battery_min ?? 10) / 100) : 0;
+    const usable = Math.max(0, wh - reserve);
+    const load = (fl.batt ?? 0) > 20 ? fl.batt : null; // nur solange der Akku das Haus versorgt
+    const until = load ? new Date(Date.now() + (usable / load) * 3600000) : null;
+    const rise = this._hass.states["sun.sun"]?.attributes?.next_rising;
+    const sunrise = rise ? new Date(rise) : null;
+    return { wh, usable, load, until, sunrise, empty: !!(until && sunrise && until < sunrise && sunrise - Date.now() < 18 * 3600000), sensor };
+  }
+
+  /** Solar-Prognose aus dem Energie-Dashboard (z. B. Forecast.Solar): Wh je Stunde, alle 30 Min. neu. */
+  _kwForecast() {
+    const c = this._kwFc;
+    if (c && Date.now() - c.at < 30 * 60000) return c.data;
+    if (!this._kwFcLoading) {
+      this._kwFcLoading = true;
+      this._hass.callWS({ type: "energy/solar_forecast" })
+        .then((res) => {
+          const hours = {};
+          for (const x of Object.values(res || {})) for (const [t, wh] of Object.entries(x?.wh_hours || {})) hours[Date.parse(t)] = (hours[Date.parse(t)] || 0) + wh;
+          this._kwFc = { at: Date.now(), data: Object.keys(hours).length ? hours : null };
+        })
+        .catch(() => (this._kwFc = { at: Date.now(), data: null }))
+        .finally(() => { this._kwFcLoading = false; if (["kwflow", "start"].includes(this._tab)) this._renderMain(); });
+    }
+    return c ? c.data : null;
+  }
+
+  /** Prognose für heute bzw. morgen: Rest, Spitze, Überschuss-Fenster (Leistung über der Grundlast + 500 W). */
+  _kwSolarPlan(fc, base) {
+    if (!fc) return null;
+    const now = Date.now();
+    const day = (off) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + off); return d.getTime(); };
+    const pick = (off) => Object.entries(fc).map(([t, wh]) => [Number(t), wh]).filter(([t]) => t >= day(off) && t < day(off + 1) && t + 3600000 > now).sort((a, b) => a[0] - b[0]);
+    let off = 0;
+    let hrs = pick(0);
+    if (hrs.reduce((a, [, wh]) => a + wh, 0) < 100) { off = 1; hrs = pick(1); }
+    if (!hrs.length) return null;
+    const kwh = hrs.reduce((a, [, wh]) => a + wh, 0) / 1000;
+    const peak = hrs.reduce((a, b) => (b[1] > a[1] ? b : a));
+    const need = (base ?? 300) + 500;
+    const sur = hrs.filter(([, wh]) => wh >= need);
+    return { off, kwh, peak: { at: new Date(peak[0]), w: peak[1] }, base: base ?? 300, hours: hrs,
+      surplus: sur.length ? { from: new Date(sur[0][0]), to: new Date(sur[sur.length - 1][0] + 3600000), w: Math.max(...sur.map(([, wh]) => wh)) - (base ?? 300) } : null };
+  }
+
+  /** Grundlast: niedrigster Hausverbrauch nachts (0–5 Uhr, 5-Minuten-Mittel), Median über 7 Nächte; dazu die Verbraucher. */
+  _kwBase() {
+    const p = this._data?.settings || {};
+    const house = p.kw_home || p.kw_grid;
+    if (!house) return null;
+    const c = this._kwB;
+    if (c && Date.now() - c.at < 60 * 60000) return c.data;
+    if (!this._kwBLoading) {
+      this._kwBLoading = true;
+      const start = new Date(Date.now() - 7 * 86400000);
+      const ids = [house, ...(p.kw_consumers || [])];
+      this._hass.callWS({ type: "recorder/statistics_during_period", start_time: start.toISOString(), statistic_ids: ids, period: "5minute", types: ["mean"], units: { power: "W" } })
+        .then((res) => {
+          const night = (x) => { const d = new Date(typeof x.start === "number" ? x.start : Date.parse(x.start)); return d.getHours() < 5 ? d.toLocaleDateString("sv") : null; };
+          const perNight = (id, fn) => {
+            const m = {};
+            for (const x of res?.[id] || []) { const k = night(x); if (k && x.mean != null) (m[k] = m[k] || []).push(x.mean); }
+            const vals = Object.values(m).filter((v) => v.length >= 12).map(fn).sort((a, b) => a - b);
+            return vals.length ? vals[Math.floor(vals.length / 2)] : null;
+          };
+          const w = perNight(house, (v) => Math.min(...v));
+          const cons = (p.kw_consumers || []).map((id) => ({ id, name: this._kwConsName(id, p), w: perNight(id, (v) => v.reduce((a, b) => a + b, 0) / v.length) }))
+            .filter((x) => x.w != null && x.w >= 3).sort((a, b) => b.w - a.w);
+          this._kwB = { at: Date.now(), data: w != null && (!p.kw_home ? w > 0 : true) ? { w: Math.max(0, w), cons, src: p.kw_home ? "Hausverbrauch" : "Netzbezug" } : null };
+        })
+        .catch(() => (this._kwB = { at: Date.now(), data: null }))
+        .finally(() => { this._kwBLoading = false; if (["kwflow", "kwrep"].includes(this._tab)) this._renderMain(); });
+    }
+    return c ? c.data : null;
+  }
+
   _kwConfigured(p = this._data?.settings || {}) {
     return !!((p.kw_solar || []).length || p.kw_grid || p.kw_battery || p.kw_home);
   }
@@ -5046,9 +5213,43 @@ class HauswerkPanel extends HTMLElement {
       <section class="card kw-flow">
         ${this._sectionHead("mdi:flash-outline", "Jetzt", `<span class="kw-live"><i></i>live</span>`)}
         ${this._kwDiagram(fl)}
+        ${(() => {
+          const bt = fl.has.batt ? this._kwBatt(fl) : null;
+          if (!bt) return "";
+          const hm = (d) => d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+          return `<div class="kw-batt ${bt.empty ? "bad" : ""}"><ha-icon icon="${bt.empty ? "mdi:battery-alert-variant-outline" : "mdi:battery-clock-outline"}"></ha-icon><span>Akku ${fl.soc != null ? `${fmt(fl.soc, 0)} % · ` : ""}${fmt(bt.wh / 1000, 2)} kWh gespeichert${bt.until ? (bt.empty ? ` – leer ca. ${hm(bt.until)}, vor Sonnenaufgang (${hm(bt.sunrise)})` : ` – reicht bei ${this._kwFmt(bt.load)} bis ca. ${hm(bt.until)}`) : (fl.batt ?? 0) < -20 ? " – lädt" : " – liefert gerade nicht"}</span></div>`;
+        })()}
       </section>
+      ${this._kwForecastCard(fl)}
       ${fl.cons.length ? `<section class="card">${this._sectionHead("mdi:power-plug-outline", "Verbraucher jetzt")}<div id="kw-cons" class="kc">${this._kwConsHtml(fl)}</div></section>` : ""}
       ${P && !P.ok ? this._kwEnergyHint() : `<section class="card">${this._sectionHead("mdi:calendar-today", "Heute", `<button class="link tiny" data-action="tab" data-tab="kwrep"><span>Verlauf</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`)}${today}</section>`}`;
+  }
+
+  /** Solar-Prognose als Stundenbalken mit Grundlast-Linie. */
+  _kwForecastCard(fl) {
+    const plan = fl.has.solar ? this._kwSolarPlan(this._kwForecast(), this._kwBase()?.w) : null;
+    if (!plan) return "";
+    const max = Math.max(plan.base + 500, ...plan.hours.map(([, wh]) => wh));
+    const bars = plan.hours.map(([t, wh]) => `<div class="kf-b ${wh >= plan.base + 500 ? "sur" : ""}" title="${new Date(t).getHours()} Uhr: ca. ${this._kwFmt(wh)}"><i style="height:${((wh / max) * 100).toFixed(1)}%"></i><small>${new Date(t).getHours()}</small></div>`).join("");
+    return `<section class="card">${this._sectionHead("mdi:solar-power-variant", `Solar-Prognose ${plan.off ? "morgen" : "heute"}`, `<span class="muted small">ca. ${fmt(plan.kwh, 1)} kWh${plan.off ? "" : " noch"}</span>`)}
+      <div class="kf"><div class="kf-line" style="bottom:${((plan.base / max) * 100).toFixed(1)}%" title="Grundlast ${this._kwFmt(plan.base)}"></div>${bars}</div>
+      <p class="muted small">${plan.surplus ? `Überschuss ca. ${plan.surplus.from.getHours()}–${plan.surplus.to.getHours()} Uhr – gute Zeit für Waschmaschine, Trockner, Spülmaschine.` : "Kaum Überschuss über der Grundlast erwartet."} Quelle: Prognose im Energie-Dashboard.</p></section>`;
+  }
+
+  /** Grundlast-Karte (Verlauf): niedrigster Verbrauch nachts, Kosten im Jahr, größte Dauerverbraucher. */
+  _kwBaseCard(P) {
+    const b = this._kwBase();
+    if (!b) return "";
+    const pi = this._kwPrice(P?.priceImp);
+    const kwh = (b.w / 1000) * 8760;
+    const top = b.cons.slice(0, 4);
+    const sum = top.reduce((a, x) => a + x.w, 0);
+    return `<section class="card">${this._sectionHead("mdi:power-sleep", "Grundlast", `<span class="muted small">nachts, Median 7 Nächte</span>`)}
+      <div class="kks"><div class="kk" style="--c:#0ea5e9"><ha-icon icon="mdi:power-sleep"></ha-icon><b>${this._kwFmt(b.w)}</b><small>läuft immer</small><em>${fmt(kwh, 0)} kWh im Jahr</em></div>
+      ${pi ? `<div class="kk" style="--c:#ef4444"><ha-icon icon="mdi:cash"></ha-icon><b>${pi.approx ? "ca. " : ""}${this._kwEur(kwh * pi.v)}</b><small>im Jahr</small><em>bei ${fmt(pi.v, 2)} €/kWh</em></div>` : ""}</div>
+      ${top.length ? `<div class="kc">${top.map((x) => `<div class="kc-row"><span class="kc-ic"><ha-icon icon="${this._kwConsIcon(x.id, this._data.settings)}"></ha-icon></span><span class="grow"><b>${esc(x.name)}</b><span class="kc-bar"><i style="width:${Math.min(100, (x.w / Math.max(1, b.w)) * 100).toFixed(1)}%"></i></span></span><em>${this._kwFmt(x.w)}<small>${fmt(Math.min(100, (x.w / Math.max(1, b.w)) * 100), 0)} %</small></em></div>`).join("")}</div>
+        <p class="muted small">${sum < b.w * 0.8 ? `Ca. ${this._kwFmt(Math.max(0, b.w - sum))} ohne eigene Messung (Router, Kühlschrank, Standby …).` : "Fast die ganze Grundlast ist gemessen."}</p>` : `<p class="muted small">Mit Messsteckdosen unter Einstellungen › Verbraucher zeigt Kraftwerk, wer die Grundlast verursacht.</p>`}
+      <p class="muted small">Gemessen am ${b.src}${b.src === "Netzbezug" ? " (nachts ohne Solar; ein Akku, der nachts liefert, ist nicht enthalten)" : ""}.</p></section>`;
   }
 
   /** Kraftwerk-Lage: was der Strom gerade bedeutet. */
@@ -5069,9 +5270,23 @@ class HauswerkPanel extends HTMLElement {
       if (a && ["running", "ending", "done"].includes(a.state))
         lines.unshift({ icon: APP_TYPES[c.type]?.icon || "mdi:power-plug-outline", c: a.state === "done" ? "#22c55e" : "#0ea5e9", text: `${c.name}: ${this._appLine(a)}`, act: `data-action="tab" data-tab="kwdev"` });
     }
-    if (top && !title.includes(top.name)) lines.push({ icon: top.icon, c: "#0ea5e9", text: `Größter Verbraucher: ${top.name} ${W(top.w)}` });
-    if (fl.has.batt && fl.soc != null)
-      lines.push({ icon: "mdi:home-battery-outline", c: fl.soc < 15 ? "#ef4444" : "#ec4899", text: `Akku ${fmt(fl.soc, 0)} %${batt > 5 ? ` – entlädt ${W(batt)}` : batt < -5 ? ` – lädt ${W(batt)}` : ""}${fl.soc < 15 ? " – fast leer" : ""}` });
+    const topLine = top && !title.includes(top.name) ? { icon: top.icon, c: "#0ea5e9", text: `Größter Verbraucher: ${top.name} ${W(top.w)}` } : null;
+    if (fl.has.batt && fl.soc != null) {
+      const bt = this._kwBatt(fl);
+      const hm = (d) => d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+      const rest = bt?.until ? (bt.empty ? ` – leer ca. ${hm(bt.until)}, vor Sonnenaufgang (${hm(bt.sunrise)})` : ` – reicht bis ca. ${hm(bt.until)}`) : "";
+      lines.push({ icon: "mdi:home-battery-outline", c: bt?.empty || fl.soc < 15 ? "#ef4444" : "#ec4899",
+        text: `Akku ${fmt(fl.soc, 0)} %${bt ? ` · ${fmt(bt.wh / 1000, 2)} kWh` : ""}${batt > 5 ? ` – entlädt ${W(batt)}` : batt < -5 ? ` – lädt ${W(batt)}` : ""}${rest}` });
+    }
+    const plan = fl.has.solar ? this._kwSolarPlan(this._kwForecast(), this._kwBase()?.w) : null;
+    if (plan) {
+      const h = (d) => `${d.getHours()} Uhr`;
+      const when = plan.off ? "Morgen" : "Heute";
+      lines.push(plan.surplus
+        ? { icon: "mdi:solar-power-variant", c: "#f59e0b", text: `${when} ab ${h(plan.surplus.from)} ca. ${W(plan.surplus.w)} Überschuss – Waschmaschine & Co. dann starten` }
+        : { icon: "mdi:weather-partly-cloudy", c: "#94a3b8", text: `${when} ${plan.off ? "" : "noch "}ca. ${fmt(plan.kwh, 1)} kWh Solar, Spitze gegen ${h(plan.peak.at)} (${W(plan.peak.w)}) – kaum Überschuss` });
+    }
+    if (topLine) lines.push(topLine);
     const t = st?.total;
     if (t && (t.autark != null || t.exp)) lines.push({ icon: "mdi:calendar-today", c: "#22c55e", text: `Heute ${t.autark != null ? `${fmt(t.autark, 0)} % selbst gedeckt` : ""}${t.autark != null && t.exp ? ", " : ""}${t.exp ? `${this._kwKwh(t.exp)} eingespeist` : ""}`, act: `data-action="tab" data-tab="kwrep"` });
     const chips = [
@@ -5267,6 +5482,7 @@ class HauswerkPanel extends HTMLElement {
     const title = { today: "Heute", 7: "Letzte 7 Tage", 30: "Letzte 30 Tage", 365: "Letzte 12 Monate" }[range];
     return `${tabs}
       <section class="card">${this._sectionHead("mdi:sigma", title)}${this._kwKpis(st.total, P)}</section>
+      ${this._kwBaseCard(P)}
       <section class="card">${this._sectionHead("mdi:chart-bar", range === "today" ? "Je Stunde" : range === "365" ? "Je Monat" : "Je Tag")}
         <div class="kbars ${every > 1 ? "thin" : ""}" style="--every:${every}">${bars}</div>
         <div class="klegend">${legend}</div>
@@ -5384,6 +5600,9 @@ class HauswerkPanel extends HTMLElement {
             <div class="field"><span><ha-icon icon="mdi:home-battery-outline"></ha-icon> Batterie-Leistung</span>${this._picker("kw_battery", p.kw_battery)}</div>
             ${this._expertOn("kraftwerk") || p.kw_battery_invert ? `<div class="wxrows">${row("kwb1", "Vorzeichen umdrehen", "an, wenn Laden positiv angezeigt wird", sw("kw_battery_invert"), "Schalte das an, wenn unten „entlädt“ steht, während der Speicher bei Sonne lädt.")}</div>` : ""}
             <div class="field"><span><ha-icon icon="mdi:battery-50"></ha-icon> Ladestand (%)</span>${this._picker("kw_battery_soc", p.kw_battery_soc)}</div>
+            <div class="field"><span><ha-icon icon="mdi:battery-clock-outline"></ha-icon> Gespeicherte Energie (Wh) – leer = automatisch am Gerät des Ladestands</span>${this._picker("kw_battery_energy", p.kw_battery_energy)}</div>
+            <div class="wxrows">${row("kwb2", "Kapazität", "nur nötig ohne Energie-Sensor", `<div class="unit"><input type="number" min="0" max="100" step="0.1" data-set="kw_battery_kwh" value="${p.kw_battery_kwh ?? ""}" placeholder="–"><i>kWh</i></div>`, "Damit rechnet Kraftwerk aus dem Ladestand die gespeicherte Energie aus.")}
+            ${row("kwb3", "Reserve", "wird nicht entladen", `<div class="unit"><input type="number" min="0" max="90" step="1" data-set="kw_battery_min" value="${p.kw_battery_min ?? 10}"><i>%</i></div>`, "Die meisten Speicher entladen nicht ganz – z. B. 10 %. Für „Akku reicht bis …“.")}</div>
             ${p.kw_battery ? live(`${fl.soc != null ? `${fmt(fl.soc, 0)} % · ` : ""}${fl.batt == null ? "kein Wert" : fl.batt > 5 ? `entlädt ${this._kwFmt(fl.batt)}` : fl.batt < -5 ? `lädt ${this._kwFmt(-fl.batt)}` : "Ruhe"}`, "#ec4899") : ""}` };
       case "kwhome":
         return { icon: "mdi:home-lightning-bolt-outline", c: "#0ea5e9", title: "Hausverbrauch", sub: "Kraftwerk · Leistung jetzt",
@@ -9307,7 +9526,9 @@ class HauswerkPanel extends HTMLElement {
     // Tabletmodus: Bildschirmschoner weckt nur auf, nach dem Wischen kein Klick
     if (path.some((n) => n.id === "saver")) {
       e.preventDefault();
+      if (this._svPressed && Date.now() - this._svPressed < 900) return; // langer Druck hat quittiert
       this._saverHide();
+      if (path.some((n) => n.dataset?.sv === "hints")) this._openPop("hints");
       return;
     }
     if (this._swiped && Date.now() - this._swiped < 400) return;
@@ -9578,6 +9799,11 @@ class HauswerkPanel extends HTMLElement {
         this._renderMain();
         break;
       }
+      case "now-ack":
+        this._ack(el.dataset.key);
+        this._renderMain();
+        this._toast("Für heute ausgeblendet – unter der Glocke steht es weiter");
+        break;
       case "hints-open":
         this._openPop("hints");
         break;
@@ -10845,6 +11071,8 @@ function morph(target, html) {
 }
 
 const EXPERT_MOD = { house: "haus", heat: "heizen", rw: "rollwerk", kw: "kraftwerk" };
+// Lüft-Bilanz je Raum: Ampel
+const VB = { ok: ["#22c55e", "gut gelüftet"], warn: ["#f59e0b", "bald lüften"], bad: ["#ef4444", "zu selten gelüftet"] };
 const LW_POPS = ["lwadd", "lwgeneral", "lwauto", "lwlinks"];
 const LW_LK = { motion: "mdi:motion-sensor", button: "mdi:gesture-tap-button", other: "mdi:link-variant" };
 const MODULE_LOGOS = {
@@ -11554,6 +11782,18 @@ summary { cursor:pointer; font-weight:600; margin-bottom:14px; }
 .bell.on { color:var(--accent); border-color:var(--accent); background:color-mix(in srgb, var(--accent) 12%, var(--card)); }
 .setintro { display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin:0 2px 12px; }
 .bell i { position:absolute; top:7px; right:8px; width:8px; height:8px; border-radius:50%; background:var(--accent); }
+.now-strip { cursor:default; } .now-strip .now-t { flex-direction:row; display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.now-box { padding:12px 14px; margin-bottom:14px; border-left:4px solid #f59e0b; }
+.now-h { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.now-h > ha-icon { color:#f59e0b; }
+.now-r { display:flex; align-items:center; gap:10px; padding:7px 0; border-top:1px solid var(--line); }
+.now-r:first-of-type { border-top:none; }
+.now-r .sr-ic { color:#f59e0b; }
+.now-t { all:unset; cursor:pointer; flex:1; min-width:0; display:flex; flex-direction:column; }
+.now-t b { font-size:14px; } .now-t small { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#saver .sv-more { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:2px; padding:6px 12px; border-radius:999px; border:1px solid currentColor; opacity:.85; }
+#saver .sv-more ha-icon { --mdc-icon-size:16px; }
+#saver .acked { opacity:.25; transition:opacity .3s; }
 .hstrip { all:unset; cursor:pointer; box-sizing:border-box; width:100%; display:flex; align-items:center; gap:10px; padding:10px 14px; margin-bottom:14px; border-radius:14px; font-size:13.5px;
   background:color-mix(in srgb, #f59e0b 12%, var(--card)); border:1px solid color-mix(in srgb, #f59e0b 35%, transparent); }
 .hstrip > ha-icon { color:#f59e0b; }
@@ -11951,6 +12191,14 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 .kc-row.rest .kc-bar i { background:var(--muted); opacity:.5; }
 .kc-row em { font-style:normal; font-weight:800; font-size:14px; white-space:nowrap; text-align:right; }
 .kc-row em small { display:block; font-weight:600; font-size:11px; color:var(--muted); }
+.kw-batt { display:flex; align-items:center; gap:8px; margin-top:10px; padding:8px 12px; border-radius:12px; background:color-mix(in srgb, #ec4899 10%, transparent); font-size:13px; }
+.kw-batt ha-icon { color:#ec4899; } .kw-batt.bad { background:color-mix(in srgb, #ef4444 12%, transparent); } .kw-batt.bad ha-icon { color:#ef4444; }
+.kf { position:relative; display:flex; align-items:flex-end; gap:3px; height:90px; margin:8px 0 4px; padding-bottom:16px; }
+.kf-b { flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; position:relative; }
+.kf-b i { display:block; width:100%; border-radius:4px 4px 0 0; background:color-mix(in srgb, #f59e0b 45%, transparent); }
+.kf-b.sur i { background:#f59e0b; }
+.kf-b small { position:absolute; bottom:-16px; font-size:10px; color:var(--muted); }
+.kf-line { position:absolute; left:0; right:0; border-top:1.5px dashed #0ea5e9; margin-bottom:16px; pointer-events:none; }
 .kks { display:grid; grid-template-columns:repeat(auto-fill, minmax(132px, 1fr)); gap:8px; }
 .kk { display:flex; flex-direction:column; gap:1px; padding:10px 12px; border-radius:14px; background:color-mix(in srgb, var(--c) 9%, var(--card2)); }
 .kk ha-icon { --mdc-icon-size:20px; color:var(--c); margin-bottom:2px; }
@@ -12873,6 +13121,8 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .vt-c { padding:14px 16px; display:flex; flex-direction:column; gap:10px; margin:0; cursor:pointer; }
 .vt-h { display:flex; align-items:center; gap:8px; }
 .vt-h b { flex:1; font-size:15.5px; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vt-amp { display:inline-flex; align-items:center; gap:5px; font-size:12px; color:var(--c); font-weight:600; margin-left:6px; }
+.vt-amp i { width:9px; height:9px; border-radius:50%; background:var(--c); box-shadow:0 0 0 3px color-mix(in srgb, var(--c) 25%, transparent); }
 .vt-chip { display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:700; color:var(--c); padding:3px 9px; border-radius:99px; background:color-mix(in srgb, var(--c) 14%, var(--card)); white-space:nowrap; }
 .vt-chip ha-icon { --mdc-icon-size:14px; }
 .vt-need, .vt-ok { display:flex; align-items:center; gap:10px; }

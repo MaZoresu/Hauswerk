@@ -366,6 +366,12 @@ def test_cold_radiator():
     run2, cold = L.cold_radiator(100, 19.4, 21.0, "komfort", False, run, 3700)
     assert not cold and run2["t0"] == 19.4  # wird wärmer: neu messen
     assert L.cold_radiator(50, 19.0, 21.0, "komfort", False, run, 7200) == (None, False)
+    # nach dem Lüften: 30 Min. nicht messen; Fußbodenheizung erst nach 3 Std.
+    assert L.cold_radiator(100, 19.0, 21.0, "komfort", False, None, 0, closed_ago=600) == (None, False)
+    run, cold = L.cold_radiator(100, 19.0, 21.0, "komfort", False, None, 0, closed_ago=1900, floor=True)
+    assert run and not cold
+    assert L.cold_radiator(100, 19.1, 21.0, "komfort", False, run, 3600, floor=True)[1] is False
+    assert L.cold_radiator(100, 19.1, 21.0, "komfort", False, run, 3 * 3600, floor=True)[1] is True
     assert L.cold_radiator(100, 19.0, 21.0, "fenster", False, run, 7200) == (None, False)
     assert L.cold_radiator(100, 19.0, 21.0, "komfort", True, run, 7200) == (None, False)
 
@@ -595,3 +601,12 @@ def test_heizplan_konflikte_und_aufloesen():
     for m in range(0, 7 * 1440, 15):
         assert L.plan_state(r, m, 21, 18)["target"] == max(
             [L.block_value("comfort", x.get("temp"), 21, 18) for x in b if L.plan_state([x], m, 21, 18)["kind"] == "komfort"] or [18])
+
+
+def test_vent_balance():
+    day = 86400
+    b = L.vent_balance(0, {"2026-11-19": 68, "2026-11-20": 70, "2026-11-21": 66}, 65, None, 3.5 * day, "2026-11-21")
+    assert b["level"] == "bad" and b["days"] == 3 and b["rh_morning"] == 68 and b["text"] == "3 Tage nicht gelüftet, Feuchte morgens 68 %"
+    assert L.vent_balance(3 * day, {"2026-11-21": 55}, 65, None, 3.2 * day, "2026-11-21")["level"] == "ok"
+    assert L.vent_balance(0, {"2026-11-21": 55}, 65, None, 2.1 * day, "2026-11-21")["level"] == "warn"
+    assert L.vent_balance(None, {}, 65, {"level": "bad"}, 0, "2026-11-21")["level"] == "bad"

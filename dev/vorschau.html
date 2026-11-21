@@ -75,6 +75,7 @@ const states = {
   "sensor.smartmeter_einspeisung": st("5412.1", { friendly_name: "Smartmeter Einspeisung", device_class: "energy", unit_of_measurement: "kWh" }),
   "sensor.speicher_leistung": st("-1200", { friendly_name: "Speicher Leistung", device_class: "power", unit_of_measurement: "W" }),
   "sensor.speicher_ladestand": st("64", { friendly_name: "Speicher Ladestand", device_class: "battery", unit_of_measurement: "%" }),
+  "sensor.speicher_energie": st("6400", { friendly_name: "Speicher Energie", device_class: "energy_storage", unit_of_measurement: "Wh" }),
   "sensor.waermepumpe_leistung": st("820", { friendly_name: "Wärmepumpe", device_class: "power", unit_of_measurement: "W" }),
   "sensor.wallbox_leistung": st("0", { friendly_name: "Wallbox", device_class: "power", unit_of_measurement: "W" }),
   "sensor.waschmaschine_leistung": st("410", { friendly_name: "Waschmaschine", device_class: "power", unit_of_measurement: "W" }),
@@ -121,7 +122,7 @@ const status = {
       fireplace: { state: "maybe", source: "verlauf", cause: "kamin?", rise: 0.7, minutes: 12, manual: false, signal: null },
       air: { limit: 65, minutes: 10, mold: { wall_temp: 14.9, wall_rh: 66, level: "ok" }, co2: 840, reasons: [], kind: null,
         open: { since: new Date(Date.now() - 4 * 60e3).toISOString(), minutes: 4.2, target: 10, done: null, cool: false },
-        last: { at: new Date(Date.now() - 20 * 3600e3).toISOString(), min: 12, rh0: 58, rh1: 49 }, week: { count: 6, minutes: 61, kwh: 1.1, rh_drop: 7 } },
+        last: { at: new Date(Date.now() - 20 * 3600e3).toISOString(), min: 12, rh0: 58, rh1: 49 }, week: { count: 6, minutes: 61, kwh: 1.1, rh_drop: 7 }, balance: { level: "bad", days: 3, rh_morning: 68, text: "3 Tage nicht gelüftet, Feuchte morgens 68 %" } },
       battery_low: [{ id: "sensor.thermostat_wohnzimmer_batterie", name: "Thermostat Wohnzimmer Batterie", level: 14 }],
       valve: 100, valve_all: 100, cold_radiator: { minutes: 74, valve: 100, rise: 0.1 },
       followers: ["climate.wohnzimmer_heizkoerper"], pair_broken: [], duty_blocked: [], assist: { entities: ["climate.wohnzimmer_heizkoerper2"], on: true, diff: 0.5, room_temp: 20.4 },
@@ -201,7 +202,7 @@ const devices = { d1: { id: "d1", area_id: "wz" }, d2: { id: "d2", area_id: "bad
 const entities = {
   "climate.wohnzimmer": { entity_id: "climate.wohnzimmer", device_id: "d1" }, "sensor.wohnzimmer_temperatur": { device_id: "d1" },
   "binary_sensor.wohnzimmer_fenster": { area_id: "wz" }, "climate.bad": { device_id: "d2" }, "climate.bad_heizkoerper": { device_id: "d3" }, "sensor.bad_heizkoerper_ventil_offnungsgrad": { device_id: "d3" }, "sensor.wohnzimmer_ventil_offnungsgrad": { device_id: "d1" }, "sensor.bad_temperatur": { device_id: "d2" },
-  "sensor.wechselrichter_pv_leistung": { device_id: "inv" }, "sensor.wechselrichter_ertrag_heute": { device_id: "inv" }, "sensor.smartmeter_wirkleistung": { device_id: "sm" }, "sensor.smartmeter_bezug": { device_id: "sm" }, "sensor.smartmeter_einspeisung": { device_id: "sm" }, "sensor.speicher_leistung": { device_id: "bat" }, "sensor.speicher_ladestand": { device_id: "bat" },
+  "sensor.wechselrichter_pv_leistung": { device_id: "inv" }, "sensor.wechselrichter_ertrag_heute": { device_id: "inv" }, "sensor.smartmeter_wirkleistung": { device_id: "sm" }, "sensor.smartmeter_bezug": { device_id: "sm" }, "sensor.smartmeter_einspeisung": { device_id: "sm" }, "sensor.speicher_leistung": { device_id: "bat" }, "sensor.speicher_ladestand": { device_id: "bat" }, "sensor.speicher_energie": { device_id: "bat" },
   "binary_sensor.fenster_bad": { area_id: "bad" }, "cover.ra_bad": { area_id: "bad" }, "cover.ra_bad_dach": { area_id: "bad" }, "binary_sensor.bad_fenster_gekippt": { area_id: "bad" }, "sensor.kueche_temperatur": { area_id: "kueche" }, "sensor.garten_temp": { area_id: "garten" },
 };
 const hass = {
@@ -239,6 +240,23 @@ const hass = {
         flow_to: [{ stat_energy_to: "sensor.smartmeter_einspeisung", number_energy_price: 0.082 }], cost_adjustment_day: 0 },
       { type: "solar", stat_energy_from: "sensor.wechselrichter_ertrag_heute" },
       { type: "battery", stat_energy_from: "sensor.speicher_entladen", stat_energy_to: "sensor.speicher_geladen" } ], device_consumption: [] };
+    if (msg.type === "energy/solar_forecast") {
+      const wh = {}; const d0 = new Date(); d0.setHours(0, 0, 0, 0);
+      for (let i = 0; i < 48; i++) { const t = new Date(d0.getTime() + i * 3600e3); const h = t.getHours(); wh[t.toISOString()] = Math.round(Math.max(0, Math.sin(((h - 7) / 10) * Math.PI)) * 2400); }
+      return { fs1: { wh_hours: wh } };
+    }
+    if (msg.type === "recorder/statistics_during_period" && msg.period === "5minute") {
+      const out = {}; const start = Date.parse(msg.start_time), end = Date.now();
+      for (const id of msg.statistic_ids) {
+        out[id] = [];
+        for (let t = start; t < end; t += 300e3) {
+          const h = new Date(t).getHours();
+          const base = { "sensor.smartmeter_wirkleistung": h < 5 ? 210 + (t / 300e3 % 7) * 6 : 600, "sensor.waermepumpe_leistung": h < 5 ? 60 : 400, "sensor.wallbox_leistung": h < 5 ? 4 : 0 }[id] ?? 0;
+          out[id].push({ start: t, end: t + 300e3, mean: base });
+        }
+      }
+      return out;
+    }
     if (msg.type === "recorder/statistics_during_period") {
       const out = {}; const start = Date.parse(msg.start_time), end = Date.parse(msg.end_time);
       const step = msg.period === "hour" ? 3600e3 : msg.period === "day" ? 86400e3 : 30 * 86400e3;

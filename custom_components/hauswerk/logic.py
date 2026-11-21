@@ -980,21 +980,53 @@ COLD_MINUTES = 60  # so lange Ventil (fast) ganz offen ohne Erwärmung = Heizkö
 NO_HEAT_MODES = ("fenster", "sommer", "aus", "warm", "entkalken")
 
 
+def vent_balance(last_at: float | None, rh_morning: dict[str, float], limit: float, mold: dict | None,
+                 now: float, today: str) -> dict:
+    """Lüft-Bilanz eines Raums als Ampel: wie lange nicht gelüftet und wie feucht morgens (Mittel der letzten 3 Tage).
+
+    rot: ≥ 3 Tage nicht gelüftet und morgens feucht (ab Grenze − 5 %) oder Schimmel-Ampel rot;
+    gelb: ≥ 2 Tage nicht gelüftet oder morgens über der Grenze; sonst grün.
+    """
+    days = None if last_at is None else int((now - last_at) // 86400)
+    recent = [v for k, v in sorted(rh_morning.items()) if k <= today][-3:]
+    rh = round(sum(recent) / len(recent)) if recent else None
+    moldbad = (mold or {}).get("level") == "bad"
+    level = "ok"
+    if moldbad or (days is not None and days >= 3 and rh is not None and rh >= limit - 5):
+        level = "bad"
+    elif (days is not None and days >= 2) or (rh is not None and rh >= limit):
+        level = "warn"
+    parts = []
+    if days is None:
+        parts.append("noch keine Lüftung erfasst")
+    elif days >= 1:
+        parts.append(f"{days} {'Tag' if days == 1 else 'Tage'} nicht gelüftet")
+    else:
+        parts.append("heute gelüftet")
+    if rh is not None:
+        parts.append(f"Feuchte morgens {rh} %")
+    return {"level": level, "days": days, "rh_morning": rh, "text": ", ".join(parts)}
+
+
 def cold_radiator(valve: float | None, room_temp: float | None, target: float | None, mode: str,
-                  windows_open: bool, run: dict | None, now: float) -> tuple[dict | None, bool]:
+                  windows_open: bool, run: dict | None, now: float, closed_ago: float | None = None,
+                  floor: bool = False) -> tuple[dict | None, bool]:
     """Bleibt ein Heizkörper kalt, obwohl sein Ventil offen ist?
 
     run: laufende Beobachtung {since, t0} oder None. Ergebnis: (neue Beobachtung, kalt?).
     Kalt heißt: Ventil ≥ 90 % seit COLD_MINUTES Minuten, der Raum mindestens 0,5 °C unter Soll und
     in der Zeit um weniger als 0,3 °C wärmer geworden. Wird der Raum wärmer, beginnt die Messung neu.
+    Kein Fehlalarm nach dem Lüften: bis 30 Min. nach dem Schließen (closed_ago in s) wird nicht gemessen –
+    der Raum muss erst die ausgekühlten Wände nachheizen. Räume mit Fußbodenheizung (träge) erst nach 3 Std.
     """
     active = (valve is not None and valve >= 90 and room_temp is not None and target is not None
-              and target - room_temp >= 0.5 and mode not in NO_HEAT_MODES and not windows_open)
+              and target - room_temp >= 0.5 and mode not in NO_HEAT_MODES and not windows_open
+              and (closed_ago is None or closed_ago >= 1800))
     if not active:
         return None, False
     if run is None or room_temp - run["t0"] >= 0.3:
         return {"since": now, "t0": room_temp}, False
-    return run, now - run["since"] >= COLD_MINUTES * 60
+    return run, now - run["since"] >= (180 if floor else COLD_MINUTES) * 60
 
 
 def demand_state(need: bool, current: str | None, no_need_since: float | None, now: float, hold_min: float,

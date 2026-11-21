@@ -401,6 +401,8 @@ def test_fehler_wird_angezeigt(panel):
 def test_widgets_ziehen(panel):
     """Im Anpassen-Modus ein Widget am Griff nach hinten ziehen – die neue Reihenfolge wird gespeichert."""
     panel.page.set_viewport_size({"width": 1100, "height": 900})
+    # „Jetzt wichtig“ für heute quittieren, damit alle Widgets im Bild sind
+    panel.js(f"(() => {{ const k = {EL}._hints().map((h) => {EL}._ackKey(h)); localStorage.setItem('hauswerk.ack', JSON.stringify({{ day: new Date().toLocaleDateString('sv'), keys: k }})); }})()")
     panel.view("start")
     before = [w["type"] for w in panel.js(f"{EL}._widgets()")]
     panel.click('[data-action="w-edit"]')
@@ -1601,3 +1603,70 @@ def test_benachrichtigung_geraet_fertig_abwaehlbar(panel):
     apps = {a["id"]: a for a in m["settings"]["kw_appliances"]}
     assert apps["waschmaschine"]["notify"] == ["svc:mobile_app_jens", "svc:mobile_app_pixel_8"] and apps["waschmaschine"]["notify_ha"] is True
     assert apps["trockner"]["notify"] == ["svc:mobile_app_jens"]
+
+
+def test_kraftwerk_akku_prognose_grundlast(panel):
+    """Kraftwerk: Akku-Rest (Energie-Sensor am Gerät, Reserve), Solar-Prognose mit Überschuss-Fenster, Grundlast im Verlauf."""
+    p = panel
+    p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    # Akku entlädt 800 W, 6,4 kWh gespeichert, 10 % Reserve von 10 kWh → 5,4 kWh / 0,8 kW ≈ 6,75 Std.
+    p.js(f"() => {{ {EL}._hass.states['sensor.speicher_leistung'] = {{ ...{EL}._hass.states['sensor.speicher_leistung'], state: '800' }}; }}")
+    bt = p.js(f"(() => {{ const b = {EL}._kwBatt({EL}._kwFlow()); return [b.wh, Math.round(b.usable), b.sensor, Math.round((b.until - Date.now()) / 60000)]; }})()")
+    assert bt[0] == 6400 and bt[1] == 5400 and bt[2] == "sensor.speicher_energie" and 400 <= bt[3] <= 410, bt
+    p.view("kwflow")
+    p.wait(600)
+    p.js(f"{EL}._renderMain()")
+    p.wait(300)
+    main = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "kWh gespeichert" in main and ("bis ca." in main or "vor Sonnenaufgang" in main), main
+    assert "Solar-Prognose" in main and p.js(f"{EL}.shadowRoot.querySelectorAll('#main .kf-b').length") > 0
+    p.view("kwrep")
+    p.wait(600)
+    p.js(f"{EL}._renderMain()")
+    p.wait(300)
+    main = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "Grundlast" in main and "läuft immer" in main and "im Jahr" in main, main
+    base = p.js(f"{EL}._kwBase()")
+    assert 200 <= base["w"] <= 250 and base["cons"][0]["w"] == 60, base
+
+
+def test_jetzt_wichtig_und_quittieren(panel):
+    """Startseite „Jetzt wichtig“: höchstens drei Punkte, „Erledigt“ blendet für heute aus (Glocke behält es);
+    Bildschirmschoner: kein doppelter Müll-Termin, „weitere Hinweise“ öffnet die Glocke."""
+    p = panel
+    p.js("localStorage.removeItem('hauswerk.ack')")
+    p.view("start")
+    p.wait()
+    warn = p.js(f"{EL}._hints().filter((h) => h.lvl === 'warn').length")
+    if warn:
+        rows = p.js(f"{EL}.shadowRoot.querySelectorAll('#main .now-box .now-r').length")
+        assert 1 <= rows <= 3
+        key = p.js(f"{EL}.shadowRoot.querySelector('#main .now-box [data-action=now-ack]')?.dataset.key")
+        if key:
+            p.js(f"{EL}.shadowRoot.querySelector('#main .now-box [data-action=now-ack]').click()")
+            p.wait()
+            assert key in p.js("JSON.parse(localStorage.getItem('hauswerk.ack')).keys")
+            assert any(f"{h['text']}|{h.get('sub') or ''}" == key for h in p.js(f"{EL}._hints()"))  # Glocke behält es
+    # Müll: Termin nicht doppelt
+    p.js(f"() => {{ {EL}._status.waste_due = {{ when: 'heute', types: ['Biotonne'] }}; {EL}._cal = [{{ title: 'Biotonne', allDay: true, start: new Date().toISOString().slice(0, 10) }}]; {EL}._calLoad = () => {{}}; {EL}._saverShow(); }}")
+    p.wait(200)
+    side = p.js(f"{EL}.shadowRoot.querySelector('#saver .sv-side')?.innerText || ''")
+    assert "Biotonne" not in side, side
+    more = p.js(f"!!{EL}.shadowRoot.querySelector('#saver .sv-more')")
+    if more:
+        p.js(f"{EL}.shadowRoot.querySelector('#saver .sv-more').click()")
+        p.wait(200)
+        assert p.js(f"{EL}._pop?.id") == "hints"
+    p.js("localStorage.removeItem('hauswerk.ack')")
+
+
+def test_lueft_bilanz_ampel(panel):
+    """Lüften: Ampel je Raum mit „x Tage nicht gelüftet, Feuchte morgens y %“ – Kachel und Glocke."""
+    p = panel
+    p.view("vent")
+    p.wait()
+    main = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "zu selten gelüftet" in main and "morgens (Ø 3 Tage)" in main, main
+    p.js(f"() => {{ delete {EL}._status.rooms.a1.air.open; delete {EL}._status.rooms.a1.vent; }}")
+    h = [x for x in p.js(f"{EL}._hints()") if x["text"] == "Zu selten gelüftet"]
+    assert h and h[0]["lvl"] == "warn" and "3 Tage nicht gelüftet, Feuchte morgens 68 %" in h[0]["sub"]

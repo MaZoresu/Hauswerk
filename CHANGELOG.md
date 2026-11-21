@@ -2,6 +2,26 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.69.0 – 2026-11-21
+
+### Neu – Startseite und Tablet
+- **„Jetzt wichtig“** oben auf der Startseite statt des Hinweis-Streifens: höchstens drei Punkte zum Erledigen, je mit Sprung an die richtige Stelle und „Erledigt“ (für heute ausgeblendet – unter der Glocke steht es weiter). Bei fertigen Geräten heißt der Knopf „Gesehen“ und quittiert direkt in Kraftwerk. „alle x“ öffnet die Glocke.
+- **Bildschirmschoner:**
+  - Hinweis **lange drücken** (0,7 s) blendet ihn für heute aus, ohne den Schoner zu beenden.
+  - **„und x weitere Hinweise“** ist ein Knopf und öffnet direkt die Glocke.
+  - **Müll nicht doppelt:** Steht die Abholung schon als Hinweis da („Heute Müllabfuhr · Biotonne“), fehlt derselbe Termin in der Terminliste.
+
+### Neu – Lüften
+- **Lüft-Bilanz je Raum als Ampel** (Heizwerk › Lüften): „gut gelüftet“, „bald lüften“ (2 Tage nicht gelüftet oder morgens über der Grenze) oder „zu selten gelüftet“ (3 Tage nicht gelüftet und morgens feucht, bzw. Schimmel-Ampel rot). Dazu die Feuchte morgens (5–9 Uhr, Mittel 3 Tage). Hinweis unter der Glocke wie „Schlafzimmer: 3 Tage nicht gelüftet, Feuchte morgens 68 %“. Nur für Räume mit Fensterkontakt.
+
+### Behoben – Heizwerk
+- **„Heizkörper bleibt kalt“ ohne Fehlalarm nach dem Lüften:** bis 30 Min. nach dem Schließen des Fensters wird nicht gemessen (die ausgekühlten Wände ziehen erst Wärme). Räume mit Fußbodenheizung oder Zusatz-Heizkörpern melden erst nach 3 Std. statt 1 Std.
+
+### Neu – Kraftwerk
+- **Solar-Prognose** (aus der Prognose im Energie-Dashboard, z. B. Forecast.Solar): Stundenbalken unter Energiefluss mit Grundlast-Linie; in der Kopfkachel „Heute ab 11 Uhr ca. 1,8 kW Überschuss – Waschmaschine & Co. dann starten“ bzw. „Heute noch ca. 1,1 kWh Solar, Spitze gegen 13 Uhr – kaum Überschuss“ (abends für morgen).
+- **Grundlast** (Kraftwerk › Verlauf): niedrigster Verbrauch nachts (Median aus 7 Nächten), kWh und Kosten im Jahr mit dem Preis aus dem Energie-Dashboard; welche gemessenen Verbraucher dazu beitragen und wie viel ohne eigene Messung bleibt.
+- **Akku-Rest:** gespeicherte Energie (Sensor am Gerät, z. B. „Akkuenergie“ der Solarbank – automatisch gefunden – oder Kapazität × Ladestand) und „reicht bei 300 W bis ca. 04:30“; rot mit „leer vor Sonnenaufgang“, wenn er vorher leer ist. Reserve (Standard 10 %) und Kapazität unter Einstellungen › Batterie.
+
 ## 0.68.5 – 2026-11-21
 
 ### Geändert (Lüften)

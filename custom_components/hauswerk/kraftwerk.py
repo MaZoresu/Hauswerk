@@ -28,6 +28,9 @@ KW_DEFAULTS: dict[str, Any] = {
     "kw_battery": None,          # Batterie: Leistung mit Vorzeichen (+ Entladen, − Laden)
     "kw_battery_invert": False,
     "kw_battery_soc": None,      # Ladestand in %
+    "kw_battery_energy": None,   # gespeicherte Energie (Wh/kWh), sonst Kapazität × Ladestand
+    "kw_battery_kwh": None,      # Kapazität in kWh (nur ohne Energie-Sensor nötig)
+    "kw_battery_min": 10,        # Reserve in %, die nicht entladen wird
     "kw_home": None,             # Hausverbrauch, falls gemessen (sonst errechnet)
     "kw_consumers": [],          # einzelne Verbraucher (Wärmepumpe, Wallbox …)
     "kw_names": {},              # eigene Namen der Verbraucher: {sensor: "Wärmepumpe"}
