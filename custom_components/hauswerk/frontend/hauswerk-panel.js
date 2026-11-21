@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.71.0";
+const VERSION = "0.71.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1317,10 +1317,10 @@ class HauswerkPanel extends HTMLElement {
     }
   }
 
-  /** Tablet: Wand-Kacheln (groß) oder Details. „Automatisch“: Wand bis zur ersten Berührung, danach Details bis zum Bildschirmschoner. */
+  /** Tablet: Details (Standard) oder Wand-Kacheln (groß). „Automatisch“: Wand bis zur ersten Berührung, danach Details bis zum Bildschirmschoner. */
   _wall() {
     if (!this._tablet) return false;
-    const m = this._tabletOpt("tview", "auto");
+    const m = this._tabletOpt("tview", "detail");
     return m === "wall" || (m === "auto" && !this._touched);
   }
 
@@ -1360,7 +1360,7 @@ class HauswerkPanel extends HTMLElement {
       const act = () => (this._lastAct = Date.now());
       // erste Berührung nach dem Aufwecken: im Modus „Automatisch“ von Wand-Kacheln zu Details
       window.addEventListener("pointerdown", (e) => {
-        if (!this._tablet || this._touched || this._tabletOpt("tview", "auto") !== "auto") return;
+        if (!this._tablet || this._touched || this._tabletOpt("tview", "detail") !== "auto") return;
         if (e.composedPath().some((n) => n.id === "saver")) return;
         this._touched = true;
         setTimeout(() => this._renderMain(), 0);
@@ -1522,7 +1522,7 @@ class HauswerkPanel extends HTMLElement {
       ${on ? `
       <div class="field"><span>Hell / Dunkel auf diesem Tablet</span><div class="segs small">${[["sun", "Nach Sonnenstand"], ["global", "Wie Darstellung"], ["light", "Hell"], ["dark", "Dunkel"]].map(([v, l]) => opt("theme", v, l, this._tabletOpt("theme", "sun"))).join("")}</div></div>
       <p class="muted small">„Nach Sonnenstand“ wird dunkel, sobald die Sonne untergeht (sun.sun), und morgens wieder hell. „Wie Home Assistant“ klappt in Fully oft nicht, weil das Tablet den Dunkelmodus nicht meldet.</p>
-      <div class="field"><span>Kacheln</span><div class="segs small">${[["auto", "Automatisch"], ["wall", "Immer groß"], ["detail", "Immer Details"]].map(([v, l]) => opt("tview", v, l, this._tabletOpt("tview", "auto"))).join("")}</div></div>
+      <div class="field"><span>Kacheln</span><div class="segs small">${[["detail", "Details"], ["auto", "Automatisch"], ["wall", "Immer groß"]].map(([v, l]) => opt("tview", v, l, this._tabletOpt("tview", "detail"))).join("")}</div></div>
       <p class="muted small">„Automatisch“: große Wand-Kacheln (lesbar aus Abstand), nach der ersten Berührung die Kacheln mit allen Details – bis zum Bildschirmschoner.</p>
       <div class="field"><span>Startseite</span><div class="segs small">${[["wall", "Wand-Startseite"], ["widgets", "Widgets"]].map(([v, l]) => opt("tstart", v, l, this._tabletOpt("tstart", "wall"))).join("")}</div></div>
       <div class="field"><span>Zurück zur Startseite nach</span><div class="segs small">${[["0", "Nie"], ["1", "1 Min."], ["2", "2 Min."], ["5", "5 Min."]].map(([v, l]) => opt("home", v, l, this._tabletOpt("home", "2"))).join("")}</div></div>

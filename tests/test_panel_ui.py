@@ -757,6 +757,7 @@ def test_tablet_alle_raeume_sichtbar(browser, server):
           d.rooms[id] = {{ ...d.rooms[src], id, name: d.rooms[src].name + ' ' + i }};
           if (el._status?.rooms?.[src]) el._status.rooms[id] = {{ ...el._status.rooms[src] }}; }}
         el._tFit = {{}}; }}""")
+    p.js("localStorage.setItem('hauswerk.tablet.tview', 'wall')")
     p.view("overview")
     p.wait(300)
     n = p.js(f"{EL}._tPages")
@@ -799,6 +800,7 @@ def test_tablet_gleiche_leisten_und_kacheln(browser, server):
     page.wait_for_function(f"{EL} && {EL}._data")
     p = Panel(page)
     p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    p.js("localStorage.setItem('hauswerk.tablet.tview', 'wall')")
     heights = {}
     for view in ("overview", "shutters", "kwflow", "lights"):
         p.view(view)
@@ -1697,6 +1699,8 @@ def test_tablet_wand_startseite_und_details(tablet):
     ersten Berührung, danach Details; Rollläden und Lichter je Raum mit Sammel-Fenster; Seiten-Pfeile; Kraftwerk in zwei Spalten."""
     p = tablet
     p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    assert p.js(f"{EL}._wall()") is False  # Standard: Detailkacheln
+    p.js("localStorage.setItem('hauswerk.tablet.tview', 'auto')")
     p.view("start")
     p.wait(300)
     assert p.has(".wstart .ws-time") and p.js(f"{EL}._tPages") == 1

@@ -2,11 +2,16 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.71.1 – 2026-11-21
+
+### Geändert
+- **Tablet: wieder die gewohnten Modul-Kacheln.** Heizwerk, Rollwerk, Kraftwerk und Lichtwerk zeigen im Tabletmodus standardmäßig wieder die Kacheln mit allen Details. Die großen Wand-Kacheln gibt es weiter unter Darstellung › Tabletmodus › Kacheln (*Automatisch* oder *Immer groß*).
+
 ## 0.71.0 – 2026-11-21
 
 ### Neu – Tabletmodus, zweiter Teil
 - **Wand-Startseite:** links große Uhr, Datum, Wetter und „Jetzt wichtig“ (bzw. „Alles in Ordnung“), rechts je eine große Kachel für Heizwerk (Ø-Temperatur, heizen, offen), Rollwerk (offen/zu, nächste Fahrt), Kraftwerk (Solar, Bezug/Einspeisung), Lichtwerk (wie viele an), Termine (Müll zuerst) und Anwesenheit. Eine Seite, kein Scrollen; Tipp öffnet das Modul. Die Widget-Startseite gibt es weiter („Widgets anzeigen“ bzw. Darstellung › Tabletmodus › Startseite).
-- **Zwei Stufen – Wand und Details:** Unter Darstellung › Tabletmodus › Kacheln: *Automatisch* (Standard) zeigt große Wand-Kacheln, bis jemand das Tablet berührt – dann die Kacheln mit allen Details bis zum Bildschirmschoner. Oder fest *Immer groß* bzw. *Immer Details*.
+- **Zwei Stufen – Wand und Details:** Unter Darstellung › Tabletmodus › Kacheln: *Automatisch* zeigt große Wand-Kacheln, bis jemand das Tablet berührt – dann die Kacheln mit allen Details bis zum Bildschirmschoner. Oder fest *Immer groß* bzw. *Immer Details*.
 - **Rollläden und Lichter je Raum:** In der Wand-Ansicht eine Kachel je Raum – „2 / 3 offen“ mit ↑ ■ ↓ für alle Rollläden des Raums bzw. „2 / 3 an“ mit einer Lampe für alle Lichter. Antippen öffnet die einzelnen Rollläden bzw. Lichter. Räume mit nur einem Gerät zeigen dieses direkt.
 - **Kraftwerk in zwei Spalten:** links der Energiefluss (und „Verbraucher jetzt“, nur wenn einer über 50 W zieht), rechts „Heute“ und die Solar-Prognose.
 - **Größere Tippflächen:** Unterseiten-Umschalter 48 px hoch, beim Blättern Pfeile ‹ › neben den Seitenpunkten und „Seite 1 von 2“.
