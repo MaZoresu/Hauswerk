@@ -1421,14 +1421,22 @@ def test_lichtwerk_profil_aus(panel):
     p.js(f"{EL}._closePop()")
     p.view("lightset")
     p.wait()
-    assert "PROFIL AUS" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
+    assert "KEIN PROFIL" in p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
     p.js(f"() => {{ {EL}._openPop('lwl:light.kuche'); }}")
     p.wait()
-    p.js(f"""() => {{ {EL}.shadowRoot.querySelector('#pop [data-lwl="auto"]').click(); }}""")
+    assert p.js(f"{EL}.shadowRoot.querySelector('#pop select[data-lwl=\"profile\"]').value") == ""  # „Kein Profil“
+    p.page.locator('hauswerk-panel #pop select[data-lwl="profile"]').select_option("standard")
     p.click('#pop [data-action="lwl-save"]')
     p.wait(200)
     m = [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/light/save"][-1]
-    assert m["entity_id"] == "light.kuche" and m["light"]["auto"] is True
+    assert m["entity_id"] == "light.kuche" and m["light"]["auto"] is True and m["light"]["profile"] == "standard"
+    # wieder „Kein Profil“
+    p.js(f"() => {{ {EL}._openPop('lwl:light.kuche'); }}")
+    p.wait()
+    p.page.locator('hauswerk-panel #pop select[data-lwl="profile"]').select_option("")
+    p.click('#pop [data-action="lwl-save"]')
+    p.wait(200)
+    assert [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/light/save"][-1]["light"]["auto"] is False
 
 def test_homematic_verknuepfungen(panel):
     """CCU-Direktverknüpfungen: im Raum › Geräte, Übersicht unter Heizwerk › Einstellungen (Neu lesen), Hinweise."""

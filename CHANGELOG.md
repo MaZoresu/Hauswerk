@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.74.1 – 2026-11-21
+
+### Geändert (Lichtwerk)
+- **„Kein Profil“ je Leuchte:** In der Profil-Auswahl der Leuchte (und „Profil für alle“ im Raum) gibt es oben „Kein Profil“ – Lichtwerk zeigt die Leuchte dann nur an und schaltet sie nicht; HmIP-Direktverknüpfungen schalten weiter. Ersetzt den Schalter „Profil aktiv“; das bisherige Profil bleibt gemerkt. In der Liste steht „Kein Profil – nur anzeigen“ mit der Marke KEIN PROFIL.
+
 ## 0.74.0 – 2026-11-21
 
 ### Neu (Lichtwerk)

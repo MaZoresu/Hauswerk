@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.74.0";
+const VERSION = "0.74.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4791,7 +4791,7 @@ class HauswerkPanel extends HTMLElement {
     const timers = on.map((l) => l.ls.off?.at).filter(Boolean).sort();
     const profs = [...new Set(list.filter((l) => l.cfg.auto !== false).map((l) => this._lwProfName(l.cfg.profile)))];
     const lead = on[0] || list[0];
-    const sub = [`${on.length} von ${list.length} an`, profs.length === 1 ? profs[0] : profs.length > 1 ? `${profs.length} Profile` : "Profil aus"].join(" · ");
+    const sub = [`${on.length} von ${list.length} an`, profs.length === 1 ? profs[0] : profs.length > 1 ? `${profs.length} Profile` : "kein Profil"].join(" · ");
     const row = (l) => {
       const o = l.st?.state === "on";
       const pct = this._lwPct(l);
@@ -4831,8 +4831,8 @@ class HauswerkPanel extends HTMLElement {
     const lux = p.lw_lux_sensor ? this._entityName(p.lw_lux_sensor) : "automatisch";
     return [
       { g: "Lichter", id: "lwadd", icon: "mdi:auto-fix", c: "#6366f1", title: "Licht hinzufügen", sum: "Assistent: Lichter wählen, Profil aus Vorlage (Abendlicht, Außenlicht, Flur mit Bewegung …)", words: "assistent neu hinzufügen licht lampe leuchte" },
-      ...lights.map((l) => ({ g: "Lichter", id: `lwl:${l.id}`, icon: this._lwIco(l, false), c: l.cfg.auto === false ? "#94a3b8" : "#818cf8", title: this._lwName(l), off: l.cfg.auto === false, offTxt: "PROFIL AUS",
-        sum: [`Profil „${this._lwProfName(l.cfg.profile)}“${l.cfg.auto === false ? " (aus)" : ""}`, l.ls.area ? `Raum ${l.ls.area}` : ""].filter(Boolean).join(" · "), words: `${l.id} licht profil` })),
+      ...lights.map((l) => ({ g: "Lichter", id: `lwl:${l.id}`, icon: this._lwIco(l, false), c: l.cfg.auto === false ? "#94a3b8" : "#818cf8", title: this._lwName(l), off: l.cfg.auto === false, offTxt: "KEIN PROFIL",
+        sum: [l.cfg.auto === false ? "Kein Profil – nur anzeigen" : `Profil „${this._lwProfName(l.cfg.profile)}“`, l.ls.area ? `Raum ${l.ls.area}` : ""].filter(Boolean).join(" · "), words: `${l.id} licht profil` })),
       ...profiles.map((x) => {
         const n = lights.filter((l) => (l.cfg.profile || "standard") === x.id).length;
         return { g: "Profile", id: `lwp:${x.id}:on`, icon: "mdi:tune-variant", c: "#f59e0b", title: `${x.name} · ${n} ${n === 1 ? "Licht" : "Lichter"}`, sum: this._lwProfSum(x), words: `profil ${x.name} sonne helligkeit zeit bewegung nachtlicht` };
@@ -4942,11 +4942,13 @@ class HauswerkPanel extends HTMLElement {
           </div>
           ${(this._lwStatus?.report?.lights?.[eid]?.power_src === "sensor") ? `<p class="muted small"><ha-icon icon="mdi:flash-outline"></ha-icon>Leistung gemessen am Gerät: ${fmt(this._lwStatus.report.lights[eid].power ?? 0, 1)} W</p>`
             : `<label class="field"><span><ha-icon icon="mdi:flash-outline"></ha-icon> Leistung (für den Bericht, leer = nur Brenndauer)</span><div class="unit"><input type="number" min="0" max="5000" step="0.5" data-lwl="watt" value="${d.cfg.watt ?? ""}" placeholder="z. B. 9" ${dis}><i>W</i></div></label>`}
-          <label class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Profil</span><select data-lwl="profile" ${dis}>${profs.map((x) => `<option value="${esc(x.id)}" ${(d.cfg.profile || "standard") === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
-          ${d.cfg.auto === false ? `<p class="note"><ha-icon icon="mdi:robot-off-outline"></ha-icon>Das Profil ist an dieser Leuchte aus – Lichtwerk zeigt sie nur an.</p>` : ""}
-          <p class="muted small">${esc(this._lwProfSum(profs.find((x) => x.id === (d.cfg.profile || "standard")) || {}))} · <button class="link inline" data-action="pop-open" data-pop="lwp:${esc(d.cfg.profile || "standard")}:on">Profil bearbeiten</button></p>
+          <label class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Profil</span><select data-lwl="profile" ${dis}>
+            <option value="" ${d.cfg.auto === false ? "selected" : ""}>Kein Profil</option>
+            ${profs.map((x) => `<option value="${esc(x.id)}" ${d.cfg.auto !== false && (d.cfg.profile || "standard") === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+          ${d.cfg.auto === false ? `<p class="note"><ha-icon icon="mdi:robot-off-outline"></ha-icon>Kein Profil – Lichtwerk zeigt die Leuchte nur an und schaltet sie nicht. HmIP-Direktverknüpfungen der CCU schalten weiter.</p>` : ""}
+          ${d.cfg.auto === false ? "" : `<p class="muted small">${esc(this._lwProfSum(profs.find((x) => x.id === (d.cfg.profile || "standard")) || {}))} · <button class="link inline" data-action="pop-open" data-pop="lwp:${esc(d.cfg.profile || "standard")}:on">Profil bearbeiten</button></p>`}
           ${this._lwLinksBox(eid)}
-          <div class="wxrows">${this._setRow("lwauto1", "Profil aktiv", "Lichtwerk schaltet diese Leuchte nach dem Profil", `<label class="switch"><input type="checkbox" data-lwl="auto" ${d.cfg.auto !== false ? "checked" : ""} ${dis}><span></span></label>`, "Aus: Das Profil gilt für diese Leuchte nicht – Lichtwerk zeigt sie nur an und schaltet sie nicht (z. B. im Sommer, bei Besuch oder zum Ausprobieren). Profil und Einstellungen bleiben erhalten; einschalten geht auch direkt an der Kachel. Andere Leuchten mit demselben Profil laufen weiter.")}</div>`,
+`,
         foot: `${this._admin ? `<button class="icon boxed danger" data-action="lwl-remove" data-id="${esc(eid)}" title="Aus Lichtwerk entfernen"><ha-icon icon="mdi:delete-outline"></ha-icon></button>` : ""}
           <button class="secondary" data-action="pop-close">${this._admin ? "Abbrechen" : "Schließen"}</button>
           ${this._admin ? `<button class="primary" data-action="lwl-save" data-id="${esc(eid)}"><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>` : ""}`,
@@ -4973,9 +4975,9 @@ class HauswerkPanel extends HTMLElement {
         body: `
           <p class="muted small">Ein Profil für alle Leuchten des Raums – z. B. Wand und Decke im Windfang gemeinsam. Einzelne Leuchten lassen sich danach weiter unter ihren Einstellungen ändern.</p>
           ${mixed ? `<p class="note"><ha-icon icon="mdi:information-outline"></ha-icon>Bisher unterschiedliche Profile: ${list.map((l) => `${esc(this._lwName(l))} – ${esc(this._lwProfName(l.cfg.profile))}`).join(", ")}</p>` : ""}
-          <label class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Profil für alle</span><select data-lwroom="profile">${profs.map((x) => `<option value="${esc(x.id)}" ${d.profile === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
-          <p class="muted small">${esc(this._lwProfSum(profs.find((x) => x.id === d.profile) || {}))}</p>
-          <div class="wxrows">${this._setRow("lwroom_auto", "Profil aktiv", "für alle Leuchten des Raums", `<label class="switch"><input type="checkbox" data-lwroom="auto" ${d.auto ? "checked" : ""}><span></span></label>`, "Aus: Lichtwerk schaltet die Leuchten dieses Raums nicht – HmIP-Direktverknüpfungen der CCU schalten weiter.")}</div>`,
+          <label class="field"><span><ha-icon icon="mdi:tune-variant"></ha-icon> Profil für alle</span><select data-lwroom="profile"><option value="" ${!d.auto ? "selected" : ""}>Kein Profil</option>${profs.map((x) => `<option value="${esc(x.id)}" ${d.auto && d.profile === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+          <p class="muted small">${d.auto ? esc(this._lwProfSum(profs.find((x) => x.id === d.profile) || {})) : "Kein Profil – Lichtwerk zeigt die Leuchten des Raums nur an. HmIP-Direktverknüpfungen der CCU schalten weiter."}</p>
+`,
         foot: `<button class="secondary" data-action="pop-close">Abbrechen</button><button class="primary" data-action="lw-room-save"><ha-icon icon="mdi:content-save-outline"></ha-icon>Für ${list.length} ${list.length === 1 ? "Leuchte" : "Leuchten"} speichern</button>`,
       };
     }
@@ -9939,6 +9941,12 @@ class HauswerkPanel extends HTMLElement {
       if ((kind === "bool" || kind === "entity") && isChange) this._renderPop();
       return;
     }
+    if (t.dataset.lwroom === "profile" && this._pop?.draft?.ids) {
+      if (t.value) Object.assign(this._pop.draft, { profile: t.value, auto: true });
+      else this._pop.draft.auto = false;
+      if (isChange) this._renderPop();
+      return;
+    }
     if (t.dataset.lwroom && this._pop?.draft?.ids) {
       this._pop.draft[t.dataset.lwroom] = t.type === "checkbox" ? t.checked : t.value;
       if (isChange) this._renderPop();
@@ -9949,6 +9957,13 @@ class HauswerkPanel extends HTMLElement {
       const sc = (this._pop.draft.prof.scenes = (this._pop.draft.prof.scenes || []).map((x) => ({ ...x })));
       if (!sc[+i]) return;
       sc[+i][k] = ["brightness", "kelvin"].includes(k) ? (t.value === "" ? null : Number(t.value)) : t.value || null;
+      if (isChange) this._renderPop();
+      return;
+    }
+    if (t.dataset.lwl === "profile" && this._pop?.draft?.cfg) {
+      // „Kein Profil“: Lichtwerk zeigt die Leuchte nur an (das bisherige Profil bleibt gemerkt)
+      if (t.value) Object.assign(this._pop.draft.cfg, { profile: t.value, auto: true });
+      else this._pop.draft.cfg.auto = false;
       if (isChange) this._renderPop();
       return;
     }
