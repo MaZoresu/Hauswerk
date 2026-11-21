@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.72.2 – 2026-11-21
+
+### Geändert (Rollwerk)
+- **Größere Knöpfe im Fenster „Höhe einstellen“:** ↑ ■ ↓ nebeneinander als große Tasten (64 px hoch, Symbol 32 px), die Behanghöhen (Offen, Halb offen …) als deutlich sichtbare Knöpfe mit 60 px Höhe und größerer Schrift.
+- Im Raum-Fenster (mehrere Rollläden) haben ↑ ■ ↓ je Rollladen 56 px große Tasten.
+
 ## 0.72.1 – 2026-11-21
 
 ### Neu – Tagesleiste in den Fenstern hinter den Kacheln

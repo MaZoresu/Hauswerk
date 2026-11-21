@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.72.1";
+const VERSION = "0.72.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -8041,7 +8041,7 @@ class HauswerkPanel extends HTMLElement {
         return `<div class="lwr">${this._rwWin(c, p)}<button class="lwr-n" data-action="pop-open" data-pop="rwpos:${esc(c.id)}"><b>${esc(this._entityName(c.id))}</b><small>${bad ? "nicht erreichbar" : p == null ? esc(c.st.state) : p >= 95 ? "offen" : p <= 5 ? "zu" : `${fmt(p, 0)} %`}${c.rs.reason && c.cfg.auto !== false ? ` · ${esc(c.rs.reason)}` : ""}</small></button>${b("open", "mdi:arrow-up")}${b("stop", "mdi:stop")}${b("close", "mdi:arrow-down")}</div>`;
       };
       return { icon: "mdi:window-shutter", c: "#3b82f6", title: esc(area), sub: `${list.length} Rollläden`,
-        body: `${this._rwAreaBars(list)}<div class="lw-room"><div class="lwr-list">${list.map(row).join("")}</div></div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+        body: `${this._rwAreaBars(list)}<div class="lw-room rw-area-pop"><div class="lwr-list">${list.map(row).join("")}</div></div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     }
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (KW_POPS.includes(id)) return this._kwPop(id);
@@ -12441,17 +12441,21 @@ kbd { font:600 11px/1 ui-monospace, monospace; padding:2px 6px; border-radius:5p
 .rwwin-sh i { position:absolute; left:0; right:0; bottom:-8px; height:8px; background:#475569; border-radius:0 0 3px 3px; }
 .rwwin-mark { position:absolute; right:0; width:12px; height:2px; top:calc((100 - var(--m)) * 1%); background:var(--accent); box-shadow:0 0 0 1px #fff; }
 .rwwin-val { position:absolute; left:50%; bottom:10px; transform:translateX(-50%); padding:3px 9px; border-radius:999px; background:rgba(15,23,42,.72); color:#fff; font-weight:700; font-size:14px; }
-.rwpos-side { display:flex; flex-direction:column; justify-content:space-between; gap:12px; min-width:0; }
+.rwpos-side { flex:1; display:flex; flex-direction:column; justify-content:space-between; gap:12px; min-width:0; }
 .rwpos-now b { display:block; font-size:18px; }
 .rwpos-now small { display:block; color:var(--muted); margin-top:4px; }
-.rwpos-btns { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
-.rwpre { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:8px; margin-bottom:12px; }
-.rwpre-b { display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:var(--card); color:inherit; font:inherit; cursor:pointer; text-align:left; }
+.rwpos-btns { display:flex; gap:10px; }
+.rwpos-btns .sbtn { flex:1; min-width:64px; height:64px; border-radius:16px; display:grid; place-items:center; background:color-mix(in srgb, var(--text) 9%, transparent); border:1px solid var(--line); }
+.rwpos-btns .sbtn ha-icon { --mdc-icon-size:32px; }
+.rw-area-pop .sbtn { width:56px; height:56px; border-radius:14px; display:grid; place-items:center; background:color-mix(in srgb, var(--text) 9%, transparent); border:1px solid var(--line); }
+.rw-area-pop .sbtn ha-icon { --mdc-icon-size:28px; }
+.rwpre { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:10px; margin-bottom:12px; }
+.rwpre-b { display:flex; align-items:center; gap:10px; min-height:60px; padding:10px 14px; box-sizing:border-box; border-radius:14px; border:1px solid var(--line); background:color-mix(in srgb, var(--text) 7%, transparent); color:inherit; font:inherit; font-size:16px; cursor:pointer; text-align:left; }
 .rwpre-b > span { flex:1; min-width:0; display:flex; flex-direction:column; }
 .rwpre-n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .rwpre-b b { font-variant-numeric:tabular-nums; font-size:13px; color:var(--muted); }
 .rwpre-b.on b { color:var(--accent); }
-.rwpre-b ha-icon { --mdc-icon-size:20px; color:var(--muted); }
+.rwpre-b ha-icon { --mdc-icon-size:26px; color:var(--muted); }
 .rwpre-b.on { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--card)); }
 .rwpre-b.on ha-icon { color:var(--accent); }
 .segs.small.rw-fac { display:grid; grid-template-columns:repeat(9, minmax(0, 1fr)); gap:4px; }
