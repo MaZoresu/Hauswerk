@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.73.1";
+const VERSION = "0.73.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -7725,7 +7725,7 @@ class HauswerkPanel extends HTMLElement {
 
   /** Ein Einstieg für alle Einstellungen: Reiter Haus · Heizwerk · Rollwerk · Kraftwerk · Lichtwerk · System. */
   _setNav(scope) {
-    const items = [["house", "Haus", "mdi:home-cog-outline", "house"], ["heat", "Heizwerk", "logo:heizen", "settings"], ["rw", "Rollwerk", "logo:rollwerk", "shutset"],
+    const items = [["house", "Haus", "logo:hauswerk", "house"], ["heat", "Heizwerk", "logo:heizen", "settings"], ["rw", "Rollwerk", "logo:rollwerk", "shutset"],
       ["kw", "Kraftwerk", "logo:kraftwerk", "kwset"], ["lw", "Lichtwerk", "logo:lichtwerk", "lightset"], ["sys", "System", "mdi:cog-outline", "house"]];
     return `<div class="setnav" role="tablist" aria-label="Einstellungen">${items.map(([k, l, i, tab]) => `<button class="sn ${scope === k ? "on" : ""}" role="tab" aria-selected="${scope === k}" data-action="set-nav" data-tab="${tab}" data-sys="${k === "sys" ? 1 : 0}"><span class="sn-ic">${modIcon(i)}</span><span>${l}</span></button>`).join("")}</div>`;
   }
@@ -11690,7 +11690,7 @@ MODULE_LOGOS.lichtwerk = `<svg viewBox="0 0 48 48" aria-hidden="true">
 // Jede Kopie bekommt eigene IDs für den Farbverlauf: sonst bleibt sie leer, wenn die erste Kopie verborgen ist.
 let logoNo = 0;
 const modIcon = (icon) => {
-  const svg = String(icon).startsWith("logo:") && MODULE_LOGOS[icon.slice(5)];
+  const svg = icon === "logo:hauswerk" ? LOGO : String(icon).startsWith("logo:") && MODULE_LOGOS[icon.slice(5)];
   if (!svg) return `<ha-icon icon="${icon}"></ha-icon>`;
   const n = ++logoNo;
   return `<span class="mlogo">${svg.replace(/id="(\w+)"/g, `id="$1${n}"`).replace(/url\(#(\w+)\)/g, `url(#$1${n})`)}</span>`;
@@ -12898,7 +12898,8 @@ select[data-rwc] { width:100%; padding:10px 12px; border-radius:12px; border:1px
 @media (min-width:700px) { .setnav { flex-wrap:wrap; } }
 .sn { all:unset; cursor:pointer; flex:none; display:inline-flex; align-items:center; gap:8px; padding:8px 14px 8px 8px; border-radius:999px; border:1px solid var(--line); background:var(--card); font-size:14px; font-weight:600; color:var(--muted); }
 .sn.on { color:var(--text); border-color:color-mix(in srgb, var(--accent) 60%, transparent); background:color-mix(in srgb, var(--accent) 12%, var(--card)); }
-.sn-ic { width:26px; height:26px; border-radius:8px; display:grid; place-items:center; flex:none; } .sn-ic ha-icon { --mdc-icon-size:18px; } .sn-ic .mlogo { width:26px; height:26px; border-radius:8px; display:block; }
+.sn-ic { width:26px; height:26px; border-radius:8px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--text) 10%, transparent); color:var(--text); } .sn-ic ha-icon { --mdc-icon-size:18px; }
+.sn-ic:has(.mlogo) { background:none; } .sn-ic .mlogo svg { width:26px; height:26px; display:block; } .sn-ic .mlogo { width:26px; height:26px; border-radius:8px; display:block; }
 .settop { display:flex; gap:10px; align-items:center; margin-bottom:14px; }
 .xsw { all:unset; cursor:pointer; flex:none; display:inline-flex; align-items:center; gap:6px; padding:8px 10px; border-radius:12px; border:1px solid var(--line); background:var(--card); font-size:13px; font-weight:600; color:var(--muted); }
 .xsw ha-icon { --mdc-icon-size:18px; }

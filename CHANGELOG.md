@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.73.2 – 2026-11-21
+
+### Geändert
+- **Einstellungen:** Der Reiter „Haus“ trägt das Hauswerk-Logo, „System“ ein gut sichtbares Zahnrad.
+
 ## 0.73.1 – 2026-11-21
 
 ### Geändert
