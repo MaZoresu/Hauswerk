@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.68.1";
+const VERSION = "0.68.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2233,25 +2233,15 @@ class HauswerkPanel extends HTMLElement {
     const mods = [];
     const it = (icon, val, title) => `<span class="sv-i" title="${esc(title)}"><ha-icon icon="${icon}"></ha-icon>${val != null ? `<b>${esc(String(val))}</b>` : ""}</span>`;
     if (f.rooms.length) {
-      const x = [it("mdi:fire", f.heating, "heizen")];
-      if (f.open) x.push(it("mdi:window-open-variant", f.open, "Fenster offen"));
-      if (this._status?.away) x.push(it("mdi:home-export-outline", null, "niemand zu Hause"));
-      mods.push(["heizen", x]);
+      // Heizwerk: nur „ok“ – oder ein Achtung-Zeichen, wenn die Kopfkachel etwas zu beheben hat
+      const hb = this._briefParts(this._heatBriefHtml());
+      const bad = ["warn", "alert"].includes(hb?.tone);
+      mods.push(["heizen", [bad ? `<span class="sv-i" title="${esc(hb.title)}" style="color:${hb.color}"><ha-icon icon="mdi:alert-circle-outline"></ha-icon><b>prüfen</b></span>`
+        : `<span class="sv-i" title="${esc(hb?.title || "")}"><ha-icon icon="mdi:check-circle-outline" style="color:#22c55e"></ha-icon><b>ok</b></span>`]]);
     }
     if (covers.length) {
       const pos = covers.map((c) => this._rwPos(c.st)).filter((v) => v != null);
       const x = [it("mdi:window-shutter-open", pos.filter((v) => v >= 95).length, "offen"), it("mdi:window-shutter", pos.filter((v) => v <= 5).length, "zu")];
-      const sh = covers.filter((c) => c.rs?.cat === "shading").length;
-      if (sh) x.push(it("mdi:sun-thermometer-outline", sh, "beschattet"));
-      // nächste Fahrt: Uhrzeit, Richtung, Anzahl
-      const nowMin = now.getHours() * 60 + now.getMinutes();
-      const nx = covers.map((c) => /(\d{1,2}):(\d{2}) (.+)$/.exec(c.rs?.next || "")).filter(Boolean)
-        .map((m) => ({ at: Number(m[1]) * 60 + Number(m[2]), hm: `${m[1].padStart(2, "0")}:${m[2]}`, what: m[3] })).filter((m) => m.at > nowMin).sort((a2, b2) => a2.at - b2.at);
-      if (nx.length) {
-        const first = nx.filter((m) => m.at === nx[0].at && m.what === nx[0].what);
-        const dir = /schließt|Stufe/.test(nx[0].what) ? "mdi:arrow-down-bold" : /öffnet/.test(nx[0].what) ? "mdi:arrow-up-bold" : "mdi:sun-thermometer-outline";
-        x.push(`<span class="sv-i sv-next" title="${esc(nx[0].what)}"><ha-icon icon="mdi:clock-outline"></ha-icon><b>${nx[0].hm}</b><ha-icon icon="${dir}"></ha-icon><b>${first.length}</b></span>`);
-      }
       mods.push(["rollwerk", x]);
     }
     if ((set.kw_solar || []).length || set.kw_grid) {
@@ -2259,16 +2249,12 @@ class HauswerkPanel extends HTMLElement {
       const x = [];
       if (fl.solar != null) x.push(it("mdi:solar-power-variant", this._kwFmt(fl.solar), "Solar"));
       if (fl.grid != null) x.push(it(fl.grid > 0 ? "mdi:transmission-tower-import" : "mdi:transmission-tower-export", this._kwFmt(Math.abs(fl.grid)), fl.grid > 0 ? "Bezug" : "Einspeisung"));
-      if (fl.soc != null) x.push(it("mdi:home-battery-outline", `${fmt(fl.soc, 0)} %`, "Akku"));
       if (x.length) mods.push(["kraftwerk", x]);
     }
     if (this._data.lichtwerk && this._lwLights().length) {
       const ls = this._lwLights();
       const on = ls.filter((l) => l.st?.state === "on").length;
-      const x = [it("mdi:lightbulb-on-outline", String(on), "Lichter an")];
-      const nx = this._lwStatus?.next;
-      if (nx && !nx.day) x.push(`<span class="sv-i sv-next" title="${esc(nx.reason)}"><ha-icon icon="mdi:clock-outline"></ha-icon><b>${t2(nx.min)}</b><ha-icon icon="${nx.action === "on" ? "mdi:lightbulb-on-outline" : "mdi:lightbulb-off-outline"}"></ha-icon><b>${nx.count || 1}</b></span>`);
-      mods.push(["lichtwerk", x]);
+      mods.push(["lichtwerk", [it("mdi:lightbulb-on-outline", String(on), "Lichter an")]]);
     }
     // Vorhersage der nächsten Stunden
     let fcHtml = "";

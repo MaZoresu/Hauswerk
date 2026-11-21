@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.68.2 – 2026-11-21
+
+### Geändert (Bildschirmschoner)
+- **Module schlanker:** je Modul nur noch das Wichtigste –
+  - **Heizwerk:** „ok“ mit grünem Haken; nur wenn die Kopfkachel etwas zu beheben hat, „prüfen“ in deren Farbe.
+  - **Rollwerk:** wie viele offen und wie viele zu (ohne Beschattung und nächste Fahrt).
+  - **Kraftwerk:** Solar und Netz, ohne Akku.
+  - **Lichtwerk:** wie viele Lichter an (ohne nächste Schaltung).
+
 ## 0.68.1 – 2026-11-20
 
 ### Behoben (Lichtwerk)
