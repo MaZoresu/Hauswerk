@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.83.0 – 2026-11-22
+
+### Neu (Heizwerk › Lüften)
+- **Schlafzimmer: Fenster darf nachts offen bleiben.** Zwischen 21:00 und 07:30 (einstellbar unter Lüften & Schimmelschutz) gilt ein offenes Fenster im Schlafzimmer als gewollt: kein „Fenster schließen“, kein „Fenster lange offen“ und kein „Kippen kostet Wärme“. Die Heizung bleibt solange in der Fensterpause.
+- Ist das Fenster am Morgen noch offen, kommt einmal „Fenster schließen – Nacht vorbei“. „Morgens lüften“ entfällt nach einer Nacht bei offenem Fenster.
+- Raumkachel und Seite Lüften zeigen „Nachts bei offenem Fenster – gewollt“ mit Mond-Symbol. Die Nacht zählt in der Bilanz extra („2× nachts offen“) und verfälscht weder Lüftdauer, Wärme noch die gelernte Lüftdauer.
+- Automatisch für Räume mit Raumart Schlafzimmer (bzw. „Schlaf“ im Namen); je Raum unter Raum › Lüften „Nachts bei offenem Fenster schlafen“ (Automatisch / Ja / Nein) – z. B. auch fürs Kinderzimmer.
+
 ## 0.82.1 – 2026-11-21
 
 ### Behoben (Lichtwerk)

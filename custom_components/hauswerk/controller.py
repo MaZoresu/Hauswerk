@@ -5,7 +5,7 @@ Anwesenheit, Urlaub und Außentemperatur kommen aus dem Hauswerk-Kern (core.Haus
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 import logging
 from typing import Any
 import uuid
@@ -1680,6 +1680,26 @@ class Heizen:
         times = vent_plan(hours, now, t_in, rh_in)
         return {"times": [{**x, "at": dt_util.utc_from_timestamp(x["ts"]).isoformat()} for x in times], "rh_in": round(rh_in)}
 
+    def _night_allowed(self, room: dict) -> bool:
+        """Darf das Fenster nachts offen bleiben (bei offenem Fenster schlafen)? Automatisch im Schlafzimmer."""
+        if room.get("vent_night") is not None:
+            return bool(room["vent_night"])
+        return room.get("use") == "schlafen" or "schlaf" in str(room.get("name") or "").lower()
+
+    def _night_window(self) -> tuple[int, int]:
+        return parse_hm(self.settings.get("vent_night_from") or "21:00"), parse_hm(self.settings.get("vent_night_to") or "07:30")
+
+    def _in_night(self, local) -> bool:
+        a, b = self._night_window()
+        m = local.hour * 60 + local.minute
+        return (a <= m < b) if a < b else (m >= a or m < b)
+
+    def _night_end(self, local) -> datetime:
+        """Ende der laufenden Nacht (für „offen bis …“)."""
+        _a, b = self._night_window()
+        end = local.replace(hour=b // 60, minute=b % 60, second=0, microsecond=0)
+        return end if end > local else end + timedelta(days=1)
+
     def _air(self, room_id: str, room: dict, rt: dict, room_temp: float | None, humidity: float | None,
              out_temp: float | None, out_rh: float | None, open_since: float | None, now: float) -> dict[str, Any]:
         """Lüften: Empfehlung mit Dauer und Anlass, Lüft-Timer mit Ende, Schimmel-Ampel, Dauerkippen, Sommer-Kühlen, Bilanz."""
@@ -1736,7 +1756,8 @@ class Heizen:
                 start = parse_hm(morning)
                 now_min = local.hour * 60 + local.minute
                 today0 = dt_util.start_of_local_day().timestamp()
-                done_today = any(v["at"] >= today0 + start * 60 for v in self.vent_log.get(room_id) or [])
+                done_today = any(v["at"] >= today0 + start * 60 or (v.get("night") and v["at"] + v["min"] * 60 >= today0)
+                                 for v in self.vent_log.get(room_id) or []) or open_since is not None
                 if start <= now_min < start + 90 and not done_today:
                     reasons.append("morgens lüften")
                     kind = kind or "morning"
@@ -1765,7 +1786,21 @@ class Heizen:
                 session = rt["vs"] = {"start": open_since, "rh0": humidity, "t0": room_temp, "target": minutes,
                                       "cool": cooling, "done": None, "to": out_temp, "rho": out_rh, "learned": learned}
             open_min = (now - session["start"]) / 60
-            if not session["done"]:
+            in_night = self._night_allowed(room) and self._in_night(local)
+            if in_night and not session.get("night"):
+                # Schlafzimmer: Fenster bleibt nachts offen – gewollt, keine Erinnerung bis zum Morgen
+                session["night"] = True
+                self.haus.clear(done_key)
+                self.log.add("window", "Nachts gelüftet – Fenster darf offen bleiben",
+                             f"bis {self._night_end(local).strftime('%H:%M')}, keine Erinnerung", room_id, name)
+            if session.get("night") and not in_night and not session.get("night_end"):
+                # Nacht vorbei, Fenster noch offen: einmal erinnern
+                session["night_end"] = now
+                self.log.add("window", "Nacht vorbei – Fenster noch offen", "Erinnerung „Fenster schließen“", room_id, name)
+                self.haus.notify(done_key, "vent_done", "Fenster schließen", f"{name}: Nacht vorbei – Fenster noch offen", room_id, name)
+            if session.get("night"):
+                pass
+            elif not session["done"]:
                 if session["cool"]:
                     why = "draußen wärmer als drinnen" if out_temp is not None and room_temp is not None and out_temp >= room_temp else None
                 else:
@@ -1784,9 +1819,13 @@ class Heizen:
             long_min = float(self.settings.get("vent_long_min") or 30)
             info["open"] = {"since": dt_util.utc_from_timestamp(session["start"]).isoformat(), "minutes": round(open_min, 1),
                             "target": session["target"], "done": session["done"], "cool": session["cool"],
-                            "learned": bool(session.get("learned"))}
-            if not self._summer and open_min >= long_min:
-                info["long"] = {"minutes": int(open_min), "kwh": window_loss_kwh(open_min, room_temp, out_temp)}
+                            "learned": bool(session.get("learned")),
+                            "night": bool(session.get("night")) and in_night,
+                            "night_until": self._night_end(local).isoformat() if session.get("night") and in_night else None}
+            # „Kippen kostet Wärme“: nicht in der gewollten Nacht – danach ab Ende der Nacht gezählt
+            long_open = (now - session["night_end"]) / 60 if session.get("night_end") else open_min
+            if not self._summer and long_open >= long_min and not (session.get("night") and in_night):
+                info["long"] = {"minutes": int(long_open), "kwh": window_loss_kwh(long_open, room_temp, out_temp)}
         elif session:
             # Fenster zu: Lüftung in die Bilanz
             open_min = (now - session["start"]) / 60
@@ -1794,10 +1833,10 @@ class Heizen:
                 log = self.vent_log.setdefault(room_id, [])
                 kwh = window_loss_kwh(open_min, session["t0"], out_temp)
                 log.append({"at": round(session["start"]), "min": round(open_min, 1), "rh0": session["rh0"], "rh1": humidity,
-                            "t0": session["t0"], "t1": room_temp, "kwh": kwh})
+                            "t0": session["t0"], "t1": room_temp, "kwh": kwh, **({"night": True} if session.get("night") else {})})
                 # Luftwechsel lernen (nur echte Stoßlüftungen bis 45 Min.)
                 tau = vent_tau(open_min, session["t0"], session["rh0"], room_temp, humidity,
-                               session.get("to", out_temp), session.get("rho", out_rh)) if open_min <= 45 else None
+                               session.get("to", out_temp), session.get("rho", out_rh)) if open_min <= 45 and not session.get("night") else None
                 if tau is not None:
                     self.vent_tau[room_id] = ((self.vent_tau.get(room_id) or []) + [tau])[-10:]
                     self.log.add("window", "Lüften gelernt", f"Luftwechsel τ = {tau:.0f} Min.".replace(".", ","), room_id, name)
@@ -1806,7 +1845,9 @@ class Heizen:
                 self._save(30)
             rt["vs"] = None
             self.haus.clear(done_key)
-        week = [v for v in self.vent_log.get(room_id) or [] if v["at"] >= now - 7 * 86400]
+        week_all = [v for v in self.vent_log.get(room_id) or [] if v["at"] >= now - 7 * 86400]
+        # Nächte bei offenem Fenster zählen extra – sie verfälschen sonst Dauer, Wärme und Feuchte-Rückgang
+        week = [v for v in week_all if not v.get("night")]
         drops = [v["rh0"] - v["rh1"] for v in week if v.get("rh0") is not None and v.get("rh1") is not None]
         last = (self.vent_log.get(room_id) or [None])[-1]
         # Morgen-Feuchte (5–9 Uhr, höchster Wert je Tag) für die Lüft-Bilanz; 10 Tage
@@ -1828,7 +1869,8 @@ class Heizen:
             "last": {"at": dt_util.utc_from_timestamp(last["at"]).isoformat(), "min": last["min"],
                      "rh0": last.get("rh0"), "rh1": last.get("rh1")} if last else None,
             "week": {"count": len(week), "minutes": round(sum(v["min"] for v in week)), "kwh": round(sum(v.get("kwh") or 0 for v in week), 1),
-                     "rh_drop": round(sum(drops) / len(drops)) if drops else None},
+                     "rh_drop": round(sum(drops) / len(drops)) if drops else None, "nights": len(week_all) - len(week)},
+            "night_ok": self._night_allowed(room),
             "balance": balance,
         }
         vent = None
@@ -1843,7 +1885,11 @@ class Heizen:
         hs = self.haus.settings
         key = f"window:{room_id}"
         limit = float(hs.get("notify_window_min") or 30)
-        if open_since is not None and now - open_since >= limit * 60:
+        vs = self._rt(room_id).get("vs") or {}
+        since = vs.get("night_end") or open_since if vs.get("night") else open_since
+        if vs.get("night") and not vs.get("night_end"):
+            since = None  # nachts gewollt offen (Schlafzimmer)
+        if open_since is not None and since is not None and now - since >= limit * 60:
             self.haus.notify(key, "window", "Fenster lange offen",
                              f"{name}: seit {int((now - open_since) // 60)} Min. offen", room_id, name)
         else:

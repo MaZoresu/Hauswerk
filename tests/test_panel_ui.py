@@ -850,7 +850,8 @@ def test_neue_widgets_lage_ereignisse_termine(panel):
     assert "Papier" in panel.js(f"{EL}.shadowRoot.querySelector('.wcal').innerText")
     ev = panel.js(f"{EL}.shadowRoot.querySelector('.wev').innerText")
     # Rollladen-Fahrten der Vorschau liegen bis 16:50 – danach erst wieder morgen (hinter den Terminen)
-    assert "Restmüll" in ev and ("Rollläden" in ev or panel.js("new Date().getHours()") >= 16), ev
+    hour = panel.js("new Date().getHours()")
+    assert "Restmüll" in ev and ("Rollläden" in ev or hour >= 16 or hour < 6), ev  # nachts füllen Heizwechsel die Liste
     # Werte leer: Vorschlag übernehmen
     panel.click('[data-action="w-sugg"]')
     panel.wait(300)

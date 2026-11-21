@@ -1266,6 +1266,57 @@ def test_muellabholung(hw):
     asyncio.run(run())
 
 
+def test_schlafzimmer_nachts_fenster_offen(hw):
+    """Schlafzimmer: Fenster darf nachts offen bleiben – kein „Fenster schließen“, kein „lange offen“, kein Dauerkippen;
+    am Morgen (07:30) noch offen → einmal „Fenster schließen“; die Nacht zählt extra in der Bilanz, nicht fürs Lernen."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 18, 21, 0, tzinfo=timezone.utc)  # 22:00 Ortszeit
+        hass = Hass()
+        hass.set("climate.sz", "heat", {"current_temperature": 19.0, "temperature": 18.0}, "Thermostat Schlafzimmer")
+        hass.set("sensor.sz_t", "19.0", name="SZ Temperatur")
+        hass.set("sensor.sz_h", "62", name="SZ Feuchte")
+        hass.set("binary_sensor.sz_fenster", "off", name="SZ Fenster")
+        hass.set("weather.home", "cloudy", {"temperature": 4.0, "humidity": 80})
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"weather_entity": "weather.home", "notify_targets": ["mobile_app_pixel"], "notify_quiet": False,
+                                        "notify_window_min": 30})
+        await ctl.async_save_settings({"vent_rh": 65})
+        await ctl.async_save_room({"id": "sz", "name": "Schlafzimmer", "type": "heizkoerper", "comfort": 19, "eco": 17,
+                                   "climates": ["climate.sz"], "windows": ["binary_sensor.sz_fenster"], "use": "schlafen",
+                                   "temp_sensor": "sensor.sz_t", "humidity_sensor": "sensor.sz_h", "enabled": True, "schedule": []})
+        hass.set("binary_sensor.sz_fenster", "on", name="SZ Fenster")
+        await ctl.async_evaluate()
+        air = ctl.status()["rooms"]["sz"]["air"]
+        assert air["open"]["night"] is True and air["night_ok"] is True
+        for _ in range(6):  # die ganze Nacht
+            NOW[0] += timedelta(hours=1)
+            hass.set("sensor.sz_h", "50", name="SZ Feuchte")
+            await ctl.async_evaluate()
+            await asyncio.sleep(0)
+        air = ctl.status()["rooms"]["sz"]["air"]
+        assert "Fenster schließen" not in hass.sent() and "Fenster lange offen" not in hass.sent(), hass.sent()
+        assert not air.get("long") and not air["open"]["done"]
+        # 07:30 vorbei, noch offen: einmal erinnern
+        NOW[0] = datetime(2026, 11, 19, 6, 31, tzinfo=timezone.utc)
+        await ctl.async_evaluate()
+        await ctl.async_evaluate()
+        await asyncio.sleep(0)
+        assert hass.sent().count("Fenster schließen") == 1
+        assert ctl.status()["rooms"]["sz"]["air"]["open"]["night"] is False
+        hass.set("binary_sensor.sz_fenster", "off", name="SZ Fenster")
+        await ctl.async_evaluate()
+        week = ctl.status()["rooms"]["sz"]["air"]["week"]
+        assert week["nights"] == 1 and week["count"] == 0
+        assert not ctl.vent_tau.get("sz")
+        # Wohnzimmer (kein Schlafraum): Erinnerungen wie bisher
+        assert ctl._night_allowed({"name": "Wohnzimmer", "use": "wohnen"}) is False
+        assert ctl._night_allowed({"name": "Kinderzimmer", "use": "kind", "vent_night": True}) is True
+
+    asyncio.run(run())
+
+
 def test_lueften_ausgebaut(hw):
     """Lüften: Empfehlung mit Dauer nach Außentemperatur und Grenze je Raumart, Schimmel-Ampel, Lüft-Timer mit
     „Fenster schließen“, Bilanz nach dem Schließen, Dauerkippen mit Wärmeverlust."""

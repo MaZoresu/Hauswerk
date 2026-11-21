@@ -124,6 +124,7 @@ ROOM_SCHEMA = vol.Schema(
         vol.Optional("vent_rh"): _opt(vol.All(vol.Coerce(int), vol.Range(min=0, max=95))),
         vol.Optional("co2_sensor"): _opt(str),
         vol.Optional("vent_morning"): _opt(bool),
+        vol.Optional("vent_night"): _opt(bool),
         # Kamin im Raum: vorhanden; optional ein Signal „in Betrieb“ (Schalter, Binärsensor, Ofen-/Rohrtemperatur, Leistung)
         vol.Optional("fireplace"): _opt(bool),
         # Fensterpause der CCU überlassen, wenn der Fensterkontakt direkt mit dem Thermostat verknüpft ist (Standard an)
@@ -343,6 +344,8 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("vent_co2"): vol.All(vol.Coerce(int), vol.Range(min=0, max=5000)),
         vol.Optional("vent_cool"): bool,
         vol.Optional("vent_long_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
+        vol.Optional("vent_night_from"): _hm,
+        vol.Optional("vent_night_to"): _hm,
     },
     extra=vol.REMOVE_EXTRA,
 )

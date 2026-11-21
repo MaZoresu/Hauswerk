@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.82.1";
+const VERSION = "0.83.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2185,6 +2185,7 @@ class HauswerkPanel extends HTMLElement {
 
   _ventChip(s) {
     const a = s?.air || {};
+    if (a.open?.night) return ["mdi:weather-night", "Nacht", "#6366f1", `Nachts bei offenem Fenster – gewollt, keine Erinnerung bis ${new Date(a.open.night_until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`];
     if (a.open?.done) return ["mdi:window-closed-variant", "schließen", "#ef4444", `Genug gelüftet – Fenster schließen (${a.open.done})`];
     if (a.open && a.open.cool) return ["mdi:snowflake", `kühlt ${Math.floor(a.open.minutes)} Min.`, "#38bdf8", "Fenster offen zum Kühlen – Hinweis, sobald es draußen wärmer ist"];
     if (a.open && !a.long) return ["mdi:timer-sand", `${Math.floor(a.open.minutes)}/${a.open.target} Min.`, "#22c55e", `Lüften läuft – empfohlen ${a.open.target} Min.`];
@@ -2218,7 +2219,10 @@ class HauswerkPanel extends HTMLElement {
       const a = s.air || {};
       const chip = this._ventChip(s);
       let state;
-      if (a.open) {
+      if (a.open?.night) {
+        state = `<div class="vt-run night"><ha-icon icon="mdi:weather-night"></ha-icon><b>Nachts bei offenem Fenster – gewollt</b>
+          <small>Keine Erinnerung bis ${new Date(a.open.night_until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} Uhr – ist es dann noch offen, kommt „Fenster schließen“. Die Heizung bleibt solange in der Fensterpause.</small></div>`;
+      } else if (a.open) {
         const pc = a.open.cool ? 100 : Math.min(100, (a.open.minutes / a.open.target) * 100);
         state = `<div class="vt-run ${a.open.done ? "done" : ""}"><div class="vt-bar"><i style="width:${pc}%"></i></div>
           <b>${a.open.done ? `Genug gelüftet – Fenster schließen` : a.open.cool ? `Kühlt seit ${Math.floor(a.open.minutes)} Min.` : `Lüftet ${Math.floor(a.open.minutes)} von ${a.open.target} Min.`}</b>
@@ -2232,6 +2236,7 @@ class HauswerkPanel extends HTMLElement {
         a.co2 != null ? [`${a.co2} ppm`, "CO₂", a.co2 >= (set.vent_co2 || 1000) ? "#f59e0b" : ""] : null,
         a.last ? [ago(a.last.at), `zuletzt gelüftet · ${fmt(a.last.min, 0)} Min.${a.last.rh0 != null && a.last.rh1 != null ? ` · ${fmt(a.last.rh0, 0)} → ${fmt(a.last.rh1, 0)} %` : ""}`, ""] : null,
         a.week?.count ? [`${a.week.count}×`, `7 Tage · ${a.week.minutes} Min.${a.week.kwh ? ` · ca. ${fmt(a.week.kwh)} kWh` : ""}`, ""] : null,
+        a.week?.nights ? [`${a.week.nights}×`, "nachts offen · 7 Tage", "#6366f1"] : null,
         a.tau ? [`${fmt(a.minutes, 0)} Min.`, "gelernte Lüftdauer", ""] : null,
         a.balance?.rh_morning != null ? [`${a.balance.rh_morning} %`, "morgens (Ø 3 Tage)", a.balance.level !== "ok" ? VB[a.balance.level][0] : ""] : null,
       ].filter(Boolean);
@@ -9043,6 +9048,9 @@ class HauswerkPanel extends HTMLElement {
             <label class="field narrow"><span><ha-icon icon="mdi:window-open-variant"></ha-icon> „Kippen kostet Wärme“ nach</span>${minutes("vent_long_min", 30, 5, 240, 5)}</label>
             <p class="muted small"><ha-icon icon="mdi:clock-check-outline"></ha-icon>Die besten Lüftzeiten des Tages kommen aus der Stunden-Vorhersage des Wetterdienstes (kein Regen, trockene Luft, wenig Wärmeverlust).</p>
             <div class="lbl">Anlässe</div>
+            <div class="field"><span><ha-icon icon="mdi:weather-night"></ha-icon> Schlafzimmer: Fenster darf nachts offen bleiben</span>
+              <div class="bwt-time"><label class="field"><span>von</span><input type="time" data-set="vent_night_from" value="${esc(p.vent_night_from || "21:00")}" ${dis}></label><label class="field"><span>bis</span><input type="time" data-set="vent_night_to" value="${esc(p.vent_night_to || "07:30")}" ${dis}></label></div>
+              <small class="muted">In dieser Zeit kein „Fenster schließen“, kein „Fenster lange offen“ und kein „Kippen kostet Wärme“. Ist es danach noch offen, kommt einmal „Fenster schließen“. Je Raum unter Raum › Lüften (automatisch für Schlafzimmer).</small></div>
             <div class="field"><span><ha-icon icon="mdi:weather-sunset-up"></ha-icon> Morgens lüften (Schlaf- und Kinderzimmer) ab</span>${segs("vent_morning", [["null", "Aus"], ["06:30", "6:30"], ["07:00", "7:00"], ["07:30", "7:30"], ["08:00", "8:00"]], "null")}</div>
             <label class="field narrow"><span><ha-icon icon="mdi:molecule-co2"></ha-icon> Lüften ab CO₂ (0 = aus)</span>${minutes("vent_co2", 1000, 0, 5000, 100, "ppm")}</label>
             <div class="wxrows">${this._setRow("vcool", "Sommer: kühlen", "„Fenster auf“, wenn draußen kühler – „zu“, wenn wärmer", sw("vent_cool"), "In der Sommerpause: Ist es drinnen ab 23 °C und draußen mindestens 2 °C kühler, empfiehlt Heizwerk das Fenster zu öffnen. Wird es draußen wärmer als drinnen, kommt „Fenster schließen“. Zusammen mit dem Sonnenschutz von Rollwerk bleibt es so tagsüber kühler.")}</div>
@@ -9800,6 +9808,7 @@ class HauswerkPanel extends HTMLElement {
           <label class="field"><span>Lüften ab Luftfeuchte</span><div class="unit"><input type="number" step="1" min="40" max="90" data-room="vent_rh" value="${r.vent_rh ?? ""}" placeholder="${fmt(this._ventLimitOf(r), 0)}"><i>%</i></div></label>
         </div>
         <div class="row2">
+          <label class="field"><span>Nachts bei offenem Fenster schlafen</span><select data-room="vent_night">${[["", "Automatisch (Schlafzimmer)"], ["1", "Ja"], ["0", "Nein"]].map(([v, l]) => `<option value="${v}" ${(r.vent_night == null ? "" : r.vent_night ? "1" : "0") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
           <label class="field"><span>Morgens lüften</span><select data-room="vent_morning">${[["", "Automatisch (Schlaf-/Kinderzimmer)"], ["1", "Ja"], ["0", "Nein"]].map(([v, l]) => `<option value="${v}" ${(r.vent_morning == null ? "" : r.vent_morning ? "1" : "0") === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
           <div class="field"><span><ha-icon icon="mdi:molecule-co2"></ha-icon> CO₂-Sensor <span class="muted small">· optional</span></span>${this._picker("co2_sensor", r.co2_sensor ? [r.co2_sensor] : [])}</div>
         </div>
@@ -10412,7 +10421,7 @@ class HauswerkPanel extends HTMLElement {
       else if (t.type === "number") v = t.value === "" ? null : Number(t.value);
       else v = t.value;
       if (key === "plan_id" || key === "use") v = v || null;
-      if (key === "vent_morning") v = v === "" ? null : v === "1";
+      if (key === "vent_morning" || key === "vent_night") v = v === "" ? null : v === "1";
       this._dialog.room[key] = v;
       if (["name", "valve_control", "calibration", "window_detect", "fireplace"].includes(key) && isChange) this._renderDialog();
       return;
@@ -14583,6 +14592,8 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .bwp-heat { background:color-mix(in srgb, #f97316 55%, transparent); } .bwp-frost { background:color-mix(in srgb, #38bdf8 35%, #fff); }
 .bwp-leg { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:11px; color:var(--muted); } .bwp-leg span { display:inline-flex; align-items:center; gap:5px; }
 .bwp-leg i { display:inline-block; width:16px; height:10px; border-radius:3px; position:static; }
+.vt-run.night { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; align-items:center; } .vt-run.night ha-icon { color:#6366f1; grid-row:span 2; }
+.vt-run.night small { grid-column:2; }
 .bwt-time { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
 .bws { display:flex; align-items:flex-end; gap:4px; height:90px; } .bws-b { flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:3px; }
 .bws-b i { width:100%; border-radius:4px 4px 2px 2px; background:#16a34a; min-height:2px; } .bws-b small { font-size:10px; color:var(--muted); }
