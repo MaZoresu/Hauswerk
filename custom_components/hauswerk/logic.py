@@ -1579,9 +1579,15 @@ def plan_mowing(now_local, hours: list[dict], cfg: dict, done: dict[str, float],
     now_min = now_local.hour * 60 + now_local.minute
     carry = backlog + max(0.0, quota - float(done.get(today.isoformat(), 0) or 0)) - quota  # heute schon Gemähtes zählt
     out_days = []
+    holidays = set(cfg.get("holidays") or [])
+    hmode = cfg.get("holiday") or "sunday"
     for i in range(7):
         d = today + timedelta(days=i)
         wd = MOW_DAYS[d.weekday()]
+        holiday = d.isoformat() in holidays
+        ok = wd in allowed
+        if holiday:  # Feiertag laut Arbeitstage-Kalender: wie Sonntag, nicht mähen oder wie ein normaler Tag
+            ok = False if hmode == "off" else ("su" in allowed) if hmode == "sunday" else ok
         slots = []  # (Beginn, Grund oder None)
         for s in range(frm, to, 30):
             why = None
@@ -1604,7 +1610,7 @@ def plan_mowing(now_local, hours: list[dict], cfg: dict, done: dict[str, float],
                         why = "heat"
             slots.append((s, why))
         need = 0.0
-        if wd in allowed:
+        if ok:
             need = max(0.0, quota + carry)
         windows: list[list[int]] = []
         if need > 0:
@@ -1632,7 +1638,7 @@ def plan_mowing(now_local, hours: list[dict], cfg: dict, done: dict[str, float],
                     left -= take
                 windows.sort()
         planned = sum(b - a for a, b in windows) / 60
-        carry = (need - planned) if wd in allowed else carry
+        carry = (need - planned) if ok else carry
         carry = max(0.0, carry)
         bad = []
         for s, why in slots:
@@ -1642,7 +1648,7 @@ def plan_mowing(now_local, hours: list[dict], cfg: dict, done: dict[str, float],
                 bad[-1][1] = s + 30
             else:
                 bad.append([s, s + 30, why])
-        out_days.append({"date": d.isoformat(), "wd": wd, "allowed": wd in allowed, "windows": windows,
+        out_days.append({"date": d.isoformat(), "wd": wd, "allowed": ok, "holiday": holiday, "windows": windows,
                          "hours": round(planned, 2), "bad": bad})
     return {"target": round(target, 1), "factor": round(factor, 2), "quota": round(quota, 2), "backlog": round(backlog, 2),
             "mean_temp": None if mean is None else round(mean, 1), "days": out_days,

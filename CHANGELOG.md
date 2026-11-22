@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.85.0 – 2026-11-22
+
+### Neu (Beetwerk › Mähplan)
+- **Feiertage aus dem Arbeitstage-Kalender:** Der Mähplan kennt jetzt Feiertage und Brückentage (Werktag, aber laut Workday-Kalender kein Arbeitstag – wie in Heizwerk und Rollwerk). Neue Auswahl **„An Feiertagen“**: *wie Sonntag* (Standard – ist Sonntag kein Mähtag, wird auch am Feiertag nicht gemäht), *nicht mähen (Feiertagsruhe)* oder *wie der Wochentag*.
+- Im Mähplan der Mäher-Karte ist der Tag mit „*“ markiert und zeigt „Feiertag“; was dort ausfällt, holt Beetwerk an den nächsten Mähtagen nach. Ohne gewählten Arbeitstage-Kalender verweist das Fenster auf Einstellungen › Kalender.
+
 ## 0.84.0 – 2026-11-22
 
 ### Geändert (Tabletmodus, Beetwerk)

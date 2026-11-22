@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.84.0";
+const VERSION = "0.85.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -5156,12 +5156,12 @@ class HauswerkPanel extends HTMLElement {
     const nowM = new Date().getHours() * 60 + new Date().getMinutes();
     const tm = (v, d) => { const [h, m] = String(v || d).split(":").map(Number); return (h || 0) * 60 + (m || 0); };
     const frm = tm(set.bw_plan_from, "09:00"), to = tm(set.bw_plan_to, "19:00");
-    const rows = (pl.days || []).map((d, i) => `<div class="bwt-r ${i === 0 ? "today" : ""} ${d.allowed ? "" : "off"}"><span>${i === 0 ? "Heute" : DN[d.wd]}</span><div class="bwt-bar">
+    const rows = (pl.days || []).map((d, i) => `<div class="bwt-r ${i === 0 ? "today" : ""} ${d.allowed ? "" : "off"}"><span title="${d.holiday ? "Feiertag" : ""}">${i === 0 ? "Heute" : DN[d.wd]}${d.holiday ? "*" : ""}</span><div class="bwt-bar">
       ${d.allowed ? `<i class="bwp-ok" style="left:${pc(frm)};width:${pc(to - frm)}"></i>` : ""}
       ${(d.bad || []).map(([a, b, w]) => `<i class="${(WHY[w] || ["", "bwp-wet"])[1]}" style="left:${pc(a)};width:${pc(b - a)}" title="${hm(a)}–${hm(b)}: ${(WHY[w] || [w])[0]}"></i>`).join("")}
       ${(d.windows || []).map(([a, b]) => `<i class="bwt-s" style="left:${pc(a)};width:${pc(b - a)}" title="Mähen ${hm(a)}–${hm(b)}"></i>`).join("")}
       ${i === 0 ? `<i class="bwt-now" style="left:${pc(nowM)}"></i>` : ""}</div>
-      <em>${d.windows.length ? d.windows.map(([a, b]) => `${hm(a)}–${hm(b)}`).join(", ") : d.allowed ? "–" : "frei"}</em></div>`).join("");
+      <em>${d.windows.length ? d.windows.map(([a, b]) => `${hm(a)}–${hm(b)}`).join(", ") : d.holiday && !d.allowed ? "Feiertag" : d.allowed ? "–" : "frei"}</em></div>`).join("");
     const done7 = bs.stats ? bs.stats.week_hours : null;
     return `<div class="bw-sub">
       <div class="bw-sub-h"><ha-icon icon="mdi:calendar-clock"></ha-icon><b>Mähplan</b><small>Beetwerk plant nach Wetter</small></div>
@@ -5289,7 +5289,7 @@ class HauswerkPanel extends HTMLElement {
       { g: "Garten", id: "bwmower", t: "oft", icon: "mdi:robot-mower-outline", c: "#16a34a", title: "Mähroboter", sum: auto("bw_mower", E.mower), val: E.mower ? "" : "fehlt", warn: !E.mower && !E.valve, words: "mähroboter rasenmäher mäher lawn mower robonect automower" },
       { g: "Garten", id: "bwpause", t: "oft", icon: "mdi:pause-octagon-outline", c: "#0ea5e9", title: "Mähpause", sum: pause.length ? `bei ${pause.map((k) => PT[k]).join(", ")}${p.bw_resume !== false ? " · danach weiter" : ""}` : "aus", val: String(pause.length), words: "regen nass boden frost bewässerung pause weiter" },
       { g: "Garten", id: "bwwater", icon: "mdi:sprinkler-variant", c: "#0ea5e9", title: "Bewässerung", sum: [E.valve ? `Ventil ${this._entityName(E.valve)}` : "", E.soil ? `Bodenfeuchte ${this._entityName(E.soil)}` : ""].filter(Boolean).join(" · ") || "keine gefunden", words: "bewässerung ventil gießen bodenfeuchte smart irrigation" },
-      { g: "Garten", id: "bwplan", t: "oft", icon: "mdi:calendar-clock", c: "#16a34a", title: "Mähplan", sum: p.bw_plan ? `${fmt(p.bw_plan_hours ?? 12, 0)} Std./Woche · ${(p.bw_plan_days || ["mo", "tu", "we", "th", "fr", "sa"]).length} Tage · ${p.bw_plan_from || "09:00"}–${p.bw_plan_to || "19:00"} Uhr · nach Wetter` : "aus – der Mäher fährt nach seinen eigenen Zeitplänen", val: p.bw_plan ? "an" : "aus", words: "mähplan zeitplan mähzeiten wochenziel wetter regen nachholen robonect timer" },
+      { g: "Garten", id: "bwplan", t: "oft", icon: "mdi:calendar-clock", c: "#16a34a", title: "Mähplan", sum: p.bw_plan ? `${fmt(p.bw_plan_hours ?? 12, 0)} Std./Woche · ${(p.bw_plan_days || ["mo", "tu", "we", "th", "fr", "sa"]).length} Tage · ${p.bw_plan_from || "09:00"}–${p.bw_plan_to || "19:00"} Uhr · Feiertage ${{ sunday: "wie Sonntag", off: "frei", normal: "normal" }[p.bw_plan_holiday || "sunday"]}` : "aus – der Mäher fährt nach seinen eigenen Zeitplänen", val: p.bw_plan ? "an" : "aus", words: "mähplan zeitplan mähzeiten wochenziel wetter regen nachholen robonect timer" },
       { g: "Garten", id: "bwguard", t: "oft", icon: "mdi:human-child", c: "#16a34a", title: "Garten frei & Igelschutz", sum: [p.bw_guard !== false ? `Kamera schickt den Mäher heim (${(bs.guard?.sensors || []).length ? (bs.guard.sensors || []).map((x) => this._entityName(x)).join(", ") : "kein Melder"})` : "Kamera aus", p.bw_night !== false ? "nachts nie mähen" : ""].filter(Boolean).join(" · "), val: p.bw_guard !== false ? `${p.bw_guard_wait ?? 30} Min.` : "aus", warn: p.bw_guard !== false && E.mower && !(bs.guard?.sensors || []).length, words: "kamera kinder person haustier hund katze igel nacht garten frei belegt" },
       { g: "Garten", id: "bwwatch", icon: "mdi:shield-search", c: "#16a34a", title: "Hitze, Saison & Wächter", sum: [p.bw_heat !== false ? `Hitzepause ab ${fmt(p.bw_heat_temp ?? 30, 0)} °C` : "", p.bw_season !== false ? "Saison-Hinweise" : "", p.bw_watch !== false ? `Wächter nach ${p.bw_watch_min ?? 20} Min.` : ""].filter(Boolean).join(" · ") || "aus", words: "hitze sommer saison winterpause diebstahl wächter gestohlen akku verschleiß" },
       { g: "Garten", id: "bwcare", icon: "mdi:saw-blade", c: "#16a34a", title: "Wartung", sum: `Messer wechseln nach ${p.bw_blades_days ?? 60} Tagen`, val: E.blades_days && this._bwNum(E.blades_days) != null ? `${fmt(this._bwNum(E.blades_days), 0)} Tage` : "", words: "messer wartung klingen" },
@@ -9435,6 +9435,8 @@ class HauswerkPanel extends HTMLElement {
             <label class="field narrow"><span><ha-icon icon="mdi:timer-outline"></ha-icon> Wochenziel (Hochsaison)</span>${minutes("bw_plan_hours", 12, 1, 60, 1, "Std.")}</label>
             <div class="bwt-time"><label class="field"><span>Mähen ab</span><input type="time" data-set="bw_plan_from" value="${esc(p.bw_plan_from || "09:00")}" ${dis}></label><label class="field"><span>bis</span><input type="time" data-set="bw_plan_to" value="${esc(p.bw_plan_to || "19:00")}" ${dis}></label></div>
             <div class="field"><span>Mähtage</span><div class="rq-quick">${DAYS.map(([k, l]) => `<button class="pill ${days.has(k) ? "on" : ""}" data-action="bw-plan-day" data-k="${k}" ${dis}>${l}</button>`).join("")}</div></div>
+            <label class="field"><span><ha-icon icon="mdi:calendar-star"></ha-icon> An Feiertagen</span><select data-set="bw_plan_holiday" ${dis}>${[["sunday", "wie Sonntag"], ["off", "nicht mähen (Feiertagsruhe)"], ["normal", "wie der Wochentag"]].map(([v, l]) => `<option value="${v}" ${(p.bw_plan_holiday || "sunday") === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+              <small class="muted">${p.workday_calendar || this._data.settings.workday_calendar ? `Feiertage aus dem Arbeitstage-Kalender ${esc(this._entityName(p.workday_calendar || this._data.settings.workday_calendar))} – ein Werktag ohne Arbeitstag gilt als Feiertag.` : `Kein Arbeitstage-Kalender gewählt – Feiertage kennt Beetwerk erst mit <button class="link inline" data-action="settings-go" data-sub="calendars">Kalender › Arbeitstage</button>.`}</small></label>
             <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Regen, Frost und Hitze kommen aus der Stunden-Vorhersage (Hauswerk › Wetter) und den Grenzen unter Mähpause bzw. Hitze. Die Pausen bleiben als Sicherheitsnetz: Regnet es überraschend oder ist jemand im Garten, fährt der Mäher heim und danach im Automatik-Modus weiter.</p>`,
         };
       }

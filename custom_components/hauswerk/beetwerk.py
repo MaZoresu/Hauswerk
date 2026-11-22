@@ -68,6 +68,7 @@ BW_DEFAULTS: dict[str, Any] = {
     "bw_plan_from": "09:00",
     "bw_plan_to": "19:00",
     "bw_plan_days": ["mo", "tu", "we", "th", "fr", "sa"],
+    "bw_plan_holiday": "sunday",  # Feiertage (Arbeitstage-Kalender): wie Sonntag | off = nicht mähen | normal = wie der Wochentag
 }
 BW_KEYS = frozenset(BW_DEFAULTS)
 RAINY = ("rainy", "pouring", "snowy", "snowy-rainy", "hail", "lightning-rainy")
@@ -677,7 +678,15 @@ class Beetwerk:
                 "days": list(s.get("bw_plan_days") or MOW_DAYS), "season": s.get("bw_plan_season", True) is not False,
                 "frost": float(s.get("bw_frost") or 3) if "frost" in pause else None,
                 "heat": float(s.get("bw_heat_temp") or 30) if s.get("bw_heat", True) else None,
-                "wet": 2 if "rain" in pause else 0, "margin": int(s.get("bw_night_margin") or 0)}
+                "wet": 2 if "rain" in pause else 0, "margin": int(s.get("bw_night_margin") or 0),
+                "holiday": s.get("bw_plan_holiday") or "sunday", "holidays": self._holidays()}
+
+    def _holidays(self) -> list[str]:
+        """Feiertage der nächsten Tage aus dem Arbeitstage-Kalender (Workday): Mo–Fr, aber kein Arbeitstag."""
+        try:
+            return list(self.haus.free_days(8))
+        except Exception:  # noqa: BLE001 - ohne Kalender: keine Feiertage
+            return []
 
     def _sun_minutes(self) -> tuple[int, int] | None:
         if not self.settings.get("bw_night", True):

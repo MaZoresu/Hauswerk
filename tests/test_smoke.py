@@ -2408,6 +2408,19 @@ def test_beetwerk_maehplan(hw):
         writes = [c[2] for c in hass.calls if c[:2] == ("robonect", "timer")]
         assert {"entity_id": "lawn_mower.robonect", "timer": "5", "enable": True, "start": "09:00", "end": "11:00", "weekdays": ["we"]} in writes, writes
         assert any(w["timer"] == "1" and w["enable"] is True and w["weekdays"] == ["mo"] for w in writes)
+        # Feiertag (Arbeitstage-Kalender): Do ist Feiertag → wie Sonntag (nicht erlaubt), „normal“ → wie Do, „off“ → frei
+        haus.free_days = lambda days=14: ["2026-06-11"]
+        await bw.async_save_settings({"bw_plan_holiday": "normal"}, by="Test")
+        assert bw.status()["plan"]["days"][1]["allowed"] is True and bw.status()["plan"]["days"][1]["windows"]
+        await bw.async_save_settings({"bw_plan_holiday": "sunday"}, by="Test")
+        thu = bw.status()["plan"]["days"][1]
+        assert thu["wd"] == "th" and thu["holiday"] is True and thu["allowed"] is False and thu["windows"] == []
+        await bw.async_save_settings({"bw_plan_holiday": "sunday", "bw_plan_days": ["mo", "tu", "we", "th", "fr", "sa", "su"]}, by="Test")
+        assert bw.status()["plan"]["days"][1]["allowed"] is True  # Sonntag erlaubt → Feiertag auch
+        await bw.async_save_settings({"bw_plan_holiday": "off"}, by="Test")
+        assert bw.status()["plan"]["days"][1]["allowed"] is False
+        await bw.async_save_settings({"bw_plan_holiday": "sunday", "bw_plan_days": ["mo", "tu", "we", "th", "fr", "sa"]}, by="Test")
+        haus.free_days = lambda days=14: []
         # Pause (Regen) endet: mit Mähplan „Auto“ statt „Mähen“
         hass.set("lawn_mower.robonect", "mowing", {}, "Automower")
         hass.set("weather.home", "rainy", {"temperature": 20, "humidity": 90})
