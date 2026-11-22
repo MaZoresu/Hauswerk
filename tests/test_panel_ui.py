@@ -2241,3 +2241,38 @@ def test_therme(panel):
     p.wait()
     assert "Beispiel-Heizkurve" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
     p.js(f"{EL}._closePop()")
+
+
+def test_einheitliches_muster(panel):
+    """Fenster hinter den Kacheln: Zahnrad oben zu den Einstellungen, „Warum so?“ und „Rückgängig“ bei automatischen Änderungen."""
+    p = panel
+    # Rollwerk: letzte Fahrt automatisch → Rückgängig auf die Stellung davor
+    p.view("shutters")
+    p.wait(300)
+    cover = p.js(f"Object.keys({EL}._rwStatus.covers).find((k) => {EL}._rwStatus.covers[k].last?.from != null)")
+    p.js(f"() => {EL}._openPop('rwpos:{cover}')")
+    p.wait()
+    assert "Warum so?" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    p.click('#pop .rq-why [data-action="rwpos-go"][data-v="100"]')
+    p.wait(300)
+    m = [x for x in p.sent() if x["type"] == "hauswerk/rollwerk/command"][-1]
+    assert m["position"] == 100 and m["entity_ids"] == [cover], m
+    p.js(f"() => {EL}._openPop('rwpos:{cover}')")
+    p.wait()
+    p.click(f'#pop .sheet-head [data-pop="rwc:{cover}"]')
+    p.wait()
+    assert p.js(f"{EL}._pop.id") == f"rwc:{cover}"
+    p.js(f"{EL}._closePop()")
+    # Lichtwerk: automatisch eingeschaltet → Rückgängig = wieder aus
+    p.view("lights")
+    p.js(f"() => {EL}._openPop('lwbri:light.wohnzimmer')")
+    p.wait()
+    assert p.has('#pop .rq-why [data-action="lw-pre"][data-v="off"]') and p.has('#pop .sheet-head [data-pop="lwl:light.wohnzimmer"]')
+    p.js(f"{EL}._closePop()")
+    # Heizwerk: Zahnrad im Schnellmenü öffnet den Raum
+    p.view("overview")
+    p.wait(300)
+    p.click('[data-action="room-quick"]')
+    p.wait()
+    assert p.has('#pop .sheet-head [data-action="room-edit"]')
+    p.js(f"{EL}._closePop()")

@@ -102,6 +102,7 @@ class Lichtwerk:
         self._store.async_delay_save(self._data, delay)
 
     async def async_start(self) -> None:
+        self.haus.action_handlers["lw_off"] = lambda d, by: self.async_command(list(d.get("eids") or []), "off", by=by)
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
         self._unsubs.append(self.haus.subscribe(self._on_house))
         self._track()
@@ -718,6 +719,11 @@ class Lichtwerk:
         ctx = self.haus.own_context("Lichtwerk")
         self._ctx = (self._ctx + [ctx.id])[-200:]
         rt = self._rt.setdefault(eid, {})
+        if not adjust:
+            prev = self.hass.states.get(eid)
+            pb = prev.attributes.get("brightness") if prev is not None else None
+            rt["last_auto"] = {"at": dt_util.utcnow().timestamp(), "on": on, "cause": cause,
+                               "prev_on": prev is not None and prev.state == "on", "prev_bri": round(int(pb) / 2.55) if pb else None}
         if domain == "light":
             st = self.hass.states.get(eid)
             modes = set((st.attributes.get("supported_color_modes") if st else None) or [])
@@ -757,7 +763,8 @@ class Lichtwerk:
             since = self._away_since
             if on and now - since >= float(self.settings.get("lw_away_min") or 30) * 60:
                 self.haus.notify("lw_away", "light_away", "Licht an, niemand zu Hause",
-                                 f"{', '.join(self.name_room(e) for e in on)} – brennt seit {int((now - since) // 60)} Min.")
+                                 f"{', '.join(self.name_room(e) for e in on)} – brennt seit {int((now - since) // 60)} Min.",
+                                 actions=[{"title": "Alle aus", "do": "lw_off", "data": {"eids": on}}, {"title": "Gesehen", "do": "ack"}])
             if not on:
                 self._away_since = None
                 self.haus.clear("lw_away")
@@ -801,7 +808,7 @@ class Lichtwerk:
                 "kelvin": attrs.get("color_temp_kelvin"), "rgb": attrs.get("rgb_color"),
                 "modes": attrs.get("supported_color_modes"),
                 "auto": (self.lights.get(eid) or {}).get("auto", True) is not False,
-                "want": rt.get("want"), "cause": rt.get("cause"), "latch": rt.get("latch"),
+                "want": rt.get("want"), "cause": rt.get("cause"), "latch": rt.get("latch"), "last_auto": rt.get("last_auto"),
                 "manual": ({"since": dt_util.utc_from_timestamp(rt["manual"]["since"]).isoformat(),
                             "until": dt_util.utc_from_timestamp(rt["manual"]["until"]).isoformat() if rt["manual"].get("until") else None}
                            if rt.get("manual") else None),

@@ -2,6 +2,27 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.93.0 – 2026-11-22
+
+### Neu – Nachrichten mit Knöpfen (Home-Assistant-App)
+- Nachrichten an die Home-Assistant-App tragen jetzt passende Knöpfe – erledigen, ohne die App zu öffnen:
+  - **Licht an, niemand zu Hause:** Alle aus · Gesehen
+  - **Niemand zu Hause – noch offen:** Lichter aus · Gesehen
+  - **Fenster lange offen**, **Fenster offen – Regen/Sturm:** In 30 Min. · Gesehen
+  - **Fenster schließen (Lüften):** 10 Min. später · Gesehen
+  - **Tür/Tor lange offen:** Schließen (bei Toren) · In 30 Min. · Gesehen
+  - **Mäher fährt heim:** Garten frei (Melder 1 Std. nicht beachten) · 2 Std. belegt
+  - **Wartung fällig:** Erledigt · In 1 Woche
+  - **Müllabfuhr**, **Batterie schwach**, **Mähroboter braucht Hilfe:** Erledigt bzw. Gesehen
+  - **Wochenbericht:** Hauswerk öffnen · **Es hat geklingelt:** Wachwerk öffnen
+- **Gesehen** = derselbe Anlass meldet sich erst wieder, wenn er erledigt war und neu auftritt. **Später** = bis dahin Ruhe, dann erneut, falls noch aktuell.
+- Jeder Knopf wirkt einmal und nur 12 Stunden; danach passiert nichts. Im Protokoll steht, wer ihn gedrückt hat („Knopf in der Nachricht · Jens“). Eine neue Nachricht zum selben Anlass ersetzt die alte auf dem Handy.
+- Unter Benachrichtigungen zeigt die Vorschau je Anlass die Knöpfe mit. Andere Kanäle (Pushover, Telegram, Ansagen …) bleiben unverändert.
+
+### Geändert – überall dasselbe Muster
+- **Zahnrad oben im Fenster** führt zu den Einstellungen des Geräts: Raum (Heizwerk-Schnellmenü), Rollladen, Leuchte, Mähroboter, Bewässerung, Termine.
+- **„Warum so?“ mit „Rückgängig“:** Rollladen- und Leuchten-Fenster zeigen oben den Grund, die letzte automatische Änderung („Zuletzt 16:42: 20 % offen · Beschattung“) und – bis 3 Stunden danach – **Rückgängig** (zurück auf die Stellung bzw. den Zustand davor; danach wartet die Automatik wie nach jeder Änderung von Hand). Heizwerk zeigt „Warum“ wie bisher im Schnellmenü.
+
 ## 0.92.0 – 2026-11-22
 
 ### Neu – Heizwerk › Therme

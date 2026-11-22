@@ -86,6 +86,7 @@ class Dienste:
         self._persist = stored.get("persist") or {}
 
     async def async_start(self) -> None:
+        self.haus.action_handlers["hd_done"] = lambda d, by: self.async_task_done(str(d.get("id")), by=by)
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
 
     async def async_stop(self) -> None:
@@ -232,7 +233,9 @@ class Dienste:
             _due, left = self._due(t, today)
             key = f"maint:{t.get('id')}"
             if left is not None and left <= 0:
-                self.haus.notify(key, "maint", "Wartung fällig", t.get("name") or "Aufgabe")
+                self.haus.notify(key, "maint", "Wartung fällig", t.get("name") or "Aufgabe",
+                                 actions=[{"title": "Erledigt", "do": "hd_done", "data": {"id": t.get("id")}},
+                                          {"title": "In 1 Woche", "do": "snooze", "minutes": 7 * 1440}])
             else:
                 self.haus.clear(key)
 
@@ -263,7 +266,7 @@ class Dienste:
         self._persist["weekly_sent"] = week
         self._save()
         rep = await self.async_weekly_report()
-        self.haus.notify(f"weekly:{week}", "weekly", rep["title"], rep["text"])
+        self.haus.notify(f"weekly:{week}", "weekly", rep["title"], rep["text"], actions=[{"title": "Hauswerk öffnen", "uri": "/hauswerk"}])
         if rep.get("ai_error"):
             self.log.add("notify", "Wochenbericht ohne KI", rep["ai_error"], module="haus")
 

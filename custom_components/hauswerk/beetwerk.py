@@ -112,7 +112,19 @@ class Beetwerk:
         self.settings.update({k: v for k, v in (stored.get("settings") or {}).items() if k in BW_KEYS})
         self._persist = stored.get("persist") or {}
 
+    async def _act_free(self, _data: dict, by: str) -> None:
+        """Knopf „Garten frei“: Melder eine Stunde lang nicht beachten, Pause aufheben."""
+        now = dt_util.utcnow().timestamp()
+        self._persist["guard_ignore"] = now + 3600
+        self._persist["guard_at"] = 0
+        self._persist["busy_until"] = None
+        self.log.add("garden", "Garten frei – Mäher darf wieder", f"Melder 1 Std. nicht beachtet · {by}", module="beetwerk")
+        self._save()
+        await self.async_evaluate()
+
     async def async_start(self) -> None:
+        self.haus.action_handlers["bw_free"] = self._act_free
+        self.haus.action_handlers["bw_busy"] = lambda _d, by: self.async_busy(hours=2, by=by)
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
         # nach einem Neustart: laufende Bewässerung zu Ende führen bzw. Ventil schließen
         await self._async_water_step()
@@ -312,6 +324,8 @@ class Beetwerk:
         """Jemand im Garten: Sensor an oder vor weniger als „Wartezeit“ zuletzt an."""
         wait = float(self.settings.get("bw_guard_wait") or 30) * 60
         seen = self._persist.get("guard_at") or 0
+        if (self._persist.get("guard_ignore") or 0) > now:
+            return False  # „Garten frei“ aus der Nachricht: Melder eine Stunde lang nicht beachten
         hit = None
         for eid in self.guard_sensors():
             st = self.hass.states.get(eid)
@@ -417,7 +431,8 @@ class Beetwerk:
         # Fehler: „braucht Hilfe“
         err = self.error_text(ent, state)
         if err:
-            self.haus.notify("bw_mower_error", "mower", "Mähroboter braucht Hilfe", f"{self._name(mower)}: {err}", image=self._image())
+            self.haus.notify("bw_mower_error", "mower", "Mähroboter braucht Hilfe", f"{self._name(mower)}: {err}", image=self._image(),
+                             actions=[{"title": "Gesehen", "do": "ack"}])
         else:
             self.haus.clear("bw_mower_error")
         # Wartung: Messer
@@ -453,7 +468,7 @@ class Beetwerk:
             self.log.add("garden", "Mähpause – Mäher fährt in die Station", msg, module="beetwerk")
             if "guard" in reasons:
                 self.haus.notify("bw_guard", "mower_guard", "Mäher fährt heim", f"Jemand im Garten – {self._name(mower)} wartet in der Station",
-                                 image=self._image())
+                                 image=self._image(), actions=[{"title": "Garten frei", "do": "bw_free"}, {"title": "2 Std. belegt", "do": "bw_busy"}])
             self._save()
             return
         if paused:

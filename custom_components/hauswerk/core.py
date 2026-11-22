@@ -119,6 +119,11 @@ class Haus:
         self._recent: dict[tuple, float] = {}
         self.notify_health: dict[str, dict] = {}   # Kanal → letzte Zustellung {ok, at, error}
         self.notify_hist: list[dict] = []          # letzte Nachrichten {at, title, message, kind, how, channels}
+        # Knöpfe in Nachrichten (Home-Assistant-App): Token → Aktion; Gesehen/Später je Anlass
+        self._actions: dict[str, dict] = {}
+        self._acked: dict[str, float] = {}         # Anlass gesehen – bis er erledigt ist (clear) nicht erneut
+        self._snooze: dict[str, float] = {}        # Anlass später erinnern – bis Zeitpunkt nicht senden
+        self.action_handlers: dict[str, Any] = {}  # Name → async (data, by) – von den Modulen eingetragen
         self._bundle: dict[str, dict] = {}         # Kanal → {last, items, timer}  # (Kanal, Titel, Text) → gesendet um: gegen Doppel nach Neuladen o. Ä.
         self._active: set[str] = set()
         # Wettervorhersage (Frost)
@@ -175,10 +180,15 @@ class Haus:
         self.settings = {k: v for k, v in self.settings.items() if k in HOUSE_KEYS}
         self.notify_health = stored.get("notify_health") or {}
         self.notify_hist = stored.get("notify_hist") or []
+        now = dt_util.utcnow().timestamp()
+        self._actions = {k: v for k, v in (stored.get("notify_actions") or {}).items() if v.get("exp", 0) > now}
+        self._acked = dict(stored.get("notify_acked") or {})
+        self._snooze = {k: v for k, v in (stored.get("notify_snooze") or {}).items() if v > now}
         await self._store.async_save(self._data())
 
     def _data(self) -> dict:
-        return {"settings": self.settings, "notify_health": self.notify_health, "notify_hist": self.notify_hist[-40:]}
+        return {"settings": self.settings, "notify_health": self.notify_health, "notify_hist": self.notify_hist[-40:],
+                "notify_actions": self._actions, "notify_acked": self._acked, "notify_snooze": self._snooze}
 
     def _save(self) -> None:
         self._store.async_delay_save(self._data, 2)
@@ -186,6 +196,9 @@ class Haus:
     # ------------------------------------------------------------ Lebenszyklus
     async def async_start(self) -> None:
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
+        bus = getattr(self.hass, "bus", None)
+        if bus is not None and hasattr(bus, "async_listen"):
+            self._unsubs.append(bus.async_listen("mobile_app_notification_action", self._on_notify_action))
         self._unsubs.append(self.hass.bus.async_listen(EVENT_CALL_SERVICE, self._on_radio_call))
         self._track()
         self._find_workday_calendar()
@@ -588,7 +601,8 @@ class Haus:
         for old in [k for k in self._active if k.startswith("waste_") and k != key]:
             self.clear(old)
         if key:
-            self.notify(key, "waste", "Morgen Müllabfuhr", f"{', '.join(due['types'])} – Tonne heute Abend rausstellen.")
+            self.notify(key, "waste", "Morgen Müllabfuhr", f"{', '.join(due['types'])} – Tonne heute Abend rausstellen.",
+                        actions=[{"title": "Erledigt", "do": "ack"}])
 
     def is_workday(self, day: date | None = None) -> bool | None:
         """Ist der Tag ein Arbeitstag? Aus dem Kalender (auch künftige Tage), heute sonst aus dem Sensor; None = unbekannt."""
@@ -666,7 +680,7 @@ class Haus:
 
     @callback
     def send(self, channels: list[str], title: str, message: str, important: bool = False, key: str | None = None,
-             image: str | None = None, kind: str | None = None) -> list[str]:
+             image: str | None = None, kind: str | None = None, actions: list[dict] | None = None) -> list[str]:
         """Eine Nachricht an Kanäle schicken – gemeinsam für alle Module. Nicht nutzbare Kanäle werden übersprungen
         (Protokoll), dieselbe Nachricht an denselben Kanal innerhalb von 2 Minuten nur einmal (Schutz vor Doppeln
         durch Neuladen/Wiederverbinden). Ansagen in der Ruhezeit nur, wenn wichtig. Rückgabe: gesendete Kanäle."""
@@ -699,7 +713,7 @@ class Haus:
                 sent.append(ch)
                 continue
             shown = title if voice else self._deco(title, kind)
-            self.hass.async_create_task(self._async_channel(ch, shown, message, important, key, image=image))
+            self.hass.async_create_task(self._async_channel(ch, shown, message, important, key, image=image, actions=actions))
             sent.append(ch)
         return sent
 
@@ -732,7 +746,8 @@ class Haus:
         self._save()
 
     async def _async_channel(self, ch: str, title: str, message: str, important: bool = False,
-                             key: str | None = None, raise_errors: bool = False, image: str | None = None) -> None:
+                             key: str | None = None, raise_errors: bool = False, image: str | None = None,
+                             actions: list[dict] | None = None) -> None:
         kind, _, rest = ch.partition(":")
         if ch == "ha":
             domain, service, data = "persistent_notification", "create", {"title": title, "message": message}
@@ -747,6 +762,13 @@ class Haus:
             if image:
                 # Bild in der Mitteilung der Home-Assistant-App, z. B. /api/camera_proxy/camera.garten
                 data.setdefault("data", {})["image"] = image
+            if actions and rest.startswith("mobile_app_"):
+                # Knöpfe in der Mitteilung der Home-Assistant-App (höchstens 3)
+                data.setdefault("data", {})["actions"] = [
+                    {"action": "URI", "title": a["title"], "uri": a["uri"]} if a.get("uri") else {"action": f"HW_{a['token']}", "title": a["title"]}
+                    for a in actions[:3]]
+                if key:
+                    data["data"]["tag"] = self._ha_id(key)  # gleiche Meldung ersetzt die alte
             domain, service = "notify", rest
         elif kind == "ent":
             domain, service, data = "notify", "send_message", {"entity_id": rest, "title": title, "message": message}
@@ -779,7 +801,7 @@ class Haus:
     @callback
     def notify(self, key: str, kind: str, title: str, message: str,
                room: str | None = None, room_name: str | None = None, quiet_why: str | None = None,
-               image: str | None = None) -> None:
+               image: str | None = None, actions: list[dict] | None = None) -> None:
         """Nachricht je nach Art: aufs Handy (normal oder wichtig), nur ins Protokoll oder gar nicht.
 
         Dieselbe Nachricht (key) kommt erst wieder, wenn sie mit clear() erledigt ist oder
@@ -793,6 +815,8 @@ class Haus:
             mode = "log"  # nicht senden, nur Glocke und Protokoll (z. B. schon oft genug gesendet)
         self._active.add(key)
         now = dt_util.utcnow().timestamp()
+        if key in self._acked or self._snooze.get(key, 0) > now:
+            return  # über den Knopf „Gesehen“ bzw. „Später“ in der Nachricht
         if key in self._queued or now - self._sent.get(key, 0) < NOTIFY_REPEAT:
             return
         self._sent[key] = now
@@ -808,10 +832,10 @@ class Haus:
         elif not targets:
             how = "nur hier – kein Kanal unter Benachrichtigungen gewählt"
         elif self._quiet() and not important:
-            self._queued[key] = (title, message, room, room_name, kind)
+            self._queued[key] = (title, message, room, room_name, kind, actions)
             how = f"Ruhezeit – wird um {self.settings.get('notify_quiet_to')} gesendet, falls noch aktuell"
         else:
-            sent = self.send(targets, title, message, important, key, image=image, kind=kind)
+            sent = self.send(targets, title, message, important, key, image=image, kind=kind, actions=self._tokens(key, actions))
             how = f"{'wichtig ' if important else ''}gesendet an {', '.join(self.channel_name(c) for c in sent) or '– (kein Kanal erreichbar)'}"
         state = "log" if mode == "log" or not targets else "held" if key in self._queued else "sent"
         self._hist(title, message, kind, state, how)
@@ -843,6 +867,8 @@ class Haus:
         self._active.discard(key)
         self._sent.pop(key, None)
         self._queued.pop(key, None)
+        if self._acked.pop(key, None) is not None or self._snooze.pop(key, None) is not None:
+            self._save()
 
     @callback
     def _flush_queue(self) -> None:
@@ -852,9 +878,75 @@ class Haus:
         for key, (title, message, room, room_name, *rest) in queued.items():
             if key in self._active:
                 kind = rest[0] if rest else None
-                sent = self.send(self.channels_for(kind), title, message, False, key, kind=kind)
+                acts = rest[1] if len(rest) > 1 else None
+                sent = self.send(self.channels_for(kind), title, message, False, key, kind=kind, actions=self._tokens(key, acts))
                 self._hist(title, message, kind, "sent", "nach der Ruhezeit gesendet")
                 self.log.add("notify", title, f"{message} · nach der Ruhezeit gesendet an {', '.join(self.channel_name(c) for c in sent)}", room, room_name)
+
+    # ------------------------------------------------------------ Knöpfe in Nachrichten
+    def _tokens(self, key: str, actions: list[dict] | None) -> list[dict] | None:
+        """Je Knopf ein einmaliges Token (12 Std. gültig). Aktion: do = Name eines Moduls, „ack“ (Gesehen), „snooze“ (Später)
+        oder uri (öffnet eine Seite)."""
+        if not actions:
+            return None
+        import secrets  # noqa: PLC0415
+        now = dt_util.utcnow().timestamp()
+        self._actions = {k: v for k, v in self._actions.items() if v.get("exp", 0) > now}
+        out = []
+        for a in actions:
+            if a.get("uri"):
+                out.append({"title": a["title"], "uri": a["uri"]})
+                continue
+            tok = secrets.token_hex(6)
+            self._actions[tok] = {"key": key, "do": a["do"], "data": a.get("data") or {}, "title": a["title"],
+                                  "minutes": a.get("minutes"), "exp": now + 12 * 3600}
+            out.append({"title": a["title"], "token": tok})
+        self._save()
+        return out
+
+    @callback
+    def _on_notify_action(self, event) -> None:
+        action = str((event.data or {}).get("action") or "")
+        if not action.startswith("HW_"):
+            return
+        self.hass.async_create_task(self.async_run_action(action[3:], getattr(getattr(event, "context", None), "user_id", None)))
+
+    async def async_run_action(self, token: str, user_id: str | None = None) -> bool:
+        """Knopf aus einer Nachricht ausführen – einmalig, nur solange gültig. Steht im Protokoll mit Name."""
+        a = self._actions.pop(token, None)
+        now = dt_util.utcnow().timestamp()
+        if a is None or a.get("exp", 0) < now:
+            self.log.add("notify", "Knopf in Nachricht abgelaufen", "schon benutzt oder älter als 12 Stunden – nichts getan")
+            self._save()
+            return False
+        # die anderen Knöpfe derselben Nachricht sind damit erledigt
+        self._actions = {k: v for k, v in self._actions.items() if v.get("key") != a["key"]}
+        by = "Nachricht"
+        if user_id and getattr(self.hass, "auth", None) is not None:
+            try:
+                user = await self.hass.auth.async_get_user(user_id)
+                by = f"Nachricht · {user.name}" if user and user.name else by
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            if a["do"] == "ack":
+                self._acked[a["key"]] = now
+            elif a["do"] == "snooze":
+                self._snooze[a["key"]] = now + float(a.get("minutes") or 30) * 60
+                self._sent.pop(a["key"], None)
+            else:
+                handler = self.action_handlers.get(a["do"])
+                if handler is None:
+                    raise KeyError(a["do"])
+                await handler(a.get("data") or {}, by)
+            self.log.add("notify", f"„{a['title']}“", f"Knopf in der Nachricht · {by}")
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Knopf %s fehlgeschlagen: %s", a.get("do"), err)
+            self.log.add("notify", f"„{a['title']}“ fehlgeschlagen", f"{err} · {by}")
+            return False
+        finally:
+            self._save()
+        return True
 
     def _deco(self, title: str, kind: str | None = None) -> str:
         """Dezent ein Emoji vor den Titel (abschaltbar unter Benachrichtigungen)."""

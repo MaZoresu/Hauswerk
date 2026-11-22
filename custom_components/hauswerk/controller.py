@@ -1845,7 +1845,8 @@ class Heizen:
                 # Nacht vorbei, Fenster noch offen: einmal erinnern
                 session["night_end"] = now
                 self.log.add("window", "Nacht vorbei – Fenster noch offen", "Erinnerung „Fenster schließen“", room_id, name)
-                self.haus.notify(done_key, "vent_done", "Fenster schließen", f"{name}: Nacht vorbei – Fenster noch offen", room_id, name)
+                self.haus.notify(done_key, "vent_done", "Fenster schließen", f"{name}: Nacht vorbei – Fenster noch offen", room_id, name,
+                                 actions=[{"title": "10 Min. später", "do": "snooze", "minutes": 10}, {"title": "Gesehen", "do": "ack"}])
             if session.get("night"):
                 pass
             elif not session["done"]:
@@ -1861,7 +1862,8 @@ class Heizen:
                     cnt = self._ventdone_sent.get(room_id)
                     n = cnt[1] if cnt and cnt[0] == day else 0
                     self.haus.notify(done_key, "vent_done", "Fenster schließen", f"{name}: genug gelüftet ({why})", room_id, name,
-                                     quiet_why=f"heute schon {n}× gesendet" if n >= 2 else None)
+                                     quiet_why=f"heute schon {n}× gesendet" if n >= 2 else None,
+                                     actions=[{"title": "10 Min. später", "do": "snooze", "minutes": 10}, {"title": "Gesehen", "do": "ack"}])
                     if n < 2:
                         self._ventdone_sent[room_id] = (day, n + 1)
             long_min = float(self.settings.get("vent_long_min") or 30)
@@ -1939,7 +1941,8 @@ class Heizen:
             since = None  # nachts gewollt offen (Schlafzimmer)
         if open_since is not None and since is not None and now - since >= limit * 60:
             self.haus.notify(key, "window", "Fenster lange offen",
-                             f"{name}: seit {int((now - open_since) // 60)} Min. offen", room_id, name)
+                             f"{name}: seit {int((now - open_since) // 60)} Min. offen", room_id, name,
+                             actions=[{"title": "In 30 Min.", "do": "snooze", "minutes": 30}, {"title": "Gesehen", "do": "ack"}])
         else:
             self.haus.clear(key)
         limit = float(hs.get("notify_offline_min") or 15) * 60
@@ -1957,7 +1960,8 @@ class Heizen:
             if entity_id in low:
                 level = low[entity_id]["level"]
                 text = "schwach" if level == 0 else f"{level:.0f} %"
-                self.haus.notify(key, "battery", "Batterie schwach", f"{low[entity_id]['name']} ({name}): {text}", room_id, name)
+                self.haus.notify(key, "battery", "Batterie schwach", f"{low[entity_id]['name']} ({name}): {text}", room_id, name,
+                                 actions=[{"title": "Gesehen", "do": "ack"}])
             else:
                 state = self.hass.states.get(entity_id)
                 lvl = battery_level(state.state, state.attributes.get("device_class"), state.attributes.get("unit_of_measurement")) if state else None

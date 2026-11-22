@@ -2386,6 +2386,77 @@ def test_beetwerk_garten_frei_igel_hitze_waechter(hw):
     asyncio.run(run())
 
 
+def test_knoepfe_in_nachrichten(hw):
+    """Nachrichten an die Home-Assistant-App tragen Knöpfe; ein Knopf wirkt einmal, Gesehen/Später unterdrücken den Anlass."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 22, 12, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("light.wz", "on", {}, "Licht Wohnzimmer")
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"notify_targets": ["mobile_app_pixel"], "notify_quiet": False})
+        lw = hw.Lichtwerk(hass, log, haus)
+        await lw.async_load()
+        lw.settings["lw_lights"] = ["light.wz"]
+        await lw.async_start()
+        haus.notify("lw_away", "light_away", "Licht an, niemand zu Hause", "Licht Wohnzimmer",
+                    actions=[{"title": "Alle aus", "do": "lw_off", "data": {"eids": ["light.wz"]}}, {"title": "Gesehen", "do": "ack"}])
+        await asyncio.sleep(0)
+        call = [c for c in hass.calls if c[0] == "notify" and c[1] == "mobile_app_pixel"][-1]
+        acts = call[2]["data"]["actions"]
+        assert [a["title"] for a in acts] == ["Alle aus", "Gesehen"] and acts[0]["action"].startswith("HW_") and call[2]["data"]["tag"]
+        tok = acts[0]["action"][3:]
+        assert await haus.async_run_action(tok, None)
+        assert ("light", "turn_off", {"entity_id": "light.wz"}) in hass.calls
+        assert any(e["title"] == "„Alle aus“" for e in log.entries)
+        # einmalig: zweiter Druck (und der andere Knopf derselben Nachricht) tut nichts
+        assert not await haus.async_run_action(tok, None)
+        assert not await haus.async_run_action(acts[1]["action"][3:], None)
+        # Gesehen: Anlass kommt bis zum Erledigen nicht wieder
+        haus.clear("w1")
+        haus.notify("w1", "window", "Fenster lange offen", "Bad", actions=[{"title": "Gesehen", "do": "ack"}])
+        await asyncio.sleep(0)
+        tok = [c for c in hass.calls if c[0] == "notify"][-1][2]["data"]["actions"][0]["action"][3:]
+        assert await haus.async_run_action(tok, None)
+        n = len(hass.sent())
+        NOW[0] += timedelta(hours=6)
+        haus.notify("w1", "window", "Fenster lange offen", "Bad")
+        await asyncio.sleep(0)
+        assert len(hass.sent()) == n
+        haus.clear("w1")
+        haus.notify("w1", "window", "Fenster lange offen", "Bad")
+        await asyncio.sleep(0)
+        assert len(hass.sent()) == n + 1
+        # Später: 10 Min. Ruhe, danach wieder
+        haus.clear("v1")
+        haus.notify("v1", "vent_done", "Fenster schließen", "Bad", actions=[{"title": "10 Min. später", "do": "snooze", "minutes": 10}])
+        await asyncio.sleep(0)
+        tok = [c for c in hass.calls if c[0] == "notify"][-1][2]["data"]["actions"][0]["action"][3:]
+        assert await haus.async_run_action(tok, None)
+        n = len(hass.sent())
+        haus.notify("v1", "vent_done", "Fenster schließen", "Bad")
+        await asyncio.sleep(0)
+        assert len(hass.sent()) == n
+        NOW[0] += timedelta(minutes=11)
+        haus.notify("v1", "vent_done", "Fenster schließen", "Bad")
+        await asyncio.sleep(0)
+        assert len(hass.sent()) == n + 1
+        # abgelaufen nach 12 Std.
+        haus.clear("w2")
+        haus.notify("w2", "window", "Fenster lange offen", "Küche", actions=[{"title": "Gesehen", "do": "ack"}])
+        await asyncio.sleep(0)
+        tok = [c for c in hass.calls if c[0] == "notify"][-1][2]["data"]["actions"][0]["action"][3:]
+        NOW[0] += timedelta(hours=13)
+        assert not await haus.async_run_action(tok, None)
+        # URI-Knopf ohne Token
+        haus.notify("wk", "weekly", "Wochenbericht", "…", actions=[{"title": "Hauswerk öffnen", "uri": "/hauswerk"}])
+        await asyncio.sleep(0)
+        assert [c for c in hass.calls if c[0] == "notify"][-1][2]["data"]["actions"] == [{"action": "URI", "title": "Hauswerk öffnen", "uri": "/hauswerk"}]
+
+    asyncio.run(run())
+
+
 def test_therme_erkennen(hw):
     """Therme (myVaillant) und eigene Fühler werden erkannt; der Heizkreis-Fühler über das gemeinsame Gerät (Shelly)."""
     async def run():

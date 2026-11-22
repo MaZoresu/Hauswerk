@@ -1027,7 +1027,8 @@ class Rollwerk:
                 if (self._storm or rain) and self._contact(c):
                     what = "Sturm" if self._storm else "Regen"
                     self.haus.notify(key, "storm", f"Fenster offen – {what}",
-                                     f"{self._name(c)}: bitte schließen – der Rollladen bleibt {'oben' if self._storm else 'auf Lüftungsstellung'}")
+                                     f"{self._name(c)}: bitte schließen – der Rollladen bleibt {'oben' if self._storm else 'auf Lüftungsstellung'}",
+                                     actions=[{"title": "In 30 Min.", "do": "snooze", "minutes": 30}, {"title": "Gesehen", "do": "ack"}])
                 else:
                     self.haus.clear(key)
 
@@ -1193,8 +1194,10 @@ class Rollwerk:
 
     def _note_move(self, entity_id: str, pos: float | None, why: str, by: str) -> None:
         """Letzte Fahrt je Rollladen merken (für die Kachel: „07:15 ↑ Morgens öffnen“), übersteht Neustarts."""
+        before = self._pos(entity_id) if by == "auto" else None  # für „Rückgängig“
         self._persist.setdefault("last", {})[entity_id] = {
-            "at": dt_util.utcnow().timestamp(), "pos": None if pos is None else round(float(pos)), "why": why, "by": by}
+            "at": dt_util.utcnow().timestamp(), "pos": None if pos is None else round(float(pos)), "why": why, "by": by,
+            "from": None if before is None else round(float(before))}
 
     def _device_health(self, entity_id: str) -> dict[str, Any] | None:
         """Batterie und Funk am Gerät des Rollladens (nur wenn vorhanden); Sensoren alle 10 Minuten neu suchen."""

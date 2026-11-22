@@ -60,7 +60,15 @@ class Wachwerk:
         self.settings.update({k: v for k, v in (stored.get("settings") or {}).items() if k in WW_KEYS})
         self._persist = stored.get("persist") or {}
 
+    async def _act_close(self, data: dict, by: str) -> None:
+        """Knopf „Schließen“ (Garagentor u. Ä.)."""
+        eid = data.get("eid")
+        if eid and eid.startswith("cover."):
+            await self.hass.services.async_call("cover", "close_cover", {"entity_id": eid}, blocking=True)
+            self.log.add("security", f"{self._name(eid)} wird geschlossen", by, module="wachwerk")
+
     async def async_start(self) -> None:
+        self.haus.action_handlers["ww_close"] = self._act_close
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
         self._unsubs.append(self.haus.subscribe(self._on_house))
         self._was_away = bool(getattr(self.haus, "away", False))
@@ -172,7 +180,8 @@ class Wachwerk:
         cam = self.settings.get("ww_camera")
         self.haus.notify(f"ww_bell_{int(now.timestamp())}", "bell", "Es hat geklingelt",
                          "an der Haustür" + ("" if not getattr(self.haus, "away", False) else " – niemand zu Hause"),
-                         image=f"/api/camera_proxy/{cam}" if cam else None)
+                         image=f"/api/camera_proxy/{cam}" if cam else None,
+                         actions=[{"title": "Wachwerk öffnen", "uri": "/hauswerk/wachwerk/sicherheit"}])
         self.log.add("security", "Es hat geklingelt", self._name(st.entity_id), module="wachwerk")
         self._save()
 
@@ -227,7 +236,9 @@ class Wachwerk:
             st = self.hass.states.get(x)
             key = f"ww_door:{x}"
             if st is not None and st.state in WINDOW_OPEN and now - st.last_changed.timestamp() >= lim:
-                self.haus.notify(key, "door", f"{self._name(x)} offen", f"seit {int((now - st.last_changed.timestamp()) // 60)} Min.")
+                self.haus.notify(key, "door", f"{self._name(x)} offen", f"seit {int((now - st.last_changed.timestamp()) // 60)} Min.",
+                                 actions=([{"title": "Schließen", "do": "ww_close", "data": {"eid": x}}] if x.startswith("cover.") else [])
+                                 + [{"title": "In 30 Min.", "do": "snooze", "minutes": 30}, {"title": "Gesehen", "do": "ack"}])
             else:
                 self.haus.clear(key)
 
@@ -282,8 +293,10 @@ class Wachwerk:
                 out.append({"entity": x, "name": lw.name_room(x) if hasattr(lw, "name_room") else self._name(x), "what": "an"})
         if notify:
             if out:
+                lights = [o["entity"] for o in out if o["what"] == "an"]
                 self.haus.notify("ww_leave", "leave", "Niemand zu Hause – noch offen",
-                                 ", ".join(f"{o['name']} {o['what']}" for o in out[:8]) + (f" und {len(out) - 8} weitere" if len(out) > 8 else ""))
+                                 ", ".join(f"{o['name']} {o['what']}" for o in out[:8]) + (f" und {len(out) - 8} weitere" if len(out) > 8 else ""),
+                                 actions=([{"title": "Lichter aus", "do": "lw_off", "data": {"eids": lights}}] if lights else []) + [{"title": "Gesehen", "do": "ack"}])
                 self.log.add("security", "Beim Verlassen noch offen bzw. an", ", ".join(o["name"] for o in out), module="wachwerk")
             else:
                 self.haus.clear("ww_leave")

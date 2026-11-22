@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.92.0";
+const VERSION = "0.93.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -143,6 +143,12 @@ const NK_KINDS = [
   { k: "weekly", g: "Hauswerk", icon: "mdi:newspaper-variant-outline", c: "#14b8a6", title: "Wochenbericht", def: "normal", ex: ["Wochenbericht", "🔥 Heizwerk: 84 Std. geheizt · 💡 Lichtwerk: 46 Std. Licht"], text: "Einmal pro Woche das Wichtigste aus allen Modulen (Hauswerk › Wochenbericht)." },
   { k: "waste", g: "Hauswerk", icon: "mdi:trash-can-outline", c: "#64748b", title: "Müllabfuhr morgen", def: "off", ex: ["Morgen Müllabfuhr", "Restabfall, Papier – Tonne heute Abend rausstellen."], text: "Am Vorabend ab der Uhrzeit unter Hauswerk › Kalender › Müllabholung, einmal je Abholtag." },
 ];
+// Knöpfe in der Mitteilung der Home-Assistant-App (je Anlass)
+const NK_BTNS = {
+  light_away: ["Alle aus", "Gesehen"], leave: ["Lichter aus", "Gesehen"], window: ["In 30 Min.", "Gesehen"], vent_done: ["10 Min. später", "Gesehen"],
+  storm: ["In 30 Min.", "Gesehen"], door: ["Schließen (Tor)", "In 30 Min.", "Gesehen"], mower_guard: ["Garten frei", "2 Std. belegt"], mower: ["Gesehen"],
+  maint: ["Erledigt", "In 1 Woche"], weekly: ["Hauswerk öffnen"], bell: ["Wachwerk öffnen"], waste: ["Erledigt"], battery: ["Gesehen"],
+};
 const NK_GROUPS = { Heizwerk: ["#f97316", "logo:heizen"], "Lüften": ["#22d3ee", "mdi:weather-windy"], Rollwerk: ["#0ea5e9", "logo:rollwerk"], Kraftwerk: ["#eab308", "logo:kraftwerk"], Lichtwerk: ["#6366f1", "logo:lichtwerk"], Beetwerk: ["#16a34a", "logo:beetwerk"], Wachwerk: ["#dc2626", "logo:wachwerk"], Hauswerk: ["#14b8a6", "mdi:home-outline"] };
 const NK_GICON = { App: "mdi:cellphone", Pushover: "mdi:message-badge-outline", Telegram: "mdi:send-circle-outline", "E-Mail": "mdi:email-outline", Sprachausgabe: "mdi:account-voice", Bildschirm: "mdi:tablet", Weitere: "mdi:bell-outline", "Home Assistant": "mdi:home-assistant" };
 /** Kanäle eines Kraftwerk-Geräts (alte Einträge: nur Dienstname, notify_ha). */
@@ -2200,8 +2206,7 @@ class HauswerkPanel extends HTMLElement {
   /** Übersicht der Termine (14 Tage) aus allen Kalendern – Zahnrad führt zu den Kalender-Einstellungen. */
   _agendaPop() {
     const cals = this._allCals();
-    const gear = this._admin ? `<button class="icon boxed" data-action="settings-go" data-sub="calendars" title="Kalender einstellen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : "";
-    const base = { icon: "mdi:calendar-month-outline", c: "#f472b6", title: "Termine", headBtn: gear, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+    const base = { icon: "mdi:calendar-month-outline", c: "#f472b6", title: "Termine", gear: `data-action="settings-go" data-sub="calendars"`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     if (!cals.length)
       return { ...base, sub: "kein Kalender gewählt", body: `<p class="muted">Unter Kalender wählst du Termin- und Müll-Kalender (z. B. Familie, Abfuhr).</p>${this._admin ? `<button class="primary" data-action="settings-go" data-sub="calendars"><ha-icon icon="mdi:cog-outline"></ha-icon>Kalender einstellen</button>` : ""}` };
     const key = `${cals.join(",")}|14`;
@@ -5769,8 +5774,18 @@ class HauswerkPanel extends HTMLElement {
       const presets = [["off", "Aus", "mdi:lightbulb-off-outline"], ...(prof.night ? [[prof.night_brightness ?? 10, "Nachtlicht", "mdi:weather-night"]] : []), [prof.brightness ?? 80, "Normal", "mdi:lightbulb-outline"], [100, "Hell", "mdi:lightbulb-on"]];
       return {
         icon: this._lwIco(l, l.st?.state === "on"), c: "#6366f1", title: esc(this._lwName(l)), sub: `Lichtwerk · ${l.st?.state === "on" ? `an${pct != null ? ` · ${pct} %` : ""}` : "aus"}`, open: true,
+        gear: `data-action="pop-open" data-pop="lwl:${esc(eid)}"`,
         body: `
-          ${l.ls.cause && l.cfg.auto !== false ? `<div class="rq-why"><ha-icon icon="mdi:help-circle-outline"></ha-icon><span><b>Automatik</b><small>${esc(l.ls.cause)}</small>${l.ls.next ? `<small class="muted">Als Nächstes: ${l.ls.next.action === "on" ? "an" : "aus"} ${this._lwWhen(l.ls.next)} (${esc(l.ls.next.reason)})</small>` : ""}</span></div>` : ""}
+          ${(() => {
+            if (l.cfg.auto === false || !(l.ls.cause || l.ls.last_auto)) return "";
+            const la = l.ls.last_auto;
+            const hm = (t) => new Date(t * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+            const isOn = l.st?.state === "on";
+            const undo = la && !l.ls.manual && !l.ls.ccu && Date.now() / 1000 - la.at < 3 * 3600 && la.on === isOn && la.prev_on !== la.on
+              ? `<button class="secondary small" data-action="lw-pre" data-ids="${esc(eid)}" data-v="${la.prev_on ? (la.prev_bri || 100) : "off"}" title="Wieder ${la.prev_on ? "an" : "aus"} – danach wartet die Automatik"><ha-icon icon="mdi:undo-variant"></ha-icon>Rückgängig</button>` : "";
+            return this._whyBox("Warum so?", [l.ls.cause ? esc(l.ls.cause) : "", l.ls.next ? `<span class="muted">Als Nächstes: ${l.ls.next.action === "on" ? "an" : "aus"} ${this._lwWhen(l.ls.next)} (${esc(l.ls.next.reason)})</span>` : "",
+              la ? `<span class="muted">Zuletzt ${hm(la.at)}: ${la.on ? "an" : "aus"} · ${esc(la.cause || "")}</span>` : ""], undo);
+          })()}
           ${l.ls.ccu ? `<div class="room-note"><ha-icon icon="mdi:link-variant"></ha-icon>HmIP · ${esc(l.ls.ccu)}${l.cfg.auto !== false ? " – Lichtwerk wartet, bis die Direktverknüpfung ausschaltet" : ""}</div>` : ""}
           ${l.ls.manual && !l.ls.ccu && l.cfg.auto !== false ? `<div class="room-note"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>Von Hand – Automatik wartet<span class="grow"></span><button class="link" data-action="lw-cmd" data-ids="${esc(eid)}" data-a="resume">Automatik übernimmt</button></div>` : ""}
           ${l.cfg.auto !== false && this._lwStatus?.lights?.[eid] ? `<div class="pop-tl">${this._lwDayBar(l)}</div>` : ""}
@@ -6945,6 +6960,11 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Pop-up „Höhe einstellen“: Fenster zum Ziehen, Behanghöhen aus dem Profil, hoch/Stopp/runter. */
+  /** Einheitlicher Block „Warum so?“ in den Fenstern: Grund, letzte automatische Änderung und „Rückgängig“. */
+  _whyBox(title, lines, undo = "") {
+    return `<div class="rq-why"><ha-icon icon="mdi:help-circle-outline"></ha-icon><span class="grow"><b>${title}</b>${lines.filter(Boolean).map((l) => `<small>${l}</small>`).join("")}</span>${undo}</div>`;
+  }
+
   _rwPosPop(id) {
     const c = this._rwCovers().find((x) => x.id === id) || { id, st: this._hass.states[id], cfg: {}, rs: {} };
     const bad = !c.st || ["unavailable", "unknown"].includes(c.st.state);
@@ -6955,9 +6975,17 @@ class HauswerkPanel extends HTMLElement {
     const txt = (x) => (x >= 100 ? "offen" : x <= 0 ? "zu" : `${fmt(x, 0)} % offen`);
     const presets = RW_HEIGHTS;
     const auto = c.cfg.auto !== false;
+    const last = c.rs.last;
+    const hm = (t) => new Date(t * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    const canUndo = auto && last && last.by === "auto" && last.from != null && !c.rs.manual && Date.now() / 1000 - last.at < 3 * 3600 && Math.abs((cur ?? last.pos) - last.from) > 2;
+    const why = auto && (c.rs.reason || last) ? this._whyBox("Warum so?", [
+      c.rs.reason ? esc(c.rs.reason) : "",
+      last ? `<span class="muted">Zuletzt ${hm(last.at)}: ${last.pos != null ? txt(last.pos) : "gefahren"} · ${esc(last.why || (last.by === "hand" ? "von Hand" : ""))}</span>` : ""],
+      canUndo ? `<button class="secondary small" data-action="rwpos-go" data-id="${esc(id)}" data-v="${last.from}" title="Zurück auf ${txt(last.from)} – danach wartet die Automatik bis zum nächsten Wechsel"><ha-icon icon="mdi:undo-variant"></ha-icon>Rückgängig</button>` : "") : "";
     return {
-      icon: "mdi:window-shutter", c: "#0ea5e9", title: this._entityName(id), sub: `Rollwerk · Höhe einstellen`,
+      icon: "mdi:window-shutter", c: "#0ea5e9", title: this._entityName(id), sub: `Rollwerk · Höhe einstellen`, gear: `data-action="pop-open" data-pop="rwc:${esc(id)}"`,
       body: `
+        ${why}
         <div class="rwpos">
           <div class="rwwin ${bad ? "off" : ""}" data-rwwin="${esc(id)}" style="--v:${v}" role="slider" aria-label="Höhe" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${v}" tabindex="0">
             <div class="rwwin-glass"></div>
@@ -8407,7 +8435,7 @@ class HauswerkPanel extends HTMLElement {
     // ---------- Reiter „Anlässe“
     const preview = (x, chs) => {
       const voice = voiceOf(chs);
-      return `<div class="nk-prev"><div class="nk-phone"><ha-icon icon="mdi:home-automation"></ha-icon><span class="grow"><b>${esc(p.notify_emoji !== false ? nkEmoji(x.ex[0], x.k) : x.ex[0])}</b><small>${esc(x.ex[1])}</small></span><em>jetzt</em></div>
+      return `<div class="nk-prev"><div class="nk-phone"><ha-icon icon="mdi:home-automation"></ha-icon><span class="grow"><b>${esc(p.notify_emoji !== false ? nkEmoji(x.ex[0], x.k) : x.ex[0])}</b><small>${esc(x.ex[1])}</small>${NK_BTNS[x.k] ? `<span class="nk-btns">${NK_BTNS[x.k].map((b) => `<i>${esc(b)}</i>`).join("")}</span>` : ""}</span><em>jetzt</em></div>
         ${this._admin && chs.length ? `<div class="nk-pa">
           <button class="secondary small" data-action="nk-try" data-k="${x.k}" ${dis}><ha-icon icon="mdi:send-outline"></ha-icon>So senden</button>
           ${voice.length ? `<button class="secondary small" data-action="nk-try" data-k="${x.k}" data-voice="1" ${dis}><ha-icon icon="mdi:account-voice"></ha-icon>Probehören</button>` : ""}</div>` : ""}</div>`;
@@ -9342,6 +9370,7 @@ class HauswerkPanel extends HTMLElement {
           <span class="sr-ic big" style="--c:${def.c}"><ha-icon icon="${def.icon}"></ha-icon></span>
           <div class="grow"><h2>${def.title}</h2>${def.sub ? `<div class="muted">${def.sub}</div>` : ""}</div>
           ${def.headBtn || ""}
+          ${def.gear && this._admin ? `<button class="icon boxed" ${def.gear} title="Einstellungen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}
           <button class="icon boxed" data-action="pop-close" title="Schließen"><ha-icon icon="mdi:close"></ha-icon></button>
         </div>
         <div class="sheet-body">${this._admin || def.open ? "" : `<p class="note warn"><ha-icon icon="mdi:lock-outline"></ha-icon>Nur ansehen: Ändern dürfen Administratoren – oder alle, wenn ein Admin es unter „Berechtigungen“ freigibt.</p>`}${def.body}</div>
@@ -9431,8 +9460,8 @@ class HauswerkPanel extends HTMLElement {
     if (id === "bwmow" || id === "bwwat") {
       const bs = this._status?.beetwerk || {};
       return id === "bwmow"
-        ? { icon: "mdi:robot-mower-outline", c: "#16a34a", title: this._entityName(bs.entities?.mower), sub: "Beetwerk", body: `<div class="bw-pop">${this._bwMowerCard(bs, this._bwSvcBtn.bind(this))}</div>`, foot: "" }
-        : { icon: "mdi:sprinkler-variant", c: "#0ea5e9", title: "Bewässerung", sub: "Beetwerk", body: `<div class="bw-pop">${this._bwWaterCard(bs)}</div>`, foot: "" };
+        ? { icon: "mdi:robot-mower-outline", c: "#16a34a", title: this._entityName(bs.entities?.mower), sub: "Beetwerk", gear: `data-action="settings-go" data-sub="bwmower"`, body: `<div class="bw-pop">${this._bwMowerCard(bs, this._bwSvcBtn.bind(this))}</div>`, foot: "" }
+        : { icon: "mdi:sprinkler-variant", c: "#0ea5e9", title: "Bewässerung", sub: "Beetwerk", gear: `data-action="settings-go" data-sub="bwwater"`, body: `<div class="bw-pop">${this._bwWaterCard(bs)}</div>`, foot: "" };
     }
     if (String(id).startsWith("lwp:")) { const [, pid, sec] = String(id).split(":"); return this._lwpPop(pid, LW_SECTIONS.some(([x]) => x === sec) ? sec : "on"); }
     if (String(id).startsWith("lwbri:") || String(id).startsWith("lwl:") || String(id).startsWith("lwroom:") || String(id).startsWith("lwarea:") || LW_POPS.includes(id)) return this._lwPop(id);
@@ -9736,6 +9765,7 @@ class HauswerkPanel extends HTMLElement {
         const auto = room.enabled !== false;
         return {
           icon: roomIcon(room), c: this._roomColor(room.id), title: esc(room.name || "Raum"), sub: "Manuell ändern", open: true,
+          gear: `data-action="room-edit" data-id="${esc(room.id)}"`,
           body: `
             <div class="rq-facts">${facts.map(([i, txt, c]) => `<span style="--c:${c}"><ha-icon icon="${i}"></ha-icon>${esc(txt)}</span>`).join("")}</div>
             ${auto && (room.climates || []).length ? `<div class="pop-tl">${this._schedStrip(room, rs)}</div>` : ""}
@@ -15343,6 +15373,8 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .nk-chev { color:var(--muted); --mdc-icon-size:20px; }
 .nk-body { padding:0 12px 12px; display:flex; flex-direction:column; gap:8px; }
 .nk-prev { display:flex; flex-direction:column; gap:6px; }
+.nk-btns { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
+.nk-btns i { font-style:normal; font-size:12px; font-weight:600; padding:3px 10px; border-radius:99px; background:color-mix(in srgb, var(--accent, #0ea5e9) 14%, transparent); color:var(--text); }
 .nk-phone { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:16px; background:var(--card2); box-shadow:0 1px 3px rgba(0,0,0,.12); max-width:420px; }
 .nk-phone > ha-icon { --mdc-icon-size:22px; color:#18bcf2; }
 .nk-phone b { display:block; font-size:13.5px; }
@@ -15415,6 +15447,8 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .rs-why ha-icon { --mdc-icon-size:15px; flex:none; }
 .rq-why { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:12px; background:var(--card2); margin:8px 0; }
 .rq-why b { display:block; font-size:13px; } .rq-why small { display:block; font-size:12.5px; }
+.rq-why .grow { min-width:0; }
+.rq-why > button { flex:none; align-self:center; }
 .lw-c.on { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--lc) 45%, transparent); }
 .lw-bulb { width:46px; height:46px; flex:none; border-radius:14px; border:none; display:grid; place-items:center; cursor:pointer; background:var(--card2); color:var(--muted); }
 .lw-bulb ha-icon { --mdc-icon-size:26px; }
