@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.84.0 – 2026-11-22
+
+### Geändert (Tabletmodus, Beetwerk)
+- **Beetwerk wie die anderen Module:** Die Seite Garten zeigt im Tablet Wand-Kacheln – je Kachel Name, eine große Zahl und eine Statuszeile, darunter große Knöpfe:
+  - **Mähroboter:** Bild im Zustand, Akku in %, „Mäht · seit 42 Min.“ bzw. „In der Station · wartet – es regnet“ oder „Winterpause“; Knöpfe Mähen/Pause und Zur Station.
+  - **Garten:** „frei“ oder „belegt“ (Kamera bzw. „Garten belegt“), Knöpfe 2 Std. belegt / Bis heute Abend bzw. Wieder frei.
+  - **Je Bewässerungs-Zone:** Bedarf in Min. bzw. Restzeit beim Gießen, Bilanz; Knopf Gießen bzw. Stopp.
+- Antippen öffnet die Details im Fenster: die Karte des Mähroboters mit Zeitplan/Mähplan und Mähzeiten bzw. die Bewässerung mit allen Zonen. Wie bei den anderen Modulen gilt Darstellung › Tabletmodus › Kacheln (Automatisch: Details nach dem ersten Antippen).
+
 ## 0.83.3 – 2026-11-22
 
 ### Behoben (Heizwerk › Fensterpause)

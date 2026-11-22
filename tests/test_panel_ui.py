@@ -1782,6 +1782,25 @@ def test_wandkachel_fenster_offen_hmip(tablet):
     assert "Fenster offen" in t and "HmIP 12,0°" in t and "4 Min." in t and "Manuell" not in t, t
 
 
+def test_beetwerk_wandkacheln(tablet):
+    """Tabletmodus: Beetwerk wie die anderen Module – Wand-Kacheln für Mäher, Garten und je Zone; Antippen öffnet die Details."""
+    p = tablet
+    p.js(f"() => {{ {EL}._touched = false; }}")
+    p.view("garden")
+    p.wait(300)
+    names = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.wgrid > .wt .wt-n b')].map((b) => b.textContent)")
+    assert names[:2] == ["Automower", "Garten"] and "Rasen 1" in names, names
+    assert not p.has(".bw-mow")  # die große Karte erst im Fenster
+    p.js(f"() => {{ {EL}.shadowRoot.querySelector('.wgrid > .wt[data-pop=\"bwmow\"]').click(); }}")
+    p.wait()
+    assert p.has("#pop .bw-mow") and "Zeitplan" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    p.js(f"{EL}._closePop()")
+    p.js(f"() => {{ {EL}.shadowRoot.querySelector('.wgrid > .wt[data-pop=\"bwwat\"]').click(); }}")
+    p.wait()
+    assert p.has("#pop .bw-zones")
+    p.js(f"{EL}._closePop()")
+
+
 def test_zeitleiste_in_detailfenstern(tablet):
     """Tagesleiste in den Fenstern hinter den Wand-Kacheln: Raum (Heizwerk), Rollladen, Rollläden je Raum, Licht, Lichter je Raum."""
     p = tablet

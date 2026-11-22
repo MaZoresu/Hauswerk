@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.83.3";
+const VERSION = "0.84.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4943,6 +4943,24 @@ class HauswerkPanel extends HTMLElement {
       ],
     });
     const mower = !E.mower ? "" : this._bwMowerCard(bs, svc);
+    const water = this._bwWaterCard(bs);
+    if (this._wall()) return head + this._bwWall(bs);
+    return head + `<div class="bw-grid">${mower}${water}</div>`;
+  }
+
+  _bwSvcBtn(d, sv, e, label, icon, cls = "") {
+    return `<button class="qbtn ${cls}" data-action="bw-svc" data-d="${d}" data-s="${sv}" data-e="${esc(e)}" data-l="${esc(label)}"><ha-icon icon="${icon}"></ha-icon>${label}</button>`;
+  }
+
+  /** Bewässerung: Zonen aus Smart Irrigation bzw. einfaches Ventil. */
+  _bwWaterCard(bs) {
+    const E = bs.entities || {};
+    const S = this._hass.states;
+    const svc = this._bwSvcBtn.bind(this);
+    const soil = this._bwNum(E.soil);
+    const need = E.need ? S[E.need]?.state === "on" : null;
+    const valve = E.valve ? S[E.valve] : null;
+    const vOpen = valve ? ["open", "opening", "on"].includes(valve.state) : false;
     const zones = bs.zones || [];
     const zoneHtml = !zones.length ? "" : `<section class="card bw-c bw-zones">
       <div class="bw-h"><span class="bw-ic" style="--c:#0ea5e9"><ha-icon icon="mdi:sprinkler-variant"></ha-icon></span><span class="grow"><b>Bewässerung</b>
@@ -4978,7 +4996,56 @@ class HauswerkPanel extends HTMLElement {
         E.bucket && this._bwNum(E.bucket) != null ? [`${fmt(this._bwNum(E.bucket), 1)} mm`, "Wasserbilanz (Smart Irrigation)", ""] : null,
       ].filter(Boolean).map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>
     </section>`;
-    return head + `<div class="bw-grid">${mower}${water}</div>`;
+    return water;
+  }
+
+  /** Tabletmodus: Wand-Kacheln wie in den anderen Modulen – große Zahl, eine Statuszeile, Rest beim Antippen. */
+  _bwWall(bs) {
+    const E = bs.entities || {};
+    const tiles = [];
+    if (E.mower) {
+      const mv = this._bwMowerState(bs);
+      const bat = this._bwNum(E.battery);
+      const why = (bs.reasons || []).map((r) => r.text);
+      const busy = bs.busy_until ? new Date(bs.busy_until) : null;
+      const next = bs.next_start ? new Date(bs.next_start) : null;
+      const line = bs.error ? esc(bs.error) : mv.k === "winter" ? "" : busy ? `Garten belegt bis ${busy.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`
+        : why.length && mv.k !== "mowing" ? `wartet – ${esc(why[0])}` : mv.k === "mowing" && bs.since ? `seit ${this._bwAgo(bs.since)}` : next ? `nächster Start ${next.toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : "";
+      const btn = (sv, i, t) => `<button class="wbtn" data-action="bw-svc" data-d="lawn_mower" data-s="${sv}" data-e="${esc(E.mower)}" data-l="${t}" title="${t}" ${mv.k === "offline" ? "disabled" : ""}><ha-icon icon="${i}"></ha-icon></button>`;
+      tiles.push(this._wallTile({
+        act: `data-action="pop-open" data-pop="bwmow"`, color: mv.c, ic: `<span class="wt-ic wt-art">${this._bwArt(mv, "sm")}</span>`,
+        name: this._entityName(E.mower), value: bat != null ? `${fmt(bat, 0)}` : "–", unit: bat != null ? "%" : "",
+        status: `<span style="color:${tint(mv.c)}"><ha-icon icon="${mv.icon}"></ha-icon><b>${esc(mv.label)}</b></span>${line ? `<span class="wt-dim" style="margin-left:6px">· ${line}</span>` : ""}`,
+        ctl: mv.k === "winter" ? "" : mv.k === "mowing" ? btn("pause", "mdi:pause", "Pause") + btn("dock", "mdi:home-import-outline", "Zur Station") : btn("start_mowing", "mdi:play", "Mähen") + btn("dock", "mdi:home-import-outline", "Zur Station"),
+        cls: mv.k === "offline" ? "bad" : mv.k === "winter" ? "off" : "",
+      }));
+      if (mv.k !== "winter" && this._data.settings.bw_guard !== false) {
+        const guard = (bs.reasons || []).some((r) => r.k === "guard");
+        tiles.push(this._wallTile({
+          act: `data-action="pop-open" data-pop="bwmow"`, color: busy || guard ? "#f59e0b" : "#16a34a",
+          ic: `<span class="wt-ic"><ha-icon icon="mdi:human-child"></ha-icon></span>`, name: "Garten",
+          value: busy || guard ? "belegt" : "frei",
+          status: busy ? `<span class="wt-dim">bis ${busy.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} – Mäher bleibt in der Station</span>` : guard ? `<span class="wt-dim">jemand im Garten – Mäher wartet</span>` : `<span class="wt-dim">Kamera schickt den Mäher bei Bedarf heim</span>`,
+          ctl: busy ? `<button class="wbtn" data-action="bw-busy" data-v="clear" title="Wieder frei"><ha-icon icon="mdi:check"></ha-icon></button>`
+            : `<button class="wbtn" data-action="bw-busy" data-v="2" title="2 Std. belegt"><ha-icon icon="mdi:timer-outline"></ha-icon></button><button class="wbtn" data-action="bw-busy" data-v="evening" title="Bis heute Abend"><ha-icon icon="mdi:grill-outline"></ha-icon></button>`,
+        }));
+      }
+    }
+    for (const z of bs.zones || []) {
+      const min = z.duration ? Math.max(1, Math.round(z.duration / 60)) : 0;
+      const vl = z.valves || [];
+      const run = !!z.running_until;
+      tiles.push(this._wallTile({
+        act: `data-action="pop-open" data-pop="bwwat"`, color: run || z.waiting ? "#0ea5e9" : min ? "#0ea5e9" : C.rest,
+        ic: `<span class="wt-ic"><ha-icon icon="mdi:sprinkler-variant"></ha-icon></span>`, name: z.name,
+        value: run ? `<span data-lw-until="${esc(z.zone_until || z.running_until)}">${this._lwLeft(z.zone_until || z.running_until)}</span>` : min ? `${min}` : "–", unit: !run && min ? "Min." : "",
+        status: run ? `<span style="color:#0ea5e9"><ha-icon icon="mdi:water"></ha-icon><b>gießt</b></span>${z.parts > 1 ? `<span class="wt-dim" style="margin-left:6px">· Ventil ${z.part}/${z.parts}</span>` : ""}`
+          : z.waiting ? `<span class="wt-dim">wartet – kommt gleich dran</span>` : `<span class="wt-dim">${min ? "Wasser nötig" : "kein Bedarf"}${z.bucket != null ? ` · Bilanz ${Number(z.bucket) > 0 ? "+" : ""}${fmt(Number(z.bucket), 1)} mm` : ""}</span>`,
+        ctl: run || z.waiting ? `<button class="wbtn" data-action="bw-stop" title="Stopp"><ha-icon icon="mdi:stop"></ha-icon></button>`
+          : vl.length ? `<button class="wbtn" data-action="bw-water" data-zone="${esc(z.zone)}" data-min="${min || 10}" title="${min || 10} Min. gießen"><ha-icon icon="mdi:water-outline"></ha-icon></button>` : "",
+      }));
+    }
+    return `<div class="wgrid">${tiles.join("")}</div>`;
   }
 
   /** Zustand des Mähers in Worten, Farbe und Symbol – für Karte, Widget und Bildschirmschoner. */
@@ -8645,6 +8712,12 @@ class HauswerkPanel extends HTMLElement {
     if (String(id).startsWith("rwpos:")) return this._rwPosPop(id.slice(6));
     if (String(id).startsWith("kwapp:")) return this._kwAppPop(id.slice(6));
     if (String(id).startsWith("bwtimer:")) return this._bwTimerPop(Number(id.slice(8)));
+    if (id === "bwmow" || id === "bwwat") {
+      const bs = this._status?.beetwerk || {};
+      return id === "bwmow"
+        ? { icon: "mdi:robot-mower-outline", c: "#16a34a", title: this._entityName(bs.entities?.mower), sub: "Beetwerk", body: `<div class="bw-pop">${this._bwMowerCard(bs, this._bwSvcBtn.bind(this))}</div>`, foot: "" }
+        : { icon: "mdi:sprinkler-variant", c: "#0ea5e9", title: "Bewässerung", sub: "Beetwerk", body: `<div class="bw-pop">${this._bwWaterCard(bs)}</div>`, foot: "" };
+    }
     if (String(id).startsWith("lwp:")) { const [, pid, sec] = String(id).split(":"); return this._lwpPop(pid, LW_SECTIONS.some(([x]) => x === sec) ? sec : "on"); }
     if (String(id).startsWith("lwbri:") || String(id).startsWith("lwl:") || String(id).startsWith("lwroom:") || String(id).startsWith("lwarea:") || LW_POPS.includes(id)) return this._lwPop(id);
     if (String(id).startsWith("rwarea:")) {
@@ -14590,6 +14663,8 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 @media (prefers-reduced-motion: reduce) { .bw-art * { animation:none !important; } }
 .bw-guard { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 12px; border-radius:14px; background:color-mix(in srgb, var(--muted) 8%, transparent); }
 .bw-guard-a { flex-basis:100%; } .bw-guard .grow b { display:block; font-size:14px; } .bw-guard .grow small { color:var(--muted); font-size:12px; } .bw-ic.sm { width:34px; height:34px; border-radius:11px; } .bw-ic.sm ha-icon { --mdc-icon-size:20px; }
+.bw-pop > .card { box-shadow:none; border:0; padding:0; background:none; }
+.wt-ic.wt-art { width:72px; min-width:72px; background:none !important; overflow:visible; } .wt-art .bw-art { width:68px; } .wt-art .bw-art-b { width:22px; height:22px; } .wt-art .bw-art-b ha-icon { --mdc-icon-size:14px; }
 .bw-sub { display:flex; flex-direction:column; gap:10px; padding-top:12px; border-top:1px solid var(--line, color-mix(in srgb, var(--muted) 20%, transparent)); }
 .bw-sub-h { display:flex; align-items:center; gap:8px; } .bw-sub-h ha-icon { --mdc-icon-size:20px; color:#16a34a; } .bw-sub-h b { font-size:15px; } .bw-sub-h small { color:var(--muted); font-size:12px; margin-left:auto; }
 .bwt { display:flex; flex-direction:column; gap:5px; }
