@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.85.0";
+const VERSION = "0.86.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -110,7 +110,7 @@ const LEGEND = [
 const NK_EMOJI_WORDS = [[["regen"], "🌧️"], [["sturm"], "💨"], [["winterpause", "frost"], "❄️"], [["saison starten"], "🌱"], [["bleibt kalt"], "🌡️"], [["batterie", "akku"], "🪫"],
   [["nicht erreichbar"], "📡"], [["fenster"], "🪟"], [["lüften"], "🌬️"], [["braucht hilfe"], "🆘"], [["fährt heim"], "🧒"], [["nachts"], "🌙"], [["messer", "wartung"], "🔧"],
   [["mähroboter", "mäher"], "🤖"], [["licht", "leuchte"], "💡"], [["müll"], "🗑️"], [["waschmaschine"], "🧺"], [["trockner"], "👕"], [["spül", "geschirr"], "🍽️"], [["meldungen"], "📬"], [[" fertig"], "✅"], [["testnachricht", "hauswerk"], "👋"]];
-const NK_EMOJI_KINDS = { window: "🪟", offline: "📡", frost: "❄️", battery: "🪫", cold: "🌡️", vent: "🌬️", vent_done: "🪟", storm: "💨", cover: "📡", light_away: "💡", light_offline: "📡", mower: "🤖", mower_care: "🔧", mower_guard: "🧒", waste: "🗑️", appliance: "✅" };
+const NK_EMOJI_KINDS = { window: "🪟", offline: "📡", frost: "❄️", battery: "🪫", cold: "🌡️", vent: "🌬️", vent_done: "🪟", storm: "💨", cover: "📡", light_away: "💡", light_offline: "📡", mower: "🤖", mower_care: "🔧", mower_guard: "🧒", waste: "🗑️", appliance: "✅", smoke: "🔥", water: "💧", warn: "⚠️", door: "🚪", leave: "🏠", bell: "🔔", maint: "🔧", weekly: "📰" };
 const nkEmoji = (title, kind) => {
   const low = ` ${String(title).toLowerCase()}`;
   const hit = NK_EMOJI_WORDS.find(([w]) => w.some((x) => low.includes(x)));
@@ -133,9 +133,17 @@ const NK_KINDS = [
   { k: "mower", g: "Beetwerk", icon: "mdi:robot-mower-outline", c: C.alert, title: "Mähroboter braucht Hilfe", def: "important", ex: ["Mähroboter braucht Hilfe", "Automower: Mäher steckt fest"], text: "Meldet der Mähroboter einen Fehler (steckt fest, außerhalb des Drahts, Messer blockiert …)." },
   { k: "mower_guard", g: "Beetwerk", icon: "mdi:human-child", c: "#16a34a", title: "Mäher fährt heim", def: "log", ex: ["Mäher fährt heim", "Jemand im Garten – Automower wartet in der Station"], text: "Die Kamera meldet Kinder oder Tiere im Garten und Beetwerk schickt den Mäher in die Station – mit Kamerabild in der App." },
   { k: "mower_care", g: "Beetwerk", icon: "mdi:saw-blade", c: "#16a34a", title: "Mähroboter: Wartung", def: "log", ex: ["Mähroboter: Messer wechseln", "seit 62 Tagen im Einsatz (Hinweis ab 60)"], text: "Messer lange im Einsatz – Hinweis unter der Glocke, auf Wunsch als Nachricht." },
+  { k: "smoke", g: "Wachwerk", icon: "mdi:fire-alert", c: C.alert, title: "Rauch- oder CO-Alarm", def: "important", ex: ["Rauchalarm!", "Rauchmelder Wohnzimmer – Rollläden fahren hoch, Licht geht an"], text: "Ein Rauch-, CO- oder Gasmelder schlägt an. Wichtig: kommt auch in der Ruhezeit." },
+  { k: "water", g: "Wachwerk", icon: "mdi:water-alert", c: C.alert, title: "Wasser erkannt", def: "important", ex: ["Wasser erkannt!", "Wassermelder HWR"], text: "Ein Wassermelder meldet Feuchte – Leck, Waschmaschine, Keller." },
+  { k: "warn", g: "Wachwerk", icon: "mdi:alert-outline", c: "#f59e0b", title: "Amtliche Warnung", def: "normal", ex: ["Amtliche Warnung vor Sturmböen", "Böen bis 70 km/h"], text: "Neue Warnung von NINA bzw. DWD, mit Überschrift und Text – einmal je Warnung." },
+  { k: "door", g: "Wachwerk", icon: "mdi:door-open", c: "#f59e0b", title: "Tür lange offen", def: "normal", ex: ["Garagentor offen", "seit 30 Min."], text: "Eine Tür oder ein Tor steht so lange offen (Wachwerk › Türen & Tore)." },
+  { k: "leave", g: "Wachwerk", icon: "mdi:exit-run", c: "#f59e0b", title: "Beim Gehen noch offen", def: "normal", ex: ["Niemand zu Hause – noch offen", "Küche Tür offen, Licht Wohnzimmer an"], text: "Ist niemand mehr zu Hause, meldet Wachwerk offene Türen und Fenster und brennende Lichter." },
+  { k: "bell", g: "Wachwerk", icon: "mdi:doorbell", c: "#0ea5e9", title: "Es klingelt", def: "log", ex: ["Es hat geklingelt", "Haustür – mit Kamerabild"], text: "Jemand klingelt – mit Kamerabild in der App, wenn eine Kamera da ist." },
+  { k: "maint", g: "Hauswerk", icon: "mdi:wrench-clock", c: "#14b8a6", title: "Wartung fällig", def: "log", ex: ["Wartung fällig", "Rauchmelder testen"], text: "Eine Aufgabe unter Hauswerk › Wartung ist fällig – steht immer unter der Glocke." },
+  { k: "weekly", g: "Hauswerk", icon: "mdi:newspaper-variant-outline", c: "#14b8a6", title: "Wochenbericht", def: "normal", ex: ["Wochenbericht", "🔥 Heizwerk: 84 Std. geheizt · 💡 Lichtwerk: 46 Std. Licht"], text: "Einmal pro Woche das Wichtigste aus allen Modulen (Hauswerk › Wochenbericht)." },
   { k: "waste", g: "Hauswerk", icon: "mdi:trash-can-outline", c: "#64748b", title: "Müllabfuhr morgen", def: "off", ex: ["Morgen Müllabfuhr", "Restabfall, Papier – Tonne heute Abend rausstellen."], text: "Am Vorabend ab der Uhrzeit unter Hauswerk › Kalender › Müllabholung, einmal je Abholtag." },
 ];
-const NK_GROUPS = { Heizwerk: ["#f97316", "logo:heizen"], "Lüften": ["#22d3ee", "mdi:weather-windy"], Rollwerk: ["#0ea5e9", "logo:rollwerk"], Kraftwerk: ["#eab308", "logo:kraftwerk"], Lichtwerk: ["#6366f1", "logo:lichtwerk"], Beetwerk: ["#16a34a", "logo:beetwerk"], Hauswerk: ["#14b8a6", "mdi:home-outline"] };
+const NK_GROUPS = { Heizwerk: ["#f97316", "logo:heizen"], "Lüften": ["#22d3ee", "mdi:weather-windy"], Rollwerk: ["#0ea5e9", "logo:rollwerk"], Kraftwerk: ["#eab308", "logo:kraftwerk"], Lichtwerk: ["#6366f1", "logo:lichtwerk"], Beetwerk: ["#16a34a", "logo:beetwerk"], Wachwerk: ["#dc2626", "logo:wachwerk"], Hauswerk: ["#14b8a6", "mdi:home-outline"] };
 const NK_GICON = { App: "mdi:cellphone", Pushover: "mdi:message-badge-outline", Telegram: "mdi:send-circle-outline", "E-Mail": "mdi:email-outline", Sprachausgabe: "mdi:account-voice", Bildschirm: "mdi:tablet", Weitere: "mdi:bell-outline", "Home Assistant": "mdi:home-assistant" };
 /** Kanäle eines Kraftwerk-Geräts (alte Einträge: nur Dienstname, notify_ha). */
 const appChannels = (a) => [...new Set([...(a.notify || []).map((x) => (x.includes(":") || x === "ha" ? x : `svc:${x}`)), ...(a.notify_ha ? ["ha"] : [])])];
@@ -224,6 +232,14 @@ const DEFAULT_WIDGETS = [{ type: "heat", size: "m" }, { type: "weather", size: "
 const SC_ICONS = { light: "mdi:lightbulb-outline", switch: "mdi:toggle-switch-outline", input_boolean: "mdi:toggle-switch-outline", script: "mdi:script-text-play-outline", scene: "mdi:palette-outline", button: "mdi:gesture-tap-button", input_button: "mdi:gesture-tap-button", fan: "mdi:fan", cover: "mdi:window-shutter", lock: "mdi:lock-outline", media_player: "mdi:speaker" };
 const ROOM_COLORS = ["#2dd4bf", "#f59e0b", "#a78bfa", "#f472b6", "#60a5fa", "#a3e635", "#f87171", "#22d3ee", "#facc15", "#c084fc"];
 const PICKERS = {
+  ww_smoke: { scope: "settings", multi: true, domains: ["binary_sensor"] },
+  ww_co: { scope: "settings", multi: true, domains: ["binary_sensor"] },
+  ww_water: { scope: "settings", multi: true, domains: ["binary_sensor"] },
+  ww_warn: { scope: "settings", multi: true, domains: ["binary_sensor"] },
+  ww_doors: { scope: "settings", multi: true, domains: ["binary_sensor", "cover"] },
+  ww_alarm: { scope: "settings", multi: false, domains: ["alarm_control_panel"] },
+  ww_bell: { scope: "settings", multi: false, domains: ["event", "binary_sensor"] },
+  ww_camera: { scope: "settings", multi: false, domains: ["camera"] },
   bw_mower: { scope: "settings", multi: false, domains: ["lawn_mower"] },
   bw_soil: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "moisture" },
   bw_watering: { scope: "settings", multi: false, domains: ["binary_sensor"] },
@@ -474,6 +490,11 @@ const BW_VIEWS = [
   { id: "garden", slug: "garten", name: "Garten", icon: "mdi:flower-outline" },
   { id: "gardenset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true },
 ];
+const WW_VIEWS = [
+  { id: "security", slug: "sicherheit", name: "Sicherheit", icon: "mdi:shield-home-outline" },
+  { id: "secset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true },
+];
+const WW_POPS = ["wwdetect", "wwfire", "wwwarn", "wwdoors", "wwalarm"];
 const BW_POPS = ["bwmower", "bwplan", "bwwater", "bwpause", "bwcare", "bwguard", "bwwatch"];
 const LW_VIEWS = [
   { id: "lights", slug: "licht", name: "Licht", icon: "mdi:lightbulb-group-outline" },
@@ -510,15 +531,16 @@ const KW_VIEWS = [
   { id: "kwset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true },
 ];
 // Einstellungsseiten der Module: nur noch über Einstellungen (Zahnrad) erreichbar, nicht in der Unterleiste der Module
-const SET_VIEWS = ["house", "settings", "shutset", "kwset", "lightset", "gardenset", "plans"];
+const SET_VIEWS = ["house", "settings", "shutset", "kwset", "lightset", "gardenset", "secset", "plans"];
 const MODULES = [
   { id: "heizen", no: 1, name: "Heizwerk", icon: "mdi:radiator", logo: "heizen", views: HEAT_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
   { id: "rollwerk", no: 2, name: "Rollwerk", icon: "mdi:window-shutter", logo: "rollwerk", views: SHUT_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
   { id: "kraftwerk", no: 3, name: "Kraftwerk", icon: "mdi:solar-power-variant", logo: "kraftwerk", views: KW_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
   { id: "lichtwerk", no: 4, name: "Lichtwerk", icon: "mdi:lightbulb-outline", logo: "lichtwerk", views: LW_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
   { id: "beetwerk", no: 5, name: "Beetwerk", icon: "mdi:flower-outline", logo: "beetwerk", views: BW_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
+  { id: "wachwerk", no: 6, name: "Wachwerk", icon: "mdi:shield-home-outline", logo: "wachwerk", views: WW_VIEWS.map((v) => v.id).filter((v) => !SET_VIEWS.includes(v)) },
 ];
-const SUB_VIEWS = [...HEAT_VIEWS, ...SHUT_VIEWS, ...KW_VIEWS, ...LW_VIEWS, ...BW_VIEWS];
+const SUB_VIEWS = [...HEAT_VIEWS, ...SHUT_VIEWS, ...KW_VIEWS, ...LW_VIEWS, ...BW_VIEWS, ...WW_VIEWS];
 // Symbol eines Verbrauchers nach seinem Namen (erster Treffer zählt)
 const KW_ICONS = [
   [/w(ä|ae)rmepumpe|heat ?pump|\bwp\b/, "mdi:heat-pump-outline"], [/wallbox|e-?auto|\bev\b|lades(ä|ae)ule|laden|charger|auto/, "mdi:ev-station"],
@@ -543,7 +565,8 @@ const KW_POPS = ["kwdetect", "kwsolar", "kwgrid", "kwbatt", "kwhome", "kwcons"];
 const COMING = [];
 const SLUGS = { start: "start", house: "einstellungen", log: "protokoll", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])),
   ...Object.fromEntries(SHUT_VIEWS.map((v) => [v.id, `rollwerk/${v.slug}`])), ...Object.fromEntries(KW_VIEWS.map((v) => [v.id, `kraftwerk/${v.slug}`])),
-  ...Object.fromEntries(LW_VIEWS.map((v) => [v.id, `lichtwerk/${v.slug}`])), ...Object.fromEntries(BW_VIEWS.map((v) => [v.id, `beetwerk/${v.slug}`])) };
+  ...Object.fromEntries(LW_VIEWS.map((v) => [v.id, `lichtwerk/${v.slug}`])), ...Object.fromEntries(BW_VIEWS.map((v) => [v.id, `beetwerk/${v.slug}`])),
+  ...Object.fromEntries(WW_VIEWS.map((v) => [v.id, `wachwerk/${v.slug}`])) };
 // Pop-ups von Rollwerk (Einstellungen unter Rollwerk › Einstellungen)
 const WIZ_USES = [
   { id: "wohnen", label: "Wohnzimmer", icon: "mdi:sofa-outline", comfort: 21, eco: 18, plan: "berufstaetig", match: /wohn|living|stube/ },
@@ -596,7 +619,7 @@ const RW_BEHAVIOR = [["prevent_higher_position_closing", "Abends nicht höher fa
   ["prevent_closing_multiple_times", "Nur einmal am Tag schließen"], ["prevent_shading_multiple_times", "Nur einmal am Tag beschatten"]];
 const FACADE_NAMES = { N: "Nord", NO: "Nordost", O: "Ost", SO: "Südost", S: "Süd", SW: "Südwest", W: "West", NW: "Nordwest" };
 // Pop-ups, die zu den zentralen Hauswerk-Einstellungen gehören (alle anderen gehören zu Heizwerk)
-const HOUSE_POPS = ["presence", "vacation", "calendars", "weather", "notify", "radio", "access", "look"];
+const HOUSE_POPS = ["presence", "vacation", "calendars", "weather", "notify", "radio", "access", "look", "modes", "maint", "weekly"];
 // Akzentfarben der Darstellung: [gespeicherter Wert (null = Standard), Name, Anzeigefarbe]
 const ACCENTS = [
   [null, "Türkis", "#14b8a6"], ["#0ea5e9", "Himmelblau"], ["#3b82f6", "Blau"], ["#8b5cf6", "Violett"],
@@ -617,6 +640,7 @@ const LOG_CATS = {
   notify: { name: "Nachrichten", icon: "mdi:message-badge-outline", c: "#0ea5e9" },
   appliance: { name: "Geräte", icon: "mdi:washing-machine", c: "#f59e0b" },
   garden: { name: "Garten", icon: "mdi:robot-mower-outline", c: "#16a34a" },
+  security: { name: "Sicherheit", icon: "mdi:shield-home-outline", c: "#dc2626" },
 };
 const SKIES = [["night", "Nacht"], ["dawn", "Sonnenaufgang"], ["day", "Tag"], ["dusk", "Sonnenuntergang"]];
 const DEFAULT_VIEW = "start";
@@ -853,7 +877,7 @@ class HauswerkPanel extends HTMLElement {
     this._unsub = this._hass.connection.subscribeMessage(
       (status) => {
         this._status = status;
-        if (["start", "overview"].includes(this._tab) && !this._busy) this._renderMain();
+        if (["start", "overview", "security"].includes(this._tab) && !this._busy) this._renderMain();
         else this._renderChrome();
       },
       { type: "hauswerk/heizen/subscribe" }
@@ -1097,7 +1121,10 @@ class HauswerkPanel extends HTMLElement {
     const head = this.shadowRoot.getElementById("head");
     if (head) head.innerHTML = this._headHtml();
     const bnav = this.shadowRoot.getElementById("bnav");
-    if (bnav) bnav.innerHTML = this._data && !this._error ? this._bnavHtml() : "";
+    if (bnav) {
+      bnav.innerHTML = this._data && !this._error ? this._bnavHtml() : "";
+      bnav.classList.toggle("many", bnav.children.length > 7);
+    }
     const rail = this.shadowRoot.getElementById("rail");
     if (rail) rail.innerHTML = this._data && !this._error && this._tablet ? this._railHtml() : "";
     const chips = this.shadowRoot.getElementById("chips");
@@ -1161,6 +1188,15 @@ class HauswerkPanel extends HTMLElement {
       const c = (this._data?.settings?.kw_appliances || []).find((x) => x.id === aid);
       if (c && a.state === "done") add("warn", APP_TYPES[c.type]?.icon || "mdi:check-circle-outline", `${c.name} fertig`, a.last ? `${this._durTxt(a.last.dur)} · ${fmt(a.last.wh / 1000, 2)} kWh – ausräumen` : "ausräumen", "tab", { tab: "kwdev", app: aid });
     }
+    const ww = s.wachwerk;
+    if (ww) {
+      if (ww.fire) add("warn", "mdi:fire-alert", "Rauchalarm!", (ww.smoke || []).concat(ww.co || []).filter((x) => x.on).map((x) => x.name).join(", "), "tab", { tab: "security" });
+      if (ww.water_alarm) add("warn", "mdi:water-alert", "Wasser erkannt!", (ww.water || []).filter((x) => x.on).map((x) => x.name).join(", "), "tab", { tab: "security" });
+      for (const w of ww.warnings || []) add("warn", "mdi:alert-outline", w.title, w.text || "Amtliche Warnung", "tab", { tab: "security" });
+      for (const x of [...(ww.smoke || []), ...(ww.co || []), ...(ww.water || [])]) if (["unavailable", "unknown", null].includes(x.state)) add("info", "mdi:smoke-detector-variant-off", "Melder nicht erreichbar", x.name, "tab", { tab: "security" });
+      if (ww.alarm?.state === "triggered") add("warn", "mdi:alarm-light", "Alarmanlage ausgelöst", this._entityName(ww.alarm.entity), "tab", { tab: "security" });
+    }
+    for (const t of s.dienste?.tasks || []) if (t.left != null && t.left <= 0) add("info", t.icon || "mdi:wrench-clock", t.auto ? t.name : `Wartung fällig: ${t.name}`, t.auto ? "Wartung" : t.left < 0 ? `${-t.left} Tage überfällig` : "heute fällig", "settings-go", { sub: "maint" });
     if (s.waste_due) add("info", this._calIcon(s.waste_due.types[0])[0], `${s.waste_due.when === "morgen" ? "Morgen" : "Heute"} Müllabfuhr`, s.waste_due.types.join(" · "), "settings-go", { sub: "calendars" });
     for (const r of this._rooms()) {
       const rs = s.rooms?.[r.id] || {};
@@ -1330,7 +1366,7 @@ class HauswerkPanel extends HTMLElement {
       shutters: this._viewShutters, shutset: () => this._settingsPage("rw"),
       kwflow: this._viewKwFlow, kwdev: this._viewKwDev, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw"),
       lights: this._viewLights, lwrep: this._viewLwRep, lightset: () => this._settingsPage("lw"),
-      garden: this._viewGarden, gardenset: () => this._settingsPage("bw") }[this._tab] || this._viewStart;
+      garden: this._viewGarden, gardenset: () => this._settingsPage("bw"), security: this._viewSecurity, secset: () => this._settingsPage("ww") }[this._tab] || this._viewStart;
     let html;
     try {
       html = view.call(this);
@@ -1613,7 +1649,7 @@ class HauswerkPanel extends HTMLElement {
     // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
     const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
     // Einstellungen: vollständig und scrollbar (zwei Spalten, keine Karte wird geteilt oder abgeschnitten)
-    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "house"].includes(tab);
+    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house"].includes(tab);
     box.classList.toggle("tscroll", scroll);
     if (scroll) {
       Object.assign(tin.style, { zoom: f, width: "", height: "", columnWidth: "", columnGap: "", transform: "", clipPath: "" });
@@ -1626,7 +1662,7 @@ class HauswerkPanel extends HTMLElement {
       if (dots) dots.innerHTML = "";
       return;
     }
-    const onePage = ["settings", "shutset", "kwset", "lightset", "gardenset", "house"].includes(tab);
+    const onePage = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house"].includes(tab);
     const ZOOMS = [1.4, 1.3, 1.2, 1.1, 1, 0.92, 0.85, 0.78, 0.72, 0.66, ...(onePage ? [0.6, 0.55] : [])].map((z) => Math.round(z * f * 100) / 100);
     const maxZ = Math.max(f, Math.min(1.4 * f, (W / 820) * f));
     const zs = ZOOMS.filter((z) => z <= maxZ + 0.001);
@@ -2519,6 +2555,11 @@ class HauswerkPanel extends HTMLElement {
       }
       mods.push(["beetwerk", x]);
     }
+    const wss = this._status?.wachwerk;
+    if (wss?.configured) {
+      const lv = this._wwLevel(wss);
+      mods.push(["wachwerk", [it(lv.icon, null, lv.title), `<span class="sv-i sv-t">${esc(lv.title)}</span>`]]);
+    }
     // Vorhersage der nächsten Stunden
     let fcHtml = "";
     const wid = set.weather_entity || Object.keys(this._hass.states).find((e) => e.startsWith("weather."));
@@ -2635,6 +2676,12 @@ class HauswerkPanel extends HTMLElement {
       tiles.push(this._wallTile({ act: go("lights"), color: on ? "#facc15" : C.rest, ic: logo("lichtwerk"), name: "Lichtwerk", value: String(on), unit: `/ ${ls.length} an`,
         status: on ? `<span class="wt-dim">${esc(ls.filter((l) => l.st?.state === "on").map((l) => this._lwName(l)).slice(0, 3).join(", "))}</span>` : "" }));
     }
+    const wws = this._status?.wachwerk;
+    if (wws?.configured) {
+      const lv = this._wwLevel(wws);
+      tiles.push(this._wallTile({ act: go("security"), color: lv.c, ic: logo("wachwerk"), name: "Wachwerk", value: lv.tone === "ok" ? "ruhig" : lv.tone === "warn" ? "ALARM" : "Hinweis",
+        status: `<span class="${lv.tone === "ok" ? "wt-dim" : ""}">${esc(lv.title)}</span>`, cls: lv.tone === "warn" ? "bad" : "" }));
+    }
     // Termine (Müll zuerst) und Anwesenheit
     this._calLoad?.();
     const waste = this._status?.waste_due;
@@ -2652,6 +2699,7 @@ class HauswerkPanel extends HTMLElement {
         <div class="ws-date">${now.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })}</div>
         ${w ? `<div class="ws-wx"><ha-icon icon="${w.icon}"></ha-icon><b>${fmt(w.temp)}°</b><span>${esc(w.label)}</span></div>` : ""}
         ${this._nowBox(warn, true) || `<div class="ws-ok"><ha-icon icon="mdi:check-circle-outline"></ha-icon>Alles in Ordnung</div>`}
+        ${this._modesBar()}
         <button class="link tiny ws-sw" data-action="tablet-opt" data-k="tstart" data-v="widgets"><ha-icon icon="mdi:view-dashboard-edit-outline"></ha-icon>Widgets anzeigen</button>
       </div>
       <div class="ws-r" style="--n:${tiles.length}">${tiles.join("")}</div>
@@ -2668,6 +2716,7 @@ class HauswerkPanel extends HTMLElement {
     const edit = this._wEdit && this._admin;
     return `
       ${this._nowBox(warn)}
+      ${this._modesBar()}
 
       ${(() => {
         if (!this._admin) return "";
@@ -4899,6 +4948,234 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Einstellungen von Lichtwerk (Liste). */
+  // ------------------------------------------------------------ Modul Wachwerk (Sicherheit)
+  _wwAgo(iso) {
+    if (!iso) return "";
+    const m = Math.max(0, Math.round((Date.now() - new Date(iso)) / 60000));
+    return m < 1 ? "gerade eben" : m < 60 ? `vor ${m} Min.` : m < 1440 ? `vor ${Math.round(m / 60)} Std.` : `vor ${Math.round(m / 1440)} Tagen`;
+  }
+
+  /** Gesamtlage: Alarm (rot), Warnung/offen (gelb) oder alles ruhig (grün). */
+  _wwLevel(ws) {
+    const bad = (l) => (l || []).filter((x) => ["unavailable", "unknown", null].includes(x.state));
+    if (ws.fire) return { tone: "warn", c: C.alert, icon: "mdi:fire-alert", title: "Rauchalarm!" };
+    if (ws.water_alarm) return { tone: "warn", c: C.alert, icon: "mdi:water-alert", title: "Wasser erkannt!" };
+    if ((ws.warnings || []).length) return { tone: "info", c: "#f59e0b", icon: "mdi:alert-outline", title: ws.warnings[0].title };
+    const open = (ws.doors || []).filter((d) => d.on);
+    if (open.length) return { tone: "info", c: "#f59e0b", icon: "mdi:door-open", title: `${open.map((d) => d.name).join(", ")} offen` };
+    const off = [...bad(ws.smoke), ...bad(ws.co), ...bad(ws.water)];
+    if (off.length) return { tone: "info", c: "#f59e0b", icon: "mdi:lan-disconnect", title: `${off.length} Melder nicht erreichbar` };
+    return { tone: "ok", c: C.ok, icon: "mdi:shield-check-outline", title: "Alles ruhig" };
+  }
+
+  _wwAlarmInfo(a) {
+    const T = { disarmed: ["Unscharf", "mdi:shield-off-outline", "#64748b"], armed_away: ["Scharf · abwesend", "mdi:shield-lock", C.alert], armed_home: ["Scharf · zu Hause", "mdi:shield-home", "#f59e0b"],
+      armed_night: ["Scharf · Nacht", "mdi:shield-moon", "#6366f1"], arming: ["Wird scharf geschaltet …", "mdi:shield-sync-outline", "#f59e0b"], pending: ["Gleich Alarm …", "mdi:shield-alert-outline", C.alert],
+      triggered: ["ALARM", "mdi:alarm-light", C.alert] };
+    return T[a?.state] || [a?.state && !["unavailable", "unknown"].includes(a.state) ? a.state : "nicht erreichbar", "mdi:shield-outline", "#94a3b8"];
+  }
+
+  _wwAlarmBtns(a, cls = "qbtn") {
+    if (!a || a.code) return "";
+    const b = (v, i, t) => `<button class="${cls}" data-action="ww-alarm" data-v="${v}" title="${t}"><ha-icon icon="${i}"></ha-icon>${cls === "qbtn" ? t : ""}</button>`;
+    return a.state === "disarmed" ? b("away", "mdi:shield-lock", "Abwesend") + b("home", "mdi:shield-home", "Zu Hause") + b("night", "mdi:shield-moon", "Nacht") : b("off", "mdi:shield-off-outline", "Unscharf");
+  }
+
+  _viewSecurity() {
+    const ws = this._status?.wachwerk || {};
+    const setBtn = this._admin ? `<button class="link" data-action="tab" data-tab="secset"><ha-icon icon="mdi:tune-variant"></ha-icon>Einstellen</button>` : "";
+    if (!ws.configured)
+      return `<section class="card empty"><span class="empty-logo">${modIcon("logo:wachwerk")}</span><h2>Noch keine Melder</h2>
+        <p class="muted">Wachwerk findet Rauch-, CO- und Wassermelder, amtliche Warnungen (NINA, DWD), Türen, Alarmanlage und Klingel automatisch. Fehlt etwas, unter Einstellungen wählen.</p>${setBtn}</section>`;
+    const lv = this._wwLevel(ws);
+    const det = [...(ws.smoke || []), ...(ws.co || []), ...(ws.water || [])];
+    const head = this._brief({
+      cls: "card br-mod-ww", tone: lv.tone, icon: lv.icon, label: `<ha-icon icon="mdi:shield-home-outline"></ha-icon>Wachwerk · Sicherheit`, title: lv.title, side: setBtn,
+      lines: [
+        ...(ws.alarm ? [{ icon: this._wwAlarmInfo(ws.alarm)[1], text: `Alarmanlage: ${this._wwAlarmInfo(ws.alarm)[0]}` }] : []),
+        ...(det.length ? [{ icon: "mdi:smoke-detector-variant", text: `${det.length} Melder überwacht${ws.fire || ws.water_alarm ? "" : " – alle ruhig"}` }] : []),
+        ...(ws.bell?.last ? [{ icon: "mdi:doorbell", text: `Zuletzt geklingelt ${this._wwAgo(ws.bell.last)}${ws.bell.week ? ` · ${ws.bell.week}× diese Woche` : ""}` }] : []),
+      ],
+    });
+    if (this._wall()) return head + this._wwWall(ws);
+    const row = (x, icon, onTxt, offTxt, alert = true) => {
+      const bad = ["unavailable", "unknown", null].includes(x.state);
+      const c = bad ? "#94a3b8" : x.on ? (alert ? C.alert : "#f59e0b") : C.ok;
+      return `<div class="ev ${x.on ? "live" : ""}"><ha-icon icon="${icon}" style="color:${c}"></ha-icon><span class="grow"><b>${esc(x.name)}</b><small>${bad ? "nicht erreichbar" : x.on ? `${onTxt} · ${this._wwAgo(x.since)}` : offTxt}</small></span></div>`;
+    };
+    const cards = [];
+    if (det.length)
+      cards.push(`<section class="card"><div class="shead"><ha-icon icon="mdi:smoke-detector-variant"></ha-icon><h3>Melder</h3></div><div class="evlist">
+        ${(ws.smoke || []).map((x) => row(x, x.on ? "mdi:fire-alert" : "mdi:smoke-detector-variant", "RAUCH", "ruhig")).join("")}
+        ${(ws.co || []).map((x) => row(x, "mdi:molecule-co", "CO/GAS", "ruhig")).join("")}
+        ${(ws.water || []).map((x) => row(x, x.on ? "mdi:water-alert" : "mdi:water-outline", "WASSER", "trocken")).join("")}</div>
+        ${this._data.settings.ww_fire_covers !== false || this._data.settings.ww_fire_lights !== false ? `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Bei Rauch oder CO: ${[this._data.settings.ww_fire_covers !== false ? "alle Rollläden hoch" : "", this._data.settings.ww_fire_lights !== false ? "alle Lichter an" : ""].filter(Boolean).join(" und ")} – als Fluchtweg.</p>` : ""}</section>`);
+    if ((ws.warnings || []).length || (ws.entities?.warn || []).length)
+      cards.push(`<section class="card"><div class="shead"><ha-icon icon="mdi:alert-outline"></ha-icon><h3>Amtliche Warnungen</h3></div>
+        ${(ws.warnings || []).length ? `<div class="evlist">${ws.warnings.map((w) => `<div class="ev live"><ha-icon icon="mdi:alert" style="color:#f59e0b"></ha-icon><span class="grow"><b>${esc(w.title)}</b>${w.text ? `<small>${esc(w.text)}</small>` : ""}</span></div>`).join("")}</div>`
+          : `<p class="muted small"><ha-icon icon="mdi:check-circle-outline" style="color:${C.ok}"></ha-icon>Keine Warnung aktiv (${(ws.entities?.warn || []).length} Warnquellen).</p>`}</section>`);
+    if ((ws.doors || []).length)
+      cards.push(`<section class="card"><div class="shead"><ha-icon icon="mdi:door"></ha-icon><h3>Türen & Tore</h3></div><div class="evlist">
+        ${ws.doors.map((x) => row(x, x.on ? "mdi:door-open" : "mdi:door-closed", "offen", "zu", false)).join("")}</div></section>`);
+    if (ws.alarm) {
+      const [t, i, c] = this._wwAlarmInfo(ws.alarm);
+      cards.push(`<section class="card"><div class="shead"><ha-icon icon="mdi:shield-home-outline"></ha-icon><h3>Alarmanlage</h3></div>
+        <div class="ev"><ha-icon icon="${i}" style="color:${c}"></ha-icon><span class="grow"><b>${esc(t)}</b><small>${esc(this._entityName(ws.alarm.entity))}</small></span></div>
+        <div class="qrow">${ws.alarm.code ? `<p class="muted small">Braucht einen Code – bitte in der Alarmanlage selbst schalten.</p>` : this._wwAlarmBtns(ws.alarm)}</div></section>`);
+    }
+    if (ws.bell)
+      cards.push(`<section class="card"><div class="shead"><ha-icon icon="mdi:doorbell"></ha-icon><h3>Klingel</h3></div>
+        <div class="ev"><ha-icon icon="mdi:doorbell" style="color:#0ea5e9"></ha-icon><span class="grow"><b>${ws.bell.last ? `Zuletzt ${this._wwAgo(ws.bell.last)}` : "Noch nicht geklingelt"}</b><small>${ws.bell.week || 0}× in den letzten 7 Tagen${this._data.settings.ww_camera || ws.entities?.camera ? " · mit Kamerabild in der Nachricht" : ""}</small></span></div></section>`);
+    if ((ws.leave || []).length)
+      cards.push(`<section class="card"><div class="shead"><ha-icon icon="mdi:exit-run"></ha-icon><h3>Beim Gehen noch offen bzw. an</h3></div><div class="evlist">
+        ${ws.leave.map((o) => `<div class="ev"><ha-icon icon="${o.what === "an" ? "mdi:lightbulb-on-outline" : "mdi:window-open-variant"}" style="color:#f59e0b"></ha-icon><span class="grow"><b>${esc(o.name)}</b><small>${o.what}</small></span></div>`).join("")}</div></section>`);
+    return head + `<div class="bw-grid">${cards.join("")}</div>`;
+  }
+
+  _wwWall(ws) {
+    const tiles = [];
+    const det = [...(ws.smoke || []), ...(ws.co || []), ...(ws.water || [])];
+    if (det.length) {
+      const alarm = det.filter((x) => x.on);
+      const off = det.filter((x) => ["unavailable", "unknown", null].includes(x.state));
+      tiles.push(this._wallTile({ act: `data-action="tab" data-tab="security"`, color: alarm.length ? C.alert : off.length ? "#f59e0b" : C.ok,
+        ic: `<span class="wt-ic"><ha-icon icon="${ws.fire ? "mdi:fire-alert" : ws.water_alarm ? "mdi:water-alert" : "mdi:smoke-detector-variant"}"></ha-icon></span>`, name: "Melder",
+        value: alarm.length ? "ALARM" : String(det.length), unit: alarm.length ? "" : "ruhig",
+        status: alarm.length ? `<span style="color:${C.alert}"><b>${esc(alarm.map((x) => x.name).join(", "))}</b></span>` : off.length ? `<span class="wt-dim">${off.length} nicht erreichbar</span>` : `<span class="wt-dim">Rauch, CO und Wasser</span>`,
+        cls: alarm.length ? "bad" : "" }));
+    }
+    if (ws.alarm) {
+      const [t, i, c] = this._wwAlarmInfo(ws.alarm);
+      tiles.push(this._wallTile({ act: `data-action="tab" data-tab="security"`, color: c, ic: `<span class="wt-ic"><ha-icon icon="${i}"></ha-icon></span>`, name: "Alarmanlage",
+        value: ws.alarm.state === "disarmed" ? "aus" : ws.alarm.state === "triggered" ? "ALARM" : "scharf", status: `<span class="wt-dim">${esc(t)}</span>`, ctl: this._wwAlarmBtns(ws.alarm, "wbtn") }));
+    }
+    for (const d of ws.doors || [])
+      tiles.push(this._wallTile({ act: `data-action="tab" data-tab="security"`, color: d.on ? "#f59e0b" : C.rest, ic: `<span class="wt-ic"><ha-icon icon="${d.on ? "mdi:door-open" : "mdi:door-closed"}"></ha-icon></span>`,
+        name: d.name, value: d.on ? "offen" : "zu", status: d.on ? `<span class="wt-dim">${this._wwAgo(d.since)}</span>` : "" }));
+    for (const w of ws.warnings || [])
+      tiles.push(this._wallTile({ act: `data-action="tab" data-tab="security"`, color: "#f59e0b", ic: `<span class="wt-ic"><ha-icon icon="mdi:alert"></ha-icon></span>`, name: "Warnung", value: "", status: `<span><b>${esc(w.title)}</b></span>` }));
+    if (ws.bell)
+      tiles.push(this._wallTile({ act: `data-action="tab" data-tab="security"`, color: "#0ea5e9", ic: `<span class="wt-ic"><ha-icon icon="mdi:doorbell"></ha-icon></span>`, name: "Klingel",
+        value: String(ws.bell.week || 0), unit: "× Woche", status: ws.bell.last ? `<span class="wt-dim">zuletzt ${this._wwAgo(ws.bell.last)}</span>` : "" }));
+    return `<div class="wgrid">${tiles.join("")}</div>`;
+  }
+
+  _wwRows(p) {
+    const ws = this._status?.wachwerk || {};
+    const E = ws.entities || {};
+    const n = (l) => (l || []).length;
+    const list = (key, found) => (n(p[key]) ? `${n(p[key])} gewählt` : n(found) ? `automatisch: ${n(found)} gefunden` : "keine gefunden");
+    return [
+      { g: "Melder", id: "wwdetect", t: "oft", icon: "mdi:smoke-detector-variant", c: C.alert, title: "Rauch-, CO- & Wassermelder", sum: `Rauch ${list("ww_smoke", E.smoke)} · CO ${list("ww_co", E.co)} · Wasser ${list("ww_water", E.water)}`, val: String(n(E.smoke) + n(E.co) + n(E.water)), words: "rauchmelder co gas wassermelder leck x-sense melder" },
+      { g: "Melder", id: "wwfire", t: "oft", icon: "mdi:fire-alert", c: C.alert, title: "Bei Rauch oder CO", sum: [p.ww_fire_covers !== false ? "Rollläden hoch" : "", p.ww_fire_lights !== false ? "Licht an" : ""].filter(Boolean).join(" · ") || "nur Nachricht", words: "feuer brand fluchtweg rollläden licht" },
+      { g: "Melder", id: "wwwarn", icon: "mdi:alert-outline", c: "#f59e0b", title: "Amtliche Warnungen", sum: list("ww_warn", E.warn), val: n(ws.warnings) ? `${n(ws.warnings)} aktiv` : "", words: "nina dwd warnung unwetter katwarn" },
+      { g: "Haus", id: "wwdoors", t: "oft", icon: "mdi:door", c: "#0ea5e9", title: "Türen & Tore", sum: `${list("ww_doors", E.doors)} · Hinweis nach ${p.ww_door_min ?? 30} Min.${p.ww_leave_check !== false ? " · Check beim Gehen" : ""}`, words: "haustür garage tor terrasse offen verlassen" },
+      { g: "Haus", id: "wwalarm", icon: "mdi:shield-home-outline", c: "#6366f1", title: "Alarmanlage, Klingel & Kamera", sum: [E.alarm ? this._entityName(E.alarm) : "keine Alarmanlage", E.bell ? `Klingel ${this._entityName(E.bell)}` : "keine Klingel", E.camera ? `Kamera ${this._entityName(E.camera)}` : ""].filter(Boolean).join(" · "), words: "alarmo alarmanlage klingel türklingel kamera bild" },
+      { g: "Allgemein", go: "log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll", sum: "Alarme, Klingel, Warnungen", words: "protokoll" },
+    ];
+  }
+
+  _wwPop(id, p, { sw, minutes, head }) {
+    const E = this._status?.wachwerk?.entities || {};
+    const pk = (key, label, icon, found) => `<div class="field"><span><ha-icon icon="${icon}"></ha-icon> ${label}${!(p[key] || []).length && (Array.isArray(found) ? found.length : found) ? ` (leer = automatisch: ${esc((Array.isArray(found) ? found : [found]).map((x) => this._entityName(x)).join(", "))})` : " (leer = automatisch)"}</span>${this._picker(key, p[key] || [])}</div>`;
+    switch (id) {
+      case "wwdetect":
+        return { icon: "mdi:smoke-detector-variant", c: C.alert, title: "Melder", sub: "Wachwerk",
+          body: `${pk("ww_smoke", "Rauchmelder", "mdi:smoke-detector-variant", E.smoke)}${pk("ww_co", "CO- und Gasmelder", "mdi:molecule-co", E.co)}${pk("ww_water", "Wassermelder", "mdi:water-alert", E.water)}
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Rauch und CO melden als „Wichtig“ (auch nachts, auch in der Ruhezeit), Wasser ebenso. Einstellbar unter Benachrichtigungen › Wachwerk.</p>` };
+      case "wwfire":
+        return { icon: "mdi:fire-alert", c: C.alert, title: "Bei Rauch oder CO", sub: "Wachwerk · Fluchtweg",
+          body: `<div class="wxrows">${this._setRow("wwfc", "Rollläden hoch", "alle Rollläden aus Rollwerk", sw("ww_fire_covers"), "Fährt alle Rollläden ganz auf, damit Fenster als Fluchtweg frei sind – auch nachts und trotz Sperren.")}
+            ${this._setRow("wwfl", "Licht an", "alle Lichter aus Lichtwerk, volle Helligkeit", sw("ww_fire_lights"), "Schaltet alle Leuchten auf 100 %, damit der Weg nach draußen hell ist.")}</div>` };
+      case "wwwarn":
+        return { icon: "mdi:alert-outline", c: "#f59e0b", title: "Amtliche Warnungen", sub: "Wachwerk",
+          body: `${pk("ww_warn", "Warnquellen (NINA, DWD …)", "mdi:alert-outline", E.warn)}<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Neue Warnungen kommen mit Überschrift und Text als Nachricht (Benachrichtigungen › Wachwerk › Warnung).</p>` };
+      case "wwdoors":
+        return { icon: "mdi:door", c: "#0ea5e9", title: "Türen & Tore", sub: "Wachwerk",
+          body: `${pk("ww_doors", "Türen und Tore", "mdi:door", E.doors)}
+            <label class="field narrow"><span><ha-icon icon="mdi:timer-sand"></ha-icon> Hinweis, wenn offen länger als</span>${minutes("ww_door_min", 30, 5, 240, 5)}</label>
+            <div class="wxrows">${this._setRow("wwlc", "Check beim Gehen", "wenn niemand mehr zu Hause ist", sw("ww_leave_check"), "Verlässt der Letzte das Haus, prüft Wachwerk Türen, Fenster (Heizwerk) und Lichter (Lichtwerk) und meldet, was noch offen bzw. an ist.")}</div>` };
+      case "wwalarm":
+        return { icon: "mdi:shield-home-outline", c: "#6366f1", title: "Alarmanlage, Klingel & Kamera", sub: "Wachwerk",
+          body: `<div class="field"><span><ha-icon icon="mdi:shield-home-outline"></ha-icon> Alarmanlage${!p.ww_alarm && E.alarm ? ` (leer = automatisch: ${esc(this._entityName(E.alarm))})` : ""}</span>${this._picker("ww_alarm", p.ww_alarm ? [p.ww_alarm] : [])}</div>
+            <div class="field"><span><ha-icon icon="mdi:doorbell"></ha-icon> Klingel${!p.ww_bell && E.bell ? ` (leer = automatisch: ${esc(this._entityName(E.bell))})` : ""}</span>${this._picker("ww_bell", p.ww_bell ? [p.ww_bell] : [])}</div>
+            <div class="field"><span><ha-icon icon="mdi:cctv"></ha-icon> Kamera fürs Bild${!p.ww_camera && E.camera ? ` (leer = automatisch: ${esc(this._entityName(E.camera))})` : ""}</span>${this._picker("ww_camera", p.ww_camera ? [p.ww_camera] : [])}</div>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Scharf und unscharf schaltet Wachwerk nur Alarmanlagen ohne Code (z. B. Alarmo). Die Hausmodi „Wir gehen“ und „Wir sind da“ können das mit erledigen.</p>` };
+      default:
+        return null;
+    }
+  }
+
+  // ------------------------------------------------------------ Hausdienste: Hausmodi, Wartung, Wochenbericht
+  /** Hausmodi als Knopfleiste (Startseite und Tablet). */
+  _modesBar() {
+    const hd = this._status?.dienste;
+    if (!hd?.modes) return "";
+    const last = hd.last_mode && Date.now() - new Date(hd.last_mode.at) < 12 * 3600000 ? hd.last_mode.mode : null;
+    return `<div class="hmodes">${Object.entries(hd.modes).map(([k, m]) => `<button class="hmode ${last === k ? "on" : ""}" data-action="house-mode" data-mode="${k}" title="${esc((m.actions || []).map((a) => hd.actions?.[a] || a).join(" · "))}"><ha-icon icon="${m.icon}"></ha-icon><span>${esc(m.name)}</span></button>`).join("")}
+      ${this._admin ? `<button class="hmode set" data-action="settings-go" data-sub="modes" title="Hausmodi einstellen"><ha-icon icon="mdi:tune-variant"></ha-icon></button>` : ""}</div>`;
+  }
+
+  /** Stand der Hausdienste neu holen (Wartung nach Ändern) und das Fenster neu zeichnen. */
+  async _hdReload() {
+    try {
+      const st = await this._ws({ type: "hauswerk/dienste/get" });
+      if (this._status) this._status.dienste = st;
+    } catch (e) {
+      /* kommt mit dem nächsten Status */
+    }
+    if (this._pop) this._renderPop?.();
+  }
+
+  _hdTaskRow(t, done = true) {
+    const left = t.left;
+    const c = left == null ? "#94a3b8" : left <= 0 ? C.alert : left <= 14 ? "#f59e0b" : C.ok;
+    const when = left == null ? "" : left < 0 ? `${-left} Tage überfällig` : left === 0 ? "fällig" : `in ${left} Tagen`;
+    return `<div class="ev ${left != null && left <= 0 ? "live" : ""}"><ha-icon icon="${esc(t.icon || "mdi:wrench-outline")}" style="color:${c}"></ha-icon><span class="grow"><b>${esc(t.name)}</b><small>${t.auto ? "automatisch erkannt" : `alle ${t.days} Tage${t.last ? ` · zuletzt ${new Date(t.last).toLocaleDateString("de-DE")}` : ""}`}${when ? ` · ${when}` : ""}</small></span>
+      ${!t.auto && done ? `<button class="sbtn" data-action="task-done" data-id="${esc(t.id)}" title="Erledigt"><ha-icon icon="mdi:check"></ha-icon></button>${this._admin ? `<button class="sbtn" data-action="task-del" data-id="${esc(t.id)}" title="Löschen"><ha-icon icon="mdi:delete-outline"></ha-icon></button>` : ""}` : ""}</div>`;
+  }
+
+  _hdPop(id, p, { sw, head, dis }) {
+    const hd = this._status?.dienste || {};
+    switch (id) {
+      case "modes": {
+        const modes = p.hd_modes || {};
+        const acts = hd.actions || {};
+        const blk = (k, m) => {
+          const on = new Set(modes[k] || m.actions || []);
+          return `${head(m.icon, m.name)}<div class="rq-quick">${Object.entries(acts).map(([a, l]) => `<button class="pill ${on.has(a) ? "on" : ""}" data-action="hd-mode-act" data-mode="${k}" data-a="${a}" ${dis}>${esc(l)}</button>`).join("")}</div>`;
+        };
+        return { icon: "mdi:home-switch-outline", c: "#14b8a6", title: "Hausmodi", sub: "Hauswerk · ein Tipp, alle Module",
+          body: `<p class="muted">Die Knöpfe auf der Startseite. Jeder Modus erledigt die gewählten Schritte über die Module (Lichtwerk, Rollwerk, Heizwerk, Beetwerk, Wachwerk) und sagt danach, was noch offen ist.</p>
+            ${Object.entries(hd.modes || {}).map(([k, m]) => blk(k, m)).join("")}` };
+      }
+      case "maint": {
+        const tasks = hd.tasks || [];
+        const own = new Set((p.hd_tasks || []).map((t) => t.name));
+        const tpl = (hd.templates || []).filter((t) => !own.has(t.name));
+        return { icon: "mdi:wrench-clock", c: "#14b8a6", title: "Wartung", sub: "Hauswerk · was im Haus fällig ist", foot: null,
+          body: `${tasks.length ? `<div class="evlist">${tasks.map((t) => this._hdTaskRow(t)).join("")}</div>` : `<p class="muted">Noch keine Aufgaben.</p>`}
+            ${this._admin ? `${head("mdi:plus", "Aufgabe hinzufügen")}
+            ${tpl.length ? `<div class="rq-quick">${tpl.map((t, i) => `<button class="pill" data-action="task-add" data-i="${i}"><ha-icon icon="${t.icon}"></ha-icon>${esc(t.name)}</button>`).join("")}</div>` : ""}
+            <div class="hd-add"><input type="text" id="hd-new-name" placeholder="Eigene Aufgabe, z. B. Pelletlager prüfen" maxlength="80"><div class="unit"><input type="number" id="hd-new-days" min="1" max="3650" value="90"><i>Tage</i></div>
+              <button class="secondary" data-action="task-add">Hinzufügen</button></div>` : ""}
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Automatisch dabei: schwache Batterien, Melder am Ende ihrer Lebensdauer und die Mähermesser. Fällige Aufgaben stehen unter der Glocke; als Nachricht unter Benachrichtigungen › Hauswerk › Wartung.</p>` };
+      }
+      case "weekly": {
+        const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+        const rep = this._pop?.draft?.weekly;
+        return { icon: "mdi:newspaper-variant-outline", c: "#14b8a6", title: "Wochenbericht", sub: "Hauswerk · einmal pro Woche",
+          body: `<div class="wxrows">${this._setRow("hdw", "Wochenbericht senden", "das Wichtigste der Woche aus allen Modulen", sw("hd_weekly"), "Heizstunden und Lüften, Energie, Licht, Mähen, Klingel und Warnungen sowie fällige Wartung – je Modul eine Zeile. Kanal unter Benachrichtigungen › Hauswerk › Wochenbericht.")}</div>
+            <div class="field"><span><ha-icon icon="mdi:calendar-week"></ha-icon> Tag</span><div class="segs small">${DAYS.map((d, i) => `<button class="seg ${Number(p.hd_weekly_day ?? 6) === i ? "on" : ""}" data-action="set-seg" data-key="hd_weekly_day" data-v="${i}" ${dis}>${d}</button>`).join("")}</div></div>
+            <label class="field narrow"><span><ha-icon icon="mdi:clock-outline"></ha-icon> Uhrzeit</span><input type="time" data-set="hd_weekly_time" value="${esc(p.hd_weekly_time || "18:00")}" ${dis}></label>
+            <div class="qrow"><button class="secondary" data-action="weekly" data-send="0"><ha-icon icon="mdi:eye-outline"></ha-icon>Vorschau</button><button class="secondary" data-action="weekly" data-send="1"><ha-icon icon="mdi:send-outline"></ha-icon>Jetzt senden</button></div>
+            ${rep ? `<div class="card wk-prev"><b>${esc(rep.title)}</b>${(rep.lines.length ? rep.lines : [rep.text]).map((l) => `<p>${esc(l)}</p>`).join("")}</div>` : ""}` };
+      }
+      default:
+        return null;
+    }
+  }
+
   // ------------------------------------------------------------ Modul Beetwerk (Garten: Mähroboter, Bewässerung)
   _bwNum(id) {
     const v = parseFloat(id ? this._hass.states[id]?.state : NaN);
@@ -7957,6 +8234,7 @@ class HauswerkPanel extends HTMLElement {
     if (scope === "kw") return this._kwRows(p);
     if (scope === "lw") return this._lwRows(p);
     if (scope === "bw") return this._bwRows(p);
+    if (scope === "ww") return this._wwRows(p);
     if (scope === "house" || scope === "sys") {
       const vac = {
         off: "Nur von Hand",
@@ -7978,6 +8256,16 @@ class HauswerkPanel extends HTMLElement {
             (p.waste_calendars || []).length ? (s.waste?.[0] ? `Müll: ${s.waste[0].type} ${new Date(s.waste[0].date).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" })}` : "Müllabholung") : "",
             p.main_calendar ? `Standard: ${this._entityName(p.main_calendar)}` : (p.calendars || []).length ? `${p.calendars.length} Termin-Kalender` : "", p.vacation_source === "calendar" && p.vacation_calendar ? "Urlaub per Kalender" : ""].filter(Boolean).join(" · "),
           warn: !!s.workday_calendar_error, words: "kalender feiertag arbeitstag workday wochenende brückentag termine müll abfall familie urlaub" },
+        ...(() => {
+          const hd = s.dienste || {};
+          const due = (hd.tasks || []).filter((t) => t.left != null && t.left <= 0);
+          const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+          return hd.modes ? [
+            { g: "Alltag", id: "modes", t: "oft", icon: "mdi:home-switch-outline", c: "#14b8a6", title: "Hausmodi", sum: Object.values(hd.modes).map((m) => `${m.name}: ${(m.actions || []).length} Schritte`).join(" · "), words: "gute nacht guten morgen wir gehen wir sind da modus szene" },
+            { g: "Alltag", id: "maint", t: "oft", icon: "mdi:wrench-clock", c: "#14b8a6", title: "Wartung", sum: due.length ? `fällig: ${due.slice(0, 3).map((t) => t.name).join(", ")}${due.length > 3 ? " …" : ""}` : `${(hd.tasks || []).length} Aufgaben · nichts fällig`, val: due.length ? String(due.length) : "", warn: due.length > 0, words: "wartung fällig rauchmelder filter entlüften batterie aufgabe erinnerung" },
+            { g: "Alltag", id: "weekly", icon: "mdi:newspaper-variant-outline", c: "#14b8a6", title: "Wochenbericht", sum: p.hd_weekly !== false ? `${DAYS[Number(p.hd_weekly_day ?? 6)]} ${p.hd_weekly_time || "18:00"} Uhr` : "aus", val: p.hd_weekly !== false ? "an" : "aus", words: "wochenbericht bericht woche zusammenfassung" },
+          ] : [];
+        })(),
         { g: "Einrichten", id: "vacation", icon: "mdi:palm-tree", c: "#34d399", title: "Urlaub & Abwesenheit", sum: `${vac} · Heizen: abwesend ${p.away_action === "off" ? "aus" : p.away_mode === "offset" ? `${fmt(p.away_offset)} °C kühler` : `höchstens ${fmt(p.away_temp)} °C`}, Urlaub ${fmt(p.vacation_temp)} °C`,
           val: s.vacation ? "Urlaub" : s.away ? "abwesend" : "", on: s.vacation, words: "kalender zeitraum stichwort ferien reise abwesend absenken temperatur frostschutz" },
         { g: "Einrichten", id: "weather", val: this._weather()?.temp != null ? `${fmt(this._weather().temp)} °C` : "", icon: "mdi:weather-partly-cloudy", c: "#60a5fa", title: "Wetter",
@@ -8132,7 +8420,7 @@ class HauswerkPanel extends HTMLElement {
           <div class="grow"><h2>Protokoll</h2><small>Was wann warum entschieden wurde · ${L.days || 14} Tage</small></div>
           <span class="lg-live ${L.live ? "on" : ""}" id="lg-live">${this._logLiveHtml()}</span>
         </div>
-        <div class="lg-chips">${[["", "Alles", "mdi:home-outline", "#94a3b8"], ["heizwerk", "Heizwerk & Haus", "logo:heizen", "#fb923c"], ["rollwerk", "Rollwerk", "logo:rollwerk", "#0ea5e9"], ["kraftwerk", "Kraftwerk", "logo:kraftwerk", "#f59e0b"], ["beetwerk", "Beetwerk", "logo:beetwerk", "#16a34a"], ["lichtwerk", "Lichtwerk", "logo:lichtwerk", "#6366f1"]]
+        <div class="lg-chips">${[["", "Alles", "mdi:home-outline", "#94a3b8"], ["heizwerk", "Heizwerk & Haus", "logo:heizen", "#fb923c"], ["rollwerk", "Rollwerk", "logo:rollwerk", "#0ea5e9"], ["kraftwerk", "Kraftwerk", "logo:kraftwerk", "#f59e0b"], ["beetwerk", "Beetwerk", "logo:beetwerk", "#16a34a"], ["lichtwerk", "Lichtwerk", "logo:lichtwerk", "#6366f1"], ["wachwerk", "Wachwerk", "logo:wachwerk", "#dc2626"]]
           .map(([id, name, icon, c]) => `<button class="lg-cat lg-mod ${(this._logMod || "") === id ? "on" : ""}" style="--c:${c}" data-action="log-mod" data-id="${id}">${String(icon).startsWith("logo:") ? `<span class="lg-logo">${modIcon(icon)}</span>` : `<ha-icon icon="${icon}"></ha-icon>`}${name}</button>`)
           .join("")}</div>
         <div class="lg-chips">${[["", "Alle Räume", "#94a3b8"], ...rooms.map((r) => [r.id, r.name, this._roomColor(r.id)])]
@@ -8177,8 +8465,8 @@ class HauswerkPanel extends HTMLElement {
       const e = L.entries[i];
       if (!cats.has(e.cat) && LOG_CATS[e.cat]) continue;
       if (room && e.room !== room) continue;
-      if (["rollwerk", "kraftwerk", "lichtwerk", "beetwerk"].includes(this._logMod) && e.mod !== this._logMod) continue;
-      if (this._logMod === "heizwerk" && ["rollwerk", "kraftwerk", "lichtwerk", "beetwerk"].includes(e.mod)) continue;
+      if (["rollwerk", "kraftwerk", "lichtwerk", "beetwerk", "wachwerk"].includes(this._logMod) && e.mod !== this._logMod) continue;
+      if (this._logMod === "heizwerk" && ["rollwerk", "kraftwerk", "lichtwerk", "beetwerk", "wachwerk"].includes(e.mod)) continue;
       if (q && !`${e.title} ${e.why || ""} ${roomName(e)} ${LOG_CATS[e.cat]?.name || ""}`.toLowerCase().includes(q)) continue;
       hits.push(e);
     }
@@ -8240,7 +8528,7 @@ class HauswerkPanel extends HTMLElement {
   /** Ein Einstieg für alle Einstellungen: Reiter Haus · Heizwerk · Rollwerk · Kraftwerk · Lichtwerk · System. */
   _setNav(scope) {
     const items = [["house", "Haus", "logo:hauswerk", "house"], ["heat", "Heizwerk", "logo:heizen", "settings"], ["rw", "Rollwerk", "logo:rollwerk", "shutset"],
-      ["kw", "Kraftwerk", "logo:kraftwerk", "kwset"], ["lw", "Lichtwerk", "logo:lichtwerk", "lightset"], ["bw", "Beetwerk", "logo:beetwerk", "gardenset"], ["sys", "System", "mdi:cog-outline", "house"]];
+      ["kw", "Kraftwerk", "logo:kraftwerk", "kwset"], ["lw", "Lichtwerk", "logo:lichtwerk", "lightset"], ["bw", "Beetwerk", "logo:beetwerk", "gardenset"], ["ww", "Wachwerk", "logo:wachwerk", "secset"], ["sys", "System", "mdi:cog-outline", "house"]];
     return `<div class="setnav" role="tablist" aria-label="Einstellungen">${items.map(([k, l, i, tab]) => `<button class="sn ${scope === k ? "on" : ""}" role="tab" aria-selected="${scope === k}" data-action="set-nav" data-tab="${tab}" data-sys="${k === "sys" ? 1 : 0}"><span class="sn-ic">${modIcon(i)}</span><span>${l}</span></button>`).join("")}</div>`;
   }
 
@@ -8257,7 +8545,7 @@ class HauswerkPanel extends HTMLElement {
       <ha-icon class="xc-ic" icon="mdi:school-outline"></ha-icon></button>`;
   }
 
-  _settingsList(scope = this._tab === "house" ? (this._setSys ? "sys" : "house") : this._tab === "shutset" ? "rw" : this._tab === "kwset" ? "kw" : this._tab === "lightset" ? "lw" : this._tab === "gardenset" ? "bw" : "heat") {
+  _settingsList(scope = this._tab === "house" ? (this._setSys ? "sys" : "house") : this._tab === "shutset" ? "rw" : this._tab === "kwset" ? "kw" : this._tab === "lightset" ? "lw" : this._tab === "gardenset" ? "bw" : this._tab === "secset" ? "ww" : "heat") {
     const q = (this._setQuery || "").toLowerCase().trim();
     const ex = this._expertOn(EXPERT_MOD[scope] || "haus");
     const all = this._settingRows(scope).filter((r) => !r.x || ex);
@@ -8566,7 +8854,7 @@ class HauswerkPanel extends HTMLElement {
 
   // ------------------------------------------------------------ Pop-ups
   _openPop(id, draft = {}) {
-    if (this._setQuery && ["house", "settings", "shutset", "kwset", "lightset", "gardenset"].includes(this._tab)) this._setHit = this._setQuery.trim();
+    if (this._setQuery && ["house", "settings", "shutset", "kwset", "lightset", "gardenset", "secset"].includes(this._tab)) this._setHit = this._setQuery.trim();
     this._settings = clone(this._data.settings);
     this._pop = { id, draft };
     this._renderPop();
@@ -8644,7 +8932,7 @@ class HauswerkPanel extends HTMLElement {
   _popEnhance(host, body) {
     const sheet = host.querySelector(".sheet");
     if (!sheet || !body) return;
-    const setTab = ["house", "settings", "shutset", "kwset", "lightset", "gardenset"].includes(this._tab);
+    const setTab = ["house", "settings", "shutset", "kwset", "lightset", "gardenset", "secset"].includes(this._tab);
     const dock = setTab && window.innerWidth >= 1100 && !/^(search|setup|errtext|cwiz|rwiz)$/.test(this._pop.id);
     this.toggleAttribute("setdock", !!dock);
     host.querySelector(".backdrop")?.classList.toggle("dock", !!dock);
@@ -8757,6 +9045,8 @@ class HauswerkPanel extends HTMLElement {
     const p = this._settings;
     const s = this._status || {};
     const { minutes, segs, sw, head, dis } = this._setHelpers(p);
+    if (WW_POPS.includes(id)) return this._wwPop(id, p, { sw, minutes, head });
+    if (["modes", "maint", "weekly"].includes(id)) return this._hdPop(id, p, { sw, head, dis });
     const rooms = this._rooms();
     const st = s.rooms || {};
     const date = (iso, time = false) =>
@@ -11344,6 +11634,72 @@ class HauswerkPanel extends HTMLElement {
         this._instantSave("bw_plan_days");
         break;
       }
+      case "house-mode": {
+        el.disabled = true;
+        try {
+          const res = await this._ws({ type: "hauswerk/haus/mode", mode: el.dataset.mode });
+          await this._hdReload();
+          this._renderMain();
+          const open = (res.open || []).map((o) => o.name);
+          this._toast(`${res.name}: ${(res.done || []).join(", ") || "nichts zu tun"}${open.length ? ` · noch offen: ${open.join(", ")}` : ""}`);
+        } finally {
+          el.disabled = false;
+        }
+        break;
+      }
+      case "ww-alarm": {
+        await this._ws({ type: "hauswerk/wachwerk/alarm", action: el.dataset.v });
+        this._toast(el.dataset.v === "off" ? "Alarmanlage unscharf" : "Alarmanlage wird scharf geschaltet");
+        setTimeout(() => this._renderMain(), 1500);
+        break;
+      }
+      case "task-done": {
+        const res = await this._ws({ type: "hauswerk/dienste/task_done", task: el.dataset.id });
+        if (this._status) this._status.dienste = res.status;
+        const t = (this._settings.hd_tasks || []).find((x) => x.id === el.dataset.id);
+        if (t) t.last = new Date().toISOString().slice(0, 10);
+        if (this._data?.settings?.hd_tasks) this._data.settings.hd_tasks = JSON.parse(JSON.stringify(this._settings.hd_tasks || []));
+        this._toast("Erledigt");
+        this._renderPop?.();
+        this._renderMain();
+        break;
+      }
+      case "task-add": {
+        const tpl = el.dataset.i != null ? (this._status?.dienste?.templates || []).filter((t) => !(this._settings.hd_tasks || []).some((x) => x.name === t.name))[Number(el.dataset.i)] : null;
+        const name = tpl ? tpl.name : this.shadowRoot.getElementById("hd-new-name")?.value.trim();
+        const days = tpl ? tpl.days : Number(this.shadowRoot.getElementById("hd-new-days")?.value) || 90;
+        if (!name) return this._toast("Bitte einen Namen eingeben");
+        this._settings.hd_tasks = [...(this._settings.hd_tasks || []), { name, icon: tpl?.icon || "mdi:wrench-outline", days, last: new Date().toISOString().slice(0, 10) }];
+        await this._instantSave("hd_tasks");
+        await this._hdReload();
+        break;
+      }
+      case "task-del": {
+        this._settings.hd_tasks = (this._settings.hd_tasks || []).filter((x) => x.id !== el.dataset.id);
+        await this._instantSave("hd_tasks");
+        await this._hdReload();
+        break;
+      }
+      case "hd-mode-act": {
+        const hd = this._status?.dienste || {};
+        const modes = JSON.parse(JSON.stringify(this._settings.hd_modes || {}));
+        const k = el.dataset.mode;
+        const cur = new Set(modes[k] || hd.modes?.[k]?.actions || []);
+        if (cur.has(el.dataset.a)) cur.delete(el.dataset.a);
+        else cur.add(el.dataset.a);
+        modes[k] = Object.keys(hd.actions || {}).filter((a) => cur.has(a));
+        this._settings.hd_modes = modes;
+        this._refreshSettings();
+        this._instantSave("hd_modes");
+        break;
+      }
+      case "weekly": {
+        const rep = await this._ws({ type: "hauswerk/dienste/weekly", send: el.dataset.send === "1" });
+        if (this._pop) this._pop.draft = { ...(this._pop.draft || {}), weekly: rep };
+        this._renderPop?.();
+        if (el.dataset.send === "1") this._toast("Wochenbericht gesendet");
+        break;
+      }
       case "bw-pause": {
         const cur = new Set(this._settings.bw_pause || ["rain", "soil", "frost", "water"]);
         if (cur.has(el.dataset.k)) cur.delete(el.dataset.k);
@@ -11763,7 +12119,7 @@ class HauswerkPanel extends HTMLElement {
       }
       case "settings-go":
         // zentrale Pop-ups unter Hauswerk-Einstellungen, alle anderen unter Heizwerk › Einstellungen
-        this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : LW_POPS.includes(el.dataset.sub) ? "lightset" : BW_POPS.includes(el.dataset.sub) ? "gardenset" : RW_POPS.includes(el.dataset.sub) || el.dataset.sub?.startsWith("rwc:") || el.dataset.sub?.startsWith("rwp:") ? "shutset" : "settings");
+        this._setView(HOUSE_POPS.includes(el.dataset.sub) ? "house" : LW_POPS.includes(el.dataset.sub) ? "lightset" : BW_POPS.includes(el.dataset.sub) ? "gardenset" : WW_POPS.includes(el.dataset.sub) ? "secset" : RW_POPS.includes(el.dataset.sub) || el.dataset.sub?.startsWith("rwc:") || el.dataset.sub?.startsWith("rwp:") ? "shutset" : "settings");
         if (el.dataset.sub) this._openPop(el.dataset.sub);
         break;
       case "person-new":
@@ -12498,6 +12854,14 @@ MODULE_LOGOS.beetwerk = `<svg viewBox="0 0 48 48" aria-hidden="true">
   <path d="M14.8 21.8V34.2a2.8 2.8 0 0 0 2.8 2.8h12.8a2.8 2.8 0 0 0 2.8-2.8V21.8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M24 33.6v-6.2" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
   <path d="M24 28.6c-3.6 0-5.4-2.2-5.4-5 3.4 0 5.4 2 5.4 5zM24 27.2c0-3 1.8-5 5.2-5 0 2.8-1.8 5-5.2 5z" fill="#fde047"/>
+</svg>`;
+MODULE_LOGOS.wachwerk = `<svg viewBox="0 0 48 48" aria-hidden="true">
+  <defs><linearGradient id="wwlg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fca5a5"/><stop offset="1" stop-color="#b91c1c"/></linearGradient></defs>
+  <rect width="48" height="48" rx="13" fill="url(#wwlg)"/>
+  <path d="M10.5 23.5 24 11.5l13.5 12" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M14.8 21.8V34.2a2.8 2.8 0 0 0 2.8 2.8h12.8a2.8 2.8 0 0 0 2.8-2.8V21.8" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M24 21.6l5.2 2v4c0 3.1-2.2 5.4-5.2 6.4-3-1-5.2-3.3-5.2-6.4v-4z" fill="#fff"/>
+  <path d="M21.8 27.6l1.6 1.6 3-3.2" fill="none" stroke="#b91c1c" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>`;
 /** ha-icon oder – bei „logo:<modul>“ – das eigene Symbol des Moduls. */
 // Jede Kopie bekommt eigene IDs für den Farbverlauf: sonst bleibt sie leer, wenn die erste Kopie verborgen ist.
@@ -13848,8 +14212,11 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 @media (max-width:600px) {
   .bnav { display:flex; position:fixed; left:0; right:0; bottom:0; z-index:8; padding:6px 8px calc(6px + env(safe-area-inset-bottom)); gap:4px;
     background:color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter:blur(12px); border-top:1px solid var(--line); }
-  .bn { all:unset; cursor:pointer; flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:5px 0; border-radius:12px; font-size:11px; font-weight:600; color:var(--muted); }
-  .bn .bi { position:relative; display:grid; place-items:center; width:54px; height:28px; border-radius:99px; }
+  .bn { all:unset; cursor:pointer; flex:1 1 0; min-width:0; display:flex; flex-direction:column; align-items:center; gap:2px; padding:5px 0; border-radius:12px; font-size:11px; font-weight:600; color:var(--muted); }
+  .bn > span:last-child { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .bn .bi { position:relative; display:grid; place-items:center; width:54px; max-width:100%; height:28px; border-radius:99px; }
+  .bnav.many { gap:0; padding-left:2px; padding-right:2px; }
+  .bnav.many .bn { font-size:9.5px; letter-spacing:-.2px; }
   .bn ha-icon { --mdc-icon-size:22px; }
   .bn .mlogo { width:26px; height:26px; }
   .bn.on { color:var(--text); }
@@ -14689,6 +15056,24 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .bws-b i { width:100%; border-radius:4px 4px 2px 2px; background:#16a34a; min-height:2px; } .bws-b small { font-size:10px; color:var(--muted); }
 .bw-w { display:flex; align-items:center; gap:12px; } .bw-w-t { display:flex; flex-direction:column; } .bw-w-t small { color:var(--muted); }
 .sv-t { font-size:.8em; color:#cbd5e1; }
+.hmodes { display:grid; grid-template-columns:repeat(4, 1fr) auto; gap:10px; margin:12px 0 4px; }
+@media (max-width:600px) { .hmodes { grid-template-columns:1fr 1fr; } .hmode.set { display:none; } }
+.hmode { all:unset; cursor:pointer; box-sizing:border-box; display:flex; align-items:center; justify-content:center; gap:8px; min-height:48px; padding:0 14px; border-radius:14px; border:1px solid var(--line); background:var(--card); font-size:14px; font-weight:600; color:var(--text); box-shadow:0 1px 2px rgba(0,0,0,.06); }
+.hmode ha-icon { color:#14b8a6; --mdc-icon-size:22px; }
+.hmode.on { border-color:#14b8a6; background:color-mix(in srgb, #14b8a6 12%, var(--card)); }
+.hmode.set { width:48px; padding:0; }
+.hmode.set ha-icon { color:var(--muted); }
+.hmode:disabled { opacity:.5; cursor:wait; }
+.ws-l .hmodes { margin-top:16px; grid-template-columns:1fr 1fr; }
+.ws-l .hmode { min-height:56px; font-size:15px; }
+.ws-l .hmode.set { display:none; }
+.qrow { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.qrow .qbtn { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 16px; border-radius:12px; border:1px solid var(--line); background:color-mix(in srgb, var(--text) 6%, transparent); font-size:14px; font-weight:600; }
+.hd-add { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
+.hd-add input[type=text] { flex:1 1 200px; height:44px; box-sizing:border-box; padding:0 12px; border-radius:12px; border:1px solid var(--line); background:var(--card2); color:var(--text); font:inherit; }
+.hd-add .unit { width:120px; }
+.wk-prev { margin-top:12px; padding:12px 14px; white-space:pre-line; }
+.wk-prev p { margin:6px 0 0; }
 .bw-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; margin-top:14px; }
 .bw-c { display:flex; flex-direction:column; gap:12px; }
 .bw-h { display:flex; align-items:center; gap:12px; } .bw-h b { display:block; font-size:16px; } .bw-h small { color:var(--muted); font-size:13px; }

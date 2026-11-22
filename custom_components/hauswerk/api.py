@@ -10,6 +10,8 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
+from .const import MODULE_SECURITY, MODULE_SERVICES
+from .dienste import MODE_ACTIONS
 from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_GARDEN, MODULE_HEATING, MODULE_HOUSE, MODULE_LIGHT, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
 from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, block_conflicts, parse_hm
 
@@ -225,7 +227,7 @@ SETTINGS_SCHEMA = vol.Schema(
         # Benachrichtigungen
         vol.Optional("notify_targets"): vol.All([vol.All(str, vol.Match(r"^[a-z0-9_]+$"))], vol.Length(max=10)),
         vol.Optional("notify_channels"): CHANNELS,
-        vol.Optional("notify_routes"): vol.All(dict, vol.Length(max=20), {vol.All(str, vol.Match(r"^[a-z_]{2,30}$")): CHANNELS}),
+        vol.Optional("notify_routes"): vol.All(dict, vol.Length(max=40), {vol.All(str, vol.Match(r"^[a-z_]{2,30}$")): CHANNELS}),
         vol.Optional("notify_hours"): vol.All(dict, vol.Length(max=20), {CHANNEL: vol.All([_hm], vol.Length(min=2, max=2))}),
         vol.Optional("notify_voice_away"): bool,
         vol.Optional("notify_emoji"): bool,
@@ -238,6 +240,14 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_mower"): NOTIFY_MODE,
         vol.Optional("notify_mower_care"): NOTIFY_MODE,
         vol.Optional("notify_mower_guard"): NOTIFY_MODE,
+        vol.Optional("notify_smoke"): NOTIFY_MODE,
+        vol.Optional("notify_water"): NOTIFY_MODE,
+        vol.Optional("notify_warn"): NOTIFY_MODE,
+        vol.Optional("notify_door"): NOTIFY_MODE,
+        vol.Optional("notify_leave"): NOTIFY_MODE,
+        vol.Optional("notify_bell"): NOTIFY_MODE,
+        vol.Optional("notify_maint"): NOTIFY_MODE,
+        vol.Optional("notify_weekly"): NOTIFY_MODE,
         # Beetwerk (Garten)
         vol.Optional("bw_mower"): _opt(vol.All(str, vol.Match(r"^lawn_mower\.[a-z0-9_]+$"))),
         vol.Optional("bw_soil"): _opt(ENTITY),
@@ -276,6 +286,28 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("bw_plan_from"): _hm,
         vol.Optional("bw_plan_to"): _hm,
         vol.Optional("bw_plan_holiday"): vol.In(["sunday", "off", "normal"]),
+        # Wachwerk
+        vol.Optional("ww_smoke"): vol.All([ENTITY], vol.Length(max=30)),
+        vol.Optional("ww_co"): vol.All([ENTITY], vol.Length(max=20)),
+        vol.Optional("ww_water"): vol.All([ENTITY], vol.Length(max=20)),
+        vol.Optional("ww_warn"): vol.All([ENTITY], vol.Length(max=40)),
+        vol.Optional("ww_doors"): vol.All([ENTITY], vol.Length(max=30)),
+        vol.Optional("ww_alarm"): _opt(vol.All(str, vol.Match(r"^alarm_control_panel\.[a-z0-9_]+$"))),
+        vol.Optional("ww_bell"): _opt(ENTITY),
+        vol.Optional("ww_camera"): _opt(vol.All(str, vol.Match(r"^camera\.[a-z0-9_]+$"))),
+        vol.Optional("ww_fire_covers"): bool,
+        vol.Optional("ww_fire_lights"): bool,
+        vol.Optional("ww_leave_check"): bool,
+        vol.Optional("ww_door_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
+        # Hausdienste
+        vol.Optional("hd_modes"): {vol.In(["night", "morning", "leave", "home"]): vol.All([vol.In(list(MODE_ACTIONS))], vol.Length(max=12))},
+        vol.Optional("hd_tasks"): vol.All([{vol.Optional("id"): vol.All(str, vol.Length(max=20)), vol.Required("name"): vol.All(str, vol.Length(min=1, max=80)),
+                                            vol.Optional("icon"): _opt(vol.All(str, vol.Length(max=60))),
+                                            vol.Required("days"): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
+                                            vol.Optional("last"): _opt(vol.All(str, vol.Match(r"^\d{4}-\d{2}-\d{2}$")))}], vol.Length(max=50)),
+        vol.Optional("hd_weekly"): bool,
+        vol.Optional("hd_weekly_day"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
+        vol.Optional("hd_weekly_time"): _hm,
         vol.Optional("bw_plan_days"): vol.All([vol.In(["mo", "tu", "we", "th", "fr", "sa", "su"])], vol.Length(min=1, max=7)),
         # Lichtwerk
         vol.Optional("lw_lights"): vol.All([vol.All(str, vol.Match(r"^(light|switch|input_boolean)\.[a-z0-9_]+$"))], vol.Length(max=80)),
@@ -384,6 +416,14 @@ def _bw(hass: HomeAssistant):
     return (hass.data.get(DOMAIN) or {}).get(MODULE_GARDEN)
 
 
+def _ww(hass: HomeAssistant):
+    return (hass.data.get(DOMAIN) or {}).get(MODULE_SECURITY)
+
+
+def _hd(hass: HomeAssistant):
+    return (hass.data.get(DOMAIN) or {}).get(MODULE_SERVICES)
+
+
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/beetwerk/water", vol.Optional("zone"): _opt(ENTITY),
                                   vol.Optional("minutes"): _opt(vol.All(vol.Coerce(float), vol.Range(min=1, max=120)))})
 @websocket_api.async_response
@@ -414,7 +454,8 @@ def _settings(hass: HomeAssistant) -> dict:
     """Alle Einstellungen, wie das Panel sie sieht: zentral (Kern), Heizwerk, Rollwerk (rw_…) und Kraftwerk (kw_…)."""
     haus, ctl, rw, kw, lw = _haus(hass), _ctl(hass), _rw(hass), _kw(hass), _lw(hass)
     return {**(haus.settings if haus else {}), **(ctl.settings if ctl else {}), **(rw.settings if rw else {}),
-            **(kw.settings if kw else {}), **(lw.settings if lw else {}), **(_bw(hass).settings if _bw(hass) else {})}
+            **(kw.settings if kw else {}), **(lw.settings if lw else {}), **(_bw(hass).settings if _bw(hass) else {}),
+            **(_ww(hass).settings if _ww(hass) else {}), **(_hd(hass).settings if _hd(hass) else {})}
 
 
 def _log(hass: HomeAssistant):
@@ -484,6 +525,62 @@ async def ws_bw_timer(hass: HomeAssistant, connection, msg) -> None:
         return _not_ready(connection, msg)
     await bw.async_timer(msg["timer"], msg["enable"], msg["start"], msg["end"], msg["days"], by=_who(connection))
     connection.send_result(msg["id"], {"status": bw.status()})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/haus/mode", vol.Required("mode"): vol.In(["night", "morning", "leave", "home"])})
+@websocket_api.async_response
+async def ws_house_mode(hass: HomeAssistant, connection, msg) -> None:
+    """Hausmodus („Gute Nacht“ …) – darf jeder angemeldete Benutzer, wie Anwesenheit."""
+    hd = _hd(hass)
+    if hd is None:
+        return _not_ready(connection, msg)
+    res = await hd.async_mode(msg["mode"], by=_who(connection))
+    if _ctl(hass):
+        await _ctl(hass).async_evaluate()
+    connection.send_result(msg["id"], res)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/dienste/get"})
+@websocket_api.async_response
+async def ws_hd_get(hass: HomeAssistant, connection, msg) -> None:
+    hd = _hd(hass)
+    if hd is None:
+        return _not_ready(connection, msg)
+    connection.send_result(msg["id"], hd.status())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/dienste/task_done", vol.Required("task"): vol.All(str, vol.Length(max=20))})
+@websocket_api.async_response
+async def ws_task_done(hass: HomeAssistant, connection, msg) -> None:
+    hd = _hd(hass)
+    if hd is None:
+        return _not_ready(connection, msg)
+    await hd.async_task_done(msg["task"], by=_who(connection))
+    connection.send_result(msg["id"], {"status": hd.status()})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/dienste/weekly", vol.Optional("send", default=False): bool})
+@require_editor
+@websocket_api.async_response
+async def ws_weekly(hass: HomeAssistant, connection, msg) -> None:
+    """Wochenbericht ansehen bzw. jetzt senden."""
+    hd = _hd(hass)
+    if hd is None:
+        return _not_ready(connection, msg)
+    rep = await hd.async_weekly_report()
+    if msg["send"]:
+        _haus(hass).send(_haus(hass).channels_for("weekly"), rep["title"], rep["text"], key="weekly:test", kind="weekly")
+    connection.send_result(msg["id"], rep)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/wachwerk/alarm", vol.Required("action"): vol.In(["away", "home", "night", "off"])})
+@websocket_api.async_response
+async def ws_ww_alarm(hass: HomeAssistant, connection, msg) -> None:
+    ww = _ww(hass)
+    if ww is None:
+        return _not_ready(connection, msg)
+    await ww.async_alarm(msg["action"], by=_who(connection))
+    connection.send_result(msg["id"], {"ok": True})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/heizen/get"})
@@ -601,7 +698,13 @@ async def ws_settings_save(hass: HomeAssistant, connection, msg) -> None:
     power = {k: v for k, v in settings.items() if k.startswith("kw_")}
     light = {k: v for k, v in settings.items() if k.startswith("lw_")}
     garden = {k: v for k, v in settings.items() if k.startswith("bw_")}
-    heat = {k: v for k, v in settings.items() if k not in HOUSE_KEYS and not k.startswith(("rw_", "kw_", "lw_", "bw_"))}
+    security = {k: v for k, v in settings.items() if k.startswith("ww_")}
+    services = {k: v for k, v in settings.items() if k.startswith("hd_")}
+    heat = {k: v for k, v in settings.items() if k not in HOUSE_KEYS and not k.startswith(("rw_", "kw_", "lw_", "bw_", "ww_", "hd_"))}
+    if security and _ww(hass):
+        await _ww(hass).async_save_settings(security, by=_who(connection))
+    if services and _hd(hass):
+        await _hd(hass).async_save_settings(services, by=_who(connection))
     if garden and _bw(hass):
         await _bw(hass).async_save_settings(garden, by=_who(connection))
         await _bw(hass).async_evaluate()
@@ -1129,6 +1232,11 @@ COMMANDS = (
     ws_bw_stop,
     ws_bw_busy,
     ws_bw_timer,
+    ws_house_mode,
+    ws_hd_get,
+    ws_task_done,
+    ws_weekly,
+    ws_ww_alarm,
     ws_rw_profile_save,
     ws_rw_profile_delete,
     ws_log_get,

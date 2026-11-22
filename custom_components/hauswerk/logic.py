@@ -1498,7 +1498,8 @@ EMOJI_WORDS: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 EMOJI_KINDS = {"window": "🪟", "offline": "📡", "frost": "❄️", "battery": "🪫", "cold": "🌡️", "vent": "🌬️",
                "vent_done": "🪟", "storm": "💨", "cover": "📡", "light_away": "💡", "light_offline": "📡",
-               "mower": "🤖", "mower_care": "🔧", "mower_guard": "🧒", "waste": "🗑️", "appliance": "✅"}
+               "mower": "🤖", "mower_care": "🔧", "mower_guard": "🧒", "waste": "🗑️", "appliance": "✅",
+               "smoke": "🔥", "water": "💧", "warn": "⚠️", "door": "🚪", "leave": "🏠", "bell": "🔔", "maint": "🔧", "weekly": "📰"}
 
 
 def notify_emoji(title: str, kind: str | None = None) -> str:

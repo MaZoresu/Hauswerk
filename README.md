@@ -14,6 +14,9 @@ Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite 
 | <img src="docs/icons/kraftwerk.svg" height="20"> **Kraftwerk** | Energiefluss live – Solar, Netz, Batterie, Hausverbrauch und Verbraucher; Tageswerte, Autarkie und Kosten aus dem Energie-Dashboard; **lernende Fertigerkennung** für Waschmaschine, Trockner & Co. |
 | <img src="docs/icons/lichtwerk.svg" height="20"> **Lichtwerk** | Licht nach dem Vorbild des Blueprints „Smart Light“: Sonne, Helligkeit, Uhrzeit, Entität, Bewegung, Nachtlicht, dynamisches Licht, von Hand, Anwesenheit und Urlaubs-Simulation |
 | <img src="docs/icons/beetwerk.svg" height="20"> **Beetwerk** | Garten: Mähroboter (Start, Pause, Station, Feierabend, Winterpause) mit Mähpause bei Regen, nassem Boden, Frost und Bewässerung; Bewässerung (Ventil, Bodenfeuchte, Smart Irrigation); Fehler- und Wartungs-Hinweise |
+| **Wachwerk** | Sicherheit: Rauch-, CO- und Wassermelder (bei Rauch Rollläden hoch, Licht an), amtliche Warnungen (NINA, DWD), Türen und Tore, Alarmanlage (z. B. Alarmo), Klingel mit Kamerabild, Check beim Verlassen |
+
+Dazu kommen **Hausdienste** im Kern – ohne eigenes Modul: **Hausmodi** („Gute Nacht“, „Guten Morgen“, „Wir gehen“, „Wir sind da“) als Knöpfe auf der Startseite, **Wartung** (eigene Aufgaben mit Intervall plus schwache Batterien, Melder am Lebensende, Mähermesser – unter der Glocke) und der **Wochenbericht** als Nachricht.
 
 ## Installation
 
@@ -245,6 +248,22 @@ Licht mit **Profilen** nach dem Vorbild des Blueprints [🔆 Smart Light](https:
 - **Benachrichtigungen:** „Licht an, niemand zu Hause“ und „Leuchte nicht erreichbar“.
 - **Übernahme:** bestehende Licht-Automationen werden aufgelistet und lassen sich nach dem Einrichten abschalten.
 - **Widget „Licht“**, Zeile in „Lage“ und im Bildschirmschoner, Symbole in der Legende, Protokoll mit Filter „Lichtwerk“.
+
+# Modul Wachwerk
+
+Wachwerk findet die Sicherheitsgeräte selbst (Einstellungen › Wachwerk, dort auch von Hand wählbar):
+
+- **Rauch-, CO- und Wassermelder:** Alarm als wichtige Nachricht (auch in der Ruhezeit). Bei Rauch oder CO fahren alle Rollläden hoch und alle Lichter gehen auf 100 % – als Fluchtweg (abschaltbar).
+- **Amtliche Warnungen** (NINA, DWD): neue Warnung mit Überschrift und Text als Nachricht und unter der Glocke.
+- **Türen & Tore:** Hinweis, wenn länger offen als eingestellt; beim Verlassen des Hauses ein **Check**, was noch offen (Türen, Fenster aus Heizwerk) oder an ist (Lichter aus Lichtwerk).
+- **Alarmanlage** (ohne Code, z. B. Alarmo): scharf abwesend / zu Hause / Nacht oder unscharf – auf der Seite, als Wand-Kachel und über die Hausmodi.
+- **Klingel:** Nachricht mit Kamerabild, Zähler der Woche.
+
+# Hausdienste
+
+- **Hausmodi:** ein Tipp, alle Module. Je Modus wählbar: Lichter aus, Rollläden zu/auf, Heizung Eco/nach Plan, Anwesenheit, Mähroboter in die Station, Alarmanlage, Check „was ist noch offen“.
+- **Wartung** (Einstellungen › Haus › Wartung): Aufgaben mit Intervall aus Vorlagen (Rauchmelder testen, Heizkörper entlüften, Filter …) oder eigene; „Erledigt“ setzt das Datum. Automatisch dabei: schwache Batterien, Melder am Lebensende, Mähermesser.
+- **Wochenbericht:** einmal pro Woche (Standard Sonntag 18:00) je Modul eine Zeile – Heizstunden und Lüften, Energie aus dem Energie-Dashboard, Licht, Mähen, Klingel und Warnungen, fällige Wartung. Vorschau und „Jetzt senden“ im Fenster.
 
 # Aufbau des Projekts
 

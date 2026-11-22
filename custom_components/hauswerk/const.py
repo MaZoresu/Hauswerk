@@ -23,6 +23,12 @@ LIGHT_STORAGE_KEY = f"{DOMAIN}.{MODULE_LIGHT}"
 # Modul Beetwerk (Garten: Mähroboter, Bewässerung): hass.data[DOMAIN][MODULE_GARDEN], Speicher hauswerk.beetwerk
 MODULE_GARDEN = "beetwerk"
 GARDEN_STORAGE_KEY = f"{DOMAIN}.{MODULE_GARDEN}"
+# Wachwerk: Sicherheit (Rauch, CO, Wasser, Warnungen, Türen, Alarmanlage, Klingel)
+MODULE_SECURITY = "wachwerk"
+SECURITY_STORAGE_KEY = f"{DOMAIN}.{MODULE_SECURITY}"
+# Hausdienste: Hausmodi, Wartung, Wochenbericht
+MODULE_SERVICES = "dienste"
+SERVICES_STORAGE_KEY = f"{DOMAIN}.{MODULE_SERVICES}"
 
 STORAGE_KEY = f"{DOMAIN}.{MODULE_HEATING}"
 STORAGE_VERSION = 1
@@ -63,7 +69,7 @@ SETTING_LABELS = {
     "notify_ha": "Mitteilung in Home Assistant", "notify_channels": "Benachrichtigungen an", "notify_routes": "Benachrichtigungen je Anlass", "notify_storm": "Benachrichtigungen", "notify_light_away": "Benachrichtigungen", "notify_light_offline": "Benachrichtigungen", "notify_mower": "Benachrichtigungen", "notify_mower_care": "Benachrichtigungen",
     "bw_mower": "Mähroboter", "bw_soil": "Bodenfeuchte", "bw_watering": "Bewässerung läuft", "bw_need": "Gießen nötig", "bw_valve": "Ventil",
     "bw_pause": "Mähpause bei", "bw_soil_wet": "Boden zu nass ab", "bw_frost": "Frost unter", "bw_water_after": "Nach dem Bewässern",
-    "bw_resume": "Nach der Pause weiter", "bw_resume_wait": "Weiter nach", "bw_resume_until": "Weiter bis", "bw_blades_days": "Messer wechseln nach", "bw_zones": "Bewässerungs-Zonen", "bw_water_auto": "Gießplan", "bw_water_time": "Gießen um", "bw_water_skip": "Bei Regen nicht gießen", "bw_guard": "Garten frei (Kamera)", "bw_guard_sensors": "Melder im Garten", "bw_guard_wait": "Weiter nach Garten frei", "bw_camera": "Kamera", "bw_night": "Igelschutz", "bw_night_margin": "Igelschutz Puffer", "bw_heat": "Hitzepause", "bw_heat_temp": "Hitzepause ab", "bw_season": "Saison-Hinweise", "bw_watch": "Wächter", "bw_watch_min": "Wächter nach", "bw_battery_min": "Akku altert unter", "bw_plan": "Mähplan", "bw_plan_hours": "Mähplan Stunden je Woche", "bw_plan_season": "Mähplan nach Wachstum", "bw_plan_from": "Mähen ab", "bw_plan_to": "Mähen bis", "bw_plan_days": "Mähtage", "bw_plan_holiday": "Mähplan an Feiertagen", "notify_mower_guard": "Benachrichtigungen", "notify_cover": "Benachrichtigungen", "notify_hours": "Benachrichtigungen je Kanal", "notify_voice_away": "Benachrichtigungen", "notify_emoji": "Emojis in Benachrichtigungen", "notify_bundle": "Benachrichtigungen bündeln", "notify_off": "Empfänger pausiert", "notify_cold": "Benachrichtigungen", "notify_vent": "Benachrichtigungen", "notify_vent_done": "Benachrichtigungen", "vent_morning": "Lüften", "vent_co2": "Lüften", "vent_cool": "Lüften", "vent_long_min": "Lüften", "vent_night_from": "Nachts lüften ab", "vent_night_to": "Nachts lüften bis",
+    "bw_resume": "Nach der Pause weiter", "bw_resume_wait": "Weiter nach", "bw_resume_until": "Weiter bis", "bw_blades_days": "Messer wechseln nach", "bw_zones": "Bewässerungs-Zonen", "bw_water_auto": "Gießplan", "bw_water_time": "Gießen um", "bw_water_skip": "Bei Regen nicht gießen", "bw_guard": "Garten frei (Kamera)", "bw_guard_sensors": "Melder im Garten", "bw_guard_wait": "Weiter nach Garten frei", "bw_camera": "Kamera", "bw_night": "Igelschutz", "bw_night_margin": "Igelschutz Puffer", "bw_heat": "Hitzepause", "bw_heat_temp": "Hitzepause ab", "bw_season": "Saison-Hinweise", "bw_watch": "Wächter", "bw_watch_min": "Wächter nach", "bw_battery_min": "Akku altert unter", "bw_plan": "Mähplan", "bw_plan_hours": "Mähplan Stunden je Woche", "bw_plan_season": "Mähplan nach Wachstum", "bw_plan_from": "Mähen ab", "bw_plan_to": "Mähen bis", "bw_plan_days": "Mähtage", "bw_plan_holiday": "Mähplan an Feiertagen", "ww_smoke": "Rauchmelder", "ww_co": "CO-Melder", "ww_water": "Wassermelder", "ww_warn": "Warnquellen", "ww_doors": "Türen & Tore", "ww_alarm": "Alarmanlage", "ww_bell": "Klingel", "ww_camera": "Kamera (Wachwerk)", "ww_fire_covers": "Bei Rauch Rollläden hoch", "ww_fire_lights": "Bei Rauch Licht an", "ww_leave_check": "Check beim Gehen", "ww_door_min": "Tür offen Hinweis nach", "hd_modes": "Hausmodi", "hd_tasks": "Wartung", "hd_weekly": "Wochenbericht", "hd_weekly_day": "Wochenbericht Tag", "hd_weekly_time": "Wochenbericht Uhrzeit", "notify_smoke": "Benachrichtigungen", "notify_water": "Benachrichtigungen", "notify_warn": "Benachrichtigungen", "notify_door": "Benachrichtigungen", "notify_leave": "Benachrichtigungen", "notify_bell": "Benachrichtigungen", "notify_maint": "Benachrichtigungen", "notify_weekly": "Benachrichtigungen", "notify_mower_guard": "Benachrichtigungen", "notify_cover": "Benachrichtigungen", "notify_hours": "Benachrichtigungen je Kanal", "notify_voice_away": "Benachrichtigungen", "notify_emoji": "Emojis in Benachrichtigungen", "notify_bundle": "Benachrichtigungen bündeln", "notify_off": "Empfänger pausiert", "notify_cold": "Benachrichtigungen", "notify_vent": "Benachrichtigungen", "notify_vent_done": "Benachrichtigungen", "vent_morning": "Lüften", "vent_co2": "Lüften", "vent_cool": "Lüften", "vent_long_min": "Lüften", "vent_night_from": "Nachts lüften ab", "vent_night_to": "Nachts lüften bis",
     "demand_entity": "Wärmeanforderung", "demand_action": "Wärmeanforderung", "demand_low": "Wärmeanforderung",
     "demand_valve": "Wärmeanforderung", "rw_covers": "Rollwerk: Rollläden", "rw_storm": "Rollwerk: Sturmschutz", "rw_wind_entity": "Rollwerk: Sturmschutz", "rw_recovery": "Rollwerk: Nach Neustart", "demand_hold": "Wärmeanforderung", "demand_preheat": "Wärmeanforderung",
     "kw_solar": "Kraftwerk: Solar", "kw_grid": "Kraftwerk: Netz", "kw_grid_export": "Kraftwerk: Netz", "kw_grid_invert": "Kraftwerk: Netz",
@@ -155,6 +161,14 @@ HOUSE_DEFAULTS = {
     "notify_mower": "important",    # Beetwerk: Mähroboter braucht Hilfe (Fehler)
     "notify_mower_care": "log",     # Beetwerk: Wartung (Messer wechseln)
     "notify_mower_guard": "log",    # Beetwerk: Mäher fährt heim, weil jemand im Garten ist
+    "notify_smoke": "important",    # Wachwerk: Rauch- bzw. CO-Alarm
+    "notify_water": "important",    # Wachwerk: Wasser erkannt
+    "notify_warn": "normal",        # Wachwerk: amtliche Warnung (NINA, DWD)
+    "notify_door": "normal",        # Wachwerk: Tür/Tor lange offen
+    "notify_leave": "normal",       # Wachwerk: beim Verlassen noch offen bzw. an
+    "notify_bell": "log",           # Wachwerk: Es hat geklingelt
+    "notify_maint": "log",          # Wartung fällig
+    "notify_weekly": "normal",      # Wochenbericht
     "notify_hours": {},           # je Kanal aktiv von–bis: {"tts:…": ["08:00", "21:00"]}; außerhalb nur Wichtiges
     "notify_voice_away": True,    # Ansagen nur, wenn jemand zu Hause ist (außer Wichtiges)
     "notify_emoji": True,         # dezent ein Emoji vor dem Titel (nicht bei Ansagen)

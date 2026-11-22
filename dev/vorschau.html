@@ -152,6 +152,23 @@ const status = {
   waste: (() => { const d = (k) => { const x = new Date(); x.setDate(x.getDate() + k); return x.toLocaleDateString("sv-SE"); };
     return [{ date: d(1), type: "Restabfall", cal: "calendar.muell" }, { date: d(1), type: "Bioabfall", cal: "calendar.muell" }, { date: d(5), type: "Papier", cal: "calendar.muell" }, { date: d(8), type: "Gelbe Tonne", cal: "calendar.muell" }]; })(),
   waste_due: { date: (() => { const x = new Date(); x.setDate(x.getDate() + 1); return x.toLocaleDateString("sv-SE"); })(), when: "morgen", types: ["Restabfall", "Bioabfall"] },
+  wachwerk: { configured: true, entities: { smoke: ["binary_sensor.rauchmelder_wohnzimmer", "binary_sensor.rauchmelder_flur"], co: ["binary_sensor.co_melder"], water: ["binary_sensor.wassermelder_hwr"],
+      warn: ["binary_sensor.leipzig_warnung_1"], doors: ["binary_sensor.kuche_tur", "cover.garagentor"], alarm: "alarm_control_panel.alarmo", bell: "event.klingel", camera: "camera.garten" },
+    smoke: [{ entity: "binary_sensor.rauchmelder_wohnzimmer", name: "Rauchmelder Wohnzimmer", state: "off", on: false }, { entity: "binary_sensor.rauchmelder_flur", name: "Rauchmelder Flur OG", state: "off", on: false }],
+    co: [{ entity: "binary_sensor.co_melder", name: "CO-Melder", state: "off", on: false }], water: [{ entity: "binary_sensor.wassermelder_hwr", name: "Wassermelder HWR", state: "off", on: false }],
+    doors: [{ entity: "binary_sensor.kuche_tur", name: "Küche Tür", state: "on", on: true, since: new Date(Date.now() - 12 * 60000).toISOString() }, { entity: "cover.garagentor", name: "Garagentor", state: "closed", on: false }],
+    warnings: [{ entity: "binary_sensor.leipzig_warnung_1", title: "Amtliche Warnung vor Sturmböen", text: "Es treten Sturmböen bis 70 km/h auf." }],
+    alarm: { entity: "alarm_control_panel.alarmo", state: "disarmed", code: false }, bell: { entity: "event.klingel", last: new Date(Date.now() - 3 * 3600e3).toISOString(), week: 4 },
+    fire: false, water_alarm: false, leave: [{ entity: "binary_sensor.kuche_tur", name: "Küche Tür", what: "offen" }] },
+  dienste: { modes: { night: { name: "Gute Nacht", icon: "mdi:weather-night", actions: ["lights_off", "covers_close", "eco_on", "mower_home", "check"] }, morning: { name: "Guten Morgen", icon: "mdi:weather-sunset-up", actions: ["covers_open", "eco_off"] },
+      leave: { name: "Wir gehen", icon: "mdi:exit-run", actions: ["away", "lights_off", "mower_home", "check"] }, home: { name: "Wir sind da", icon: "mdi:home-heart", actions: ["presence_auto", "eco_off"] } },
+    actions: { lights_off: "Lichter aus", covers_close: "Rollläden zu", covers_open: "Rollläden auf", eco_on: "Heizung auf Eco", eco_off: "Heizung nach Plan", away: "Anwesenheit: abwesend", presence_auto: "Anwesenheit: automatisch",
+      mower_home: "Mähroboter in die Station", alarm_away: "Alarmanlage scharf (abwesend)", alarm_night: "Alarmanlage scharf (Nacht)", alarm_off: "Alarmanlage unscharf", check: "Prüfen, was noch offen bzw. an ist" },
+    last_mode: null,
+    tasks: [{ id: "t1", name: "Rauchmelder testen", icon: "mdi:smoke-detector-variant", days: 365, last: "2025-11-01", auto: false, left: -21 },
+      { id: "auto:x", name: "Batterie wechseln: Fenster Bad", icon: "mdi:battery-alert-variant-outline", auto: true, left: 0 },
+      { id: "t2", name: "Filter Dunstabzug reinigen", icon: "mdi:stove", days: 90, last: "2026-10-01", auto: false, left: 59 }],
+    templates: [{ name: "Heizkörper entlüften", icon: "mdi:radiator", days: 365 }, { name: "Wasserfilter wechseln", icon: "mdi:water-check-outline", days: 180 }] },
   beetwerk: { configured: true, entities: { mower: "lawn_mower.automower", battery: "sensor.automower_mower_battery_charge", status: "sensor.automower_mower_status_plain",
     blades_days: "sensor.automower_mower_blades_days", hours: "sensor.automower_mower_statistic_hours", winter: "switch.automower_winter_mode", eod: "button.automower_eod",
     error: null, soil: "sensor.bodenfeuchte_rasen", need: "binary_sensor.smart_irrigation_rasen_1_irrigation_needed", watering: "binary_sensor.smart_irrigation_rasen_1_watering_now",
@@ -256,6 +273,11 @@ const hass = {
     if (msg.type === "hauswerk/heizen/get") return { settings, rooms, plans: {}, target_sensors: {}, status, defaults, modes: {}, is_admin: true, user_admin: true, rollwerk: { covers: rwCovers, profiles: rwProfiles, status: rwStatus }, lichtwerk: { lights: lwLights, profiles: lwProfiles, status: lwStatus, automations: [{ entity_id: "automation.nachtlicht", name: "Auto_Nachtlicht", state: "on" }] } };
     if (msg.type === "hauswerk/rollwerk/command") return null;
     if (["hauswerk/beetwerk/water", "hauswerk/beetwerk/stop", "hauswerk/beetwerk/timer"].includes(msg.type)) return { result: "gestartet", status: status.beetwerk };
+    if (msg.type === "hauswerk/haus/mode") { status.dienste.last_mode = { mode: msg.mode, at: new Date().toISOString() }; return { mode: msg.mode, name: status.dienste.modes[msg.mode].name, done: ["3 Lichter aus", "Rollläden zu"], open: status.wachwerk.leave }; }
+    if (msg.type === "hauswerk/dienste/get") return status.dienste;
+    if (msg.type === "hauswerk/dienste/task_done") { const t = status.dienste.tasks.find((x) => x.id === msg.task); if (t) t.left = t.days; return { status: status.dienste }; }
+    if (msg.type === "hauswerk/dienste/weekly") return { title: "Wochenbericht", text: "", lines: ["🔥 Heizwerk: 84 Std. geheizt, Ø 20.6 °C, 23× Fenster geöffnet", "⚡ Kraftwerk: 41 kWh Solar, 96 kWh Netzbezug", "💡 Lichtwerk: 46 Std. Licht", "🛡️ Wachwerk: 4× geklingelt", "🔧 Wartung: Rauchmelder testen"] };
+    if (msg.type === "hauswerk/wachwerk/alarm") { status.wachwerk.alarm.state = msg.action === "off" ? "disarmed" : `armed_${msg.action}`; return { ok: true }; }
     if (msg.type === "hauswerk/beetwerk/busy") { status.beetwerk.busy_until = msg.until || msg.hours ? new Date(Date.now() + 7200e3).toISOString() : null; return { status: status.beetwerk }; }
     if (msg.type === "hauswerk/lichtwerk/command") return null;
     if (msg.type === "hauswerk/heizen/links/refresh") return status.hm_links;

@@ -2,6 +2,20 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.86.0 – 2026-11-22
+
+### Neu: Modul Wachwerk (Sicherheit)
+- Findet **Rauch-, CO- und Wassermelder**, **amtliche Warnungen** (NINA, DWD), **Türen & Tore**, die **Alarmanlage** (z. B. Alarmo) und die **Klingel** automatisch.
+- **Rauch oder CO:** wichtige Nachricht (auch in der Ruhezeit), alle Rollläden fahren hoch und alle Lichter gehen auf 100 % – als Fluchtweg (beides abschaltbar). **Wasser:** wichtige Nachricht.
+- Warnungen mit Überschrift und Text, Tür bzw. Tor lange offen, **Check beim Verlassen** (Türen, Fenster, Lichter), Klingel mit Kamerabild.
+- Eigene Seite, Wand-Kacheln im Tabletmodus, Kachel auf der Tablet-Startseite, Zeile im Bildschirmschoner, Hinweise unter der Glocke, Protokoll-Filter und Einstellungen im Reiter Wachwerk.
+
+### Neu: Hausdienste (ohne eigenes Modul)
+- **Hausmodi** als Knöpfe auf der Startseite: „Gute Nacht“, „Guten Morgen“, „Wir gehen“, „Wir sind da“ – Lichter, Rollläden, Heizung (Eco), Anwesenheit, Mähroboter und Alarmanlage mit einem Tipp; danach steht da, was noch offen ist. Schritte je Modus unter Einstellungen › Haus › Hausmodi.
+- **Wartung:** Aufgaben mit Intervall (Vorlagen wie Rauchmelder testen, Heizkörper entlüften, Filter …) mit „Erledigt“; automatisch dabei sind schwache Batterien, Melder am Lebensende und die Mähermesser. Fälliges steht unter der Glocke.
+- **Wochenbericht:** einmal pro Woche (Standard Sonntag 18:00) je Modul eine Zeile – Heizen und Lüften, Energie, Licht, Mähen, Klingel und Warnungen, fällige Wartung. Mit Vorschau und „Jetzt senden“.
+- Neue Benachrichtigungs-Anlässe unter Wachwerk und Hauswerk.
+
 ## 0.85.0 – 2026-11-22
 
 ### Neu (Beetwerk › Mähplan)

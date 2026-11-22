@@ -96,7 +96,7 @@ def hw(tmp_path_factory):
     pkg = root / "hw"
     pkg.mkdir()
     _mod("homeassistant.config_entries", ConfigEntry=object)
-    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py", "hmlinks.py", "beetwerk.py"):
+    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py", "hmlinks.py", "beetwerk.py", "wachwerk.py", "dienste.py"):
         shutil.copy(SRC / name, pkg / name)
     (pkg / "__init__.py").write_text("")
     sys.path.insert(0, str(root))
@@ -109,6 +109,8 @@ def hw(tmp_path_factory):
         Kraftwerk=importlib.import_module("hw.kraftwerk").Kraftwerk,
         Lichtwerk=importlib.import_module("hw.lichtwerk").Lichtwerk,
         Beetwerk=importlib.import_module("hw.beetwerk").Beetwerk,
+        Wachwerk=importlib.import_module("hw.wachwerk").Wachwerk,
+        Dienste=importlib.import_module("hw.dienste").Dienste,
         light=importlib.import_module("hw.light_logic"),
         const=importlib.import_module("hw.const"),
     )
@@ -2371,6 +2373,120 @@ def test_beetwerk_garten_frei_igel_hitze_waechter(hw):
         await bw.async_timer(2, True, "09:00", "12:00", ["sa", "su"], by="Test")
         assert ("robonect", "timer", {"entity_id": "lawn_mower.robonect", "timer": "2", "enable": True, "start": "09:00", "end": "12:00", "weekdays": ["sa", "su"]}) in hass.calls
         await bw.async_stop()
+
+    asyncio.run(run())
+
+
+def test_wachwerk_und_hausdienste(hw):
+    """Wachwerk: Melder werden gefunden, Rauch → Rollläden hoch + Licht an + wichtige Nachricht, Wasser, Warnung,
+    Tür lange offen, Klingel, Check beim Verlassen. Hausdienste: Gute Nacht, Wartung fällig/erledigt, Wochenbericht."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 22, 20, 0, tzinfo=timezone.utc)  # So 21:00 Ortszeit
+        hass = Hass()
+        hass.set("binary_sensor.rauchmelder_wz", "off", {"device_class": "smoke"}, "Rauchmelder Wohnzimmer")
+        hass.set("binary_sensor.rauchmelder_janea_rauch", "off", {}, "Rauchmelder Janea")
+        hass.set("binary_sensor.rauchmelder_janea_is_life_end", "on", {}, "Rauchmelder Janea Lebensende")
+        hass.set("binary_sensor.co_melder", "off", {"device_class": "carbon_monoxide"}, "CO-Melder")
+        hass.set("binary_sensor.wassermelder_hwr", "off", {"device_class": "moisture"}, "Wassermelder HWR")
+        hass.set("binary_sensor.wetterstation_regen", "off", {"device_class": "moisture"}, "Wetterstation Regen")
+        hass.set("binary_sensor.leipzig_warnung_1", "off", {"device_class": "safety"}, "Leipzig Warnung 1")
+        hass.set("binary_sensor.haustuer", "off", {"device_class": "door"}, "Haustür")
+        hass.set("binary_sensor.geschirrspuler_door", "off", {"device_class": "door"}, "Geschirrspüler Tür")
+        hass.set("cover.garagentor", "closed", {"device_class": "garage"}, "Garagentor")
+        hass.set("alarm_control_panel.alarmo", "disarmed", {"code_arm_required": False}, "Alarmo")
+        hass.set("event.klingeltaster", "2026-11-22T10:00:00", {"device_class": "doorbell"}, "Klingel")
+        hass.set("binary_sensor.fenster_bad_batterie", "on", {"device_class": "battery"}, "Fenster Bad Batterie")
+        hass.set("cover.wz", "open", {}, "Rollladen Wohnzimmer")
+        hass.set("light.wz", "on", {}, "Licht Wohnzimmer")
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"notify_targets": ["mobile_app_pixel"], "notify_quiet": False, "notify_bell": "normal"})
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        rw.settings["rw_covers"] = ["cover.wz"]
+        lw = hw.Lichtwerk(hass, log, haus)
+        await lw.async_load()
+        lw.settings["lw_lights"] = ["light.wz"]
+        hass.data["hauswerk"] = {"heizen": ctl, "rollwerk": rw, "lichtwerk": lw}
+        ww = hw.Wachwerk(hass, log, haus)
+        await ww.async_load()
+        hass.data["hauswerk"]["wachwerk"] = ww
+        e = ww.entities()
+        assert e["smoke"] == ["binary_sensor.rauchmelder_janea_rauch", "binary_sensor.rauchmelder_wz"]
+        assert e["co"] == ["binary_sensor.co_melder"] and e["water"] == ["binary_sensor.wassermelder_hwr"]
+        assert e["warn"] == ["binary_sensor.leipzig_warnung_1"] and e["doors"] == ["binary_sensor.haustuer", "cover.garagentor"]
+        assert e["alarm"] == "alarm_control_panel.alarmo" and e["bell"] == "event.klingeltaster"
+        await ww.async_evaluate()
+        assert not hass.sent()
+        # Rauch: Rollläden hoch, Licht an, wichtig
+        hass.set("binary_sensor.rauchmelder_wz", "on", {"device_class": "smoke"}, "Rauchmelder Wohnzimmer")
+        await ww.async_evaluate()
+        await asyncio.sleep(0)
+        assert ("cover", "open_cover", {"entity_id": ["cover.wz"]}) in hass.calls
+        assert ("light", "turn_on", {"entity_id": ["light.wz"], "brightness_pct": 100}) in hass.calls
+        assert "Rauchalarm!" in hass.sent() and ww.status()["fire"] is True
+        hass.set("binary_sensor.rauchmelder_wz", "off", {"device_class": "smoke"}, "Rauchmelder Wohnzimmer")
+        await ww.async_evaluate()
+        assert ww.status()["fire"] is False
+        # Wasser, Warnung
+        hass.set("binary_sensor.wassermelder_hwr", "on", {"device_class": "moisture"}, "Wassermelder HWR")
+        hass.set("binary_sensor.leipzig_warnung_1", "on", {"device_class": "safety", "headline": "Amtliche Warnung vor Sturmböen", "description": "Böen bis 70 km/h"}, "Leipzig Warnung 1")
+        await ww.async_evaluate()
+        await asyncio.sleep(0)
+        assert "Wasser erkannt!" in hass.sent() and "Amtliche Warnung vor Sturmböen" in hass.sent()
+        assert ww.status()["warnings"][0]["text"] == "Böen bis 70 km/h"
+        # Tür lange offen
+        hass.set("binary_sensor.haustuer", "on", {"device_class": "door"}, "Haustür")
+        NOW[0] += timedelta(minutes=31)
+        await ww.async_evaluate()
+        await asyncio.sleep(0)
+        assert "Haustür offen" in hass.sent()
+        # Klingel
+        old = hass.st["event.klingeltaster"]
+        hass.set("event.klingeltaster", "2026-11-22T20:31:00", {"device_class": "doorbell"}, "Klingel")
+        ww._on_state(types.SimpleNamespace(data={"old_state": old, "new_state": hass.st["event.klingeltaster"]}))
+        await asyncio.sleep(0)
+        assert "Es hat geklingelt" in hass.sent() and ww.status()["bell"]["week"] == 1
+        # Verlassen: Haustür offen, Licht an
+        names = [o["name"] for o in ww.leave_check()]
+        assert "Haustür" in names and "Licht Wohnzimmer" in names
+        # Hausdienste
+        hd = hw.Dienste(hass, log, haus)
+        await hd.async_load()
+        hass.data["hauswerk"].update({"dienste": hd})
+        n = len(hass.calls)
+        res = await hd.async_mode("night", by="Test")
+        assert "Rollläden zu" in res["done"] and "Heizung auf Eco" in res["done"] and any("aus" in d for d in res["done"])
+        assert [o["name"] for o in res["open"]] == ["Haustür"]  # das Licht schaltet der Modus selbst aus
+        assert ctl.settings["eco_force"] is True
+        res = await hd.async_mode("morning", by="Test")
+        assert ctl.settings["eco_force"] is False and "Rollläden auf" in res["done"]
+        res = await hd.async_mode("leave", by="Test")
+        assert haus.settings["presence_force"] == "away"
+        await hd.async_mode("home", by="Test")
+        assert haus.settings["presence_force"] is None
+        # Wartung
+        await hd.async_save_settings({"hd_tasks": [{"name": "Rauchmelder testen", "icon": "mdi:smoke-detector-variant", "days": 365}]}, by="Test")
+        tasks = hd.tasks()
+        own = [t for t in tasks if not t["auto"]][0]
+        assert own["left"] == 0 and own["id"]
+        assert any(t["name"].startswith("Batterie wechseln: Fenster Bad") for t in tasks)
+        assert any("Lebensdauer" in t["name"] for t in tasks)
+        await asyncio.sleep(0)
+        assert "Wartung fällig" in [e["title"] for e in log.entries] or any(e["title"] == "Wartung fällig" for e in log.entries)
+        await hd.async_task_done(own["id"], by="Test")
+        own = [t for t in hd.tasks() if not t["auto"]][0]
+        assert own["left"] == 365
+        # Wochenbericht: Sonntag 18:00 vorbei → einmal
+        rep = await hd.async_weekly_report()
+        assert rep["title"] == "Wochenbericht" and any(l.startswith("🛡️ Wachwerk: 1× geklingelt") for l in rep["lines"]), rep
+        await hd._async_weekly()
+        await hd._async_weekly()
+        await asyncio.sleep(0)
+        assert hass.sent().count("Wochenbericht") == 1
+        await ww.async_stop()
+        await hd.async_stop()
 
     asyncio.run(run())
 

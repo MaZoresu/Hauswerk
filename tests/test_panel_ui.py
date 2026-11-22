@@ -741,7 +741,7 @@ def test_schoner_module_als_symbole(tablet):
     p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
     p.js(f"{EL}._saverShow()")
     mods = p.js(f"[...{EL}.shadowRoot.querySelectorAll('#saver .sv-mod')].map((m) => [m.querySelector('.sv-logo svg') != null, m.querySelectorAll('.sv-i').length, m.innerText])")
-    assert len(mods) == 5 and all(m[0] and m[1] >= 1 for m in mods), mods  # Heizwerk, Rollwerk, Kraftwerk, Lichtwerk, Beetwerk
+    assert len(mods) == 6 and all(m[0] and m[1] >= 1 for m in mods), mods  # Heizwerk, Rollwerk, Kraftwerk, Lichtwerk, Beetwerk, Wachwerk
     assert "mäht" in mods[4][2] and "64 %" in mods[4][2], mods[4]
     # Winterpause: nur die Schneeflocke
     p.js(f"() => {{ {EL}._hass.states['switch.automower_winter_mode'] = {{ entity_id: 'switch.automower_winter_mode', state: 'on', attributes: {{}} }}; {EL}._status.beetwerk.entities.winter = 'switch.automower_winter_mode'; }}")
@@ -1854,7 +1854,7 @@ def test_einstellungen_neu_geordnet(panel):
     p.view("house")
     p.wait()
     tabs = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.setnav .sn')].map((b) => b.textContent.trim())")
-    assert tabs == ["Haus", "Heizwerk", "Rollwerk", "Kraftwerk", "Lichtwerk", "Beetwerk", "System"], tabs
+    assert tabs == ["Haus", "Heizwerk", "Rollwerk", "Kraftwerk", "Lichtwerk", "Beetwerk", "Wachwerk", "System"], tabs
     txt = p.js(f"{EL}.shadowRoot.querySelector('#set-list').innerText")
     assert "OFT GEBRAUCHT" in txt.upper() and "Dieses Tablet" not in txt and "Als Tablet verwenden" in txt and "Funk-Auslastung" not in txt
     assert p.has(".srow .sr-v")
@@ -2120,4 +2120,53 @@ def test_funk_wer_funkt(panel):
     assert "Wer funkt am meisten" in txt and "Heizkörper Kleines Bad" in txt and "24/Std." in txt and "Heizwerk 58×" in txt, txt
     assert "Übernimmt den Sollwert nicht" in txt and "nächster Versuch" in txt
     assert p.js(f"!!{EL}.shadowRoot.querySelector('#pop .rd-trend polyline')")
+    p.js(f"{EL}._closePop()")
+
+
+def test_wachwerk_und_hausdienste(panel):
+    """Wachwerk: eigenes Modul mit Melder, Warnungen, Türen, Alarmanlage und Klingel; Einstellungen im Reiter Wachwerk.
+    Hausdienste: Hausmodi auf der Startseite, Wartung (Erledigt, Hinzufügen), Wochenbericht mit Vorschau, Glocke."""
+    p = panel
+    p.view("security")
+    p.wait(300)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    for w in ("Rauchmelder Wohnzimmer", "Amtliche Warnung vor Sturmböen", "Küche Tür", "Unscharf", "4× in den letzten 7 Tagen"):
+        assert w in txt, w
+    p.click('[data-action="ww-alarm"][data-v="away"]')
+    assert [m for m in p.sent() if m["type"] == "hauswerk/wachwerk/alarm"][-1]["action"] == "away"
+    p.view("secset")
+    p.wait()
+    assert p.js(f"{EL}.shadowRoot.querySelector('.setnav .sn.on').textContent.trim()") == "Wachwerk"
+    p.js(f"() => {EL}._openPop('wwfire')")
+    p.wait()
+    p.js(f"() => {{ const i = {EL}.shadowRoot.querySelector('#pop input[data-set=\"ww_fire_lights\"]'); i.checked = false; i.dispatchEvent(new Event('change', {{ bubbles: true }})); }}")
+    p.wait(300)
+    p.js(f"{EL}._closePop()")
+    # Hausmodi auf der Startseite
+    p.view("start")
+    p.wait(300)
+    assert p.js(f"[...{EL}.shadowRoot.querySelectorAll('.hmode')].map((b) => b.textContent.trim()).slice(0, 4)") == ["Gute Nacht", "Guten Morgen", "Wir gehen", "Wir sind da"]
+    p.click('.hmode[data-mode="night"]')
+    p.wait(300)
+    assert [m for m in p.sent() if m["type"] == "hauswerk/haus/mode"][-1]["mode"] == "night"
+    # Glocke: fällige Wartung und Warnung
+    hints = p.js(f"{EL}._hints().map((h) => h.text)")
+    assert "Wartung fällig: Rauchmelder testen" in hints and "Amtliche Warnung vor Sturmböen" in hints, hints
+    # Wartung
+    p.js(f"() => {EL}._openPop('maint')")
+    p.wait()
+    p.click('#pop [data-action="task-done"][data-id="t1"]')
+    p.wait(300)
+    assert [m for m in p.sent() if m["type"] == "hauswerk/dienste/task_done"][-1]["task"] == "t1"
+    p.click('#pop [data-action="task-add"][data-i="0"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
+    assert saved["hd_tasks"][-1]["name"] == "Heizkörper entlüften" and saved["hd_tasks"][-1]["days"] == 365, saved
+    p.js(f"{EL}._closePop()")
+    # Wochenbericht
+    p.js(f"() => {EL}._openPop('weekly')")
+    p.wait()
+    p.click('#pop [data-action="weekly"][data-send="0"]')
+    p.wait(300)
+    assert "Lichtwerk: 46 Std. Licht" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
     p.js(f"{EL}._closePop()")

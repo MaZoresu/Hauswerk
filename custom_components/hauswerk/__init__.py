@@ -8,6 +8,8 @@ Module:
 - Kraftwerk (intern „kraftwerk“): Energiefluss – Solar, Netz, Batterie, Verbrauch
 - Lichtwerk (intern „lichtwerk“): Licht nach dem Vorbild des Blueprints „Smart Light“
 - Beetwerk (intern „beetwerk“): Garten – Mähroboter und Bewässerung
+- Wachwerk (intern „wachwerk“): Sicherheit – Rauch, CO, Wasser, Warnungen, Türen, Alarmanlage, Klingel
+- Hausdienste (intern „dienste“): Hausmodi, Wartung, Wochenbericht
 """
 from __future__ import annotations
 
@@ -26,6 +28,8 @@ from .const import (
     MODULE_HOUSE,
     MODULE_LIGHT,
     MODULE_GARDEN,
+    MODULE_SECURITY,
+    MODULE_SERVICES,
     MODULE_LOG,
     MODULE_POWER,
     MODULE_SHUTTER,
@@ -41,6 +45,8 @@ from .core import Haus
 from .kraftwerk import Kraftwerk
 from .lichtwerk import Lichtwerk
 from .beetwerk import Beetwerk
+from .dienste import Dienste
+from .wachwerk import Wachwerk
 from .log import Protokoll
 from .rename import async_track_renames
 from .rollwerk import Rollwerk
@@ -100,8 +106,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await lights.async_load()
     garden = Beetwerk(hass, log, haus)
     await garden.async_load()
+    security = Wachwerk(hass, log, haus)
+    await security.async_load()
+    services = Dienste(hass, log, haus)
+    await services.async_load()
     hass.data[DOMAIN] = {MODULE_LOG: log, MODULE_HOUSE: haus, MODULE_HEATING: heating, MODULE_SHUTTER: shutters, MODULE_POWER: power,
-                         MODULE_LIGHT: lights, MODULE_GARDEN: garden}
+                         MODULE_LIGHT: lights, MODULE_GARDEN: garden, MODULE_SECURITY: security, MODULE_SERVICES: services}
 
     api.async_register(hass)
     entry.async_on_unload(async_track_renames(hass, entry))
@@ -113,6 +123,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await power.async_start()
     await lights.async_start()
     await garden.async_start()
+    await security.async_start()
+    await services.async_start()
     return True
 
 
