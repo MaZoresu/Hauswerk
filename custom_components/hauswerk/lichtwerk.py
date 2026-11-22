@@ -935,7 +935,8 @@ class Lichtwerk:
         self._save()
         await self.async_evaluate()
 
-    async def async_command(self, eids: list[str], action: str, brightness: int | None = None, by: str | None = None) -> None:
+    async def async_command(self, eids: list[str], action: str, brightness: int | None = None, by: str | None = None,
+                            kelvin: int | None = None, rgb: list[int] | None = None) -> None:
         """Von Hand schalten (Panel). Gilt als „von Hand“ – außer „resume“: Automatik übernimmt wieder."""
         for eid in eids:
             rt = self._rt.setdefault(eid, {})
@@ -956,9 +957,14 @@ class Lichtwerk:
                 svc, data = "turn_on", {"entity_id": eid}
                 if brightness is not None and domain == "light":
                     data["brightness_pct"] = max(1, min(100, int(brightness)))
+                if domain == "light" and rgb:
+                    data["rgb_color"] = [max(0, min(255, int(x))) for x in rgb[:3]]
+                elif domain == "light" and kelvin:
+                    data["color_temp_kelvin"] = int(kelvin)
             await self.hass.services.async_call(domain if domain in LIGHT_DOMAINS else "homeassistant", svc, data, context=ctx)
             self.log.add("light", f"{self._name(eid)}: von Hand {'aus' if action == 'off' else 'an'}"
-                         + (f" ({brightness} %)" if brightness is not None and action != "off" else ""),
+                         + (f" ({brightness} %)" if brightness is not None and action != "off" else "")
+                         + (f" · Farbe {'#%02x%02x%02x' % tuple(rgb[:3])}" if rgb and action != "off" else f" · {kelvin} K" if kelvin and action != "off" else ""),
                          f"im Panel · Automatik wartet {'bis zum nächsten Wechsel' if not until else 'bis ' + dt_util.as_local(dt_util.utc_from_timestamp(until)).strftime('%H:%M')}"
                          + (f" · {by}" if by else ""), module="lichtwerk")
         self._save()

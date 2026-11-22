@@ -1882,6 +1882,10 @@ def test_lichtwerk(hw):
         # Panel: von Hand an (Helligkeit) und „Automatik übernimmt“
         await lw.async_command(["light.wz"], "on", 40)
         assert hass.calls[-1] == ("light", "turn_on", {"entity_id": "light.wz", "brightness_pct": 40})
+        await lw.async_command(["light.wz"], "on", 15, rgb=[60, 70, 255])
+        assert hass.calls[-1] == ("light", "turn_on", {"entity_id": "light.wz", "brightness_pct": 15, "rgb_color": [60, 70, 255]})
+        await lw.async_command(["light.wz"], "on", kelvin=2700)
+        assert hass.calls[-1] == ("light", "turn_on", {"entity_id": "light.wz", "color_temp_kelvin": 2700})
         await lw.async_command(["light.wz"], "resume")
         assert lw.status()["lights"]["light.wz"]["manual"] is None
         # Profil an der Leuchte aus: nichts schalten, Ursache und Protokoll

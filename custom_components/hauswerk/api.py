@@ -1139,6 +1139,8 @@ async def ws_lw_light_remove(hass: HomeAssistant, connection, msg) -> None:
     vol.Required("entity_ids"): vol.All([LIGHT_ID], vol.Length(min=1, max=80)),
     vol.Required("action"): vol.In(["on", "off", "resume"]),
     vol.Optional("brightness"): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+    vol.Optional("kelvin"): vol.All(vol.Coerce(int), vol.Range(min=1000, max=10000)),
+    vol.Optional("rgb"): vol.All([vol.All(vol.Coerce(int), vol.Range(min=0, max=255))], vol.Length(min=3, max=3)),
 })
 @websocket_api.async_response
 async def ws_lw_command(hass: HomeAssistant, connection, msg) -> None:
@@ -1146,7 +1148,7 @@ async def ws_lw_command(hass: HomeAssistant, connection, msg) -> None:
     lw = _lw(hass)
     if lw is None:
         return _not_ready(connection, msg)
-    await lw.async_command(msg["entity_ids"], msg["action"], msg.get("brightness"), by=_who(connection))
+    await lw.async_command(msg["entity_ids"], msg["action"], msg.get("brightness"), by=_who(connection), kelvin=msg.get("kelvin"), rgb=msg.get("rgb"))
     connection.send_result(msg["id"])
 
 

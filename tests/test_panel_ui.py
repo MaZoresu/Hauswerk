@@ -2170,3 +2170,30 @@ def test_wachwerk_und_hausdienste(panel):
     p.wait(300)
     assert "Lichtwerk: 46 Std. Licht" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
     p.js(f"{EL}._closePop()")
+
+
+def test_lichtwerk_farbe_und_vorschlaege(panel):
+    """Lichtwerk: Leuchten mit Farbe bekommen im Fenster Vorschläge (Stimmungen), Weißtöne und Farben;
+    reine Weißton-Leuchten nur Weißtöne und passende Stimmungen; Schalt-Leuchten nichts davon."""
+    p = panel
+    p.view("lights")
+    p.js(f"() => {EL}._openPop('lwbri:light.stehlampe')")
+    p.wait()
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    assert "Vorschläge" in txt and "Weißton" in txt and "Farbe" in txt and "Kaminfeuer" in txt
+    n = len(p.sent())
+    p.click('#pop .lw-mood[data-rgb="60,70,255"]')
+    m = [x for x in p.sent()[n:] if x["type"] == "hauswerk/lichtwerk/command"][-1]
+    assert m["rgb"] == [60, 70, 255] and m["brightness"] == 15 and m["action"] == "on", m
+    p.click('#pop .lw-sw .sw[data-k="2700"]')
+    m = [x for x in p.sent() if x["type"] == "hauswerk/lichtwerk/command"][-1]
+    assert m["kelvin"] == 2700 and "rgb" not in m, m
+    p.js(f"{EL}._closePop()")
+    p.js(f"() => {EL}._openPop('lwbri:light.wohnzimmer')")
+    p.wait()
+    assert p.has("#pop .lw-sw .sw[data-k]") and not p.has("#pop .sw[data-rgb]") and not p.has("#pop .lw-mood[data-rgb]")
+    p.js(f"{EL}._closePop()")
+    p.js(f"() => {EL}._openPop('lwbri:light.eingang')")
+    p.wait()
+    assert not p.has("#pop .lw-moods")
+    p.js(f"{EL}._closePop()")

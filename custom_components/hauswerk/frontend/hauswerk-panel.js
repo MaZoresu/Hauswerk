@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.86.1";
+const VERSION = "0.87.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -508,6 +508,27 @@ const LW_SECTIONS = [
   ["night", "Nachtlicht", "mdi:weather-night"], ["more", "Ausnahmen", "mdi:hand-back-right-outline"],
 ];
 // Szenen je Tageszeit: Vorlage
+// Farbvorschläge für Leuchten mit Farbe bzw. Weißton (Lichtwerk › Leuchte antippen)
+const LW_WHITES = [[2200, "Kerze"], [2700, "Warmweiß"], [3300, "Hellweiß"], [4200, "Neutral"], [5500, "Tageslicht"]];
+const LW_COLORS = [["Kaminfeuer", [255, 110, 20]], ["Bernstein", [255, 170, 40]], ["Rot", [255, 30, 30]], ["Rosa", [255, 90, 170]], ["Lila", [150, 70, 255]],
+  ["Blau", [40, 80, 255]], ["Eisblau", [120, 200, 255]], ["Türkis", [0, 210, 190]], ["Grün", [40, 210, 80]], ["Gelb", [255, 220, 0]]];
+// Stimmungen: Farbe bzw. Weißton plus Helligkeit – je nach Leuchte nur, was sie kann
+const LW_MOODS = [
+  { name: "Gemütlich", icon: "mdi:sofa-outline", k: 2200, b: 35 }, { name: "Abendessen", icon: "mdi:silverware-fork-knife", k: 2700, b: 60 },
+  { name: "Lesen", icon: "mdi:book-open-variant", k: 4000, b: 100 }, { name: "Konzentriert", icon: "mdi:lightbulb-on-outline", k: 5500, b: 100 },
+  { name: "Fernsehen", icon: "mdi:television", rgb: [60, 70, 255], b: 15 }, { name: "Kaminfeuer", icon: "mdi:fireplace", rgb: [255, 100, 15], b: 40 },
+  { name: "Sonnenuntergang", icon: "mdi:weather-sunset", rgb: [255, 70, 40], b: 55 }, { name: "Weihnachten", icon: "mdi:pine-tree", rgb: [255, 20, 20], b: 50 },
+  { name: "Party", icon: "mdi:party-popper", rgb: [220, 0, 255], b: 100 },
+];
+/** Weißton (Kelvin) als ungefähre Bildschirmfarbe. */
+const kelvinRgb = (k) => {
+  const t = k / 100;
+  const r = t <= 66 ? 255 : 329.7 * (t - 60) ** -0.1332;
+  const g = t <= 66 ? 99.47 * Math.log(t) - 161.1 : 288.1 * (t - 60) ** -0.0755;
+  const b = t >= 66 ? 255 : t <= 19 ? 0 : 138.5 * Math.log(t - 10) - 305;
+  return [r, g, b].map((x) => Math.round(Math.max(0, Math.min(255, x))));
+};
+const rgbCss = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
 const LW_SCENES = [
   { from: "06:00", name: "Morgen", brightness: 60, kelvin: 4000 },
   { from: "09:00", name: "Tag", brightness: 100, kelvin: 4500 },
@@ -5659,6 +5680,24 @@ class HauswerkPanel extends HTMLElement {
       const d = this._pop.draft;
       if (d.v == null) d.v = pct ?? prof.brightness ?? 80;
       const dim = eid.startsWith("light.") && (l.ls.modes || S[eid]?.attributes?.supported_color_modes || []).some((m) => m !== "onoff");
+      const modes = l.ls.modes || S[eid]?.attributes?.supported_color_modes || [];
+      const canColor = eid.startsWith("light.") && modes.some((m) => ["hs", "rgb", "rgbw", "rgbww", "xy"].includes(m));
+      const canTemp = eid.startsWith("light.") && (modes.includes("color_temp") || canColor);
+      const at = S[eid]?.attributes || {};
+      const kMin = at.min_color_temp_kelvin || 2000, kMax = at.max_color_temp_kelvin || 6500;
+      const on = S[eid]?.state === "on";
+      const curRgb = on && at.color_mode !== "color_temp" && Array.isArray(at.rgb_color) ? at.rgb_color : null;
+      const curK = on && at.color_mode === "color_temp" ? at.color_temp_kelvin : null;
+      const near = (a, b) => a && b && Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 40;
+      const whites = canTemp ? LW_WHITES.map(([k, n]) => [Math.max(kMin, Math.min(kMax, k)), n]).filter(([k], i, a) => a.findIndex(([x]) => x === k) === i) : [];
+      const moods = LW_MOODS.filter((m) => (m.rgb ? canColor : canTemp));
+      const hex = (c) => `#${c.map((x) => x.toString(16).padStart(2, "0")).join("")}`;
+      const colorHtml = !canTemp && !canColor ? "" : `
+          <div class="lbl">Vorschläge</div>
+          <div class="lw-moods">${moods.map((m) => { const c = m.rgb || kelvinRgb(Math.max(kMin, Math.min(kMax, m.k))); return `<button class="lw-mood" data-action="lw-color" data-ids="${esc(eid)}" ${m.rgb ? `data-rgb="${m.rgb.join(",")}"` : `data-k="${Math.max(kMin, Math.min(kMax, m.k))}"`} data-b="${m.b}" style="--sw:${rgbCss(c)}"><i></i><ha-icon icon="${m.icon}"></ha-icon><span>${m.name}<small>${m.b} %</small></span></button>`; }).join("")}</div>
+          ${whites.length ? `<div class="lbl">Weißton</div><div class="lw-sw">${whites.map(([k, n]) => `<button class="sw ${curK && Math.abs(curK - k) < 150 ? "on" : ""}" data-action="lw-color" data-ids="${esc(eid)}" data-k="${k}" title="${n} · ${k} K" style="--sw:${rgbCss(kelvinRgb(k))}"><i></i><small>${n}</small></button>`).join("")}</div>` : ""}
+          ${canColor ? `<div class="lbl">Farbe</div><div class="lw-sw">${LW_COLORS.map(([n, c]) => `<button class="sw ${near(curRgb, c) ? "on" : ""}" data-action="lw-color" data-ids="${esc(eid)}" data-rgb="${c.join(",")}" title="${n}" style="--sw:${rgbCss(c)}"><i></i><small>${n}</small></button>`).join("")}
+            <label class="sw own" title="Eigene Farbe"><i><input type="color" data-lwcolor="${esc(eid)}" value="${curRgb ? hex(curRgb) : "#ff8800"}"><ha-icon icon="mdi:palette-outline"></ha-icon></i><small>Eigene</small></label></div>` : ""}`;
       const presets = [["off", "Aus", "mdi:lightbulb-off-outline"], ...(prof.night ? [[prof.night_brightness ?? 10, "Nachtlicht", "mdi:weather-night"]] : []), [prof.brightness ?? 80, "Normal", "mdi:lightbulb-outline"], [100, "Hell", "mdi:lightbulb-on"]];
       return {
         icon: this._lwIco(l, l.st?.state === "on"), c: "#6366f1", title: esc(this._lwName(l)), sub: `Lichtwerk · ${l.st?.state === "on" ? `an${pct != null ? ` · ${pct} %` : ""}` : "aus"}`, open: true,
@@ -5668,6 +5707,7 @@ class HauswerkPanel extends HTMLElement {
           ${l.ls.manual && !l.ls.ccu && l.cfg.auto !== false ? `<div class="room-note"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>Von Hand – Automatik wartet<span class="grow"></span><button class="link" data-action="lw-cmd" data-ids="${esc(eid)}" data-a="resume">Automatik übernimmt</button></div>` : ""}
           ${l.cfg.auto !== false && this._lwStatus?.lights?.[eid] ? `<div class="pop-tl">${this._lwDayBar(l)}</div>` : ""}
           ${dim ? `<div class="lw-slider"><input type="range" min="1" max="100" step="1" value="${d.v}" data-lwbri><b id="lwbri-v">${d.v} %</b></div>` : ""}
+          ${colorHtml}
           <div class="rq-quick lw-pre">${presets.map(([v, t, i]) => `<button class="pill" data-action="lw-pre" data-ids="${esc(eid)}" data-v="${v}"><ha-icon icon="${i}"></ha-icon>${t}${v !== "off" && dim ? ` · ${v} %` : ""}</button>`).join("")}</div>
           
           ${l.cfg.auto !== false ? `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Von Hand geschaltet wartet die Automatik ${prof.manual_hold === "hours" ? `${prof.manual_hours ?? 2} Std.` : "bis zum nächsten Wechsel"}.</p>` : ""}`,
@@ -10930,6 +10970,13 @@ class HauswerkPanel extends HTMLElement {
       }
       return;
     }
+    if (t.dataset.lwcolor && isChange) {
+      const h = t.value.replace("#", "");
+      const rgb = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+      this._ws({ type: "hauswerk/lichtwerk/command", entity_ids: [t.dataset.lwcolor], action: "on", rgb,
+        ...(this._pop?.draft?.v != null ? { brightness: Math.max(1, Math.min(100, Number(this._pop.draft.v))) } : {}) });
+      return;
+    }
     if (t.dataset.lwbri !== undefined && this._pop?.draft) {
       this._pop.draft.v = Number(t.value);
       const v = this.shadowRoot.getElementById("lwbri-v");
@@ -12275,6 +12322,16 @@ class HauswerkPanel extends HTMLElement {
         await this._ws(v === "off" ? { type: "hauswerk/lichtwerk/command", entity_ids: [el.dataset.ids], action: "off" }
           : { type: "hauswerk/lichtwerk/command", entity_ids: [el.dataset.ids], action: "on", brightness: Math.max(1, Math.min(100, Number(v))) });
         this._closePop();
+        break;
+      }
+      case "lw-color": {
+        const d = this._pop?.draft || {};
+        const b = el.dataset.b ? Number(el.dataset.b) : d.v != null ? Number(d.v) : null;
+        if (el.dataset.b && this._pop?.draft) this._pop.draft.v = Number(el.dataset.b);
+        await this._ws({ type: "hauswerk/lichtwerk/command", entity_ids: [el.dataset.ids], action: "on",
+          ...(b ? { brightness: Math.max(1, Math.min(100, b)) } : {}),
+          ...(el.dataset.rgb ? { rgb: el.dataset.rgb.split(",").map(Number) } : { kelvin: Number(el.dataset.k) }) });
+        setTimeout(() => this._pop?.id?.startsWith("lwbri:") && this._renderPop(), 700);
         break;
       }
       case "lw-bri-apply":
@@ -14937,6 +14994,20 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .lwseg { position:absolute; top:0; bottom:0; background:linear-gradient(180deg, #fde047, #facc15); }
 .lwseg.night { background:repeating-linear-gradient(135deg, rgba(99,102,241,.55) 0 3px, rgba(99,102,241,.25) 3px 7px); }
 .lwbar .now { position:absolute; top:-2px; bottom:-2px; width:2px; background:var(--text); border-radius:1px; }
+.lw-moods { display:grid; grid-template-columns:repeat(auto-fill, minmax(128px, 1fr)); gap:8px; margin:6px 0 4px; }
+.lw-mood { all:unset; cursor:pointer; position:relative; overflow:hidden; display:flex; align-items:center; gap:8px; min-height:48px; padding:6px 10px; border-radius:14px; border:1px solid var(--line); background:var(--card2); font-size:13.5px; font-weight:600; color:var(--text); }
+.lw-mood i { position:absolute; inset:0; background:linear-gradient(120deg, color-mix(in srgb, var(--sw) 38%, transparent), transparent 75%); pointer-events:none; }
+.lw-mood ha-icon { position:relative; color:var(--sw); --mdc-icon-size:22px; filter:drop-shadow(0 0 1px rgba(0,0,0,.35)); }
+.lw-mood span { position:relative; display:flex; flex-direction:column; line-height:1.15; }
+.lw-mood small { font-size:11.5px; font-weight:500; color:var(--muted); }
+.lw-sw { display:flex; flex-wrap:wrap; gap:10px 8px; margin:6px 0 4px; }
+.lw-sw .sw { all:unset; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:4px; width:56px; }
+.lw-sw .sw i { position:relative; display:grid; place-items:center; width:40px; height:40px; border-radius:50%; background:var(--sw, conic-gradient(red, yellow, lime, cyan, blue, magenta, red)); box-shadow:inset 0 0 0 1px rgba(0,0,0,.15), 0 1px 3px rgba(0,0,0,.2); }
+.lw-sw .sw.on i { box-shadow:0 0 0 3px var(--card), 0 0 0 5px #6366f1; }
+.lw-sw .sw small { font-size:11px; color:var(--muted); text-align:center; line-height:1.1; }
+.lw-sw .sw.own i { background:conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+.lw-sw .sw.own ha-icon { color:#fff; --mdc-icon-size:20px; filter:drop-shadow(0 0 2px rgba(0,0,0,.6)); }
+.lw-sw .sw.own input { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
 .lw-slider { display:flex; align-items:center; gap:12px; margin:10px 0; }
 .lw-slider input { flex:1; accent-color:#6366f1; height:32px; }
 .lw-slider b { font-size:18px; min-width:56px; text-align:right; }

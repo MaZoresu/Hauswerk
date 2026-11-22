@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.87.0 – 2026-11-22
+
+### Neu (Lichtwerk › Leuchte antippen)
+- **Farbe und Weißton von Hand:** Kann eine Leuchte Farbe bzw. Farbtemperatur, zeigt ihr Fenster neben der Helligkeit jetzt
+  - **Vorschläge** – Stimmungen mit passender Helligkeit: Gemütlich, Abendessen, Lesen, Konzentriert (Weißtöne) sowie Fernsehen, Kaminfeuer, Sonnenuntergang, Weihnachten und Party (Farbe),
+  - **Weißton:** Kerze, Warmweiß, Hellweiß, Neutral, Tageslicht – im Bereich, den die Leuchte kann,
+  - **Farbe:** zehn Farbtupfer (Kaminfeuer, Bernstein, Rot, Rosa, Lila, Blau, Eisblau, Türkis, Grün, Gelb) und „Eigene“ mit Farbwähler.
+- Ein Tipp schaltet sofort, das Fenster bleibt offen zum Ausprobieren; die aktuelle Farbe ist markiert. Gilt als „von Hand“ (Automatik wartet wie beim Dimmen) und steht mit Farbe im Protokoll. Leuchten, die nur an/aus können, zeigen wie bisher nur die Knöpfe.
+
 ## 0.86.1 – 2026-11-22
 
 ### Behoben
