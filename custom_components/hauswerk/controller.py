@@ -35,6 +35,7 @@ from .const import (
     STORAGE_VERSION,
     WINDOW_OPEN_STATES,
 )
+from .logic import degree_days, punctual_summary, savings_summary
 from .logic import (
     MAX_TEMP,
     MIN_TEMP,
@@ -2368,6 +2369,8 @@ class Heizen:
                 bucket["mn"] = bucket.get("mn", 0) + 1
                 if temp > target + 1.0:
                     bucket["over"] = bucket.get("over", 0) + 1
+            self._record_punctual(room_id, bucket, mode, temp, target, after_vent)
+            self._record_savings(room_id, bucket, result, temp)
             if temp is not None and (result.get("valve_all") or 0) >= 90:
                 bucket["full"] = bucket.get("full", 0) + 1
             outside = self.haus.outside_temp()
@@ -2382,6 +2385,204 @@ class Heizen:
             for day in [d for d in self.stats[room_id] if d < cutoff]:
                 del self.stats[room_id][day]
         self._save(30)
+
+    def _record_punctual(self, room_id: str, bucket: dict, mode: str | None, temp: float | None, target: float | None, after_vent: bool) -> None:
+        """Pünktlich warm? Beim Beginn der Komfortzeit laut Plan: wie viele Minuten später war der Raum warm genug
+        (höchstens 0,5 °C unter Soll) bzw. wie viele Minuten vorher schon (beim Vorheizen)."""
+        rt = self._rt(room_id)
+        now = dt_util.utcnow().timestamp()
+        prev = rt.get("p_mode")
+        rt["p_mode"] = mode
+        warm = temp is not None and target is not None and temp >= target - 0.5
+        if mode == "vorheizen":
+            if warm and not rt.get("p_pre_warm"):
+                rt["p_pre_warm"] = now
+            return
+        if mode == "komfort" and prev in ("vorheizen", "eco", "abwesend", "leer", "warm") and not after_vent and temp is not None:
+            early = round((now - rt["p_pre_warm"]) / 60) if prev == "vorheizen" and rt.get("p_pre_warm") else 0
+            rt["p_start"] = {"at": now, "early": early, "hm": dt_util.now().strftime("%H:%M")}
+            rt["p_pre_warm"] = None
+            if warm:
+                bucket.setdefault("pw", []).append([rt["p_start"]["hm"], 0, early])
+                rt["p_start"] = None
+            return
+        rt["p_pre_warm"] = None if mode != "vorheizen" else rt.get("p_pre_warm")
+        st = rt.get("p_start")
+        if not st:
+            return
+        if mode != "komfort" or after_vent:
+            # Komfortzeit vorbei, Fenster, von Hand …: nicht rechtzeitig warm geworden bzw. keine Aussage
+            if mode not in ("fenster", "manuell", "boost"):
+                bucket.setdefault("pw", []).append([st["hm"], None, 0])
+            rt["p_start"] = None
+            return
+        late = round((now - st["at"]) / 60)
+        if warm or late >= 240:
+            bucket.setdefault("pw", []).append([st["hm"], late if warm else None, 0])
+            rt["p_start"] = None
+        if len(bucket.get("pw") or []) > 12:
+            bucket["pw"] = bucket["pw"][-12:]
+
+    def _record_savings(self, room_id: str, bucket: dict, result: dict, temp: float | None) -> None:
+        """Was das Absenken bringt: je Anlass Minuten und Grad-Minuten, um die der Raum wirklich kühler war als ohne Absenken."""
+        mode = result.get("mode")
+        room = self.rooms[room_id]
+        target = result.get("target")
+        if mode == "eco":
+            ref = float(room.get("comfort", 21))
+        elif mode in ("fenster", "abwesend", "urlaub", "frost", "leer", "eco_fix"):
+            ref = result.get("plan_target")
+        else:
+            return
+        if ref is None:
+            return
+        drop = ref - (target if target is not None and not result.get("hvac_off") else (temp if temp is not None else ref))
+        if temp is not None:
+            drop = min(drop, ref - temp)  # nur so weit, wie der Raum wirklich kühler war
+        key = {"leer": "abwesend", "eco_fix": "eco", "frost": "urlaub"}.get(mode, mode)
+        sav = bucket.setdefault("sav", {})
+        m, dm = sav.get(key, [0, 0.0])
+        sav[key] = [m + 1, round(dm + max(0.0, drop), 1)]
+
+    # ------------------------------------------------------------ weitere Berichte
+    def _heat_meter(self) -> str | None:
+        """Gas- bzw. Wärmezähler: eigene Wahl, sonst Energie-Dashboard (wird in async_report_extra ergänzt), sonst erster Gaszähler."""
+        if self.settings.get("heat_meter"):
+            return self.settings["heat_meter"]
+        ids = getattr(self.hass.states, "async_entity_ids", None)
+        for eid in sorted(ids("sensor")) if ids else []:
+            st = self.hass.states.get(eid)
+            if st is not None and st.attributes.get("device_class") == "gas" and st.attributes.get("state_class") in ("total", "total_increasing"):
+                return eid
+        return None
+
+    async def _async_heat_energy(self, start_day, days: int) -> dict[str, Any] | None:
+        """Wärme (Gas) je Tag in kWh aus den Statistiken, dazu Kosten aus dem Energie-Dashboard, wenn dort eingetragen."""
+        try:
+            from homeassistant.components.recorder import get_instance  # noqa: PLC0415
+            from homeassistant.components.recorder.statistics import statistics_during_period  # noqa: PLC0415
+        except ImportError:
+            return None
+        src: dict[str, Any] = {}
+        if not self.settings.get("heat_meter"):
+            try:
+                from homeassistant.components.energy.data import async_get_manager  # noqa: PLC0415
+                prefs = (await async_get_manager(self.hass)).data or {}
+                src = next((s for s in prefs.get("energy_sources") or [] if s.get("type") == "gas" and s.get("stat_energy_from")), {})
+            except Exception:  # noqa: BLE001
+                src = {}
+        meter = src.get("stat_energy_from") or self._heat_meter()
+        if not meter:
+            return None
+        st = self.hass.states.get(meter)
+        unit = (st.attributes.get("unit_of_measurement") if st is not None else None) or "kWh"
+        factor = 1.0 if unit.lower() in ("kwh",) else 0.001 if unit.lower() == "wh" else float(self.settings.get("gas_factor") or 10.3)
+        start = dt_util.start_of_local_day(datetime.combine(start_day, datetime.min.time()))
+        ids = {meter} | ({src["stat_cost"]} if src.get("stat_cost") else set())
+        try:
+            stats = await get_instance(self.hass).async_add_executor_job(
+                statistics_during_period, self.hass, start, dt_util.utcnow(), ids, "day", None, {"change"})
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Wärmestatistik nicht lesbar: %s", err)
+            return None
+
+        def per_day(sid: str) -> dict[str, float]:
+            out: dict[str, float] = {}
+            for r in stats.get(sid) or []:
+                t = r.get("start")
+                t = dt_util.utc_from_timestamp(t) if isinstance(t, (int, float)) else t
+                out[dt_util.as_local(t).date().isoformat()] = (out.get(dt_util.as_local(t).date().isoformat(), 0.0) + (r.get("change") or 0))
+            return out
+        raw = per_day(meter)
+        if not raw:
+            return None
+        kwh = {d: round(v * factor, 2) for d, v in raw.items()}
+        cost = None
+        if src.get("stat_cost"):
+            cost = per_day(src["stat_cost"])
+        elif src.get("number_energy_price") or src.get("entity_energy_price"):
+            price = src.get("number_energy_price")
+            if price is None:
+                ps = self.hass.states.get(src["entity_energy_price"])
+                try:
+                    price = float(ps.state) if ps is not None else None
+                except ValueError:
+                    price = None
+            if price:
+                cost = {d: round(v * float(price), 2) for d, v in raw.items()}
+        return {"meter": meter, "unit": unit, "factor": factor, "kwh": kwh, "cost": cost, "dashboard": bool(src)}
+
+    async def async_report_extra(self, days: int) -> dict[str, Any]:
+        """Weitere Berichte: pünktlich warm, Verbrauch je Gradtag, Anteil je Raum, was das Absenken bringt, Geräte."""
+        days2 = min(STATS_DAYS, days * 2)
+        rep = self.report(days2)
+        rep.pop("_analysis", None)
+        today = dt_util.now().date()
+        dates = [(today - timedelta(days=days2 - 1 - i)).isoformat() for i in range(days2)]
+        # Außentemperatur je Tag (Mittel über die Räume mit Wert)
+        outs = []
+        for i in range(days2):
+            vals = [rows[i]["outside_avg"] for rows in rep.values() if rows[i].get("outside_avg") is not None]
+            outs.append(round(sum(vals) / len(vals), 1) if vals else None)
+        cur = {rid: rows[-days:] for rid, rows in rep.items()}
+        energy = await self._async_heat_energy(today - timedelta(days=days2 - 1), days2)
+        out: dict[str, Any] = {}
+        # Verbrauch je Gradtag
+        if energy:
+            def period(idx: range) -> dict[str, Any]:
+                k = sum(energy["kwh"].get(dates[i], 0) for i in idx if i < len(dates) - 0)
+                g = sum(degree_days(outs[i]) for i in idx)
+                c = sum((energy["cost"] or {}).get(dates[i], 0) for i in idx) if energy["cost"] else None
+                full = [i for i in idx if dates[i] in energy["kwh"]]
+                return {"kwh": round(k, 1), "gt": round(g, 1), "per_gt": round(k / g, 2) if g >= 5 and len(full) >= len(idx) * 0.7 else None,
+                        "cost": round(c, 2) if c is not None else None,
+                        "out": round(sum(o for o in (outs[i] for i in idx) if o is not None) / max(1, sum(1 for i in idx if outs[i] is not None)), 1) if any(outs[i] is not None for i in idx) else None}
+            now_p, prev_p = period(range(days2 - days, days2)), period(range(0, days2 - days)) if days2 > days else None
+            out["energy"] = {"meter": energy["meter"], "unit": energy["unit"], "factor": energy["factor"], "dashboard": energy["dashboard"],
+                             "now": now_p, "prev": prev_p,
+                             "days": [{"date": dates[i], "kwh": energy["kwh"].get(dates[i]), "gt": degree_days(outs[i]), "out": outs[i]} for i in range(days2 - days, days2)]}
+        per_gt = out.get("energy", {}).get("now", {}).get("per_gt") if out.get("energy") else None
+        # Anteil je Raum (nach Ventil-Stunden)
+        vh = {rid: sum(v for r in rows for v in (r.get("valve_hours") or []) if v is not None) / 100 for rid, rows in cur.items()}
+        tot = sum(vh.values())
+        if tot > 0:
+            kwh_now = out.get("energy", {}).get("now", {}).get("kwh") if out.get("energy") else None
+            cost_now = out.get("energy", {}).get("now", {}).get("cost") if out.get("energy") else None
+            out["share"] = sorted(({"room": rid, "valve_h": round(v, 1), "pct": round(100 * v / tot),
+                                    "kwh": round(kwh_now * v / tot, 1) if kwh_now else None,
+                                    "cost": round(cost_now * v / tot, 2) if cost_now else None} for rid, v in vh.items() if v > 0),
+                                  key=lambda x: -x["pct"])
+        # Pünktlich warm
+        out["punctual"] = {rid: x for rid, rows in cur.items()
+                           if (x := punctual_summary(rows, self._preheat_mode(self.rooms[rid]), self.rooms[rid].get("type") == "flaeche"))}
+        # Was das Absenken bringt
+        out["savings"] = savings_summary(cur, per_gt)
+        # Geräte: Probleme aus dem Protokoll und der Stand jetzt
+        cut = dt_util.utcnow().timestamp() - days * 86400
+        groups: dict[str, dict] = {}
+        for e in getattr(self.log, "entries", []):
+            if e.get("ts", 0) < cut or e.get("mod"):
+                continue
+            title = e.get("title") or ""
+            if not (e.get("cat") == "health" or (e.get("cat") == "notify" and "nicht erreichbar" in title)) or " wieder" in title:
+                continue
+            g = groups.setdefault(title, {"title": title, "n": 0, "last": 0, "rooms": set(), "why": e.get("why")})
+            g["n"] += 1
+            g["last"] = max(g["last"], e["ts"])
+            if e.get("rn"):
+                g["rooms"].add(e["rn"])
+        issues = [{**g, "rooms": sorted(g["rooms"])} for g in sorted(groups.values(), key=lambda g: -g["n"])][:12]
+        now_bad = []
+        for rid, room in self.rooms.items():
+            res = self._rt(rid).get("result") or {}
+            for b in res.get("battery_low") or []:
+                now_bad.append({"kind": "battery", "room": room.get("name"), "name": b.get("name"), "level": b.get("level")})
+            for c in room.get("climates") or []:
+                stt = self.hass.states.get(c)
+                if stt is None or stt.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                    now_bad.append({"kind": "offline", "room": room.get("name"), "name": self._name(c)})
+        out["devices"] = {"issues": issues, "now": now_bad}
+        return out
 
     def report(self, days: int) -> dict[str, list[dict[str, Any]]]:
         start = dt_util.now().date() - timedelta(days=days - 1)
@@ -2408,6 +2609,8 @@ class Heizen:
                         "comfort_dev": round(b["cdev"] / b["cn"], 2) if b.get("cn") else None,
                         "measured_min": b.get("mn", 0), "over_min": b.get("over", 0), "full_min": b.get("full", 0),
                         "comfort_over": b.get("co"),
+                        "punctual": b.get("pw") or [],
+                        "savings": b.get("sav") or {},
                         "outside_avg": round(b["osum"] / b["on"], 1) if b.get("on") else None,
                         "fire_min": b.get("fire", 0),
                     }

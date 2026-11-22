@@ -1683,3 +1683,74 @@ def plan_mowing(now_local, hours: list[dict], cfg: dict, done: dict[str, float],
     return {"target": round(target, 1), "factor": round(factor, 2), "quota": round(quota, 2), "backlog": round(backlog, 2),
             "mean_temp": None if mean is None else round(mean, 1), "days": out_days,
             "planned": round(sum(x["hours"] for x in out_days), 1)}
+
+
+# ---------------------------------------------------------------- Heizwerk: weitere Berichte
+SAVE_NAMES = {"eco": "Eco laut Heizplan", "abwesend": "Niemand zu Hause", "urlaub": "Urlaub", "fenster": "Fensterpause"}
+
+
+def _median(vals: list[float]) -> float | None:
+    vals = sorted(vals)
+    if not vals:
+        return None
+    n = len(vals)
+    return vals[n // 2] if n % 2 else (vals[n // 2 - 1] + vals[n // 2]) / 2
+
+
+def punctual_summary(rows: list[dict], preheat_mode: str = "fixed", floor: bool = False) -> dict | None:
+    """Pünktlich warm: je Beginn der Komfortzeit [Uhrzeit, Minuten zu spät (None = nicht erreicht), Minuten zu früh warm]."""
+    ev = [e for r in rows for e in (r.get("punctual") or [])]
+    if len(ev) < 2:
+        return None
+    lates = [e[1] for e in ev if e[1] is not None]
+    missed = sum(1 for e in ev if e[1] is None)
+    ontime = sum(1 for e in ev if e[1] is not None and e[1] <= 5)
+    late_ev = [e[1] for e in ev if e[1] is not None and e[1] > 5]
+    med_late = round(_median(late_ev)) if late_ev else 0
+    early = [e[2] for e in ev if e[1] == 0 and e[2]]
+    med_early = round(_median(early)) if early else 0
+    n = len(ev)
+    tip, level = "", "ok"
+    if missed + len(late_ev) >= n / 2:
+        level = "warn"
+        lead = med_late or 30
+        tip = (f"Meist {med_late} Min. zu spät warm." if late_ev else "Oft gar nicht warm geworden.") + (
+            " Das lernende Vorheizen gleicht das mit der Zeit aus – bleibt es so, reicht die Heizleistung nicht (siehe oben)."
+            if preheat_mode == "smart" else f" Vorheizen etwa {lead} Min. früher starten (Raum › Vorheizen) oder auf „lernend“ stellen.")
+    elif med_early >= (90 if floor else 30) and len(early) >= n / 2:
+        level = "info"
+        tip = f"Meist schon {med_early} Min. vor Beginn warm – kürzer vorheizen spart Energie" + (
+            "." if preheat_mode != "smart" else " (das lernende Vorheizen passt sich an).")
+    else:
+        tip = "Meist pünktlich warm."
+    return {"n": n, "ontime": ontime, "late": len(late_ev), "missed": missed, "median_late": med_late, "median_early": med_early,
+            "level": level, "tip": tip}
+
+
+def degree_days(out_avg: float | None, inside: float = 20.0, limit: float = 15.0) -> float:
+    """Gradtagzahl eines Tages (G 20/15): 20 °C minus Ø Außentemperatur, nur an Heiztagen (unter 15 °C)."""
+    if out_avg is None or out_avg >= limit:
+        return 0.0
+    return round(inside - out_avg, 1)
+
+
+def savings_summary(rooms_rows: dict[str, list[dict]], per_gt: float | None) -> dict:
+    """Was das Absenken bringt: je Anlass Stunden (Summe aller Räume) und Gradstunden; mit Verbrauch je Gradtag
+    grob in kWh (Haus-Wärmeverlust je Grad, gleichmäßig auf die Räume verteilt)."""
+    n_rooms = max(1, len(rooms_rows))
+    out: dict[str, dict] = {}
+    for rows in rooms_rows.values():
+        for r in rows:
+            for k, (m, dm) in (r.get("savings") or {}).items():
+                o = out.setdefault(k, {"min": 0, "deg_min": 0.0})
+                o["min"] += m
+                o["deg_min"] += dm
+    res = []
+    for k in ("eco", "abwesend", "urlaub", "fenster"):
+        if k not in out:
+            continue
+        o = out[k]
+        deg_days = o["deg_min"] / 1440 / n_rooms  # Gradtage, auf das ganze Haus umgerechnet
+        res.append({"key": k, "name": SAVE_NAMES[k], "hours": round(o["min"] / 60, 1), "deg_h": round(o["deg_min"] / 60, 1),
+                    "kwh": round(deg_days * per_gt, 1) if per_gt else None})
+    return {"items": res, "kwh": round(sum(x["kwh"] or 0 for x in res), 1) if per_gt else None}

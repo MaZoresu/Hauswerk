@@ -486,6 +486,11 @@ class Lichtwerk:
         st = self.hass.states.get(eid)
         return (st.name if st is not None else None) or eid
 
+    def name_room(self, eid: str) -> str:
+        """Gerät mit Raum dahinter („Fenster · Wohnzimmer“) – außer der Raum steckt schon im Namen."""
+        name, area = self._name(eid), self._area(eid)
+        return name if not area or area.lower() in name.lower() else f"{name} · {area}"
+
     def _area(self, eid: str) -> str | None:
         try:
             ent = er.async_get(self.hass).async_get(eid)
@@ -752,7 +757,7 @@ class Lichtwerk:
             since = self._away_since
             if on and now - since >= float(self.settings.get("lw_away_min") or 30) * 60:
                 self.haus.notify("lw_away", "light_away", "Licht an, niemand zu Hause",
-                                 f"{', '.join(self._name(e) for e in on)} – brennt seit {int((now - since) // 60)} Min.")
+                                 f"{', '.join(self.name_room(e) for e in on)} – brennt seit {int((now - since) // 60)} Min.")
             if not on:
                 self._away_since = None
                 self.haus.clear("lw_away")

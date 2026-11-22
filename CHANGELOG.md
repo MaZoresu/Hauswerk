@@ -2,6 +2,19 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.91.0 – 2026-11-22
+
+### Neu (Heizwerk › Bericht)
+Jeder neue Bericht endet mit einer Zeile, was zu tun ist.
+- **Verbrauch nach Wetter:** Gasverbrauch je Tag mit Gradtagen (wie kalt es war) und **kWh je Gradtag** im Vergleich zum Zeitraum davor – z. B. „Wetterbereinigt 7 % sparsamer“. Kosten, wenn im Energie-Dashboard ein Preis eingetragen ist. Der Zähler kommt aus dem Energie-Dashboard (Gas) bzw. dem ersten Gaszähler; m³ werden mit dem Faktor von der Gasrechnung umgerechnet (Heizwerk › Einstellungen › Gaszähler für den Bericht, Standard 10,3 kWh/m³).
+- **Anteil je Raum:** wohin die Wärme geht – geschätzt aus der Ventilöffnung, mit kWh und Kosten je Raum.
+- **Pünktlich warm:** je Raum, ob er zu Beginn der Komfortzeit warm genug ist bzw. wie viele Minuten später, ob er gar nicht warm wurde oder unnötig früh – mit Tipp „früher“ bzw. „kürzer vorheizen“. Zählt ab jetzt; erste Aussage nach zwei Komfort-Beginnen.
+- **Was das Absenken bringt:** Stunden und geschätzte kWh für Eco laut Heizplan, niemand zu Hause, Urlaub und Fensterpause. Gezählt wird, wie viel kühler der Raum wirklich war, nicht der eingestellte Wert. Zählt ab jetzt.
+- **Geräte:** was jetzt Aufmerksamkeit braucht (Batterie, nicht erreichbar) und was in den letzten Tagen auffiel (z. B. „übernimmt den Sollwert nicht“, 3×).
+
+### Geändert
+- **Raum hinter dem Gerät:** Leuchten heißen in Lichtwerk-Bericht, Kopfkachel, Tablet-Kachel, „Licht an, niemand zu Hause“ und im Check beim Gehen jetzt z. B. „Fenster · Wohnzimmer“ – außer der Raum steckt schon im Namen. Ebenso die Geräte im neuen Heizwerk-Bericht.
+
 ## 0.90.0 – 2026-11-22
 
 ### Behoben (Heizwerk › Bericht › Heizleistung)

@@ -675,3 +675,21 @@ def test_notify_emoji():
     assert L.with_emoji("Mähroboter: Winterpause einlegen?", "mower_care").startswith("❄️")
     assert L.with_emoji("🪟 schon da", "window") == "🪟 schon da"
     assert L.with_emoji("Irgendwas", "unbekannt") == "Irgendwas"
+
+
+def test_heizwerk_zusatzberichte_logik():
+    """Pünktlich warm, Gradtage und Absenken."""
+    rows = [{"punctual": [["06:00", 20, 0], ["06:00", 25, 0], ["17:00", 0, 0]]}]
+    p = L.punctual_summary(rows, "fixed")
+    assert p["late"] == 2 and p["median_late"] == 22 and p["level"] == "warn" and "früher starten" in p["tip"]
+    assert "lernende Vorheizen" in L.punctual_summary(rows, "smart")["tip"]
+    early = L.punctual_summary([{"punctual": [["06:00", 0, 45], ["06:00", 0, 50], ["17:00", 0, 40]]}], "fixed")
+    assert early["level"] == "info" and "kürzer vorheizen" in early["tip"]
+    assert L.punctual_summary([{"punctual": [["06:00", 0, 0], ["17:00", 3, 0]]}], "fixed")["tip"] == "Meist pünktlich warm."
+    assert L.punctual_summary([{"punctual": [["06:00", 0, 0]]}]) is None
+    assert L.degree_days(5.0) == 15.0 and L.degree_days(16.0) == 0.0 and L.degree_days(None) == 0.0
+    sv = L.savings_summary({"a": [{"savings": {"eco": [600, 1800.0], "fenster": [30, 150.0]}}], "b": [{"savings": {"eco": [600, 1080.0]}}]}, 20.0)
+    eco = sv["items"][0]
+    assert eco["key"] == "eco" and eco["hours"] == 20.0 and eco["kwh"] == round((2880 / 1440 / 2) * 20, 1)
+    assert sv["kwh"] == round(eco["kwh"] + sv["items"][1]["kwh"], 1)
+    assert L.savings_summary({"a": [{"savings": {"eco": [60, 60.0]}}]}, None)["kwh"] is None

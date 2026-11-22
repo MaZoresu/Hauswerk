@@ -10,9 +10,13 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
+import logging
+
 from .const import MODE_ACTIONS, MODULE_SECURITY, MODULE_SERVICES
 from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_GARDEN, MODULE_HEATING, MODULE_HOUSE, MODULE_LIGHT, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
 from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, block_conflicts, parse_hm
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _hm(value: Any) -> str:
@@ -355,6 +359,8 @@ SETTINGS_SCHEMA = vol.Schema(
             vol.Optional("important"): bool,
         })], vol.Length(max=10)),
         vol.Optional("demand_entity"): _opt(vol.All(str, vol.Match(r"^climate\.[a-z0-9_]+$"))),
+        vol.Optional("heat_meter"): _opt(vol.All(str, vol.Match(r"^sensor\.[a-z0-9_]+$"))),
+        vol.Optional("gas_factor"): vol.All(vol.Coerce(float), vol.Range(min=5, max=15)),
         vol.Optional("demand_action"): vol.In(["lower", "off"]),
         vol.Optional("demand_low"): vol.All(vol.Coerce(float), vol.Range(min=5, max=25)),
         vol.Optional("demand_valve"): vol.All(vol.Coerce(int), vol.Range(min=1, max=80)),
@@ -779,12 +785,17 @@ async def ws_fireplace(hass: HomeAssistant, connection, msg) -> None:
         vol.Optional("days", default=7): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
     }
 )
-@callback
-def ws_report(hass: HomeAssistant, connection, msg) -> None:
+@websocket_api.async_response
+async def ws_report(hass: HomeAssistant, connection, msg) -> None:
     ctl = _ctl(hass)
     if ctl is None:
         return _not_ready(connection, msg)
-    connection.send_result(msg["id"], ctl.report(msg["days"]))
+    rep = ctl.report(msg["days"])
+    try:
+        rep["_extra"] = await ctl.async_report_extra(msg["days"])
+    except Exception:  # noqa: BLE001 - die Zusatzberichte dürfen den Bericht nicht verhindern
+        _LOGGER.exception("Zusatzberichte Heizwerk fehlgeschlagen")
+    connection.send_result(msg["id"], rep)
 
 
 @websocket_api.websocket_command(

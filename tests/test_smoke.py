@@ -2386,6 +2386,35 @@ def test_beetwerk_garten_frei_igel_hitze_waechter(hw):
     asyncio.run(run())
 
 
+def test_heizwerk_zusatzberichte(hw):
+    """Pünktlich warm (Minuten nach Beginn der Komfortzeit), Absenken (Eco), Anteil je Raum, Geräte – ohne Gaszähler."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 16, 4, 30, tzinfo=timezone.utc)  # 05:30 Ortszeit, Eco
+        hass = Hass()
+        hass.set("climate.trv", "heat", {"current_temperature": 18.0, "temperature": 18.0}, "Heizkörper Bad")
+        log, haus, ctl = await _setup(hw, hass)
+        await ctl.async_save_room({"id": "b", "name": "Bad", "comfort": 21, "eco": 18, "enabled": True, "climates": ["climate.trv"],
+                                   "schedule": [{"days": [0, 1, 2, 3, 4, 5, 6], "start": "06:00", "end": "22:00"}]})
+        await ctl.async_evaluate()
+        ctl._record_stats()
+        for minute, temp in ((50, 18.5), (60, 19.0), (70, 19.8), (80, 20.6)):
+            NOW[0] = datetime(2026, 11, 16, 4, 0, tzinfo=timezone.utc) + timedelta(minutes=minute)
+            hass.set("climate.trv", "heat", {"current_temperature": temp, "temperature": 21.0}, "Heizkörper Bad")
+            await ctl.async_evaluate()
+            ctl._record_stats()
+        rows = ctl.report(1)["b"]
+        assert rows[0]["punctual"] == [["06:00", 20, 0]], rows[0]["punctual"]
+        assert rows[0]["savings"]["eco"][0] >= 1
+        ex = await ctl.async_report_extra(7)
+        assert "energy" not in ex and ex["savings"]["items"][0]["key"] == "eco" and ex["savings"]["kwh"] is None
+        assert ex["devices"] == {"issues": [], "now": []}
+        assert ex["punctual"] == {}  # erst ab zwei Starts eine Aussage
+
+    asyncio.run(run())
+
+
 def test_wachwerk_und_hausdienste(hw):
     """Wachwerk: Melder werden gefunden, Rauch → Rollläden hoch + Licht an + wichtige Nachricht, Wasser, Warnung,
     Tür lange offen, Klingel, Check beim Verlassen. Hausdienste: Gute Nacht, Wartung fällig/erledigt, Wochenbericht."""

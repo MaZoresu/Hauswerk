@@ -279,7 +279,7 @@ class Wachwerk:
         for x in (lw.settings.get("lw_lights") if lw else None) or []:
             st = self.hass.states.get(x)
             if st is not None and st.state == "on":
-                out.append({"entity": x, "name": self._name(x), "what": "an"})
+                out.append({"entity": x, "name": lw.name_room(x) if hasattr(lw, "name_room") else self._name(x), "what": "an"})
         if notify:
             if out:
                 self.haus.notify("ww_leave", "leave", "Niemand zu Hause – noch offen",

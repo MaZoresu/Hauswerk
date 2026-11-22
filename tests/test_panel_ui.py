@@ -560,9 +560,9 @@ def test_tablet_ohne_scrollen(tablet):
         assert p.js("document.scrollingElement.scrollHeight <= innerHeight + 1"), f"{view}: Seite scrollt"
         main = p.js(f"(() => {{ const m = {EL}.shadowRoot.getElementById('main'); return [m.scrollHeight, m.clientHeight]; }})()")
         assert main[0] <= main[1] + 1, f"{view}: Inhalt scrollt {main}"
-        if view in ("shutset", "house"):  # Einstellungen: vollständig, innen scrollbar statt abgeschnitten
+        if view in ("shutset", "house", "report"):  # Einstellungen und Bericht: vollständig, innen scrollbar statt abgeschnitten
             assert p.js(f"{EL}.shadowRoot.querySelector('.tpages').classList.contains('tscroll')")
-        assert p.js(f"{EL}._tPages") <= (1 if view in ("shutset", "house") else 2), f"{view}: {p.js(f'{EL}._tPages')} Seiten"
+        assert p.js(f"{EL}._tPages") <= (1 if view in ("shutset", "house", "report") else 2), f"{view}: {p.js(f'{EL}._tPages')} Seiten"
         # Modul-Leiste links (große Tasten), Unterseiten oben als Umschalter, keine Leisten unten
         r = p.js(f"""(() => {{ const r = {EL}.shadowRoot; const rail = r.getElementById('rail').getBoundingClientRect();
             const main = r.getElementById('main').getBoundingClientRect(); const sub = r.querySelector('#chips nav');
@@ -580,16 +580,15 @@ def test_tablet_ohne_scrollen(tablet):
         p.view(view)
         p.wait(300)
         assert p.js(f"{EL}._tPages") == 1, f"{view}: mehr als eine Seite"
-    # Bericht: zwei Seiten, Punkte und Wischen (wechselt schon während der Bewegung)
-    p.view("report")
-    p.wait(300)
-    assert p.js(f"{EL}._tPages") == 2
+    # Seite mit zwei Seiten: Punkte und Wischen (wechselt schon während der Bewegung)
+    view = next((v for v in ("kwrep", "vent", "lwrep", "kwdev", "plans") if (p.view(v), p.wait(300), p.js(f"{EL}._tPages"))[2] == 2), None)
+    assert view, "keine Seite mit zwei Seiten gefunden"
     p.click('#tdots button[data-i="1"]')
-    assert p.js(f"{EL}._tPage.report") == 1
+    assert p.js(f"{EL}._tPage.{view}") == 1
     p.page.mouse.move(600, 400)
     p.page.mouse.down()
     p.page.mouse.move(660, 402, steps=2)
-    assert p.js(f"{EL}._tPage.report") == 0, "Wischen reagiert erst beim Loslassen"
+    assert p.js(f"{EL}._tPage.{view}") == 0, "Wischen reagiert erst beim Loslassen"
     p.page.mouse.up()
 
 
@@ -2215,3 +2214,15 @@ def test_termine_uebersicht(tablet):
     p.wait()
     assert p.js(f"{EL}._pop.id") == "calendars"
     p.js(f"{EL}._closePop()")
+
+
+def test_heizwerk_zusatzberichte(panel):
+    """Bericht: Verbrauch nach Wetter, Anteil je Raum, pünktlich warm, Absenken, Geräte – je mit einer Zeile, was zu tun ist."""
+    p = panel
+    p.view("report")
+    p.wait(800)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    for w in ("Verbrauch nach Wetter", "4,2", "7 % sparsamer", "Anteil je Raum", "62 %", "Pünktlich warm", "Zu spät warm",
+              "Was das Absenken bringt", "Eco laut Heizplan", "Geräte", "Fensterkontakt · Wohnzimmer"):
+        assert w in txt, w
+    assert len(p.js(f"[...{EL}.shadowRoot.querySelectorAll('.rp-todo')].map((x) => x.textContent)")) >= 5

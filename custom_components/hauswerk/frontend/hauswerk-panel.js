@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.90.0";
+const VERSION = "0.91.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -264,6 +264,7 @@ const PICKERS = {
   proximity_sensors: { scope: "settings", multi: true, domains: ["sensor"] },
   radio_entities: { scope: "settings", multi: true, domains: ["sensor"] },
   demand_entity: { scope: "settings", multi: false, domains: ["climate"] },
+  heat_meter: { scope: "settings", multi: false, domains: ["sensor"] },
   rw_covers: { scope: "settings", multi: true, domains: ["cover"] },
   rw_wind_entity: { scope: "settings", multi: false, domains: ["sensor"] },
   kw_solar: { scope: "settings", multi: true, domains: ["sensor"], deviceClass: "power" },
@@ -1007,7 +1008,10 @@ class HauswerkPanel extends HTMLElement {
         .then((r) => {
           this._analysis = this._analysis || {};
           this._analysis[days] = r._analysis || {};
+          this._extra = this._extra || {};
+          this._extra[days] = r._extra || {};
           delete r._analysis;
+          delete r._extra;
           this._reports[days] = r;
         })
         .catch(() => (this._reports[days] = {}))
@@ -1670,8 +1674,8 @@ class HauswerkPanel extends HTMLElement {
     const tab = this._tab;
     // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
     const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
-    // Einstellungen: vollständig und scrollbar (zwei Spalten, keine Karte wird geteilt oder abgeschnitten)
-    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house"].includes(tab);
+    // Einstellungen und der Heizwerk-Bericht: vollständig und scrollbar (zwei Spalten, keine Karte wird geteilt oder abgeschnitten)
+    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house", "report"].includes(tab);
     box.classList.toggle("tscroll", scroll);
     if (scroll) {
       Object.assign(tin.style, { zoom: f, width: "", height: "", columnWidth: "", columnGap: "", transform: "", clipPath: "" });
@@ -2736,7 +2740,7 @@ class HauswerkPanel extends HTMLElement {
       const ls = this._lwLights();
       const on = ls.filter((l) => l.st?.state === "on").length;
       tiles.push(this._wallTile({ act: go("lights"), color: on ? "#facc15" : C.rest, ic: logo("lichtwerk"), name: "Lichtwerk", value: String(on), unit: `/ ${ls.length} an`,
-        status: on ? `<span class="wt-dim">${esc(ls.filter((l) => l.st?.state === "on").map((l) => this._lwName(l)).slice(0, 3).join(", "))}</span>` : "" }));
+        status: on ? `<span class="wt-dim">${esc(ls.filter((l) => l.st?.state === "on").map((l) => this._lwNameRoom(l)).slice(0, 3).join(", "))}</span>` : "" }));
     }
     const wws = this._status?.wachwerk;
     if (wws?.configured) {
@@ -4745,6 +4749,16 @@ class HauswerkPanel extends HTMLElement {
     return l.cfg?.name || l.ls?.name || this._entityName(l.id);
   }
 
+  /** Gerät mit Raum dahinter („Fenster · Wohnzimmer“) – außer der Raum steckt schon im Namen. */
+  _withRoom(name, room) {
+    if (!room || String(name).toLowerCase().includes(String(room).toLowerCase())) return name;
+    return `${name} · ${room}`;
+  }
+
+  _lwNameRoom(l) {
+    return this._withRoom(this._lwName(l), l.ls?.area || this._areaOf(l.id));
+  }
+
   /** Farbe der Leuchte für das Symbol: RGB, sonst aus der Farbtemperatur, sonst warmweiß. */
   _lwColor(l) {
     if (l.st?.state !== "on") return "var(--muted)";
@@ -4813,7 +4827,7 @@ class HauswerkPanel extends HTMLElement {
       const l = lights.find((x) => x.id === nx.entity_id);
       tone = manual.length ? "hand" : on.length ? "active" : "ok";
       icon = nx.action === "on" ? "mdi:lightbulb-on-outline" : "mdi:lightbulb-off-outline";
-      title = `${nx.day ? "Morgen um" : "Um"} ${t2(nx.min)} ${nx.action === "on" ? "an" : "aus"} – ${nx.count > 1 ? `${nx.count} Lichter` : esc(l ? this._lwName(l) : "Licht")} (${nx.reason})`;
+      title = `${nx.day ? "Morgen um" : "Um"} ${t2(nx.min)} ${nx.action === "on" ? "an" : "aus"} – ${nx.count > 1 ? `${nx.count} Lichter` : esc(l ? this._lwNameRoom(l) : "Licht")} (${nx.reason})`;
     } else {
       tone = on.length ? "active" : "calm";
       icon = on.length ? "mdi:lightbulb-group" : "mdi:weather-night";
@@ -4821,13 +4835,13 @@ class HauswerkPanel extends HTMLElement {
     }
     const lines = [];
     for (const l of hmip.slice(0, 2))
-      lines.push({ icon: "mdi:link-variant", c: "#0ea5e9", text: `${this._lwName(l)} HmIP an`, act: act(l) });
+      lines.push({ icon: "mdi:link-variant", c: "#0ea5e9", text: `${this._lwNameRoom(l)} HmIP an`, act: act(l) });
     for (const l of manual.slice(0, 2))
-      lines.push({ icon: "mdi:hand-back-right-outline", c: C.hand, text: `${this._lwName(l)} von Hand ${l.st?.state === "on" ? "an" : "aus"} – Automatik wartet${l.ls.manual.until ? ` bis ${new Date(l.ls.manual.until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : " bis zum nächsten Wechsel"}`, act: act(l) });
-    for (const l of motion.slice(0, 1)) lines.push({ icon: "mdi:motion-sensor", c: C.ok, text: `${this._lwName(l)}: Bewegung`, act: act(l) });
+      lines.push({ icon: "mdi:hand-back-right-outline", c: C.hand, text: `${this._lwNameRoom(l)} von Hand ${l.st?.state === "on" ? "an" : "aus"} – Automatik wartet${l.ls.manual.until ? ` bis ${new Date(l.ls.manual.until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}` : " bis zum nächsten Wechsel"}`, act: act(l) });
+    for (const l of motion.slice(0, 1)) lines.push({ icon: "mdi:motion-sensor", c: C.ok, text: `${this._lwNameRoom(l)}: Bewegung`, act: act(l) });
     const night = on.filter((l) => l.ls.night);
-    if (night.length) lines.push({ icon: "mdi:weather-night", c: "#6366f1", text: `Nachtlicht: ${night.map((l) => this._lwName(l)).join(", ")}` });
-    if (bad.length) lines.push({ icon: "mdi:lightbulb-alert-outline", c: C.alert, text: `${bad.length} nicht erreichbar: ${bad.slice(0, 3).map((l) => this._lwName(l)).join(", ")}` });
+    if (night.length) lines.push({ icon: "mdi:weather-night", c: "#6366f1", text: `Nachtlicht: ${night.map((l) => this._lwNameRoom(l)).join(", ")}` });
+    if (bad.length) lines.push({ icon: "mdi:lightbulb-alert-outline", c: C.alert, text: `${bad.length} nicht erreichbar: ${bad.slice(0, 3).map((l) => this._lwNameRoom(l)).join(", ")}` });
     const chips = [["mdi:lightbulb-on-outline", String(on.length), "an", ""], ["mdi:lightbulb-outline", String(lights.length - on.length), "aus", ""],
       ...(manual.length ? [["mdi:hand-back-right-outline", String(manual.length), "von Hand", C.hand]] : []),
       ...(motion.length ? [["mdi:motion-sensor", String(motion.length), "Bewegung", C.ok]] : [])];
@@ -4927,7 +4941,7 @@ class HauswerkPanel extends HTMLElement {
     const R = this._lwStatus?.report;
     if (!R) return `<section class="card empty"><ha-icon icon="mdi:chart-bar"></ha-icon><h2>Noch kein Bericht</h2><p>Lichtwerk sammelt ab jetzt Brenndauer, Energie und Schaltungen von Hand.</p></section>`;
     const lights = this._lwLights();
-    const name = (id) => { const l = lights.find((x) => x.id === id); return l ? this._lwName(l) : this._entityName(id); };
+    const name = (id) => { const l = lights.find((x) => x.id === id); return l ? this._lwNameRoom(l) : this._withRoom(this._entityName(id), this._areaOf(id)); };
     const rows = Object.entries(R.lights || {}).sort((a, b) => b[1].week_h - a[1].week_h);
     const tot = rows.reduce((a, [, r]) => ({ h: a.h + r.week_h, kwh: a.kwh + (r.kwh || 0), m: a.m + r.manual }), { h: 0, kwh: 0, m: 0 });
     const dayNames = (R.days || []).map((d) => new Date(`${d}T12:00`).toLocaleDateString("de-DE", { weekday: "short" }).slice(0, 2));
@@ -5832,7 +5846,7 @@ class HauswerkPanel extends HTMLElement {
           ${L.error ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>${esc(L.error)}</p>` : ""}
           ${(L.findings || []).length ? `<div class="lbl">Hinweise</div><div class="evlist">${L.findings.map((f) => `<div class="ev"><ha-icon icon="mdi:link-variant-off" style="color:${f.level === "warn" ? "#f97316" : "#0ea5e9"}"></ha-icon><span class="grow"><b>${esc(f.text.split(" – ")[0])}</b><small>${esc(f.text.split(" – ")[1] || "")}</small></span></div>`).join("")}</div>` : ""}
           <div class="lbl">Je Leuchte</div>
-          <div class="hl-list">${rows.map((l) => `<div class="hl-room"><div class="hl-w"><span class="hl-wn"><ha-icon icon="${this._lwIco(l, false)}"></ha-icon>${esc(this._lwName(l))}</span><ha-icon class="hl-arrow" icon="mdi:arrow-left"></ha-icon><span class="hl-ps">${L.lights[l.id].peers.length ? L.lights[l.id].peers.map((x) => this._lwPeer(x)).join("") : `<em class="hl-none">${L.lights[l.id].own ? "nur eigene Taster" : "keine Verknüpfung"}</em>`}</span></div></div>`).join("") || `<p class="muted">Keine Homematic-Leuchte in Lichtwerk – oder noch nichts gelesen.</p>`}</div>`,
+          <div class="hl-list">${rows.map((l) => `<div class="hl-room"><div class="hl-w"><span class="hl-wn"><ha-icon icon="${this._lwIco(l, false)}"></ha-icon>${esc(this._lwNameRoom(l))}</span><ha-icon class="hl-arrow" icon="mdi:arrow-left"></ha-icon><span class="hl-ps">${L.lights[l.id].peers.length ? L.lights[l.id].peers.map((x) => this._lwPeer(x)).join("") : `<em class="hl-none">${L.lights[l.id].own ? "nur eigene Taster" : "keine Verknüpfung"}</em>`}</span></div></div>`).join("") || `<p class="muted">Keine Homematic-Leuchte in Lichtwerk – oder noch nichts gelesen.</p>`}</div>`,
         foot: `<button class="secondary" data-action="pop-close">Schließen</button>${this._admin ? `<button class="primary" data-action="lwlinks-refresh"><ha-icon icon="mdi:refresh"></ha-icon>Neu lesen</button>` : ""}`,
       };
     }
@@ -7882,7 +7896,11 @@ class HauswerkPanel extends HTMLElement {
           ${vr.map((r) => { const wk = st[r.id].air.week; return `<tr><td><span class="rdot" style="background:${this._roomColor(r.id)}"></span>${esc(r.name)}</td><td>${wk.count}×</td><td>${wk.minutes} Min.</td><td>${wk.rh_drop != null ? `−${wk.rh_drop} %-Pkt.` : "–"}</td><td>${wk.kwh ? `ca. ${fmt(wk.kwh)} kWh` : "–"}</td></tr>`; }).join("")}
           </tbody></table></div><p class="muted small">Feuchte: Ø Rückgang je Lüftung. Wärme: grob geschätzt (ca. 20 W je Grad Unterschied, solange offen).</p></section>`;
       })()}
+      ${this._energyReport(rooms, days)}
       ${this._powerReport(rooms, days)}
+      ${this._punctualReport(rooms, days)}
+      ${this._savingsReport(days)}
+      ${this._deviceReport(days)}
       ${this._valveHeat(rooms, rep, days)}
       <section class="card">
         ${this._sectionHead("mdi:table", "Räume im Vergleich")}
@@ -7892,6 +7910,101 @@ class HauswerkPanel extends HTMLElement {
         </table></div>
         <p class="muted small">Geheizt: Minuten, in denen ein Thermostat „heizt“ meldet (ohne diese Angabe: Raum unter Soll).</p>
       </section>`;
+  }
+
+  /** Kernaussage eines Berichts: eine Zeile, was zu tun ist. */
+  _todo(level, text) {
+    const [i, c] = { ok: ["mdi:check-circle-outline", "#22c55e"], info: ["mdi:lightbulb-on-outline", "#0ea5e9"], warn: ["mdi:alert-outline", "#f59e0b"] }[level] || ["mdi:information-outline", "#0ea5e9"];
+    return `<p class="rp-todo" style="--c:${c}"><ha-icon icon="${i}"></ha-icon><span>${text}</span></p>`;
+  }
+
+  /** Verbrauch nach Wetter bereinigt (kWh je Gradtag) und Anteil je Raum. */
+  _energyReport(rooms, days) {
+    const ex = this._extra?.[days] || {};
+    const e = ex.energy;
+    const name = (id) => this._rooms().find((r) => r.id === id)?.name || id;
+    const eur = (v) => `${fmt(v, 2)} €`;
+    let head = "";
+    if (!e) {
+      head = this._todo("info", `Kein Gas- bzw. Wärmezähler gefunden – im Energie-Dashboard unter „Gas“ eintragen oder unter Heizwerk › Einstellungen wählen. Dann zeigt der Bericht den Verbrauch je Gradtag und die Kosten je Raum.`);
+    } else {
+      const n = e.now || {}, p = e.prev || {};
+      const diff = n.per_gt && p.per_gt ? Math.round(100 * (n.per_gt - p.per_gt) / p.per_gt) : null;
+      const max = Math.max(1, ...e.days.map((d) => d.kwh || 0));
+      const maxG = Math.max(1, ...e.days.map((d) => d.gt || 0));
+      const bars = `<div class="rp-bars">${e.days.map((d) => `<div class="rp-b" title="${new Date(d.date).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "numeric" })}: ${d.kwh != null ? `${fmt(d.kwh, 1)} kWh` : "–"} · ${d.out != null ? `Ø ${fmt(d.out)} °C außen` : ""}">
+          <i class="k" style="height:${d.kwh != null ? Math.max(2, (100 * d.kwh) / max) : 0}%"></i><i class="g" style="bottom:${(100 * d.gt) / maxG}%"></i>
+          <small>${new Date(d.date).toLocaleDateString("de-DE", { weekday: "narrow" })}</small></div>`).join("")}</div>`;
+      head = `<div class="kpis">
+          ${this._kpi("#f97316", "mdi:fire", "Verbrauch", fmt(n.kwh, 0), "kWh", `${days} Tage${n.cost != null ? ` · ${eur(n.cost)}` : ""}${e.unit !== "kWh" && e.unit !== "Wh" ? ` · ${fmt(e.factor, 1)} kWh je ${esc(e.unit)}` : ""}`)}
+          ${this._kpi("#60a5fa", "mdi:snowflake-thermometer", "Gradtage", fmt(n.gt, 0), "", n.out != null ? `Ø ${fmt(n.out)} °C außen` : "")}
+          ${this._kpi("#22c55e", "mdi:scale-balance", "Je Gradtag", n.per_gt != null ? fmt(n.per_gt, 1) : "–", "kWh", p.per_gt != null ? `davor ${fmt(p.per_gt, 1)} kWh` : "Vergleich folgt")}
+        </div>${bars}
+        <p class="muted small">Balken: Verbrauch je Tag; Strich: wie kalt es war (Gradtage). Gradtag = 20 °C minus Ø Außentemperatur an Tagen unter 15 °C. Warmwasser ist im Zähler mit drin.</p>
+        ${diff == null ? this._todo("info", "Für den Vergleich braucht es zwei Zeiträume mit genug Heiztagen – kommt von selbst.")
+          : Math.abs(diff) < 5 ? this._todo("ok", `Wetterbereinigt gleich wie im Zeitraum davor (${diff > 0 ? "+" : ""}${diff} %).`)
+          : diff < 0 ? this._todo("ok", `Wetterbereinigt <b>${-diff} % sparsamer</b> als im Zeitraum davor – Änderungen wirken.`)
+          : this._todo("warn", `Wetterbereinigt <b>${diff} % mehr</b> als im Zeitraum davor – lag es am Lüften, an Gästen oder an einer geänderten Einstellung?`)}`;
+    }
+    const sh = ex.share || [];
+    const share = sh.length ? `<div class="rp-share">${sh.map((x) => `<div class="rp-s"><span class="rdot" style="background:${this._roomColor(x.room)}"></span><b>${esc(name(x.room))}</b>
+        <span class="rp-sb"><i style="width:${x.pct}%;background:${this._roomColor(x.room)}"></i></span><em>${x.pct} %</em><small>${x.kwh != null ? `${fmt(x.kwh, 0)} kWh` : ""}${x.cost != null ? ` · ${eur(x.cost)}` : ""}</small></div>`).join("")}</div>
+      <p class="muted small">Geschätzt aus der Ventilöffnung (Ventil-Stunden) – große Heizkörper und Fußbodenheizung geben bei gleicher Öffnung mehr Wärme ab.</p>
+      ${this._todo("info", `Am meisten Wärme geht in <b>${esc(name(sh[0].room))}</b> (${sh[0].pct} %) – hier bringt jedes Grad weniger und jede kürzere Komfortzeit am meisten.`)}` : "";
+    if (!e && !sh.length) return "";
+    return `<section class="card">${this._sectionHead("mdi:gas-burner", `Verbrauch nach Wetter · ${days} Tage`)}${head}</section>
+      ${share ? `<section class="card">${this._sectionHead("mdi:chart-pie", `Anteil je Raum · ${days} Tage`)}${share}</section>` : ""}`;
+  }
+
+  /** Pünktlich warm: ist der Raum zu Beginn der Komfortzeit warm? */
+  _punctualReport(rooms, days) {
+    const pu = this._extra?.[days]?.punctual || {};
+    const list = rooms.filter((r) => pu[r.id]);
+    if (!list.length) return "";
+    const LV = { ok: "#22c55e", info: "#0ea5e9", warn: "#f59e0b" };
+    const rows = list.map((r) => {
+      const x = pu[r.id];
+      const pct = Math.round((100 * x.ontime) / x.n);
+      return `<div class="rp-p" style="--c:${LV[x.level]}"><span class="rdot" style="background:${this._roomColor(r.id)}"></span>
+        <span class="grow"><b>${esc(r.name)}</b><small>${x.ontime} von ${x.n} pünktlich${x.late ? ` · ${x.late}× zu spät (meist ${x.median_late} Min.)` : ""}${x.missed ? ` · ${x.missed}× gar nicht warm` : ""}${x.median_early ? ` · meist ${x.median_early} Min. vorher warm` : ""}</small><small class="rp-tip">${esc(x.tip)}</small></span>
+        <em class="rp-pct">${pct} %</em></div>`;
+    }).join("");
+    const bad = list.filter((r) => pu[r.id].level === "warn");
+    const early = list.filter((r) => pu[r.id].level === "info");
+    return `<section class="card">${this._sectionHead("mdi:clock-check-outline", `Pünktlich warm · ${days} Tage`)}
+      <p class="muted small">Je Beginn der Komfortzeit: War der Raum warm genug (höchstens 0,5 °C unter Soll) – oder wann wurde er es? Ohne die Zeit nach dem Lüften.</p>
+      <div class="rp-plist">${rows}</div>
+      ${bad.length ? this._todo("warn", `Zu spät warm: <b>${esc(bad.map((r) => r.name).join(", "))}</b> – früher vorheizen.`) : early.length ? this._todo("info", `Unnötig früh warm: <b>${esc(early.map((r) => r.name).join(", "))}</b> – kürzer vorheizen spart.`) : this._todo("ok", "Alle Räume sind pünktlich warm.")}</section>`;
+  }
+
+  /** Was das Absenken bringt: Eco, niemand zu Hause, Urlaub, Fensterpause. */
+  _savingsReport(days) {
+    const sv = this._extra?.[days]?.savings;
+    if (!sv || !(sv.items || []).length) return "";
+    const ICON = { eco: "mdi:leaf", abwesend: "mdi:home-export-outline", urlaub: "mdi:palm-tree", fenster: "mdi:window-open-variant" };
+    const maxH = Math.max(1, ...sv.items.map((x) => x.deg_h));
+    const best = [...sv.items].sort((a, b) => b.deg_h - a.deg_h)[0];
+    return `<section class="card">${this._sectionHead("mdi:piggy-bank-outline", `Was das Absenken bringt · ${days} Tage`)}
+      ${sv.kwh != null ? `<div class="kpis">${this._kpi("#22c55e", "mdi:piggy-bank-outline", "Gespart (geschätzt)", fmt(sv.kwh, 0), "kWh", "gegenüber immer Komfort")}</div>` : ""}
+      <div class="rp-share">${sv.items.map((x) => `<div class="rp-s"><ha-icon icon="${ICON[x.key]}" style="color:#22c55e"></ha-icon><b>${esc(x.name)}</b>
+        <span class="rp-sb"><i style="width:${(100 * x.deg_h) / maxH}%;background:#22c55e"></i></span><em>${fmt(x.hours, 0)} Std.</em><small>${x.kwh != null ? `ca. ${fmt(x.kwh, 0)} kWh` : `${fmt(x.deg_h, 0)} Grad-Std.`}</small></div>`).join("")}</div>
+      <p class="muted small">Stunden = Summe aller Räume. Gezählt wird nur, wie viel kühler der Raum wirklich war – nicht der eingestellte Wert. kWh grob aus dem Verbrauch je Gradtag des Hauses.</p>
+      ${this._todo("ok", `Am meisten bringt <b>${esc(best.name)}</b>${best.kwh != null ? ` (ca. ${fmt(best.kwh, 0)} kWh)` : ""}.`)}</section>`;
+  }
+
+  /** Geräte: was in den letzten Tagen aufgefallen ist und was jetzt zu tun ist. */
+  _deviceReport(days) {
+    const dv = this._extra?.[days]?.devices;
+    if (!dv) return "";
+    const now = dv.now || [], iss = dv.issues || [];
+    const nowHtml = now.map((x) => `<div class="ev live"><ha-icon icon="${x.kind === "battery" ? "mdi:battery-alert-variant-outline" : "mdi:lan-disconnect"}" style="color:#f59e0b"></ha-icon><span class="grow"><b>${esc(this._withRoom(x.name, x.room))}</b><small>${x.kind === "battery" ? `Batterie schwach${x.level ? ` · ${fmt(x.level, 0)} %` : ""}` : "gerade nicht erreichbar"}</small></span></div>`).join("");
+    const issHtml = iss.map((g) => `<div class="ev"><ha-icon icon="mdi:history" style="color:#94a3b8"></ha-icon><span class="grow"><b>${esc(g.title)}${g.rooms.length ? ` · ${esc(g.rooms.join(", "))}` : ""}</b><small>${g.n}× · zuletzt ${new Date(g.last * 1000).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}</small></span></div>`).join("");
+    return `<section class="card">${this._sectionHead("mdi:wrench-outline", `Geräte · ${days} Tage`)}
+      ${nowHtml ? `<div class="lbl">Jetzt</div><div class="evlist">${nowHtml}</div>` : ""}
+      ${issHtml ? `<div class="lbl">Aufgefallen</div><div class="evlist">${issHtml}</div>` : ""}
+      ${now.length ? this._todo("warn", `${now.length} ${now.length === 1 ? "Gerät braucht" : "Geräte brauchen"} jetzt Aufmerksamkeit (Batterie bzw. Funk).`)
+        : iss.length ? this._todo("info", `Zuletzt alles in Ordnung – „${esc(iss[0].title)}“ kam ${iss[0].n}× vor; wiederholt es sich, Funk bzw. Verknüpfung prüfen.`)
+        : this._todo("ok", `Keine Geräteprobleme in den letzten ${days} Tagen.`)}</section>`;
   }
 
   /** Heizleistung je Raum: Urteil, Kennzahlen und Hinweise (Analyse aus dem Backend). */
@@ -8426,6 +8539,9 @@ class HauswerkPanel extends HTMLElement {
           sum: p.demand_entity ? `${this._entityName(p.demand_entity)} · ${dm?.error ? "nicht erreichbar" : label[dm?.state || "normal"]}` : "Aus – Wärmeerzeuger läuft unabhängig",
           words: "vaillant kessel therme wärmepumpe heizung bedarf absenken vorlauf energie sparen" };
       })(),
+      { g: "Heizen", id: "heatmeter", t: "fein", icon: "mdi:meter-gas-outline", c: "#f97316", title: "Gaszähler für den Bericht",
+        sum: p.heat_meter ? `${this._entityName(p.heat_meter)} · ${fmt(p.gas_factor ?? 10.3, 1)} kWh je m³` : "automatisch: Energie-Dashboard bzw. erster Gaszähler",
+        words: "gas zähler gaszähler wärmemenge verbrauch gradtag kosten bericht kwh m3 brennwert" },
       { g: "Heizen", id: "protect", val: `${fmt(p.frost_temp)} °C`, icon: "mdi:snowflake-thermometer", c: "#38bdf8", title: "Frostschutz", sum: `${fmt(p.frost_temp)} °C bei offenem Fenster und in der Sommerpause`, words: "fenster frost" },
       { g: "Heizen", id: "boost", val: `${p.boost_minutes || 30} Min.`, icon: "mdi:rocket-launch-outline", c: "#f43f5e", title: "Boost", sum: `${p.boost_minutes || 30} Min. volle Leistung`, words: "boost schnell" },
       { g: "Heizen", id: "liming", val: p.liming ? `${["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"][p.liming_day ?? 0]} ${p.liming_time || "10:00"}` : "aus", icon: "mdi:water-sync", c: "#38bdf8", title: "Entkalkungsschutz",
@@ -9533,6 +9649,13 @@ class HauswerkPanel extends HTMLElement {
             <p class="muted small"><ha-icon icon="mdi:shower-head"></ha-icon>Nach dem Duschen nachheizen stellst du am Raum unter „Geräte“ ein (braucht einen Feuchtesensor).</p>`,
         };
       }
+
+      case "heatmeter":
+        return {
+          icon: "mdi:meter-gas-outline", c: "#f97316", title: "Gaszähler für den Bericht", sub: "Heizwerk › Bericht",
+          body: `<div class="field"><span><ha-icon icon="mdi:meter-gas-outline"></ha-icon> Gas- bzw. Wärmezähler (leer = aus dem Energie-Dashboard, sonst erster Gaszähler)</span>${this._picker("heat_meter", p.heat_meter ? [p.heat_meter] : [])}</div>
+            <label class="field narrow"><span><ha-icon icon="mdi:calculator-variant-outline"></ha-icon> kWh je m³ Gas (steht auf der Gasrechnung: Brennwert × Zustandszahl)</span>${minutes("gas_factor", 10.3, 5, 15, 0.1, "kWh/m³")}</label>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Für „Verbrauch nach Wetter“, „Anteil je Raum“ und „Was das Absenken bringt“. Kosten kommen aus dem Energie-Dashboard, wenn dort ein Preis eingetragen ist.</p>` };
 
       case "demand": {
         const dm = this._status?.demand || {};
@@ -13486,6 +13609,28 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .pw-f { display:flex; flex-direction:column; padding:6px 10px; border-radius:12px; background:var(--card2); min-width:84px; }
 .pw-f small { font-size:11px; color:var(--muted); }
 .pw-f b { font-size:15px; }
+.rp-todo { display:flex; gap:8px; align-items:flex-start; margin:12px 0 0; padding:10px 12px; border-radius:12px; background:color-mix(in srgb, var(--c) 10%, transparent); font-size:14px; }
+.rp-todo ha-icon { color:var(--c); --mdc-icon-size:20px; flex:none; }
+.rp-bars { display:flex; gap:4px; align-items:flex-end; height:110px; margin:12px 0 4px; }
+.rp-b { position:relative; flex:1; height:100%; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; }
+.rp-b i.k { display:block; width:70%; background:#f97316; border-radius:5px 5px 2px 2px; opacity:.85; }
+.rp-b i.g { position:absolute; left:8%; right:8%; height:2px; background:#60a5fa; margin-bottom:16px; }
+.rp-b small { font-size:10.5px; color:var(--muted); margin-top:3px; height:13px; }
+.rp-share { display:flex; flex-direction:column; gap:8px; margin-top:6px; }
+.rp-s { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:4px 10px; }
+.rp-s > b { grid-column:2; grid-row:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rp-s > em { grid-column:3; grid-row:1; }
+.rp-s > .rp-sb { grid-column:2 / -1; grid-row:2; }
+.rp-s > small { grid-column:2 / -1; grid-row:3; color:var(--muted); font-size:12px; }
+.rp-sb { height:10px; border-radius:99px; background:var(--card2); overflow:hidden; }
+.rp-sb i { display:block; height:100%; border-radius:99px; }
+.rp-s em { font-style:normal; font-weight:700; min-width:52px; text-align:right; }
+.rp-plist { display:flex; flex-direction:column; gap:8px; margin-top:6px; }
+.rp-p { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:12px; background:var(--card2); box-shadow:inset 3px 0 0 var(--c); }
+.rp-p .grow { display:flex; flex-direction:column; min-width:0; }
+.rp-p small { color:var(--muted); font-size:12.5px; }
+.rp-p small.rp-tip { color:var(--text); }
+.rp-pct { font-style:normal; font-weight:700; font-size:18px; color:var(--c); }
 .pw-f i { font-style:normal; font-size:11px; color:var(--muted); }
 .pw-list { display:flex; flex-direction:column; gap:6px; }
 .pw-i { display:flex; gap:8px; align-items:flex-start; }
