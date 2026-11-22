@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.86.1 – 2026-11-22
+
+### Behoben
+- Prüfung von Home Assistant (hassfest): Der Wochenbericht liest das Energie-Dashboard – „energy“ ist jetzt als optionale Abhängigkeit eingetragen. Bitte direkt 0.86.1 installieren; alles Neue aus 0.86.0 steht unten.
+
 ## 0.86.0 – 2026-11-22
 
 ### Neu: Modul Wachwerk (Sicherheit)

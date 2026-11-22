@@ -10,8 +10,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
-from .const import MODULE_SECURITY, MODULE_SERVICES
-from .dienste import MODE_ACTIONS
+from .const import MODE_ACTIONS, MODULE_SECURITY, MODULE_SERVICES
 from .const import DOMAIN, HOUSE_KEYS, LOG_DAYS, MODULE_GARDEN, MODULE_HEATING, MODULE_HOUSE, MODULE_LIGHT, MODULE_LOG, MODULE_POWER, MODULE_SHUTTER
 from .logic import MODES, TYPE_DEFAULTS, TYPE_FLOOR, TYPE_RADIATOR, block_conflicts, parse_hm
 

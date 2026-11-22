@@ -15,26 +15,11 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import (DOMAIN, MODULE_GARDEN, MODULE_HEATING, MODULE_LIGHT, MODULE_SECURITY, MODULE_SHUTTER,
+from .const import (DOMAIN, MODE_ACTIONS, MODULE_GARDEN, MODULE_HEATING, MODULE_LIGHT, MODULE_SECURITY, MODULE_SHUTTER,
                     SERVICES_STORAGE_KEY)
 from .core import Haus
 from .log import Protokoll, log_settings
 
-# Was ein Hausmodus tun kann (Reihenfolge = Anzeige)
-MODE_ACTIONS = {
-    "lights_off": "Lichter aus",
-    "covers_close": "Rollläden zu",
-    "covers_open": "Rollläden auf",
-    "eco_on": "Heizung auf Eco",
-    "eco_off": "Heizung nach Plan",
-    "away": "Anwesenheit: abwesend",
-    "presence_auto": "Anwesenheit: automatisch",
-    "mower_home": "Mähroboter in die Station",
-    "alarm_away": "Alarmanlage scharf (abwesend)",
-    "alarm_night": "Alarmanlage scharf (Nacht)",
-    "alarm_off": "Alarmanlage unscharf",
-    "check": "Prüfen, was noch offen bzw. an ist",
-}
 MODES = {
     "night": {"name": "Gute Nacht", "icon": "mdi:weather-night", "default": ["lights_off", "covers_close", "eco_on", "mower_home", "check"]},
     "morning": {"name": "Guten Morgen", "icon": "mdi:weather-sunset-up", "default": ["covers_open", "eco_off"]},

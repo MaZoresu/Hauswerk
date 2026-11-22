@@ -240,3 +240,19 @@ NOTIFY_REPEAT = 12 * 3600  # dieselbe Nachricht frühestens nach so vielen Sekun
 CALENDAR_REFRESH = 300  # Sekunden zwischen zwei Abfragen des Urlaubskalenders
 
 WINDOW_OPEN_STATES = {"on", "open", "true", "opening"}
+
+# Was ein Hausmodus tun kann (Reihenfolge = Anzeige)
+MODE_ACTIONS = {
+    "lights_off": "Lichter aus",
+    "covers_close": "Rollläden zu",
+    "covers_open": "Rollläden auf",
+    "eco_on": "Heizung auf Eco",
+    "eco_off": "Heizung nach Plan",
+    "away": "Anwesenheit: abwesend",
+    "presence_auto": "Anwesenheit: automatisch",
+    "mower_home": "Mähroboter in die Station",
+    "alarm_away": "Alarmanlage scharf (abwesend)",
+    "alarm_night": "Alarmanlage scharf (Nacht)",
+    "alarm_off": "Alarmanlage unscharf",
+    "check": "Prüfen, was noch offen bzw. an ist",
+}

@@ -3,6 +3,7 @@
   "name": "Hauswerk",
   "after_dependencies": [
     "device_tracker",
+    "energy",
     "person",
     "recorder"
   ],
@@ -22,5 +23,5 @@
   "issue_tracker": "https://github.com/MaZoresu/Hauswerk/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.86.0"
+  "version": "0.86.1"
 }
