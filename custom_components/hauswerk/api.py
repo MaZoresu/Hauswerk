@@ -361,6 +361,11 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("demand_entity"): _opt(vol.All(str, vol.Match(r"^climate\.[a-z0-9_]+$"))),
         vol.Optional("heat_meter"): _opt(vol.All(str, vol.Match(r"^sensor\.[a-z0-9_]+$"))),
         vol.Optional("gas_factor"): vol.All(vol.Coerce(float), vol.Range(min=5, max=15)),
+        vol.Optional("curve_design_flow"): vol.All(vol.Coerce(float), vol.Range(min=25, max=80)),
+        vol.Optional("curve_design_out"): vol.All(vol.Coerce(float), vol.Range(min=-25, max=0)),
+        vol.Optional("curve_room"): vol.All(vol.Coerce(float), vol.Range(min=16, max=25)),
+        vol.Optional("curve_fbh_flow"): vol.All(vol.Coerce(float), vol.Range(min=25, max=55)),
+        **{vol.Optional(f"boiler_{k}"): _opt(vol.All(str, vol.Match(r"^sensor\.[a-z0-9_]+$"))) for k in ("circuit_flow", "circuit_return", "fbh_flow", "fbh_return")},
         vol.Optional("demand_action"): vol.In(["lower", "off"]),
         vol.Optional("demand_low"): vol.All(vol.Coerce(float), vol.Range(min=5, max=25)),
         vol.Optional("demand_valve"): vol.All(vol.Coerce(int), vol.Range(min=1, max=80)),
@@ -796,6 +801,16 @@ async def ws_report(hass: HomeAssistant, connection, msg) -> None:
     except Exception:  # noqa: BLE001 - die Zusatzberichte dürfen den Bericht nicht verhindern
         _LOGGER.exception("Zusatzberichte Heizwerk fehlgeschlagen")
     connection.send_result(msg["id"], rep)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/heizen/boiler/history",
+                                  vol.Optional("days", default=14): vol.All(vol.Coerce(int), vol.Range(min=1, max=30))})
+@websocket_api.async_response
+async def ws_boiler_history(hass: HomeAssistant, connection, msg) -> None:
+    ctl = _ctl(hass)
+    if ctl is None:
+        return _not_ready(connection, msg)
+    connection.send_result(msg["id"], {"points": await ctl.async_boiler_history(msg["days"])})
 
 
 @websocket_api.websocket_command(
@@ -1248,6 +1263,7 @@ COMMANDS = (
     ws_bw_busy,
     ws_bw_timer,
     ws_house_mode,
+    ws_boiler_history,
     ws_hd_get,
     ws_task_done,
     ws_weekly,

@@ -2386,6 +2386,36 @@ def test_beetwerk_garten_frei_igel_hitze_waechter(hw):
     asyncio.run(run())
 
 
+def test_therme_erkennen(hw):
+    """Therme (myVaillant) und eigene Fühler werden erkannt; der Heizkreis-Fühler über das gemeinsame Gerät (Shelly)."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        hass = Hass()
+        hass.set("sensor.gauch_circuit_0_flow_temperature_setpoint", "50.0", {"unit_of_measurement": "°C"}, "Flow Setpoint")
+        hass.set("number.gauch_circuit_0_heating_curve", "1.4", {}, "Heating Curve")
+        hass.set("sensor.gauch_circuit_0_heating_curve", "1.4", {}, "Heating Curve")
+        hass.set("sensor.gauch_outdoor_temperature", "4.0", {"unit_of_measurement": "°C"}, "Outdoor")
+        hass.set("sensor.gauch_system_water_pressure", "2.0", {"unit_of_measurement": "bar"}, "Druck")
+        hass.set("sensor.heizung_temperatur_temperatur", "31.6", {"unit_of_measurement": "°C", "device_class": "temperature"}, "Rücklauf Temperatur FBH")
+        hass.set("sensor.heizung_temperatur_temperatur_2", "36.0", {"unit_of_measurement": "°C", "device_class": "temperature"}, "Vorlauf Temperatur FBH")
+        hass.set("sensor.heizung_temperatur_temperatur_3", "48.9", {"unit_of_measurement": "°C", "device_class": "temperature"}, "Heizung Temperatur")
+        hass.set("sensor.wohnzimmer_temperatur", "21.0", {"unit_of_measurement": "°C", "device_class": "temperature"}, "Wohnzimmer")
+        for e in ("sensor.heizung_temperatur_temperatur", "sensor.heizung_temperatur_temperatur_2", "sensor.heizung_temperatur_temperatur_3"):
+            REG[e] = types.SimpleNamespace(entity_id=e, device_id="shelly", domain="sensor", disabled_by=None)
+        log, haus, ctl = await _setup(hw, hass)
+        b = ctl.boiler()
+        e = b["entities"]
+        assert b["found"] and e["flow_set"] == "sensor.gauch_circuit_0_flow_temperature_setpoint" and e["curve"] == "number.gauch_circuit_0_heating_curve"
+        assert e["outside"] == "sensor.gauch_outdoor_temperature" and e["pressure"] == "sensor.gauch_system_water_pressure"
+        assert (e["fbh_flow"], e["fbh_return"], e["circuit_flow"]) == ("sensor.heizung_temperatur_temperatur_2", "sensor.heizung_temperatur_temperatur", "sensor.heizung_temperatur_temperatur_3")
+        await ctl.async_save_settings({"boiler_circuit_flow": "sensor.wohnzimmer_temperatur"})
+        assert ctl.boiler()["entities"]["circuit_flow"] == "sensor.wohnzimmer_temperatur"
+        assert await ctl.async_boiler_history() == []  # ohne Recorder: leer, kein Fehler
+
+    asyncio.run(run())
+
+
 def test_heizwerk_zusatzberichte(hw):
     """Pünktlich warm (Minuten nach Beginn der Komfortzeit), Absenken (Eco), Anteil je Raum, Geräte – ohne Gaszähler."""
     async def run():

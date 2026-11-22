@@ -14,6 +14,21 @@
 const now = new Date().toISOString();
 const st = (state, attributes = {}) => ({ state, attributes, last_changed: now, last_updated: now });
 const states = {
+  "sensor.gauch_circuit_0_flow_temperature_setpoint": { state: "50.0", attributes: { friendly_name: "Gauch Circuit 0 Flow Temperature Setpoint", unit_of_measurement: "°C" } },
+  "number.gauch_circuit_0_heating_curve": { state: "1.4", attributes: { friendly_name: "Gauch Circuit 0 Heating Curve" } },
+  "number.gauch_circuit_0_min_flow_temperature_setpoint": { state: "15.0", attributes: { unit_of_measurement: "°C" } },
+  "number.gauch_circuit_0_heat_demand_limited_by_outside_temperature": { state: "19.0", attributes: { unit_of_measurement: "°C" } },
+  "sensor.gauch_outdoor_temperature": { state: "4.0", attributes: { friendly_name: "Gauch Outdoor Temperature", unit_of_measurement: "°C" } },
+  "sensor.gauch_system_water_pressure": { state: "2.0", attributes: { unit_of_measurement: "bar" } },
+  "sensor.gauch_circuit_0_state": { state: "HEATING", attributes: {} },
+  "sensor.gauch_energy_manager_state": { state: "HEATING", attributes: {} },
+  "sensor.gauch_zone_zone_1_circuit_0_desired_heating_temperature": { state: "23.5", attributes: { unit_of_measurement: "°C" } },
+  "sensor.gauch_domestic_hot_water_0_tank_temperature": { state: "51.0", attributes: { unit_of_measurement: "°C" } },
+  "sensor.gauch_domestic_hot_water_0_setpoint": { state: "57.0", attributes: { unit_of_measurement: "°C" } },
+  "binary_sensor.gauch_trouble_codes": { state: "off", attributes: {} },
+  "sensor.heizung_temperatur_temperatur": { state: "31.56", attributes: { friendly_name: "Rücklauf Temperatur FBH", unit_of_measurement: "°C", device_class: "temperature" } },
+  "sensor.heizung_temperatur_temperatur_2": { state: "36.0", attributes: { friendly_name: "Vorlauf Temperatur FBH", unit_of_measurement: "°C", device_class: "temperature" } },
+  "sensor.heizung_temperatur_temperatur_3": { state: "48.94", attributes: { friendly_name: "Heizung Temperatur", unit_of_measurement: "°C", device_class: "temperature" } },
   "light.wohnzimmer": { state: "on", attributes: { friendly_name: "Wohnzimmer", brightness: 204, color_mode: "color_temp", color_temp_kelvin: 2700, supported_color_modes: ["color_temp"] }, last_changed: new Date(Date.now() - 42 * 60e3).toISOString() },
   "light.flur_og": { state: "off", attributes: { friendly_name: "Flur OG", supported_color_modes: ["color_temp"] } },
   "light.eingang": { state: "off", attributes: { friendly_name: "Eingang", supported_color_modes: ["onoff"] } },
@@ -169,6 +184,11 @@ const status = {
       { id: "auto:x", name: "Batterie wechseln: Fenster Bad", icon: "mdi:battery-alert-variant-outline", auto: true, left: 0 },
       { id: "t2", name: "Filter Dunstabzug reinigen", icon: "mdi:stove", days: 90, last: "2026-10-01", auto: false, left: 59 }],
     templates: [{ name: "Heizkörper entlüften", icon: "mdi:radiator", days: 365 }, { name: "Wasserfilter wechseln", icon: "mdi:water-check-outline", days: 180 }] },
+  boiler: { found: true, entities: { climate: "climate.gauch_zone_zone_1_circuit_0_climate", flow_set: "sensor.gauch_circuit_0_flow_temperature_setpoint", curve: "number.gauch_circuit_0_heating_curve",
+    min_flow: "number.gauch_circuit_0_min_flow_temperature_setpoint", limit_out: "number.gauch_circuit_0_heat_demand_limited_by_outside_temperature", outside: "sensor.gauch_outdoor_temperature",
+    pressure: "sensor.gauch_system_water_pressure", state: "sensor.gauch_circuit_0_state", burner: "sensor.gauch_energy_manager_state", room_set: "sensor.gauch_zone_zone_1_circuit_0_desired_heating_temperature",
+    dhw_temp: "sensor.gauch_domestic_hot_water_0_tank_temperature", dhw_set: "sensor.gauch_domestic_hot_water_0_setpoint", trouble: "binary_sensor.gauch_trouble_codes",
+    circuit_flow: "sensor.heizung_temperatur_temperatur_3", circuit_return: null, fbh_flow: "sensor.heizung_temperatur_temperatur_2", fbh_return: "sensor.heizung_temperatur_temperatur" } },
   beetwerk: { configured: true, entities: { mower: "lawn_mower.automower", battery: "sensor.automower_mower_battery_charge", status: "sensor.automower_mower_status_plain",
     blades_days: "sensor.automower_mower_blades_days", hours: "sensor.automower_mower_statistic_hours", winter: "switch.automower_winter_mode", eod: "button.automower_eod",
     error: null, soil: "sensor.bodenfeuchte_rasen", need: "binary_sensor.smart_irrigation_rasen_1_irrigation_needed", watering: "binary_sensor.smart_irrigation_rasen_1_watering_now",
@@ -273,6 +293,12 @@ const hass = {
     if (msg.type === "hauswerk/heizen/get") return { settings, rooms, plans: {}, target_sensors: {}, status, defaults, modes: {}, is_admin: true, user_admin: true, rollwerk: { covers: rwCovers, profiles: rwProfiles, status: rwStatus }, lichtwerk: { lights: lwLights, profiles: lwProfiles, status: lwStatus, automations: [{ entity_id: "automation.nachtlicht", name: "Auto_Nachtlicht", state: "on" }] } };
     if (msg.type === "hauswerk/rollwerk/command") return null;
     if (["hauswerk/beetwerk/water", "hauswerk/beetwerk/stop", "hauswerk/beetwerk/timer"].includes(msg.type)) return { result: "gestartet", status: status.beetwerk };
+    if (msg.type === "hauswerk/heizen/boiler/history") {
+      const pts = [];
+      for (let i = 0; i < 300; i++) { const out = 12 - 14 * Math.random(); const set = Math.min(75, 23.5 + 1.4 * (23.5 - out)) - 1 + 2 * Math.random();
+        pts.push([Date.now() / 1000 - i * 3600, Math.round(out * 10) / 10, Math.round(set * 10) / 10, Math.round((set - 2 - 4 * Math.random()) * 10) / 10, Math.round((33 + (5 - out) * 0.3 + Math.random()) * 10) / 10, null, null]); }
+      return { points: pts };
+    }
     if (msg.type === "hauswerk/haus/mode") { status.dienste.last_mode = { mode: msg.mode, at: new Date().toISOString() }; return { mode: msg.mode, name: status.dienste.modes[msg.mode].name, done: ["3 Lichter aus", "Rollläden zu"], open: status.wachwerk.leave }; }
     if (msg.type === "hauswerk/dienste/get") return status.dienste;
     if (msg.type === "hauswerk/dienste/task_done") { const t = status.dienste.tasks.find((x) => x.id === msg.task); if (t) t.left = t.days; return { status: status.dienste }; }

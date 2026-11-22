@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.91.0";
+const VERSION = "0.92.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -265,6 +265,10 @@ const PICKERS = {
   radio_entities: { scope: "settings", multi: true, domains: ["sensor"] },
   demand_entity: { scope: "settings", multi: false, domains: ["climate"] },
   heat_meter: { scope: "settings", multi: false, domains: ["sensor"] },
+  boiler_circuit_flow: { scope: "settings", multi: false, domains: ["sensor"] },
+  boiler_circuit_return: { scope: "settings", multi: false, domains: ["sensor"] },
+  boiler_fbh_flow: { scope: "settings", multi: false, domains: ["sensor"] },
+  boiler_fbh_return: { scope: "settings", multi: false, domains: ["sensor"] },
   rw_covers: { scope: "settings", multi: true, domains: ["cover"] },
   rw_wind_entity: { scope: "settings", multi: false, domains: ["sensor"] },
   kw_solar: { scope: "settings", multi: true, domains: ["sensor"], deviceClass: "power" },
@@ -481,6 +485,7 @@ const HEAT_VIEWS = [
   { id: "vent", slug: "lueften", name: "Lüften", icon: "mdi:weather-windy" },
   { id: "plans", slug: "heizplaene", name: "Heizpläne", icon: "mdi:calendar-clock", hidden: true }, // über Einstellungen › Heizpläne
   { id: "room", slug: "raum", name: "Raum", icon: "mdi:door", hidden: true }, // Raum-Detailseite
+  { id: "boiler", slug: "therme", name: "Therme", icon: "mdi:water-boiler" },
   { id: "report", slug: "bericht", name: "Bericht", icon: "mdi:chart-bar" },
   { id: "settings", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true }, // nur noch unter Einstellungen
 ];
@@ -1388,7 +1393,7 @@ class HauswerkPanel extends HTMLElement {
     // Hintergrund passend zum Bereich: Startseite oder Heizen
     this.setAttribute("view", MODULES[0].views.includes(this._tab) ? "heat" : "start");
     if (!this._data) return;
-    const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, vent: this._viewVent, plans: this._viewPlans, report: this._viewReport, settings: this._viewSettings, room: this._viewRoom,
+    const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, vent: this._viewVent, plans: this._viewPlans, report: this._viewReport, boiler: this._viewBoiler, settings: this._viewSettings, room: this._viewRoom,
       shutters: this._viewShutters, shutset: () => this._settingsPage("rw"),
       kwflow: this._viewKwFlow, kwdev: this._viewKwDev, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw"),
       lights: this._viewLights, lwrep: this._viewLwRep, lightset: () => this._settingsPage("lw"),
@@ -7912,6 +7917,219 @@ class HauswerkPanel extends HTMLElement {
       </section>`;
   }
 
+  // ------------------------------------------------------------ Heizwerk › Therme
+  _bNum(id) {
+    const v = parseFloat(id ? this._hass.states[id]?.state : NaN);
+    return Number.isFinite(v) ? v : null;
+  }
+
+  /** Kurven-Daten: Therme (Steilheit, Raumsoll, Fußpunkt, Heizgrenze) und Beispiel nach Auslegung. */
+  _bCurves() {
+    const b = this._status?.boiler || {};
+    const E = b.entities || {};
+    const p = this._data.settings || {};
+    const S = this._bNum(E.curve);
+    const room = this._bNum(E.room_set) ?? (E.climate ? Number(this._hass.states[E.climate]?.attributes?.temperature) || null : null);
+    const minFlow = this._bNum(E.min_flow) ?? 15;
+    const limit = this._bNum(E.limit_out);
+    const therme = S != null && room != null ? (ta) => (limit != null && ta >= limit ? null : Math.min(80, Math.max(minFlow, room + S * (room - ta)))) : null;
+    const R = Number(p.curve_room ?? 21), D = Number(p.curve_design_flow ?? 55), O = Number(p.curve_design_out ?? -12), F = Number(p.curve_fbh_flow ?? 35);
+    const L = Number(p.summer_temp ?? 16);
+    const k = (D - R) / (R - O), kf = (F - R) / (R - O);
+    const example = (ta) => (ta >= L ? null : R + k * (R - ta));
+    const exFbh = (ta) => (ta >= L ? null : R + kf * (R - ta));
+    return { S, room, minFlow, limit, therme, example, exFbh, k, kf, R, D, O, F, L };
+  }
+
+  /** Stundenwerte (14 Tage) aus den Statistiken laden – im Hintergrund, alle 30 Min. neu. */
+  _bHist() {
+    const h = this._boilerHist;
+    if (!h || (Date.now() - h.at > 30 * 60000 && !h.busy)) {
+      this._boilerHist = { at: Date.now(), points: h?.points || [], busy: true };
+      this._ws({ type: "hauswerk/heizen/boiler/history", days: 14 })
+        .then((r) => { this._boilerHist = { at: Date.now(), points: r.points || [], busy: false }; if (this._tab === "boiler") this._renderMain(); })
+        .catch(() => { this._boilerHist.busy = false; });
+    }
+    return this._boilerHist.points;
+  }
+
+  _viewBoiler() {
+    const b = this._status?.boiler || {};
+    const E = b.entities || {};
+    const setBtn = this._admin ? `<button class="link" data-action="settings-go" data-sub="boiler"><ha-icon icon="mdi:tune-variant"></ha-icon>Einstellen</button>` : "";
+    if (!b.found)
+      return `<section class="card empty"><ha-icon icon="mdi:water-boiler"></ha-icon><h2>Keine Therme gefunden</h2>
+        <p class="muted">Heizwerk erkennt Thermen über myVaillant u. Ä. (Vorlauf-Soll, Heizkurve) sowie Temperaturfühler an Heizkreis und Fußbodenheizung. Fühler lassen sich auch selbst wählen.</p>${setBtn}</section>`;
+    const n = (k) => this._bNum(E[k]);
+    const S = this._hass.states;
+    const c = this._bCurves();
+    const out = n("outside") ?? this._weather()?.temp ?? null;
+    const set = n("flow_set");
+    const burning = /heat|heiz/i.test(`${S[E.burner]?.state || ""} ${S[E.state]?.state || ""}`);
+    const dhwOn = /domestic|warmwasser|hot_water/i.test(S[E.burner]?.state || "");
+    const trouble = E.trouble && S[E.trouble]?.state === "on";
+    const pressure = n("pressure");
+    const head = this._brief({
+      cls: "card br-mod-heat", tone: trouble ? "warn" : burning ? "active" : "ok", icon: "mdi:water-boiler",
+      label: `<ha-icon icon="mdi:water-boiler"></ha-icon>Heizwerk · Therme`, big: set != null ? `${fmt(set, 0)}<span> °C</span>` : "",
+      title: trouble ? "Therme meldet eine Störung" : burning ? `Heizt – Vorlauf-Soll ${set != null ? `${fmt(set, 0)} °C` : "–"}` : dhwOn ? "Bereitet Warmwasser" : "Brenner aus", side: setBtn,
+      lines: [
+        ...(out != null ? [{ icon: "mdi:thermometer", text: `Außen ${fmt(out)} °C${c.S != null ? ` · Heizkurve ${fmt(c.S, 1)}` : ""}${c.room != null ? ` · Raumsoll der Therme ${fmt(c.room)} °C` : ""}` }] : []),
+        ...(pressure != null ? [{ icon: "mdi:gauge", text: `Anlagendruck ${fmt(pressure, 1)} bar${pressure < 1 ? " – zu niedrig, Wasser nachfüllen" : pressure > 2.5 ? " – hoch" : ""}` }] : []),
+      ],
+    });
+    return head + `<section class="card">${this._sectionHead("mdi:pipe", "Anlage jetzt")}${this._bGraphic(E, { burning, dhwOn, trouble })}</section>` + this._bCurveCard(E, c, out) + this._bAdvice(E, c, out);
+  }
+
+  /** Thermengrafik: Therme mit Flamme und Druck, Vorlauf/Rücklauf, Heizkörper, Mischer zur Fußbodenheizung, Warmwasser. */
+  _bGraphic(E, { burning, dhwOn, trouble }) {
+    const n = (k) => this._bNum(E[k]);
+    const t = (v) => (v == null ? "–" : `${fmt(v, 1)} °C`);
+    const vl = n("circuit_flow"), rl = n("circuit_return"), set = n("flow_set"), fv = n("fbh_flow"), fr = n("fbh_return");
+    const dhw = n("dhw_temp"), dhwSet = n("dhw_set"), pr = n("pressure");
+    const hot = "#ef4444", cold = "#3b82f6", fbh = "#f97316";
+    const prPct = pr == null ? 0 : Math.max(0, Math.min(1, pr / 3));
+    const prCol = pr == null ? "#94a3b8" : pr < 1 || pr > 2.5 ? "#f59e0b" : "#22c55e";
+    const dhwPct = dhw == null ? 0 : Math.max(0.05, Math.min(1, (dhw - 10) / 55));
+    const flame = burning || dhwOn ? `<g class="bflame"><path d="M70 160c-18-15-13-38 3-51-3 15 10 18 10 31 8-8 5-18 3-26 15 10 23 28 10 46z" fill="#f97316"/><path d="M75 160c-8-8-5-18 3-23 0 8 8 10 5 18 4-3 4-8 3-10 5 5 5 13-1 15z" fill="#fde047"/></g>` : `<circle cx="74" cy="140" r="6" fill="#94a3b8" opacity=".5"/>`;
+    const fbhOn = fv != null || fr != null;
+    const lbl = (x, y, v, sub, col = "var(--text)", anchor = "c") => `<text x="${x}" y="${y}" class="bv ${anchor}" fill="${col}">${v}</text>${sub ? `<text x="${x}" y="${y + 17}" class="bs ${anchor}">${sub}</text>` : ""}`;
+    return `<div class="bgraph"><svg viewBox="0 0 420 330" role="img" aria-label="Thermengrafik">
+      <defs><linearGradient id="bgw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ef4444"/><stop offset="1" stop-color="#3b82f6"/></linearGradient></defs>
+      <!-- Therme -->
+      <rect x="8" y="34" width="96" height="176" rx="14" class="bbox ${trouble ? "bad" : ""}"/>
+      <text x="56" y="58" class="bt c">Therme</text>
+      <g transform="translate(-18 0)">${flame}</g>
+      <text x="56" y="194" class="bs c">${burning ? "heizt" : dhwOn ? "Warmwasser" : "aus"}</text>
+      <!-- Vorlauf und Rücklauf -->
+      <path d="M104 70 H246" stroke="${hot}" class="bpipe ${burning ? "flow" : ""}"/>
+      <path d="M226 176 H104" stroke="${cold}" class="bpipe ${burning ? "flow" : ""}"/>
+      ${lbl(165, 56, t(vl), "", hot)}<text x="165" y="94" class="bs c">Vorlauf${set != null ? ` · Soll ${fmt(set, 0)}°` : ""}</text>
+      <text x="165" y="198" class="bs c">Rücklauf${rl != null ? ` ${t(rl)}` : ""}</text>
+      <!-- Heizkörper -->
+      <path d="M246 70 V40 H300" stroke="${hot}" class="bpipe"/><path d="M300 104 H226 V176" stroke="${cold}" class="bpipe"/>
+      <g transform="translate(300 26)">${[0, 1, 2, 3, 4, 5].map((i) => `<rect x="${i * 16}" y="0" width="11" height="90" rx="5.5" fill="url(#bgw)" opacity=".85"/>`).join("")}</g>
+      <text x="347" y="134" class="bs c">Heizkörper</text>
+      ${fbhOn ? `
+      <!-- Mischer und Fußbodenheizung -->
+      <path d="M246 70 V196" stroke="${hot}" class="bpipe"/>
+      <circle cx="246" cy="208" r="12" class="bmix"/><path d="M240 202 L252 214 M252 202 L240 214" stroke="var(--muted)" stroke-width="2"/>
+      <path d="M258 208 H300" stroke="${fbh}" class="bpipe"/>
+      <path d="M300 208 h108 v14 h-108 v14 h108 v14 h-108" fill="none" stroke="${fbh}" stroke-width="5" stroke-linejoin="round" opacity=".75"/>
+      <path d="M300 250 H226 V176" stroke="${cold}" class="bpipe"/>
+      ${lbl(354, 176, t(fv), "", fbh)}<text x="354" y="194" class="bs c">FBH Vorlauf</text>
+      ${lbl(354, 282, t(fr), fv != null && fr != null ? `FBH Rücklauf · Δ ${fmt(fv - fr, 1)} K` : "FBH Rücklauf", cold)}` : ""}
+      <!-- Druck -->
+      <path d="M34 300 A24 24 0 1 1 78 300" fill="none" stroke="var(--line)" stroke-width="7" stroke-linecap="round"/>
+      <path d="M34 300 A24 24 0 1 1 78 300" fill="none" stroke="${prCol}" stroke-width="7" stroke-linecap="round" pathLength="100" stroke-dasharray="${Math.round(prPct * 100)} 100"/>
+      <text x="56" y="296" class="bv c">${pr != null ? fmt(pr, 1) : "–"}</text><text x="56" y="318" class="bs c">bar</text>
+      ${dhw != null ? `
+      <!-- Warmwasser -->
+      <g transform="translate(112 238)"><rect x="0" y="0" width="64" height="76" rx="14" class="bbox"/><rect x="5" y="${5 + 66 * (1 - dhwPct)}" width="54" height="${66 * dhwPct}" rx="10" fill="${hot}" opacity=".3"/>
+      <text x="32" y="38" class="bv c">${fmt(dhw, 0)}°</text><text x="32" y="58" class="bs c">${dhwSet != null ? `Soll ${fmt(dhwSet, 0)}°` : ""}</text></g>
+      <text x="144" y="230" class="bs c">Warmwasser</text>` : ""}
+    </svg></div>`;
+  }
+
+  /** Heizkurve: Therme, Beispiel (Heizkörper und Fußbodenheizung) und gemessene Stundenwerte. */
+  _bCurveCard(E, c, out) {
+    const pts = this._bHist();
+    const W = 640, H = 300, X0 = 44, X1 = 624, Y0 = 268, Y1 = 14;
+    const tMin = -15, tMax = 20, vMin = 15, vMax = 75;
+    const x = (ta) => X1 - ((ta - tMin) / (tMax - tMin)) * (X1 - X0);
+    const y = (v) => Y0 - ((v - vMin) / (vMax - vMin)) * (Y0 - Y1);
+    const line = (f) => {
+      if (!f) return "";
+      const seg = [];
+      for (let ta = tMin; ta <= tMax; ta += 0.5) { const v = f(ta); if (v != null) seg.push(`${x(ta).toFixed(1)},${y(Math.max(vMin, Math.min(vMax, v))).toFixed(1)}`); }
+      return seg.length ? `M${seg.join(" L")}` : "";
+    };
+    const grid = [-15, -10, -5, 0, 5, 10, 15, 20].map((ta) => `<line x1="${x(ta)}" y1="${Y1}" x2="${x(ta)}" y2="${Y0}" class="bgrid"/><text x="${x(ta)}" y="${Y0 + 16}" class="bs c">${ta}°</text>`).join("")
+      + [20, 30, 40, 50, 60, 70].map((v) => `<line x1="${X0}" y1="${y(v)}" x2="${X1}" y2="${y(v)}" class="bgrid"/><text x="${X0 - 6}" y="${y(v) + 4}" class="bs e">${v}</text>`).join("");
+    const dots = (i, col, r = 2.6) => pts.filter((p) => p[i] != null && p[1] >= tMin && p[1] <= tMax).map((p) => `<circle cx="${x(p[1]).toFixed(1)}" cy="${y(Math.max(vMin, Math.min(vMax, p[i]))).toFixed(1)}" r="${r}" fill="${col}" opacity=".45"/>`).join("");
+    const nowSet = this._bNum(E.flow_set);
+    const now = out != null && nowSet != null ? `<circle cx="${x(out)}" cy="${y(nowSet)}" r="7" fill="none" stroke="#f97316" stroke-width="3"/><text x="${x(out) + 10}" y="${y(nowSet) - 10}" class="bv">jetzt ${fmt(nowSet, 0)} °C</text>` : "";
+    const has = (i) => pts.some((p) => p[i] != null);
+    const legend = [
+      c.therme ? `<span><i style="background:#f97316"></i>Therme (Steilheit ${fmt(c.S, 1)}, Raum ${fmt(c.room)} °C)</span>` : "",
+      `<span><i class="dash" style="border-color:#22c55e"></i>Beispiel Heizkörper (${fmt(c.D, 0)} °C bei ${fmt(c.O, 0)} °C ≈ Steilheit ${fmt(c.k, 1)})</span>`,
+      E.fbh_flow ? `<span><i class="dash" style="border-color:#14b8a6"></i>Beispiel Fußboden (${fmt(c.F, 0)} °C bei ${fmt(c.O, 0)} °C)</span>` : "",
+      has(2) ? `<span><i class="dot" style="background:#f97316"></i>Vorlauf-Soll gemessen</span>` : "",
+      has(3) ? `<span><i class="dot" style="background:#ef4444"></i>Heizkreis gemessen</span>` : "",
+      has(4) ? `<span><i class="dot" style="background:#14b8a6"></i>FBH-Vorlauf gemessen</span>` : "",
+    ].filter(Boolean).join("");
+    // Vergleich an drei Außentemperaturen: Kurve und gemessenes Mittel (±1,5 °C)
+    const meas = (ta, i) => { const v = pts.filter((p) => p[i] != null && p[1] != null && Math.abs(p[1] - ta) <= 1.5).map((p) => p[i]); return v.length >= 3 ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+    const cell = (v) => (v == null ? "–" : `${fmt(v, 0)} °C`);
+    const rows = [-10, 0, 10].map((ta) => `<tr><td>${ta} °C</td><td>${cell(c.therme?.(ta))}</td><td>${cell(c.example(ta))}</td>${E.fbh_flow ? `<td>${cell(c.exFbh(ta))}</td>` : ""}<td>${cell(meas(ta, 2) ?? meas(ta, 3))}</td>${E.fbh_flow ? `<td>${cell(meas(ta, 4))}</td>` : ""}</tr>`).join("");
+    return `<section class="card">${this._sectionHead("mdi:chart-bell-curve-cumulative", "Heizkurve")}
+      <div class="bcurve"><svg viewBox="0 0 ${W} ${H + 8}" role="img" aria-label="Heizkurve">
+        ${grid}
+        <text x="${X1}" y="${H + 6}" class="bs e">Außentemperatur</text><text x="${X0}" y="${Y1 - 2}" class="bs">Vorlauf °C</text>
+        ${dots(2, "#f97316")}${dots(3, "#ef4444")}${dots(4, "#14b8a6")}
+        <path d="${line(c.exFbh)}" class="bl" stroke="#14b8a6" stroke-dasharray="6 5" style="${E.fbh_flow ? "" : "display:none"}"/>
+        <path d="${line(c.example)}" class="bl" stroke="#22c55e" stroke-dasharray="6 5"/>
+        <path d="${line(c.therme)}" class="bl" stroke="#f97316"/>
+        ${out != null ? `<line x1="${x(out)}" y1="${Y1}" x2="${x(out)}" y2="${Y0}" stroke="var(--muted)" stroke-dasharray="2 4"/>` : ""}
+        ${now}
+      </svg></div>
+      <div class="blegend">${legend}</div>
+      <div class="table-wrap"><table class="btable"><thead><tr><th>Außen</th><th>Therme</th><th>Beispiel</th>${E.fbh_flow ? "<th>Bsp. FBH</th>" : ""}<th>gemessen</th>${E.fbh_flow ? "<th>FBH gem.</th>" : ""}</tr></thead><tbody>${rows}</tbody></table></div>
+      <p class="muted small">Therme: Raumsoll + Steilheit × (Raumsoll − außen), unten begrenzt auf ${fmt(c.minFlow, 0)} °C${c.limit != null ? `, kein Bedarf ab ${fmt(c.limit, 0)} °C außen` : ""} – eine Näherung der Vaillant-Kurve; die Punkte zeigen, was die Therme wirklich wollte (Stundenmittel, 14 Tage${this._boilerHist?.busy && !pts.length ? ", wird geladen" : pts.length ? "" : " – keine Statistik"}). Beispiel: Gerade durch ${fmt(c.R, 0)} °C Raum und die Auslegung, Heizgrenze ${fmt(c.L, 0)} °C.</p>
+    </section>`;
+  }
+
+  /** Abgleich in Worten: was auffällt und was zu tun ist. */
+  _bAdvice(E, c, out) {
+    const items = [];
+    const n = (k) => this._bNum(E[k]);
+    const pts = this._boilerHist?.points || [];
+    const rooms = this._rooms().filter((r) => r.enabled !== false);
+    const maxComfort = rooms.length ? Math.max(...rooms.map((r) => Number(r.comfort) || 21)) : null;
+    const ta = out ?? 0;
+    // 1. Raumsoll der Therme
+    if (c.room != null && maxComfort != null && c.room - maxComfort >= 1 && c.S != null) {
+      const d = c.room - maxComfort;
+      items.push(["warn", `Die Therme rechnet mit <b>${fmt(c.room)} °C</b> Raumtemperatur, deine Räume brauchen höchstens ${fmt(maxComfort)} °C (Komfort). Das hebt die ganze Kurve an: bei ${fmt(ta, 0)} °C außen ca. <b>${fmt((1 + c.S) * d, 0)} °C</b> mehr Vorlauf als nötig. Raumsoll an der Therme auf ${fmt(maxComfort)} °C stellen – die Räume regelt Hauswerk ohnehin selbst.`]);
+    }
+    // 2. Steilheit gegen das Beispiel – nur flacher, wenn kein Raum zu schwach ist
+    const an = this._analysis?.[14] || this._analysis?.[7] || {};
+    const weak = rooms.filter((r) => ["weak", "tight"].includes(an[r.id]?.verdict));
+    if (c.therme) {
+      const d0 = (c.therme(0) ?? 0) - (c.example(0) ?? 0);
+      if (d0 >= 5 && !weak.length) items.push(["info", `Bei 0 °C außen will die Therme ${fmt(c.therme(0), 0)} °C, das Beispiel ${fmt(c.example(0), 0)} °C. Kein Raum ist laut Bericht zu schwach – die Kurve darf flacher: Steilheit versuchsweise in 0,1er-Schritten senken (z. B. ${fmt(c.S, 1)} → ${fmt(Math.max(0.2, c.S - 0.2), 1)}) und je Schritt ein paar Tage den Bericht › Heizleistung beobachten. Niedriger Vorlauf heißt beim Brennwertgerät mehr Brennwertnutzung.`]);
+      else if (d0 >= 5) items.push(["info", `Die Kurve liegt über dem Beispiel, aber ${esc(weak.map((r) => r.name).join(", "))} ${weak.length === 1 ? "wird" : "werden"} laut Bericht nur knapp warm – erst dort prüfen (Heizkörper entlüften, Abgleich), dann die Kurve flacher stellen.`]);
+      else if (d0 <= -5 && weak.length) items.push(["warn", `Die Kurve liegt unter dem Beispiel und ${esc(weak.map((r) => r.name).join(", "))} ${weak.length === 1 ? "wird" : "werden"} nicht richtig warm – Steilheit leicht anheben (in 0,1er-Schritten).`]);
+      else items.push(["ok", `Die Kurve der Therme liegt nah am Beispiel (bei 0 °C außen ${fmt(c.therme(0), 0)} statt ${fmt(c.example(0), 0)} °C).`]);
+      // gemessene Sollwerte gegen die Formel
+      const dev = pts.filter((p) => p[2] != null && p[1] != null && c.therme(p[1]) != null).map((p) => p[2] - c.therme(p[1]));
+      if (dev.length >= 12) {
+        const m = dev.reduce((a, b) => a + b, 0) / dev.length;
+        if (Math.abs(m) >= 3) items.push(["info", `Die gemessenen Sollwerte liegen im Schnitt ${fmt(Math.abs(m), 0)} °C ${m > 0 ? "über" : "unter"} der Formel – die Therme nutzt eine gebogene Kurve bzw. Raumaufschaltung. Maßgeblich sind die Punkte im Diagramm.`]);
+      }
+    }
+    // 3. Heizkreis: Ist gegen Soll
+    const vl = n("circuit_flow"), set = n("flow_set");
+    if (vl != null && set != null && /heat|heiz/i.test(this._hass.states[E.state]?.state || "") && set - vl >= 8)
+      items.push(["info", `Der Heizkreis liegt ${fmt(set - vl, 0)} °C unter dem Soll der Therme – sie heizt gerade erst auf oder taktet. Bleibt das so, Fühlerposition prüfen.`]);
+    // 4. Fußbodenheizung
+    const fv = n("fbh_flow"), fr = n("fbh_return");
+    if (fv != null && fv > Math.max(42, c.F + 7)) items.push(["warn", `FBH-Vorlauf ${fmt(fv, 1)} °C – für Fußbodenheizung hoch (Estrich verträgt meist höchstens 45 °C). Mischer bzw. Begrenzer prüfen.`]);
+    if (fv != null && fr != null && fv > fr) {
+      const sp = fv - fr;
+      if (sp > 12) items.push(["info", `Spreizung der Fußbodenheizung ${fmt(sp, 1)} K – hoch. Zu wenig Durchfluss: Pumpenstufe bzw. Durchflussmesser am Verteiler prüfen.`]);
+      else if (sp < 3 && fv > 28) items.push(["info", `Spreizung der Fußbodenheizung nur ${fmt(sp, 1)} K – das Wasser gibt kaum Wärme ab. Entweder sind die Räume warm (Stellantriebe zu) oder der Durchfluss ist sehr hoch.`]);
+      else items.push(["ok", `Fußbodenheizung: Vorlauf ${fmt(fv, 1)} °C, Rücklauf ${fmt(fr, 1)} °C – Spreizung ${fmt(sp, 1)} K liegt im üblichen Bereich (3–10 K).`]);
+    }
+    // 5. Druck und Störung
+    const pr = n("pressure");
+    if (pr != null && pr < 1) items.push(["warn", `Anlagendruck ${fmt(pr, 1)} bar – zu niedrig. Heizungswasser nachfüllen (Richtwert 1,5–2,0 bar).`]);
+    else if (pr != null && pr > 2.5) items.push(["warn", `Anlagendruck ${fmt(pr, 1)} bar – hoch. Ausdehnungsgefäß prüfen lassen.`]);
+    if (E.trouble && this._hass.states[E.trouble]?.state === "on") items.push(["warn", "Die Therme meldet eine Störung – Anzeige an der Therme bzw. in der myVaillant-App prüfen."]);
+    if (!items.length) return "";
+    return `<section class="card">${this._sectionHead("mdi:clipboard-check-outline", "Abgleich")}${items.map(([l, t]) => this._todo(l, t)).join("")}</section>`;
+  }
+
   /** Kernaussage eines Berichts: eine Zeile, was zu tun ist. */
   _todo(level, text) {
     const [i, c] = { ok: ["mdi:check-circle-outline", "#22c55e"], info: ["mdi:lightbulb-on-outline", "#0ea5e9"], warn: ["mdi:alert-outline", "#f59e0b"] }[level] || ["mdi:information-outline", "#0ea5e9"];
@@ -8539,6 +8757,9 @@ class HauswerkPanel extends HTMLElement {
           sum: p.demand_entity ? `${this._entityName(p.demand_entity)} · ${dm?.error ? "nicht erreichbar" : label[dm?.state || "normal"]}` : "Aus – Wärmeerzeuger läuft unabhängig",
           words: "vaillant kessel therme wärmepumpe heizung bedarf absenken vorlauf energie sparen" };
       })(),
+      { g: "Heizen", id: "boiler", icon: "mdi:water-boiler", c: "#f97316", title: "Therme & Heizkurve",
+        sum: `Beispiel: ${fmt(p.curve_design_flow ?? 55, 0)} °C Vorlauf bei ${fmt(p.curve_design_out ?? -12, 0)} °C außen${s.boiler?.found ? "" : " · keine Therme gefunden"}`,
+        words: "therme vaillant heizkurve steilheit vorlauf rücklauf fußbodenheizung fbh heizkreis auslegung" },
       { g: "Heizen", id: "heatmeter", t: "fein", icon: "mdi:meter-gas-outline", c: "#f97316", title: "Gaszähler für den Bericht",
         sum: p.heat_meter ? `${this._entityName(p.heat_meter)} · ${fmt(p.gas_factor ?? 10.3, 1)} kWh je m³` : "automatisch: Energie-Dashboard bzw. erster Gaszähler",
         words: "gas zähler gaszähler wärmemenge verbrauch gradtag kosten bericht kwh m3 brennwert" },
@@ -9648,6 +9869,25 @@ class HauswerkPanel extends HTMLElement {
             }).join("") || `<p class="muted small">Noch kein Raum hat einen Feuchtesensor – am Raum unter „Geräte“ zuordnen.</p>`}</div>
             <p class="muted small"><ha-icon icon="mdi:shower-head"></ha-icon>Nach dem Duschen nachheizen stellst du am Raum unter „Geräte“ ein (braucht einen Feuchtesensor).</p>`,
         };
+      }
+
+      case "boiler": {
+        const E = this._status?.boiler?.entities || {};
+        const pk = (key, label, icon) => `<div class="field"><span><ha-icon icon="${icon}"></ha-icon> ${label}${!p[`boiler_${key}`] && E[key] ? ` (leer = erkannt: ${esc(this._entityName(E[key]))})` : " (leer = automatisch)"}</span>${this._picker(`boiler_${key}`, p[`boiler_${key}`] ? [p[`boiler_${key}`]] : [])}</div>`;
+        const found = [["flow_set", "Vorlauf-Soll"], ["curve", "Heizkurve"], ["room_set", "Raumsoll der Therme"], ["min_flow", "Fußpunkt"], ["limit_out", "Heizgrenze"], ["outside", "Außenfühler"], ["pressure", "Anlagendruck"], ["burner", "Zustand"], ["dhw_temp", "Warmwasser"]]
+          .filter(([k]) => E[k]).map(([k, l]) => `<div class="ev"><ha-icon icon="mdi:check-circle-outline" style="color:#16a34a"></ha-icon><span class="grow"><b>${l}</b><small>${esc(E[k])} · ${esc(this._hass.states[E[k]]?.state ?? "–")}</small></span></div>`).join("");
+        return {
+          icon: "mdi:water-boiler", c: "#f97316", title: "Therme & Heizkurve", sub: "Heizwerk › Therme",
+          body: `${head("mdi:chart-bell-curve-cumulative", "Beispiel-Heizkurve (Auslegung)")}
+            <label class="field narrow"><span><ha-icon icon="mdi:radiator"></ha-icon> Vorlauf Heizkörper bei Normaußentemperatur</span>${minutes("curve_design_flow", 55, 25, 80, 1, "°C")}</label>
+            <label class="field narrow"><span><ha-icon icon="mdi:heating-coil"></ha-icon> Vorlauf Fußbodenheizung bei Normaußentemperatur</span>${minutes("curve_fbh_flow", 35, 25, 55, 1, "°C")}</label>
+            <label class="field narrow"><span><ha-icon icon="mdi:snowflake-thermometer"></ha-icon> Normaußentemperatur (Leipzig ca. −12 °C)</span>${minutes("curve_design_out", -12, -25, 0, 1, "°C")}</label>
+            <label class="field narrow"><span><ha-icon icon="mdi:home-thermometer-outline"></ha-icon> Raumtemperatur der Kurve</span>${minutes("curve_room", 21, 16, 25, 0.5, "°C")}</label>
+            <p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Faustwerte: Heizkörper im Bestand 55–65 °C, gedämmt 45–55 °C; Fußbodenheizung 30–35 °C. Heizgrenze kommt aus Heizwerk › Saison.</p>
+            ${head("mdi:thermometer-lines", "Fühler")}
+            ${pk("circuit_flow", "Heizkreis Vorlauf", "mdi:thermometer-chevron-up")}${pk("circuit_return", "Heizkreis Rücklauf", "mdi:thermometer-chevron-down")}
+            ${pk("fbh_flow", "Vorlauf Fußbodenheizung", "mdi:thermometer-chevron-up")}${pk("fbh_return", "Rücklauf Fußbodenheizung", "mdi:thermometer-chevron-down")}
+            ${found ? `<div class="lbl">An der Therme gefunden</div><div class="evlist">${found}</div>` : ""}` };
       }
 
       case "heatmeter":
@@ -13609,6 +13849,36 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .pw-f { display:flex; flex-direction:column; padding:6px 10px; border-radius:12px; background:var(--card2); min-width:84px; }
 .pw-f small { font-size:11px; color:var(--muted); }
 .pw-f b { font-size:15px; }
+.bgraph svg, .bcurve svg { width:100%; height:auto; display:block; }
+.bgraph .bbox { fill:var(--card2); stroke:var(--line); stroke-width:2; }
+.bgraph .bbox.bad { stroke:#ef4444; }
+.bgraph .bgauge { fill:var(--card2); }
+.bgraph .bmix { fill:var(--card2); stroke:var(--muted); stroke-width:2; }
+.bgraph .bpipe { fill:none; stroke-width:7; stroke-linecap:round; stroke-linejoin:round; opacity:.8; }
+.bgraph .bpipe.flow { stroke-dasharray:14 8; animation:bflow 1.2s linear infinite; }
+@keyframes bflow { to { stroke-dashoffset:-22; } }
+.bgraph .bflame { transform-origin:74px 160px; animation:bflick 1.4s ease-in-out infinite alternate; }
+@keyframes bflick { from { transform:scale(.92); } to { transform:scale(1.06); } }
+.bgraph text, .bcurve text { fill:var(--text); font-family:inherit; }
+.bgraph .bt, .bcurve .bt { font-size:15px; font-weight:700; }
+.bgraph .bv { font-size:19px; font-weight:700; }
+.bgraph .bs { font-size:12.5px; fill:var(--muted); }
+.bgraph .bt { font-size:15px; }
+.bgraph { max-width:560px; margin:0 auto; }
+.bcurve .bv { font-size:16px; font-weight:700; }
+.bcurve .bs { font-size:13px; fill:var(--muted); }
+.bgraph .c, .bcurve .c { text-anchor:middle; }
+.bcurve .e { text-anchor:end; }
+.bcurve .bgrid { stroke:var(--line); stroke-width:1; }
+.bcurve .bl { fill:none; stroke-width:3.5; stroke-linecap:round; }
+.blegend { display:flex; flex-wrap:wrap; gap:6px 14px; margin:8px 0 4px; font-size:12.5px; color:var(--muted); }
+.blegend span { display:inline-flex; align-items:center; gap:6px; }
+.blegend i { width:18px; height:4px; border-radius:2px; display:inline-block; }
+.blegend i.dash { height:0; border-top:3px dashed; background:none; }
+.blegend i.dot { width:8px; height:8px; border-radius:50%; opacity:.7; }
+.btable td, .btable th { text-align:right; }
+.btable td:first-child, .btable th:first-child { text-align:left; }
+@media (prefers-reduced-motion: reduce) { .bgraph .bpipe.flow, .bgraph .bflame { animation:none; } }
 .rp-todo { display:flex; gap:8px; align-items:flex-start; margin:12px 0 0; padding:10px 12px; border-radius:12px; background:color-mix(in srgb, var(--c) 10%, transparent); font-size:14px; }
 .rp-todo ha-icon { color:var(--c); --mdc-icon-size:20px; flex:none; }
 .rp-bars { display:flex; gap:4px; align-items:flex-end; height:110px; margin:12px 0 4px; }

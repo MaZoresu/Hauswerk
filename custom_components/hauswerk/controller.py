@@ -995,6 +995,7 @@ class Heizen:
             "liming": self._liming,
             "eco_force": bool(self.settings.get("eco_force")),
             "long_away": getattr(self, "_long_away", False),
+            "boiler": self.boiler(),
             "demand": {**{k: v for k, v in self.demand.items() if k != "since_no_need"},
                        "action": self.settings.get("demand_action") or "lower"} if self.settings.get("demand_entity") else None,
             "cold_rooms": [rid for rid in self.rooms if (self._rt(rid).get("result") or {}).get("cold_radiator")],
@@ -2443,6 +2444,97 @@ class Heizen:
         sav = bucket.setdefault("sav", {})
         m, dm = sav.get(key, [0, 0.0])
         sav[key] = [m + 1, round(dm + max(0.0, drop), 1)]
+
+    # ------------------------------------------------------------ Therme
+    # (Schlüssel, Domänen, Muster der Entitäts-ID) – myVaillant u. Ä.; eigene Wahl über boiler_<schlüssel>
+    BOILER_FIND = (
+        ("climate", ("climate",), r"circuit_\d+_climate$|heizkreis"),
+        ("flow_set", ("sensor",), r"circuit_\d+_flow_temperature_setpoint$|vorlauf_?soll"),
+        ("curve", ("number", "sensor"), r"circuit_\d+_heating_curve$"),
+        ("min_flow", ("number",), r"min_flow_temperature_setpoint$"),
+        ("limit_out", ("number",), r"heat_demand_limited_by_outside_temperature$"),
+        ("outside", ("sensor",), r"_outdoor_temperature$"),
+        ("pressure", ("sensor",), r"water_pressure$|wasserdruck|anlagendruck"),
+        ("state", ("sensor",), r"circuit_\d+_state$"),
+        ("burner", ("sensor",), r"energy_manager_state$"),
+        ("room_set", ("sensor",), r"circuit_\d+_desired_heating_temperature$"),
+        ("dhw_temp", ("sensor",), r"hot_water_\d+_tank_temperature$"),
+        ("dhw_set", ("sensor",), r"hot_water_\d+_setpoint$"),
+        ("trouble", ("binary_sensor",), r"trouble_codes$"),
+        ("gas_heat", ("sensor",), r"consumed_primary_energy_heating$"),
+        ("gas_dhw", ("sensor",), r"consumed_primary_energy_domestic_hot_water$"),
+    )
+    BOILER_OWN = ("circuit_flow", "circuit_return", "fbh_flow", "fbh_return")
+
+    def boiler(self) -> dict[str, Any]:
+        """Entitäten der Therme (automatisch erkannt bzw. gewählt) und der Temperaturfühler an Heizkreis und Fußbodenheizung."""
+        import re  # noqa: PLC0415
+        ids = getattr(self.hass.states, "async_entity_ids", None)
+        ent: dict[str, str | None] = {}
+        for key, domains, pat in self.BOILER_FIND:
+            own = self.settings.get(f"boiler_{key}")
+            if own:
+                ent[key] = own
+                continue
+            rx = re.compile(pat)
+            ent[key] = next((e for d in domains for e in sorted(ids(d) if ids else []) if rx.search(e)), None)
+        # eigene Fühler: am Namen erkennen (Vorlauf/Rücklauf + Fußboden/FBH bzw. Heizkreis)
+        temps = []
+        for e in sorted(ids("sensor") if ids else []):
+            st = self.hass.states.get(e)
+            if st is not None and (st.attributes.get("device_class") == "temperature" or st.attributes.get("unit_of_measurement") == "°C"):
+                temps.append((e, f"{e} {getattr(st, 'name', '') or ''}".lower()))
+        fbh = r"fbh|fu(ß|ss)boden|fussboden|flächen|flaechen"
+        guess = {
+            "fbh_flow": lambda t: re.search(r"vorlauf", t) and re.search(fbh, t),
+            "fbh_return": lambda t: re.search(r"r(ü|ue|u)cklauf", t) and re.search(fbh, t),
+            "circuit_flow": lambda t: re.search(r"heiz(ungs)?kreis", t) and not re.search(r"r(ü|ue|u)cklauf|soll", t),
+            "circuit_return": lambda t: re.search(r"heiz(ungs)?kreis", t) and re.search(r"r(ü|ue|u)cklauf", t),
+        }
+        for key in self.BOILER_OWN:
+            ent[key] = self.settings.get(f"boiler_{key}") or next((e for e, t in temps if guess[key](t)), None)
+        if not ent.get("circuit_flow") and ent.get("fbh_flow"):
+            # Heizkreis-Fühler am selben Gerät wie die Fußboden-Fühler (z. B. Shelly mit drei Fühlern)
+            try:
+                reg = er.async_get(self.hass)
+                dev = getattr(reg.async_get(ent["fbh_flow"]), "device_id", None)
+                if dev:
+                    taken = {ent.get("fbh_flow"), ent.get("fbh_return")}
+                    ent["circuit_flow"] = next((e for e, _ in temps if e not in taken and getattr(reg.async_get(e), "device_id", None) == dev), None)
+            except Exception:  # noqa: BLE001
+                pass
+        found = bool(ent.get("flow_set") or ent.get("climate") or ent.get("circuit_flow") or ent.get("fbh_flow"))
+        return {"found": found, "entities": ent}
+
+    async def async_boiler_history(self, days: int = 14) -> list[list]:
+        """Stundenwerte aus den Statistiken: [Zeit, außen, Vorlauf-Soll, Heizkreis, FBH-Vorlauf, FBH-Rücklauf, Heizkreis-Rücklauf]."""
+        try:
+            from homeassistant.components.recorder import get_instance  # noqa: PLC0415
+            from homeassistant.components.recorder.statistics import statistics_during_period  # noqa: PLC0415
+        except ImportError:
+            return []
+        ent = self.boiler()["entities"]
+        out_id = ent.get("outside") or self.haus.settings.get("outside_sensor")
+        cols = [out_id, ent.get("flow_set"), ent.get("circuit_flow"), ent.get("fbh_flow"), ent.get("fbh_return"), ent.get("circuit_return")]
+        ids = {c for c in cols if c}
+        if not out_id or len(ids) < 2:
+            return []
+        start = dt_util.utcnow() - timedelta(days=days)
+        try:
+            stats = await get_instance(self.hass).async_add_executor_job(
+                statistics_during_period, self.hass, start, None, ids, "hour", None, {"mean"})
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Thermen-Statistik nicht lesbar: %s", err)
+            return []
+        rows: dict[float, list] = {}
+        for i, c in enumerate(cols):
+            for r in stats.get(c) or [] if c else []:
+                t = r.get("start")
+                t = t.timestamp() if hasattr(t, "timestamp") else float(t)
+                if r.get("mean") is None:
+                    continue
+                rows.setdefault(t, [round(t)] + [None] * len(cols))[i + 1] = round(r["mean"], 1)
+        return [rows[t] for t in sorted(rows) if rows[t][1] is not None]
 
     # ------------------------------------------------------------ weitere Berichte
     def _heat_meter(self) -> str | None:

@@ -2226,3 +2226,18 @@ def test_heizwerk_zusatzberichte(panel):
               "Was das Absenken bringt", "Eco laut Heizplan", "Geräte", "Fensterkontakt · Wohnzimmer"):
         assert w in txt, w
     assert len(p.js(f"[...{EL}.shadowRoot.querySelectorAll('.rp-todo')].map((x) => x.textContent)")) >= 5
+
+
+def test_therme(panel):
+    """Heizwerk › Therme: Grafik, Heizkurve (Therme, Beispiel, Messpunkte), Abgleich; Einstellungen mit Fühlern und Auslegung."""
+    p = panel
+    p.view("boiler")
+    p.wait(800)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    for w in ("Heizt", "Anlage jetzt", "Heizkurve", "Steilheit 1,4", "Abgleich", "23,5 °C", "Spreizung"):
+        assert w in txt, w
+    assert p.has(".bgraph svg") and p.has(".bcurve svg circle") and p.js(f"{EL}.shadowRoot.querySelectorAll('.bcurve path.bl').length") == 3
+    p.js(f"() => {EL}._openPop('boiler')")
+    p.wait()
+    assert "Beispiel-Heizkurve" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    p.js(f"{EL}._closePop()")

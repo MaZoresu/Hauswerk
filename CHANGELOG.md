@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.92.0 – 2026-11-22
+
+### Neu – Heizwerk › Therme
+- **Eigener Reiter „Therme“** zwischen Lüften und Bericht. Heizwerk erkennt die Therme (myVaillant u. Ä.: Vorlauf-Soll, Heizkurve, Raumsoll, Fußpunkt, Heizgrenze, Außenfühler, Anlagendruck, Zustand, Warmwasser, Störung) und die eigenen Fühler: Vorlauf/Rücklauf der Fußbodenheizung am Namen, den Heizkreis-Fühler am selben Gerät (z. B. Shelly mit drei Fühlern). Alles wählbar unter Heizwerk › Einstellungen › Therme & Heizkurve.
+- **Thermengrafik:** Therme mit Flamme (bewegt sich beim Heizen), Vorlauf und Rücklauf mit Temperaturen und Soll, Heizkörper, Mischer und Fußbodenheizung mit Vorlauf, Rücklauf und Spreizung, Warmwasserspeicher (Ist/Soll) und Anlagendruck als Anzeige.
+- **Heizkurve:** die Kurve der Therme (Steilheit, Raumsoll, Fußpunkt, Heizgrenze) neben einer **Beispiel-Heizkurve** nach Auslegung – Heizkörper (Standard 55 °C bei −12 °C) und Fußbodenheizung (35 °C) – und den **gemessenen Stundenwerten der letzten 14 Tage** (Vorlauf-Soll, Heizkreis, FBH-Vorlauf) aus den Statistiken. Tabelle bei −10, 0 und 10 °C außen.
+- **Abgleich in Worten,** je mit dem, was zu tun ist: Raumsoll der Therme höher als die Räume brauchen (hebt die ganze Kurve an), Kurve steiler oder flacher als das Beispiel – abgestimmt mit dem Bericht › Heizleistung (nicht flacher stellen, solange ein Raum knapp ist), Abweichung der Therme von der Formel, Heizkreis unter Soll, Fußbodenheizung zu heiß bzw. Spreizung, Anlagendruck, Störung.
+
 ## 0.91.0 – 2026-11-22
 
 ### Neu (Heizwerk › Bericht)
