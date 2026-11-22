@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.83.1";
+const VERSION = "0.83.2";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2511,9 +2511,12 @@ class HauswerkPanel extends HTMLElement {
     if (bws?.entities?.mower) {
       const mv = this._bwMowerState(bws);
       const x = [it(mv.icon, null, mv.label)];
-      const b = this._bwNum(bws.entities.battery);
-      if (b != null) x.push(it("mdi:battery-outline", `${fmt(b, 0)} %`, "Akku"));
-      x.push(`<span class="sv-i sv-t">${esc(mv.short)}</span>`);
+      if (mv.k !== "winter") {
+        // Winterpause: nur die Schneeflocke
+        const b = this._bwNum(bws.entities.battery);
+        if (b != null) x.push(it("mdi:battery-outline", `${fmt(b, 0)} %`, "Akku"));
+        x.push(`<span class="sv-i sv-t">${esc(mv.short)}</span>`);
+      }
       mods.push(["beetwerk", x]);
     }
     // Vorhersage der nächsten Stunden

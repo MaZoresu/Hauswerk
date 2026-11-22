@@ -743,6 +743,11 @@ def test_schoner_module_als_symbole(tablet):
     mods = p.js(f"[...{EL}.shadowRoot.querySelectorAll('#saver .sv-mod')].map((m) => [m.querySelector('.sv-logo svg') != null, m.querySelectorAll('.sv-i').length, m.innerText])")
     assert len(mods) == 5 and all(m[0] and m[1] >= 1 for m in mods), mods  # Heizwerk, Rollwerk, Kraftwerk, Lichtwerk, Beetwerk
     assert "mäht" in mods[4][2] and "64 %" in mods[4][2], mods[4]
+    # Winterpause: nur die Schneeflocke
+    p.js(f"() => {{ {EL}._hass.states['switch.automower_winter_mode'] = {{ entity_id: 'switch.automower_winter_mode', state: 'on', attributes: {{}} }}; {EL}._status.beetwerk.entities.winter = 'switch.automower_winter_mode'; }}")
+    p.js(f"{EL}._saverShow()")
+    bw = p.js(f"[...{EL}.shadowRoot.querySelectorAll('#saver .sv-mod')].map((m) => [m.querySelectorAll('.sv-i').length, m.innerText])[4]")
+    assert bw[0] == 1 and "%" not in bw[1] and "winterpause" not in bw[1].lower(), bw
     text = p.js(f"{EL}.shadowRoot.getElementById('saver').innerText")
     assert "Raum heizt" not in text and "Rollläden:" not in text and "Solar " not in text
     # Heizwerk wie bisher · Rollwerk offen/zu · Kraftwerk ohne Akku · Lichtwerk wie viele an

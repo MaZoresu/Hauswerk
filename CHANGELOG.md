@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.83.2 – 2026-11-22
+
+### Geändert (Bildschirmschoner)
+- **Beetwerk in der Winterpause:** nur noch die Schneeflocke – ohne Akku und ohne „winterpause“.
+
 ## 0.83.1 – 2026-11-22
 
 ### Behoben (Heizwerk)
