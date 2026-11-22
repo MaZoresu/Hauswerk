@@ -359,6 +359,17 @@ const hass = {
     }
     throw new Error("unbekannt: " + msg.type);
   },
+  callApi: async (method, path) => {
+    const id = path.split("?")[0].split("/")[1];
+    const d = (k, h, m) => { const x = new Date(); x.setDate(x.getDate() + k); x.setHours(h, m, 0, 0); return x; };
+    const day = (k) => { const x = new Date(); x.setDate(x.getDate() + k); return x.toLocaleDateString("sv-SE"); };
+    if (id === "calendar.familie") return [
+      { summary: "Elternabend", start: { dateTime: d(0, 19, 30).toISOString() }, end: { dateTime: d(0, 21, 0).toISOString() }, location: "Grundschule" },
+      { summary: "Kinderturnen", start: { dateTime: d(1, 16, 0).toISOString() }, end: { dateTime: d(1, 17, 0).toISOString() } },
+      { summary: "Oma Geburtstag", start: { date: day(4) }, end: { date: day(5) } }];
+    if (id === "calendar.muell") return [{ summary: "Restabfall", start: { date: day(1) }, end: { date: day(2) } }, { summary: "Papier", start: { date: day(5) }, end: { date: day(6) } }];
+    return [];
+  },
   callService: async (domain, service, data, target) => { (window.hwSent = window.hwSent || []).push({ type: "call_service", domain, service, service_data: data, target }); },
   connection: { subscribeMessage: (cb, msg) => { wsLog.push(msg.type); return Promise.resolve(() => {}); } },
 };

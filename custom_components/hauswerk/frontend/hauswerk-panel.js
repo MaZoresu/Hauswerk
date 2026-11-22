@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.88.0";
+const VERSION = "0.89.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -223,7 +223,7 @@ const WIDGETS = {
 Object.assign(WIDGETS, {
   lage: { name: "Lage", icon: "mdi:view-dashboard-outline", c: "#2dd4bf", text: "Der Stand aller Module in je einem Satz – Heizwerk, Rollwerk, Kraftwerk – mit Sprung zum Modul" },
   events: { name: "Nächste Ereignisse", icon: "mdi:timeline-clock-outline", c: "#38bdf8", text: "Zeitleiste: Heizwechsel, Rollladen-Fahrten und Termine (Kalender wählbar)", config: true, cal: true },
-  calendar: { name: "Termine", icon: "mdi:calendar-month-outline", c: "#f472b6", text: "Termine heute und morgen, z. B. Müllabfuhr – mit Symbol je Müllart", config: true, cal: true },
+  calendar: { name: "Termine", icon: "mdi:calendar-month-outline", c: "#f472b6", text: "Termine heute und morgen, z. B. Müllabfuhr – mit Symbol je Müllart", config: true, cal: true , open: "agenda" },
   vent: { name: "Lüften", icon: "mdi:weather-windy", c: "#22d3ee", text: "Wo jetzt gelüftet werden sollte (mit Dauer), laufende Lüftungen mit Countdown, Schimmelgefahr", go: "vent" },
   mower: { name: "Mähroboter", icon: "mdi:robot-mower-outline", c: "#16a34a", text: "Zustand mit Bild, Akku, Mähen und Zur Station; groß mit Mähstunden der Woche und nächstem Start", go: "garden" },
   light: { name: "Licht", icon: "mdi:lightbulb-outline", c: "#6366f1", text: "Wie viele Lichter an sind, nächste Schaltung, Alle aus; groß mit allen Lichtern zum Schalten", go: "lights" },
@@ -2171,7 +2171,8 @@ class HauswerkPanel extends HTMLElement {
           try {
             const ev = await this._hass.callApi("GET", `calendars/${id}?start=${encodeURIComponent(start.toISOString())}&end=${encodeURIComponent(end.toISOString())}`);
             for (const e of ev || []) {
-              const item = { title: e.summary || "Termin", start: e.start?.dateTime || e.start?.date || e.start, allDay: !e.start?.dateTime && !!e.start?.date, cal: id };
+              const item = { title: e.summary || "Termin", start: e.start?.dateTime || e.start?.date || e.start, end: e.end?.dateTime || e.end?.date || e.end,
+                allDay: !e.start?.dateTime && !!e.start?.date, cal: id, where: e.location || "" };
               if (this._calShown(item)) list.push(item);
             }
           } catch (err) {
@@ -2181,9 +2182,48 @@ class HauswerkPanel extends HTMLElement {
         entry.list = list.sort((a, b) => String(a.start).localeCompare(String(b.start)));
         entry.busy = false;
         if (this._tab === "start") this._renderMain();
+        if (this._pop?.id === "agenda") this._renderPop();
       })();
     }
     return this._calCache[key].list;
+  }
+
+  /** Übersicht der Termine (14 Tage) aus allen Kalendern – Zahnrad führt zu den Kalender-Einstellungen. */
+  _agendaPop() {
+    const cals = this._allCals();
+    const gear = this._admin ? `<button class="icon boxed" data-action="settings-go" data-sub="calendars" title="Kalender einstellen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : "";
+    const base = { icon: "mdi:calendar-month-outline", c: "#f472b6", title: "Termine", headBtn: gear, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+    if (!cals.length)
+      return { ...base, sub: "kein Kalender gewählt", body: `<p class="muted">Unter Kalender wählst du Termin- und Müll-Kalender (z. B. Familie, Abfuhr).</p>${this._admin ? `<button class="primary" data-action="settings-go" data-sub="calendars"><ha-icon icon="mdi:cog-outline"></ha-icon>Kalender einstellen</button>` : ""}` };
+    const key = `${cals.join(",")}|14`;
+    const all = this._calFetch(cals, 14);
+    const busy = !!this._hass?.callApi && !!this._calCache?.[key]?.busy && !all.length;
+    const list = all.filter((e) => (e.allDay ? new Date(e.end || e.start) > Date.now() - 86400000 + 1 : new Date(e.end || e.start) > Date.now()));
+    const set = this._data?.settings || {};
+    const hm = (d) => new Date(d).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    const dayKey = (d) => { const x = new Date(d); return new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime(); };
+    const groups = new Map();
+    for (const e of list) {
+      const k = Math.max(dayKey(e.start), dayKey(Date.now()));
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(e);
+    }
+    const head = (k) => {
+      const n = this._dayName(k);
+      const date = new Date(k).toLocaleDateString("de-DE", { day: "numeric", month: "short" });
+      return ["Heute", "Morgen"].includes(n) ? `${n} <small>${new Date(k).toLocaleDateString("de-DE", { weekday: "long" })}, ${date}</small>` : `${n} <small>${date}</small>`;
+    };
+    const body = busy ? `<p class="muted"><ha-icon icon="mdi:timer-sand"></ha-icon> Termine werden geladen …</p>`
+      : !list.length ? `<div class="wok"><ha-icon icon="mdi:calendar-check-outline"></ha-icon>Keine Termine in den nächsten 14 Tagen</div>`
+      : `<div class="agenda">${[...groups.entries()].map(([k, es]) => `<div class="ag-d">${head(k)}</div>${es.map((e) => {
+          const [icon, c] = this._calIcon(e.title);
+          const waste = (set.waste_calendars || []).includes(e.cal);
+          const now = !e.allDay && new Date(e.start) <= Date.now() && new Date(e.end || e.start) > Date.now();
+          return `<div class="ag-e ${now ? "now" : ""}"><span class="ag-t">${e.allDay ? "ganztägig" : `${hm(e.start)}${e.end ? `<small>${hm(e.end)}</small>` : ""}`}</span>
+            <span class="wc-i" style="--c:${c}"><ha-icon icon="${icon}"></ha-icon></span>
+            <span class="grow"><b>${esc(e.title)}</b><small>${now ? "läuft gerade · " : ""}${waste ? "Müllabfuhr" : esc(this._entityName(e.cal))}${e.where ? ` · ${esc(e.where)}` : ""}</small></span></div>`;
+        }).join("")}`).join("")}</div>`;
+    return { ...base, sub: `nächste 14 Tage · ${cals.length} ${cals.length === 1 ? "Kalender" : "Kalender"}`, body };
   }
 
   /** Symbol für einen Termin: Müllarten erkennen, sonst Kalender. */
@@ -2707,8 +2747,8 @@ class HauswerkPanel extends HTMLElement {
     // Termine (Müll zuerst) und Anwesenheit
     this._calLoad?.();
     const waste = this._status?.waste_due;
-    const ev = (this._cal || []).filter((e) => e.allDay || new Date(e.start) > now - 30 * 60000).slice(0, 2);
-    tiles.push(this._wallTile({ act: `data-action="pop-open" data-pop="calendars"`, color: waste ? "#22c55e" : "#64748b", ic: `<span class="wt-ic"><ha-icon icon="${waste ? "mdi:trash-can-outline" : "mdi:calendar-month-outline"}"></ha-icon></span>`, name: "Termine",
+    const ev = this._calFetch(this._allCals(), 2).filter((e) => e.allDay || new Date(e.end || e.start) > now).slice(0, 2);
+    tiles.push(this._wallTile({ act: `data-action="pop-open" data-pop="agenda"`, color: waste ? "#22c55e" : "#64748b", ic: `<span class="wt-ic"><ha-icon icon="${waste ? "mdi:trash-can-outline" : "mdi:calendar-month-outline"}"></ha-icon></span>`, name: "Termine",
       value: waste ? (waste.when === "heute" ? "Heute" : "Morgen") : String(ev.length), unit: waste ? "Müll" : "heute/morgen",
       status: waste ? `<span>${esc((waste.types || []).join(", "))}</span>` : ev.map((e) => `<span class="wt-dim">${esc(e.title)}</span>`).join("") }));
     const home = (set.persons || []).filter((id) => ["home", "on"].includes(this._hass.states[id]?.state));
@@ -2866,7 +2906,9 @@ class HauswerkPanel extends HTMLElement {
           <button class="icon tiny" data-action="w-conf" data-i="${i}" title="Einstellen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>
           <button class="icon tiny danger-t" data-action="w-del" data-i="${i}" title="Entfernen"><ha-icon icon="mdi:close"></ha-icon></button>
         </span>`
-      : def.go
+      : def.open
+        ? `<button class="link tiny" data-action="pop-open" data-pop="${def.open}" title="Alle Termine"><span>Alle</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`
+        : def.go
         ? `<button class="link tiny" data-action="tab" data-tab="${def.go}" title="Öffnen"><span>Öffnen</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`
         : def.pop && this._admin && z !== "s"
           ? `<button class="icon tiny" data-action="settings-go" data-sub="${def.pop}" title="Einstellungen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>`
@@ -8962,6 +9004,7 @@ class HauswerkPanel extends HTMLElement {
         <div class="sheet-head">
           <span class="sr-ic big" style="--c:${def.c}"><ha-icon icon="${def.icon}"></ha-icon></span>
           <div class="grow"><h2>${def.title}</h2>${def.sub ? `<div class="muted">${def.sub}</div>` : ""}</div>
+          ${def.headBtn || ""}
           <button class="icon boxed" data-action="pop-close" title="Schließen"><ha-icon icon="mdi:close"></ha-icon></button>
         </div>
         <div class="sheet-body">${this._admin || def.open ? "" : `<p class="note warn"><ha-icon icon="mdi:lock-outline"></ha-icon>Nur ansehen: Ändern dürfen Administratoren – oder alle, wenn ein Admin es unter „Berechtigungen“ freigibt.</p>`}${def.body}</div>
@@ -9038,6 +9081,7 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _popDef(id) {
+    if (id === "agenda") return this._agendaPop();
     if (id === "rwiz") return this._wizPop();
     if (id === "cwiz") {
       if (!this._pop.draft.covers) Object.assign(this._pop.draft, this._cwizDraft());
@@ -15159,6 +15203,16 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .hd-add .unit { width:120px; }
 .wk-prev { margin-top:12px; padding:12px 14px; white-space:pre-line; }
 .wk-prev p { margin:6px 0 0; }
+.agenda { display:flex; flex-direction:column; gap:6px; }
+.ag-d { margin:10px 0 2px; font-size:15px; font-weight:700; }
+.ag-d:first-child { margin-top:0; }
+.ag-d small { font-weight:500; color:var(--muted); font-size:13px; margin-left:4px; }
+.ag-e { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:14px; background:var(--card2); }
+.ag-e.now { box-shadow:inset 3px 0 0 #f472b6; }
+.ag-e .ag-t { min-width:72px; display:flex; flex-direction:column; font-weight:700; font-size:15px; font-variant-numeric:tabular-nums; }
+.ag-e .ag-t small { font-weight:500; font-size:12px; color:var(--muted); }
+.ag-e .grow { display:flex; flex-direction:column; min-width:0; }
+.ag-e .grow small { color:var(--muted); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .wk-prev .lbl { margin:0; display:flex; align-items:center; gap:6px; }
 .wk-prev.ai { border-color:color-mix(in srgb, #8b5cf6 45%, var(--line)); background:color-mix(in srgb, #8b5cf6 7%, var(--card)); }
 .wk-prev.ai .lbl ha-icon { color:#8b5cf6; --mdc-icon-size:18px; }

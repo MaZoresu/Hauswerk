@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.89.0 – 2026-11-22
+
+### Neu (Termine)
+- **Übersicht der Termine:** Ein Tipp auf die Kachel „Termine“ (Tablet-Startseite) bzw. „Alle“ im Widget „Termine“ öffnet die nächsten 14 Tage aus allen Kalendern – nach Tagen gruppiert (Heute, Morgen, Wochentag mit Datum), mit Uhrzeit von–bis bzw. „ganztägig“, Ort und Kalender; Müll mit Symbol je Abfallart, laufende Termine markiert.
+- **Zahnrad** oben im Fenster führt zu den Kalender-Einstellungen (vorher öffnete die Kachel direkt die Einstellungen).
+
 ## 0.88.0 – 2026-11-22
 
 ### Neu (Hauswerk › Wochenbericht)

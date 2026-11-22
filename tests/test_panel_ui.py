@@ -2199,3 +2199,19 @@ def test_lichtwerk_farbe_und_vorschlaege(panel):
     p.wait()
     assert not p.has("#pop .lw-moods")
     p.js(f"{EL}._closePop()")
+
+
+def test_termine_uebersicht(tablet):
+    """Tablet: die Kachel Termine öffnet eine Übersicht der nächsten 14 Tage; das Zahnrad führt zu den Kalender-Einstellungen."""
+    p = tablet
+    p.view("start")
+    p.wait(300)
+    p.js(f"() => {{ {EL}.shadowRoot.querySelector('.ws-r [data-pop=\"agenda\"]').click(); }}")
+    p.wait(600)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    for w in ("Termine", "Elternabend", "Grundschule", "Restabfall", "Oma Geburtstag", "ganztägig"):
+        assert w in txt, (w, txt)
+    p.click('#pop .sheet-head [data-action="settings-go"][data-sub="calendars"]')
+    p.wait()
+    assert p.js(f"{EL}._pop.id") == "calendars"
+    p.js(f"{EL}._closePop()")
