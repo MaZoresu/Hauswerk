@@ -1765,6 +1765,18 @@ def test_tablet_wand_startseite_und_details(tablet):
     assert p.js(f"{EL}._tab") == "start" and p.js(f"{EL}.shadowRoot.getElementById('saver').hidden") is True
 
 
+def test_wandkachel_fenster_offen_hmip(tablet):
+    """Wand-Kachel: offenes Fenster immer mit Dauer; stellt die CCU über die Direktverknüpfung um → „Fenster offen · HmIP 12,0°“."""
+    p = tablet
+    room = p.js(f"Object.keys({EL}._data.rooms)[0]")
+    p.js(f"""(id) => {{ {EL}._touched = false; Object.assign({EL}._status.rooms[id], {{ windows_open: true, window_hmip: true, hmip_target: 12,
+        window_since: new Date(Date.now() - 4 * 60e3).toISOString(), mode: 'manuell', mode_label: 'Manuell', target: 12 }}); }}""", room)
+    p.view("overview")
+    p.wait(300)
+    t = p.js(f"(id) => {EL}.shadowRoot.querySelector('#room-' + id).innerText", room)
+    assert "Fenster offen" in t and "HmIP 12,0°" in t and "4 Min." in t and "Manuell" not in t, t
+
+
 def test_zeitleiste_in_detailfenstern(tablet):
     """Tagesleiste in den Fenstern hinter den Wand-Kacheln: Raum (Heizwerk), Rollladen, Rollläden je Raum, Licht, Lichter je Raum."""
     p = tablet

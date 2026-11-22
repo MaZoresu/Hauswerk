@@ -1948,6 +1948,18 @@ def test_homematic_verknuepfungen(hw):
         assert res["mode"] == "fenster" and res["window_ccu"] and "CCU senkt" in res["cause"]
         sent = [c[2].get("entity_id") for c in hass.calls[n:] if c[0] == "climate"]
         assert "climate.wth_wz" not in sent and "climate.trv_wz" not in sent and "climate.trv_wz2" in sent
+        # Die CCU stellt das Wandthermostat auf 12 °C (Fensterfunktion) – kein „von Hand“, Anzeige „HmIP 12,0°“
+        old = hass.st["climate.wth_wz"]
+        new = types.SimpleNamespace(**{**old.__dict__, "attributes": {**old.attributes, "temperature": 12.0},
+                                       "context": types.SimpleNamespace(id="ccu", user_id=None, parent_id=None)})
+        ctl._rt("wz")["paused"] = False  # wie in der Wartezeit vor der Fensterpause: die CCU war schneller
+        ctl._detect_manual_change("climate.wth_wz", old, new, NOW[0].timestamp())
+        assert not ctl._rt("wz").get("override")
+        assert any(e["title"].startswith("Fensterfunktion HmIP") for e in log.entries)
+        hass.set("climate.wth_wz", old.state, {**old.attributes, "temperature": 12.0}, old.name)
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["wz"]
+        assert res["window_hmip"] is True and res["hmip_target"] == 12.0 and res["window_since"]
         # Raum-Einstellung aus: Hauswerk macht die Pause selbst
         await ctl.async_save_room({**ctl.rooms["wz"], "window_ccu": False})
         n = len(hass.calls)

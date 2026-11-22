@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.83.0";
+const VERSION = "0.83.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4079,17 +4079,26 @@ class HauswerkPanel extends HTMLElement {
     const info = room.enabled === false ? null : this._schedInfo(room, s);
     const fl = [];
     if (s.heating) fl.push(`<ha-icon icon="mdi:fire" style="color:#f97316" title="heizt"></ha-icon>`);
+    // Fenster offen: immer sichtbar, mit Dauer
+    if (s.windows_open) {
+      const mins = s.window_since ? Math.max(0, Math.round((Date.now() - Date.parse(s.window_since)) / 60000)) : null;
+      fl.push(`<span class="wt-chip" style="color:${C.air}" title="Fenster offen"><ha-icon icon="mdi:window-open-variant"></ha-icon>${mins != null ? (mins < 60 ? `${mins} Min.` : `${Math.floor(mins / 60)} Std.`) : "offen"}</span>`);
+    }
     const vc = this._ventChip(s);
     if (vc) fl.push(`<ha-icon icon="${vc[0]}" style="color:${vc[2]}" title="${esc(vc[3])}"></ha-icon>`);
-    else if (s.windows_open) fl.push(`<ha-icon icon="mdi:window-open-variant" style="color:${C.air}" title="Fenster offen"></ha-icon>`);
     const fc = this._fireChip(s);
     if (fc) fl.push(`<ha-icon icon="${fc[0]}" style="color:${fc[2]}" title="${esc(fc[3])}"></ha-icon>`);
     return this._wallTile({
-      act: `id="room-${room.id}" data-action="room-quick" data-id="${room.id}"`, color: m.c,
+      act: `id="room-${room.id}" data-action="room-quick" data-id="${room.id}"`, color: s.windows_open && (s.window_hmip || s.mode === "fenster") ? C.air : m.c,
       ic: `<span class="wt-ic"><ha-icon icon="${esc(roomIcon(room))}"></ha-icon></span>`, name: room.name, flags: fl.join(""),
       value: s.room_temp != null ? `${fmt(s.room_temp)}°` : "–",
       status: (() => {
         // Betriebsart mit Symbol, dahinter der nächste Wechsel: „Komfort · bis 21:00“, „Eco · Komfort ab 18:00“
+        if (s.windows_open && (s.window_hmip || s.mode === "fenster")) {
+          // Fenster offen – bei Direktverknüpfung in der CCU stellt Homematic selbst um: „HmIP 12,0°“
+          const t = s.window_hmip ? s.hmip_target : s.target;
+          return `<span style="color:${tint(C.air)}"><ha-icon icon="mdi:window-open-variant"></ha-icon><b>Fenster offen</b></span><span class="wt-dim" style="margin-left:6px">· ${s.window_hmip ? "HmIP " : ""}${t != null ? `${fmt(t)}°` : ""}</span>`;
+        }
         const lbl = s.mode_label || "Automatik aus";
         let nx = ["komfort", "eco", "vorheizen"].includes(s.mode) ? info?.text || "" : "";
         if (s.mode === "komfort") nx = nx.replace(/^Komfort (bis|ab) /, "$1 ");
@@ -14592,6 +14601,7 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .bwp-heat { background:color-mix(in srgb, #f97316 55%, transparent); } .bwp-frost { background:color-mix(in srgb, #38bdf8 35%, #fff); }
 .bwp-leg { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:11px; color:var(--muted); } .bwp-leg span { display:inline-flex; align-items:center; gap:5px; }
 .bwp-leg i { display:inline-block; width:16px; height:10px; border-radius:3px; position:static; }
+.wt-chip { display:inline-flex; align-items:center; gap:3px; font-size:14px; font-weight:700; white-space:nowrap; }
 .vt-run.night { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; align-items:center; } .vt-run.night ha-icon { color:#6366f1; grid-row:span 2; }
 .vt-run.night small { grid-column:2; }
 .bwt-time { display:grid; grid-template-columns:1fr 1fr; gap:10px; }

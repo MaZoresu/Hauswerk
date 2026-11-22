@@ -575,6 +575,21 @@ class Heizen:
             return []
         return [w["entity"] for w in links["walls"]] + list(links["linked_trvs"])
 
+    def _ccu_window_entities(self, room: dict, rt: dict, now: float) -> list[str]:
+        """Thermostate, die die CCU gerade selbst wegen eines Fensters umstellt – auch schon während der Wartezeit vor
+        der Fensterpause und kurz nach dem Schließen (die CCU stellt dann zurück). Hauswerk sendet ihnen solange nichts,
+        sonst stellen beide gegeneinander."""
+        links = self._links.get(room.get("id") or "")
+        if not links or room.get("window_ccu") is False:
+            return []
+        wins = room.get("windows") or []
+        open_ = [w for w in wins if (st := self.hass.states.get(w)) is not None and st.state.lower() in WINDOW_OPEN_STATES]
+        linked = set(links.get("windows_ccu") or [])
+        recent = now - (rt.get("win_change_at") or 0) < 180
+        if (open_ and all(w in linked for w in open_)) or (recent and any(w in linked for w in wins)):
+            return [w["entity"] for w in links["walls"]] + list(links["linked_trvs"])
+        return []
+
     def _followers(self, room: dict, rt: dict, now: float) -> set[str]:
         """Heizkörper-Thermostate, die dem Wandthermostat folgen und deshalb nicht selbst gestellt werden.
 
@@ -1043,6 +1058,7 @@ class Heizen:
                 was = old.state.lower() in WINDOW_OPEN_STATES
                 now_open = new.state.lower() in WINDOW_OPEN_STATES
                 if was != now_open:
+                    rt["win_change_at"] = now
                     self.log.add("window", f"{new.name} {'geöffnet' if now_open else 'geschlossen'}", None, room_id, room.get("name"))
             if is_open and not rt["windows_open"]:
                 self._stat(room_id)["open"] += 1
@@ -1079,6 +1095,15 @@ class Heizen:
             if from_ui and room.get("manual_ui") is False:
                 continue
             if not from_ui and room.get("manual_device") is False:
+                continue
+            # Fensterfunktion: Bei offenem Fenster (bzw. kurz nach dem Öffnen oder Schließen) stellt die CCU über die
+            # Direktverknüpfung Fensterkontakt → Thermostat den Sollwert selbst um – das ist kein „von Hand“.
+            if not from_ui and (self._windows_open_since(room)[0] is not None or now - (rt.get("win_change_at") or 0) < 180):
+                if rt.get("win_func_logged") != (entity_id, new_t):
+                    rt["win_func_logged"] = (entity_id, new_t)
+                    self.log.add("window", f"Fensterfunktion HmIP: {self._t(new_t)} °C",
+                                 f"{new.name} – die CCU stellt bei offenem Fenster selbst um (Direktverknüpfung), kein „von Hand“",
+                                 room_id, room.get("name"))
                 continue
             offset = rt["offset"].get(entity_id, 0.0)
             minutes = (rt.get("result") or {}).get("next_change") or 240
@@ -1456,6 +1481,11 @@ class Heizen:
             rt["window_ccu"] = self._window_ccu(room, result, virtual)
             if rt["window_ccu"]:
                 result["cause"] = "Fenster offen – die CCU senkt über die Direktverknüpfung ab (Hauswerk sendet nichts)"
+            hm_ids = self._ccu_window_entities(room, rt, now) if open_since is not None else []
+            result["window_hmip"] = bool(hm_ids)
+            result["hmip_target"] = next((t for e in hm_ids if (st := self.hass.states.get(e)) is not None
+                                          and (t := _float(st.attributes.get("temperature"))) is not None), None)
+            result["window_since"] = dt_util.utc_from_timestamp(open_since).isoformat() if open_since is not None else None
             fire = self._fireplace(room_id, room, rt, result, room_temp, valve_all, now)
             self._learn(room_id, rt, result, room_temp, now)
             result.update(
@@ -1923,7 +1953,7 @@ class Heizen:
                     await self._restore_mode(entity_id, room)
             return
         followers = rt.get("followers") or set()
-        ccu = set(rt.get("window_ccu") or [])
+        ccu = set(rt.get("window_ccu") or []) | set(self._ccu_window_entities(room, rt, now))
         for entity_id in room.get("climates") or []:
             if self._duty_blocked(entity_id):
                 continue  # Gerät darf gerade nicht funken

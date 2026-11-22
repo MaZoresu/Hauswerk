@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.83.1 – 2026-11-22
+
+### Behoben (Heizwerk)
+- **Fensterfunktion der CCU galt als „von Hand“:** Ist der Fensterkontakt in der CCU direkt mit dem Thermostat verknüpft, senkt die CCU beim Öffnen sofort ab (z. B. auf 12 °C) – noch bevor Heizwerks Fensterpause beginnt. Heizwerk hielt das für eine Änderung von Hand („Manuell 12,0°“), die bis zum nächsten Planwechsel gegolten hätte, und stellte in der Wartezeit sogar zurück. Jetzt gilt: Ändert sich der Sollwert, während ein Fenster offen ist oder bis 3 Min. nach dem Öffnen/Schließen, ist das die Fensterfunktion („Fensterfunktion HmIP: 12,0 °C“ im Protokoll), kein „von Hand“. Den verknüpften Thermostaten sendet Heizwerk in dieser Zeit nichts.
+
+### Geändert (Tabletmodus)
+- **Fenster offen auf jeder Raumkachel:** oben rechts das Fenster-Symbol mit der Dauer („4 Min.“), die Kachel in Türkis. Senkt die CCU über die Direktverknüpfung ab, steht „Fenster offen · HmIP 12,0°“ (der Sollwert am Thermostat), sonst „Fenster offen“ mit Heizwerks Wert.
+
 ## 0.83.0 – 2026-11-22
 
 ### Neu (Heizwerk › Lüften)
