@@ -573,7 +573,21 @@ class Heizen:
                  if (st := self.hass.states.get(w)) is not None and st.state.lower() in WINDOW_OPEN_STATES]
         if not open_ or any(w not in links["windows_ccu"] for w in open_):
             return []
-        return [w["entity"] for w in links["walls"]] + list(links["linked_trvs"])
+        return self._ccu_covered(links, open_)
+
+    @staticmethod
+    def _ccu_covered(links: dict, wins: list[str]) -> list[str]:
+        """Thermostate, die die CCU für diese Fenster selbst absenkt: nur die, mit denen ein Fenster direkt verknüpft
+        ist (ein verknüpftes Wandthermostat nimmt seine verknüpften Heizkörper mit). Alle anderen senkt Hauswerk."""
+        targets = links.get("window_targets") or {}
+        walls = {w["entity"] for w in links.get("walls") or []}
+        out: set[str] = set()
+        for win in wins:
+            for e in targets.get(win) or []:
+                out.add(e)
+                if e in walls:
+                    out |= set(links.get("linked_trvs") or [])
+        return sorted(out)
 
     def _ccu_window_entities(self, room: dict, rt: dict, now: float) -> list[str]:
         """Thermostate, die die CCU gerade selbst wegen eines Fensters umstellt – auch schon während der Wartezeit vor
@@ -584,11 +598,8 @@ class Heizen:
             return []
         wins = room.get("windows") or []
         open_ = [w for w in wins if (st := self.hass.states.get(w)) is not None and st.state.lower() in WINDOW_OPEN_STATES]
-        linked = set(links.get("windows_ccu") or [])
         recent = now - (rt.get("win_change_at") or 0) < 180
-        if (open_ and all(w in linked for w in open_)) or (recent and any(w in linked for w in wins)):
-            return [w["entity"] for w in links["walls"]] + list(links["linked_trvs"])
-        return []
+        return self._ccu_covered(links, open_ if open_ else (wins if recent else []))
 
     def _followers(self, room: dict, rt: dict, now: float) -> set[str]:
         """Heizkörper-Thermostate, die dem Wandthermostat folgen und deshalb nicht selbst gestellt werden.
@@ -1101,8 +1112,10 @@ class Heizen:
             if not from_ui and (self._windows_open_since(room)[0] is not None or now - (rt.get("win_change_at") or 0) < 180):
                 if rt.get("win_func_logged") != (entity_id, new_t):
                     rt["win_func_logged"] = (entity_id, new_t)
-                    self.log.add("window", f"Fensterfunktion HmIP: {self._t(new_t)} °C",
-                                 f"{new.name} – die CCU stellt bei offenem Fenster selbst um (Direktverknüpfung), kein „von Hand“",
+                    linked = entity_id in self._ccu_window_entities(room, rt, now)
+                    self.log.add("window", f"{'Fensterfunktion HmIP' if linked else 'Sollwert bei offenem Fenster'}: {self._t(new_t)} °C",
+                                 f"{new.name} – " + ("die CCU stellt bei offenem Fenster selbst um (Direktverknüpfung)" if linked
+                                                     else "Änderung während Fenster offen bzw. kurz danach") + ", kein „von Hand“",
                                  room_id, room.get("name"))
                 continue
             offset = rt["offset"].get(entity_id, 0.0)
@@ -1480,9 +1493,12 @@ class Heizen:
             self._assist(room, rt, result, room_temp)
             rt["window_ccu"] = self._window_ccu(room, result, virtual)
             if rt["window_ccu"]:
-                result["cause"] = "Fenster offen – die CCU senkt über die Direktverknüpfung ab (Hauswerk sendet nichts)"
+                rest = [c for c in room.get("climates") or [] if c not in rt["window_ccu"] and c not in rt["followers"]]
+                result["cause"] = ("Fenster offen – die CCU senkt über die Direktverknüpfung ab" +
+                                   (f", Hauswerk senkt {', '.join(self._name(c) for c in rest)}" if rest else " (Hauswerk sendet nichts)"))
             hm_ids = self._ccu_window_entities(room, rt, now) if open_since is not None else []
-            result["window_hmip"] = bool(hm_ids)
+            result["window_hmip"] = any(self._kind(e) == "wall" for e in hm_ids)  # Wandthermostat senkt die CCU
+            hm_ids = sorted(hm_ids, key=lambda e: self._kind(e) != "wall")  # Wandthermostat zuerst
             result["hmip_target"] = next((t for e in hm_ids if (st := self.hass.states.get(e)) is not None
                                           and (t := _float(st.attributes.get("temperature"))) is not None), None)
             result["window_since"] = dt_util.utc_from_timestamp(open_since).isoformat() if open_since is not None else None

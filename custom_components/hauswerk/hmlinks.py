@@ -78,6 +78,7 @@ def analyze_room(room: dict, kind_of, addr_of, peers: dict[str, list[str]], devi
         return None
     in_room = {a: e for e, a in addr.items() if a}
     wall_out, linked_trvs, linked_windows, fal = [], set(), set(), []
+    targets: dict[str, set[str]] = {}  # Fensterkontakt → Thermostate, die er in der CCU direkt absenkt
     for w in known:
         items = []
         for p in peers.get(addr[w]) or []:
@@ -91,6 +92,7 @@ def analyze_room(room: dict, kind_of, addr_of, peers: dict[str, list[str]], devi
                 linked_trvs.add(ent)
             if ent in windows:
                 linked_windows.add(ent)
+                targets.setdefault(ent, set()).add(w)
             if k == "fal":
                 fal.append({"address": a, "channel": ch, "name": dev.get("name") or a})
         # gleiche Gegenstelle mit mehreren Kanälen nur einmal zeigen (Kanäle zusammengefasst)
@@ -103,12 +105,15 @@ def analyze_room(room: dict, kind_of, addr_of, peers: dict[str, list[str]], devi
                 merged[key] = {**it, "channels": [it["channel"]] if it["channel"] is not None else []}
         wall_out.append({"entity": w, "address": addr[w], "peers": list(merged.values())})
     # Fensterkontakte können auch selbst als Sender verknüpft sein (Gegenstelle = Thermostat im Raum)
+    by_addr = {addr.get(c): c for c in climates if addr.get(c)}
     for win in windows:
         a = addr.get(win)
-        if a and any(split_peer(p)[0] in {addr.get(c) for c in climates} for p in peers.get(a) or []):
+        hit = [by_addr[split_peer(p)[0]] for p in peers.get(a) or [] if a and split_peer(p)[0] in by_addr]
+        if hit:
             linked_windows.add(win)
+            targets.setdefault(win, set()).update(hit)
     return {"walls": wall_out, "linked_trvs": sorted(linked_trvs), "unlinked_trvs": sorted(set(trvs) - linked_trvs),
-            "windows_ccu": sorted(linked_windows), "fal": fal}
+            "windows_ccu": sorted(linked_windows), "window_targets": {k: sorted(v) for k, v in targets.items()}, "fal": fal}
 
 
 def findings(rooms: dict[str, dict], analysis: dict[str, dict], name_of, devices: dict[str, dict],

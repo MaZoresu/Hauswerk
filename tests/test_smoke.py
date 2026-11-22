@@ -1965,6 +1965,20 @@ def test_homematic_verknuepfungen(hw):
         n = len(hass.calls)
         await ctl.async_evaluate()
         assert not ctl.status()["rooms"]["wz"]["window_ccu"]
+        # Fensterkontakt nur mit einem Heizkörper verknüpft (nicht mit dem Wandthermostat): Hauswerk senkt das
+        # Wandthermostat selbst ab, nur den verknüpften Heizkörper überlässt es der CCU
+        await ctl.async_save_room({**ctl.rooms["wz"], "window_ccu": None})
+        hass.links = {"WTHWZ": ["TRVWZ:6", "FAL:1"], "TRVWZ": ["WTHWZ:1"], "WTHJ": [], "SWDOWZ": ["TRVWZ2:1"]}
+        info = (await ctl.async_refresh_links(by="Test"))["rooms"]["wz"]
+        assert info["window_targets"] == {"binary_sensor.fenster_wz": ["climate.trv_wz2"]}
+        hass.set("climate.wth_wz", "heat", {"temperature": 21.0, "current_temperature": 20.5}, "WTH Wohnzimmer")
+        NOW[0] += timedelta(minutes=10)
+        n = len(hass.calls)
+        await ctl.async_evaluate()
+        res = ctl.status()["rooms"]["wz"]
+        sent = [c[2].get("entity_id") for c in hass.calls[n:] if c[0] == "climate"]
+        assert res["mode"] == "fenster" and "climate.wth_wz" in sent and "climate.trv_wz2" not in sent, (sent, res.get("cause"))
+        assert "Hauswerk senkt WTH Wohnzimmer" in res["cause"]
 
     asyncio.run(run())
 

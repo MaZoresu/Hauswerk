@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.83.3 – 2026-11-22
+
+### Behoben (Heizwerk › Fensterpause)
+- **Wandthermostat wurde bei offenem Fenster nicht abgesenkt:** War ein Fensterkontakt in der CCU nur mit einem Heizkörper-Thermostat verknüpft (nicht mit dem Wandthermostat), überließ Heizwerk die Fensterpause des ganzen Raums der CCU – das Wandthermostat blieb auf dem alten Sollwert. Jetzt überlässt Heizwerk der CCU nur die Thermostate, mit denen der Fensterkontakt wirklich direkt verknüpft ist (ein verknüpftes Wandthermostat nimmt seine verknüpften Heizkörper mit). Alle anderen – ohne Verknüpfung also alle – senkt Heizwerk selbst auf die Fenstertemperatur. Die Ursache am Raum nennt beides („die CCU senkt … ab, Hauswerk senkt WTH Wohnzimmer“).
+- Im Protokoll heißt eine Sollwert-Änderung bei offenem Fenster ohne Verknüpfung „Sollwert bei offenem Fenster“ statt „Fensterfunktion HmIP“; „HmIP“ an der Wand-Kachel nur, wenn die CCU das Wandthermostat selbst absenkt.
+
 ## 0.83.2 – 2026-11-22
 
 ### Geändert (Bildschirmschoner)
