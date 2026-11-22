@@ -284,7 +284,7 @@ class Dienste:
             try:
                 rep = ctl.report(14)
                 ana = rep.pop("_analysis", {})
-                VERD = {"good": "passt", "tight": "knapp", "weak": "reicht nicht", "reserve": "hat Reserve", "sensor": "Messung prüfen", "nodata": "zu wenig Daten"}
+                VERD = {"good": "passt", "tight": "knapp", "weak": "zu schwach", "reserve": "passt mit Reserve", "sensor": "Thermostat regelt zu früh ab", "nodata": "zu wenig Daten"}
                 for rid, rows in rep.items():
                     room = ctl.rooms.get(rid) or {}
                     now_, prev = rows[7:], rows[:7]

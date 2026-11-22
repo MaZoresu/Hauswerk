@@ -1270,21 +1270,28 @@ def shade_wanted(prof: dict, start: dict, end: dict, active: bool) -> bool:
 def room_analysis(rows: list[dict], heat_rate: float | None, room_type: str = "heizkoerper") -> dict:
     """Einschätzung der Heizleistung eines Raums aus den Tageswerten des Berichts.
 
-    Kennzahlen: Komfort erreicht (Anteil der Komfortzeit, in der der Raum höchstens 0,5 °C unter Soll lag),
-    Ø Abweichung vom Soll, Ø Ventilöffnung, Zeit mit Ventil ≥ 90 %, überheizt (> 1 °C über Soll), Aufheiz-
-    geschwindigkeit. Daraus ein Urteil (good/tight/weak/reserve/sensor/nodata) und Hinweise mit Tipps.
+    Kennzahlen (alle nur in der Komfortzeit, ohne die Aufheizzeit nach dem Lüften):
+    - warm genug: Anteil, in dem der Raum höchstens 0,5 °C unter Soll lag,
+    - zu warm: Anteil, in dem er mehr als 1 °C über Soll lag (Eco-Zeiten zählen nicht – nach dem Absenken ist es
+      natürlich noch wärmer),
+    - Ø Abweichung vom Soll, Ø Ventilöffnung, Anteil der Heizzeit mit Ventil ≥ 90 %, Aufheizgeschwindigkeit.
+    Daraus ein Urteil (good/tight/weak/reserve/sensor/nodata) und Hinweise. Die Hinweise widersprechen dem Urteil nicht:
+    z. B. kein „Reserve“ zusammen mit „bei Frost zu kalt“, kein „heizt schnell auf“ bei „zu schwach“.
     """
     floor = room_type == "flaeche"
     sum_ = lambda k: sum(r.get(k) or 0 for r in rows)  # noqa: E731
-    cn, under, mn, over, full, heat = sum_("comfort_n"), sum_("under_min"), sum_("measured_min"), sum_("over_min"), sum_("full_min"), sum_("heat_min")
+    cn, under, full, heat = sum_("comfort_n"), sum_("under_min"), sum_("full_min"), sum_("heat_min")
     pause, openings, fire = sum_("pause_min"), sum_("openings"), sum_("fire_min")
     devs = [(r["comfort_dev"], r["comfort_n"]) for r in rows if r.get("comfort_dev") is not None and r.get("comfort_n")]
     dev = round(sum(d * n for d, n in devs) / sum(n for _, n in devs), 1) if devs else None
-    valves = [(r["valve_avg"], 1) for r in rows if r.get("valve_avg") is not None]
-    valve = round(sum(v for v, _ in valves) / len(valves)) if valves else None
+    valves = [r["valve_avg"] for r in rows if r.get("valve_avg") is not None]
+    valve = round(sum(valves) / len(valves)) if valves else None
     ok_pct = round(100 * (cn - under) / cn) if cn else None
-    over_pct = round(100 * over / mn) if mn else None
-    full_pct = round(100 * full / heat) if heat else None
+    # zu warm: nur Tage, an denen schon in der Komfortzeit gezählt wurde (ältere Tage zählten auch Eco-Zeiten mit)
+    co_rows = [r for r in rows if r.get("comfort_over") is not None and r.get("comfort_n")]
+    co_n = sum(r["comfort_n"] for r in co_rows)
+    over_pct = round(100 * sum(r["comfort_over"] for r in co_rows) / co_n) if co_n >= 120 else None
+    full_pct = min(100, round(100 * full / heat)) if heat else None
     # kalte Tage (Ø außen < 3 °C) gegen milde
     cold = [r for r in rows if r.get("outside_avg") is not None and r["outside_avg"] < 3 and r.get("comfort_n")]
     mild = [r for r in rows if r.get("outside_avg") is not None and r["outside_avg"] >= 3 and r.get("comfort_n")]
@@ -1300,54 +1307,76 @@ def room_analysis(rows: list[dict], heat_rate: float | None, room_type: str = "h
         return {"verdict": "nodata", "facts": facts,
                 "findings": [{"level": "info", "title": "Noch zu wenig Daten",
                               "text": "Für eine Einschätzung braucht Hauswerk mindestens 2 Stunden Komfortzeit mit Messwert im gewählten Zeitraum."}]}
+    heater = "die Fußbodenheizung" if floor else "der Heizkörper"
+    de = lambda x: f"{x:.1f}".replace(".", ",")  # noqa: E731
+    dev_txt = f" – im Schnitt {de(abs(dev))} °C {'unter' if dev < 0 else 'über'} Soll" if dev is not None and abs(dev) >= 0.1 else ""
+    frost = ok_cold is not None and ok_mild is not None and len(cold) >= 2 and ok_cold < 85 and ok_mild - ok_cold >= 20
     verdict = "good"
-    if ok_pct < 75 and (valve is None or valve >= 60 or (full_pct or 0) >= 30):
+    if ok_pct < 75 and valve is None:
         verdict = "weak"
-        add("warn", "Heizleistung reicht nicht",
-            f"Der Raum erreicht nur in {ok_pct} % der Komfortzeit sein Soll, obwohl das Ventil im Schnitt {valve if valve is not None else '?'} % offen ist"
-            + (f" und {full_pct} % der Heizzeit fast ganz offen steht" if full_pct else "") + ". "
-            + ("Mögliche Gründe: Vorlauftemperatur der Fußbodenheizung zu niedrig, Heizkreis zu wenig Durchfluss (hydraulischer Abgleich)."
-               if floor else "Mögliche Gründe: Heizkörper zu klein für den Raum, Vorlauftemperatur/Heizkurve zu niedrig, Luft im Heizkörper oder fehlender hydraulischer Abgleich."))
+        add("warn", "Wird nicht warm genug",
+            f"Nur in {ok_pct} % der Komfortzeit warm genug{dev_txt}. Ohne Werte zur Ventilöffnung lässt sich nicht sagen, "
+            f"ob {heater} zu wenig Wärme liefert oder das Thermostat zu früh abregelt.")
+    elif ok_pct < 75 and (valve >= 60 or (full_pct or 0) >= 30):
+        verdict = "weak"
+        add("warn", "Zu schwach – wird nicht warm genug",
+            f"Nur in {ok_pct} % der Komfortzeit warm genug, obwohl das Ventil weit offen ist (im Schnitt {valve} %"
+            + (f", {full_pct} % der Heizzeit fast ganz auf" if full_pct else "") + f"). {heater[0].upper()}{heater[1:]} gibt also nicht genug Wärme ab. "
+            + ("Mögliche Ursachen: Vorlauftemperatur zu niedrig oder zu wenig Durchfluss im Heizkreis (hydraulischer Abgleich)."
+               if floor else "Mögliche Ursachen: Heizkörper zu klein, Vorlauftemperatur bzw. Heizkurve zu niedrig, Luft im Heizkörper oder fehlender hydraulischer Abgleich."))
     elif ok_pct < 75:
         verdict = "sensor"
-        add("warn", "Zu kalt, obwohl das Ventil wenig öffnet",
-            f"Komfort nur in {ok_pct} % der Zeit erreicht, aber das Ventil steht im Schnitt nur bei {valve} %. "
-            "Das Thermostat glaubt, es sei warm genug – es misst vermutlich am Heizkörper zu warm. Abhilfe: Raumsensor eintragen, "
-            "Kalibrierung oder „Thermostat nachführen“ (Raum › Regelung/Erweitert) einschalten.")
+        add("warn", "Zu kalt, aber das Ventil bleibt fast zu",
+            f"Nur in {ok_pct} % der Komfortzeit warm genug, das Ventil ist dabei im Schnitt nur {valve} % offen. Die Heizung könnte mehr – "
+            "das Thermostat regelt zu früh ab, vermutlich weil es direkt am Heizkörper zu warm misst. "
+            "Abhilfe: Raumsensor eintragen, Kalibrierung oder „Thermostat nachführen“ einschalten (Raum › Regelung).")
     elif ok_pct < 90:
         verdict = "tight"
-        add("info", "Heizleistung knapp",
-            f"Komfort in {ok_pct} % der Zeit erreicht (Ø {dev:+.1f} °C). "
-            + ("Früher vorheizen hilft (Vorheizen › Lernen), " if not floor else "Bei Fußbodenheizung längere Vorheizzeit wählen, ")
-            + "oder die Heizkurve etwas anheben.")
-    elif valve is not None and valve < 25 and (over_pct or 0) < 15:
+        add("info", "Meist warm genug, aber knapp",
+            f"In {ok_pct} % der Komfortzeit warm genug{dev_txt}. "
+            + ("Hilft meist: früher vorheizen (Vorheizen › Lernen) oder die Heizkurve etwas anheben." if not floor
+               else "Hilft meist: längere Vorheizzeit oder die Heizkurve etwas anheben."))
+    elif valve is not None and valve < 25 and (over_pct or 0) < 15 and not frost:
         verdict = "reserve"
-        add("ok", "Viel Reserve",
-            f"Soll in {ok_pct} % der Zeit erreicht, Ventil im Schnitt nur {valve} % offen. "
-            "Die Heizung könnte mit niedrigerer Vorlauftemperatur laufen – das spart, besonders bei Wärmepumpen.")
+        add("ok", "Wird warm – mit Reserve",
+            f"In {ok_pct} % der Komfortzeit warm genug, das Ventil ist dabei im Schnitt nur {valve} % offen. "
+            f"{heater[0].upper()}{heater[1:]} schafft mehr als nötig. Die Vorlauftemperatur ließe sich etwas senken – das spart Energie, besonders mit Wärmepumpe.")
     else:
-        add("ok", "Heizleistung passt", f"Soll in {ok_pct} % der Komfortzeit erreicht, Ø {dev:+.1f} °C, Ventil im Schnitt {valve if valve is not None else '–'} %.")
-    if ok_cold is not None and ok_mild is not None and ok_mild - ok_cold >= 20 and len(cold) >= 2:
-        add("warn", "Reicht bei Frost nicht",
-            f"An kalten Tagen (unter 3 °C außen) wird der Komfort nur in {ok_cold} % der Zeit erreicht, an milden in {ok_mild} %. "
+        add("ok", "Wird warm",
+            f"In {ok_pct} % der Komfortzeit warm genug{dev_txt}."
+            + (f" Das Ventil ist dabei im Schnitt {valve} % offen" + (" – die Heizung arbeitet schon kräftig." if valve >= 60 else ".") if valve is not None else ""))
+    if frost and verdict != "weak":
+        add("warn", "Bei Frost zu kalt",
+            f"An Frosttagen (unter 3 °C außen) nur in {ok_cold} % der Komfortzeit warm genug, an milden Tagen in {ok_mild} %. "
             "Die Heizkurve ist im kalten Bereich zu flach – Steilheit an der Heizung leicht erhöhen.")
     if over_pct is not None and over_pct >= 15:
-        add("info", "Oft überheizt",
-            f"In {over_pct} % der Zeit war es mehr als 1 °C wärmer als gewollt. Gründe: Sonne oder andere Wärmequellen, "
-            + ("die Trägheit der Fußbodenheizung (früher absenken) " if floor else "ein zu hohes Soll am Thermostat ")
-            + "oder ein Thermostat, das zu kalt misst. Spart Energie, wenn behoben.")
+        if verdict in ("weak", "sensor", "tight"):
+            add("info", "Mal zu kalt, mal zu warm",
+                f"Außerdem war es in {over_pct} % der Komfortzeit mehr als 1 °C zu warm. Die Temperatur schwankt also stark – "
+                + ("typisch für die träge Fußbodenheizung (früher absenken)." if floor else "z. B. durch Sonne oder ein Thermostat am falschen Platz."))
+        else:
+            add("info", "Oft zu warm",
+                f"In {over_pct} % der Komfortzeit mehr als 1 °C wärmer als gewollt. Mögliche Gründe: Sonne oder andere Wärmequellen, "
+                + ("die Trägheit der Fußbodenheizung (früher absenken) " if floor else "ein zu hohes Soll am Thermostat ")
+                + "oder ein Thermostat, das zu kalt misst. Weniger heizen spart hier Energie.")
     if heat_rate:
         slow, fast = (0.2, 1.0) if floor else (0.5, 3.0)
         if heat_rate < slow:
-            add("warn", "Heizt langsam auf", f"Gelernt: {heat_rate:.1f} °C pro Stunde. Für {'Fußbodenheizung' if floor else 'Heizkörper'} ist das wenig – Vorheizen startet deshalb früh.")
-        elif heat_rate > fast:
-            add("ok", "Heizt schnell auf", f"Gelernt: {heat_rate:.1f} °C pro Stunde – kurze Vorheizzeit reicht.")
+            if verdict in ("good", "reserve"):
+                add("info", "Braucht lange zum Aufheizen",
+                    f"Gelernt: {de(heat_rate)} °C pro Stunde. Hauswerk heizt deshalb früher vor – der Raum ist trotzdem rechtzeitig warm.")
+            else:
+                add("warn", "Heizt langsam auf",
+                    f"Gelernt: {de(heat_rate)} °C pro Stunde – wenig für {'Fußbodenheizung' if floor else 'Heizkörper'}. Deshalb startet das Vorheizen früh.")
+        elif heat_rate > fast and verdict not in ("weak", "sensor"):
+            add("ok", "Heizt schnell auf", f"Gelernt: {de(heat_rate)} °C pro Stunde – kurze Vorheizzeit reicht.")
     if fire >= 30:
         add("info", "Zusätzliche Wärme herausgerechnet",
-            f"{round(fire / 60, 1)} h war der Raum durch eine andere Wärmequelle (Kamin oder Ähnliches) wärmer – "
-            "diese Zeit zählt weder für „Komfort erreicht“ noch für „überheizt“, und Aufheizmessungen daraus werden verworfen.")
+            f"{de(fire / 60)} Std. war der Raum durch eine andere Wärmequelle (Kamin oder Ähnliches) wärmer – "
+            "diese Zeit zählt nicht für „warm genug“ und „zu warm“; Aufheizmessungen daraus werden verworfen.")
     if pause >= 180 or openings >= 5 * max(1, len(rows)):
-        add("info", "Viel gelüftet", f"{round(pause / 60, 1)} h Fensterpause bei {openings} Öffnungen. Stoßlüften (kurz, weit auf) verliert weniger Wärme als lange gekippte Fenster.")
+        add("info", "Viel gelüftet", f"{de(pause / 60)} Std. Fensterpause bei {openings} Öffnungen. "
+            "Die Aufheizzeit danach ist aus der Bewertung herausgenommen. Stoßlüften (kurz, weit auf) verliert weniger Wärme als lange gekippte Fenster.")
     return {"verdict": verdict, "facts": facts, "findings": findings}
 
 

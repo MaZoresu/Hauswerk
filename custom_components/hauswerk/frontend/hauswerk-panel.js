@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.89.0";
+const VERSION = "0.90.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -3178,8 +3178,8 @@ class HauswerkPanel extends HTMLElement {
     const rep = this._report(14);
     if (!rep) return `<div class="chart-empty"><div class="spinner"></div></div>`;
     const an = this._analysis?.[14] || {};
-    const V = { weak: ["Reicht nicht", "#ef4444", "mdi:fire-alert"], sensor: ["Messung prüfen", "#f97316", "mdi:thermometer-alert"], tight: ["Knapp", "#f59e0b", "mdi:alert-circle-outline"],
-      good: ["Passt", "#22c55e", "mdi:check-circle-outline"], reserve: ["Reserve", "#0ea5e9", "mdi:arrow-down-bold-circle-outline"], nodata: ["Zu wenig Daten", "#94a3b8", "mdi:timer-sand"] };
+    const V = { weak: ["Zu schwach", "#ef4444", "mdi:fire-alert"], sensor: ["Thermostat prüfen", "#f97316", "mdi:thermometer-alert"], tight: ["Knapp", "#f59e0b", "mdi:alert-circle-outline"],
+      good: ["Passt", "#22c55e", "mdi:check-circle-outline"], reserve: ["Passt · Reserve", "#0ea5e9", "mdi:arrow-down-bold-circle-outline"], nodata: ["Zu wenig Daten", "#94a3b8", "mdi:timer-sand"] };
     const order = ["weak", "sensor", "tight", "good", "reserve", "nodata"];
     const list = this._rooms().map((r) => ({ r, a: an[r.id] })).filter((x) => x.a).sort((x, y) => order.indexOf(x.a.verdict) - order.indexOf(y.a.verdict));
     if (!list.length || list.every((x) => x.a.verdict === "nodata"))
@@ -3199,7 +3199,7 @@ class HauswerkPanel extends HTMLElement {
         const f = a.facts || {};
         const top = (a.findings || []).find((x) => x.level === "warn") || (a.findings || [])[0];
         return `<div class="wrow"><span class="rdot" style="background:${this._roomColor(r.id)}"></span>
-          <span class="grow"><b>${esc(r.name)}</b><small>${f.ok_pct != null ? `Komfort ${f.ok_pct} %` : ""}${f.valve != null ? ` · Ventil Ø ${f.valve} %` : ""}${z === "l" && top ? ` · ${esc(top.title)}` : ""}</small></span>
+          <span class="grow"><b>${esc(r.name)}</b><small>${f.ok_pct != null ? `warm genug ${f.ok_pct} %` : ""}${f.valve != null ? ` · Ventil Ø ${f.valve} %` : ""}${z === "l" && top ? ` · ${esc(top.title)}` : ""}</small></span>
           <em class="wverd" style="--c:${vc}"><ha-icon icon="${vi}"></ha-icon>${vl}</em></div>`;
       })
       .join("")}</div>`;
@@ -7897,9 +7897,9 @@ class HauswerkPanel extends HTMLElement {
   /** Heizleistung je Raum: Urteil, Kennzahlen und Hinweise (Analyse aus dem Backend). */
   _powerReport(rooms, days) {
     const an = this._analysis?.[days] || {};
-    const V = { good: ["Passt", "#22c55e", "mdi:check-circle-outline"], reserve: ["Reserve", "#0ea5e9", "mdi:arrow-down-bold-circle-outline"],
-      tight: ["Knapp", "#f59e0b", "mdi:alert-circle-outline"], weak: ["Reicht nicht", "#ef4444", "mdi:fire-alert"],
-      sensor: ["Messung prüfen", "#f97316", "mdi:thermometer-alert"], nodata: ["Zu wenig Daten", "#94a3b8", "mdi:timer-sand"] };
+    const V = { good: ["Passt", "#22c55e", "mdi:check-circle-outline"], reserve: ["Passt · Reserve", "#0ea5e9", "mdi:arrow-down-bold-circle-outline"],
+      tight: ["Knapp", "#f59e0b", "mdi:alert-circle-outline"], weak: ["Zu schwach", "#ef4444", "mdi:fire-alert"],
+      sensor: ["Thermostat prüfen", "#f97316", "mdi:thermometer-alert"], nodata: ["Zu wenig Daten", "#94a3b8", "mdi:timer-sand"] };
     const LV = { ok: ["mdi:check", "#22c55e"], info: ["mdi:information-outline", "#0ea5e9"], warn: ["mdi:alert-outline", "#ef4444"] };
     const list = rooms.map((r) => ({ r, a: an[r.id] })).filter((x) => x.a);
     if (!list.length) return "";
@@ -7914,14 +7914,14 @@ class HauswerkPanel extends HTMLElement {
       const f = a.facts || {};
       return `<div class="pw-room" style="--c:${vc}">
         <div class="pw-h"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><b>${esc(r.name)}</b><small>${r.type === "flaeche" ? "Fußbodenheizung" : "Heizkörper"}</small><span class="grow"></span><em class="pw-v"><ha-icon icon="${vi}"></ha-icon>${vl}</em></div>
-        ${f.ok_pct != null ? `<div class="pw-bar" title="Komfort erreicht"><i style="width:${f.ok_pct}%"></i></div>` : ""}
+        ${f.ok_pct != null ? `<div class="pw-bar" title="Warm genug in der Komfortzeit"><i style="width:${f.ok_pct}%"></i></div>` : ""}
         <div class="pw-fs">
-          ${fact("Komfort erreicht", f.ok_pct != null ? `${f.ok_pct} %` : null)}
-          ${fact("Ø zum Soll", f.dev != null ? `${f.dev > 0 ? "+" : ""}${fmt(f.dev)} °C` : null)}
-          ${fact("Ø Ventil", f.valve != null ? `${f.valve} %` : null, f.full_pct ? `${f.full_pct} % ganz auf` : "")}
-          ${fact("Aufheizen", f.rate != null ? `${fmt(f.rate, 1)} °C/h` : null)}
-          ${fact("Überheizt", f.over_pct ? `${f.over_pct} %` : null)}
-          ${fact("Frost / mild", f.ok_cold != null && f.ok_mild != null ? `${f.ok_cold} / ${f.ok_mild} %` : null)}
+          ${fact("Warm genug", f.ok_pct != null ? `${f.ok_pct} %` : null, "der Komfortzeit")}
+          ${fact("Zu warm", f.over_pct ? `${f.over_pct} %` : null, "der Komfortzeit")}
+          ${fact("Ø zum Soll", f.dev != null ? `${f.dev > 0 ? "+" : ""}${fmt(f.dev)} °C` : null, "in der Komfortzeit")}
+          ${fact("Ventil offen", f.valve != null ? `Ø ${f.valve} %` : null, f.full_pct ? `${f.full_pct} % der Heizzeit ganz auf` : "")}
+          ${fact("Aufheizen", f.rate != null ? `${fmt(f.rate, 1)} °C/Std.` : null)}
+          ${fact("Warm genug bei Frost / mild", f.ok_cold != null && f.ok_mild != null ? `${f.ok_cold} / ${f.ok_mild} %` : null)}
           ${fact("Kamin u. Ä.", f.fire_h ? `${fmt(f.fire_h, 1)} h` : null, f.fire_h ? "herausgerechnet" : "")}
         </div>
         <div class="pw-list">${(a.findings || []).map((x) => { const [i, c] = LV[x.level] || LV.info; return `<div class="pw-i"><ha-icon icon="${i}" style="color:${c}"></ha-icon><span><b>${esc(x.title)}</b><small>${esc(x.text)}</small></span></div>`; }).join("")}</div>
@@ -7930,7 +7930,7 @@ class HauswerkPanel extends HTMLElement {
     };
     return `<section class="card">
       ${this._sectionHead("mdi:radiator", `Heizleistung je Raum · ${days} Tage`)}
-      <p class="pw-sum"><b>${head}</b><small>Komfort erreicht = Anteil der Komfortzeit, in der der Raum höchstens 0,5 °C unter Soll lag. Zusammen mit der Ventilöffnung zeigt das, ob die Heizung reicht, knapp ist oder Reserve hat.</small></p>
+      <p class="pw-sum"><b>${head}</b><small>Bewertet wird nur die Komfortzeit, ohne die Aufheizzeit nach dem Lüften. „Warm genug“ = höchstens 0,5 °C unter Soll, „zu warm“ = mehr als 1 °C darüber. Zusammen mit der Ventilöffnung zeigt das, ob die Heizung reicht: zu kalt bei weit offenem Ventil = Heizung zu schwach; zu kalt bei fast zu = Thermostat regelt zu früh ab.</small></p>
       <div class="pw-grid">${list.map(card).join("")}</div>
     </section>`;
   }
@@ -13486,7 +13486,7 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .pw-f { display:flex; flex-direction:column; padding:6px 10px; border-radius:12px; background:var(--card2); min-width:84px; }
 .pw-f small { font-size:11px; color:var(--muted); }
 .pw-f b { font-size:15px; }
-.pw-f i { font-style:normal; font-size:11px; color:#ef4444; }
+.pw-f i { font-style:normal; font-size:11px; color:var(--muted); }
 .pw-list { display:flex; flex-direction:column; gap:6px; }
 .pw-i { display:flex; gap:8px; align-items:flex-start; }
 .pw-i ha-icon { --mdc-icon-size:18px; flex:none; margin-top:1px; }

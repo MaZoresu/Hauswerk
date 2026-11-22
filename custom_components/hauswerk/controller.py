@@ -2354,11 +2354,16 @@ class Heizen:
                 bucket["fire"] = bucket.get("fire", 0) + 1
                 temp = None
             # Für die Analyse der Heizleistung: Komfort erreicht? Überheizt? Ventil ganz offen? Außentemperatur?
-            if temp is not None and target is not None and mode in COMFORT_MODES:
+            # Nach dem Lüften erst wieder bewerten, wenn der Raum Zeit zum Aufheizen hatte (Heizkörper 30 Min., Fußbodenheizung 3 Std.)
+            recover = (3 * 3600 if (self.rooms[room_id].get("type") == "flaeche") else 1800)
+            after_vent = dt_util.utcnow().timestamp() - (self._rt(room_id).get("win_change_at") or 0) < recover
+            if temp is not None and target is not None and mode in COMFORT_MODES and not after_vent:
                 bucket["cn"] = bucket.get("cn", 0) + 1
                 bucket["cdev"] = round(bucket.get("cdev", 0.0) + (temp - target), 2)
                 if temp < target - 0.5:
                     bucket["under"] = bucket.get("under", 0) + 1
+                # zu warm nur in der Komfortzeit zählen – nach dem Absenken auf Eco ist der Raum natürlich noch wärmer
+                bucket["co"] = bucket.get("co", 0) + (1 if temp > target + 1.0 else 0)
             if temp is not None and target is not None and mode not in ("fenster", "aus", "sommer", "entkalken"):
                 bucket["mn"] = bucket.get("mn", 0) + 1
                 if temp > target + 1.0:
@@ -2402,6 +2407,7 @@ class Heizen:
                         "comfort_n": b.get("cn", 0), "under_min": b.get("under", 0),
                         "comfort_dev": round(b["cdev"] / b["cn"], 2) if b.get("cn") else None,
                         "measured_min": b.get("mn", 0), "over_min": b.get("over", 0), "full_min": b.get("full", 0),
+                        "comfort_over": b.get("co"),
                         "outside_avg": round(b["osum"] / b["on"], 1) if b.get("on") else None,
                         "fire_min": b.get("fire", 0),
                     }

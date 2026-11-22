@@ -414,9 +414,9 @@ def test_shade_conditions():
     assert not L.shade_wanted(prof, {}, {}, active=False)
 
 
-def _day(cn=600, under=0, dev=0.0, valve=40, full=0, heat=300, over=0, mn=1400, out=8.0):
+def _day(cn=600, under=0, dev=0.0, valve=40, full=0, heat=300, over=0, mn=1400, out=8.0, co=0):
     return {"comfort_n": cn, "under_min": under, "comfort_dev": dev, "valve_avg": valve, "full_min": full, "heat_min": heat,
-            "over_min": over, "measured_min": mn, "outside_avg": out, "pause_min": 0, "openings": 0}
+            "over_min": over, "measured_min": mn, "outside_avg": out, "pause_min": 0, "openings": 0, "comfort_over": co}
 
 
 def test_room_analysis():
@@ -427,7 +427,35 @@ def test_room_analysis():
     assert L.room_analysis([_day(under=300, dev=-1.0, valve=20)] * 7, None)["verdict"] == "sensor"
     assert L.room_analysis([_day(valve=15)] * 7, None)["verdict"] == "reserve"
     frost = L.room_analysis([_day(out=0.0, under=200)] * 3 + [_day(out=8.0)] * 4, None)
-    assert any(f["title"] == "Reicht bei Frost nicht" for f in frost["findings"])
+    assert any(f["title"] == "Bei Frost zu kalt" for f in frost["findings"])
+
+
+def test_room_analysis_ohne_widersprueche():
+    """Heizleistung: Urteil und Hinweise widersprechen sich nicht."""
+    titles = lambda a: [f["title"] for f in a["findings"]]  # noqa: E731
+    # Reserve und „bei Frost zu kalt“ schließen sich aus → dann nur „Wird warm“
+    a = L.room_analysis([_day(out=0.0, under=120, valve=15)] * 3 + [_day(out=8.0, valve=15)] * 4, None)
+    assert a["verdict"] == "good" and "Bei Frost zu kalt" in titles(a) and "Wird warm – mit Reserve" not in titles(a)
+    # zu schwach: kein „heizt schnell auf“; langsam aufheizen passt dazu
+    a = L.room_analysis([_day(under=300, valve=85, full=200)] * 7, 5.0)
+    assert a["verdict"] == "weak" and "Heizt schnell auf" not in titles(a)
+    # passt + langsam: nur ein Hinweis, keine Warnung
+    a = L.room_analysis([_day()] * 7, 0.3)
+    slow = [f for f in a["findings"] if f["title"] == "Braucht lange zum Aufheizen"]
+    assert a["verdict"] == "good" and slow and slow[0]["level"] == "info"
+    # zu warm zählt nur die Komfortzeit; alte Tage (ohne comfort_over) zählen nicht – Eco-Abkühlen ist kein Überheizen
+    old = [{**_day(over=900), "comfort_over": None}] * 7
+    assert L.room_analysis(old, None)["facts"]["over_pct"] is None
+    a = L.room_analysis([_day(co=150)] * 7, None)
+    assert a["facts"]["over_pct"] == 25 and "Oft zu warm" in titles(a)
+    # zu kalt und zu warm zugleich: als Schwanken erklärt
+    a = L.room_analysis([_day(under=200, valve=70, co=120)] * 7, None)
+    assert a["verdict"] == "weak" and "Mal zu kalt, mal zu warm" in titles(a) and "Oft zu warm" not in titles(a)
+    # ohne Ventilwerte: keine Ursache behaupten
+    a = L.room_analysis([_day(under=300, valve=None)] * 7, None)
+    assert a["verdict"] == "weak" and "lässt sich nicht sagen" in a["findings"][0]["text"] and "?" not in a["findings"][0]["text"]
+    # Ventil ganz offen höchstens 100 %
+    assert L.room_analysis([_day(full=900, heat=300)] * 7, None)["facts"]["full_pct"] == 100
 
 
 def test_tagesmittel_fuer_sommerpause():

@@ -2,6 +2,19 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.90.0 – 2026-11-22
+
+### Behoben (Heizwerk › Bericht › Heizleistung)
+- **„Überheizt“ war fast immer zu hoch:** Gezählt wurde auch die Eco-Zeit – nach dem Absenken ist ein Raum aber natürlich noch Stunden wärmer als sein Eco-Wert. Jetzt zählt „zu warm“ nur in der Komfortzeit. Ältere Tage, die das noch nicht unterscheiden, bleiben dafür außen vor (der Wert erscheint wieder, sobald genug neue Tage da sind).
+- **Nach dem Lüften kein „zu kalt“ mehr:** Die Aufheizzeit nach dem Schließen des Fensters (Heizkörper 30 Min., Fußbodenheizung 3 Std.) zählt nicht mehr gegen „warm genug“.
+- **Keine widersprüchlichen Aussagen mehr:** kein „Reserve“ (Vorlauf senken) zusammen mit „bei Frost zu kalt“ (Heizkurve anheben); kein „heizt schnell auf“ bei „zu schwach“; „braucht lange zum Aufheizen“ bei einem Raum, der trotzdem warm wird, nur als Hinweis statt Warnung; zu kalt und zu warm zugleich heißt jetzt „Mal zu kalt, mal zu warm“ (Temperatur schwankt). „Bei Frost zu kalt“ erst, wenn es dort unter 85 % liegt. Fehlen Ventilwerte, behauptet der Bericht keine Ursache mehr (vorher „Ventil im Schnitt ? %“).
+- „Ventil ganz auf“ kann nicht mehr über 100 % liegen.
+
+### Geändert – klarere Sprache
+- Urteile: **Passt**, **Passt · Reserve**, **Knapp**, **Zu schwach** (statt „Reicht nicht“), **Thermostat prüfen** (statt „Messung prüfen“).
+- Kennzahlen: **Warm genug** (statt „Komfort erreicht“) und **Zu warm** (statt „Überheizt“), jeweils „der Komfortzeit“; **Ventil offen Ø …** mit „… % der Heizzeit ganz auf“; „Warm genug bei Frost / mild“.
+- Hinweise sagen, was es bedeutet und was hilft, z. B. „Zu kalt, aber das Ventil bleibt fast zu – das Thermostat regelt zu früh ab, vermutlich misst es am Heizkörper zu warm“. Zahlen mit deutschem Komma.
+
 ## 0.89.0 – 2026-11-22
 
 ### Neu (Termine)
