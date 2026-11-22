@@ -2169,6 +2169,8 @@ def test_wachwerk_und_hausdienste(panel):
     p.click('#pop [data-action="weekly"][data-send="0"]')
     p.wait(300)
     assert "Lichtwerk: 46 Std. Licht" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    assert "Mit KI" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText") and p.has("#pop .wk-prev.ai")
+    assert [m for m in p.sent() if m["type"] == "hauswerk/dienste/weekly"][-1]["ai"] is True
     p.js(f"{EL}._closePop()")
 
 

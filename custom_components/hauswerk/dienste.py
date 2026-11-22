@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from datetime import date, timedelta
 from typing import Any
@@ -38,12 +40,28 @@ TASK_TEMPLATES = [
     {"name": "Dachrinne reinigen", "icon": "mdi:home-roof", "days": 365},
 ]
 
+_LOGGER = logging.getLogger(__name__)
+
+AI_INSTRUCTIONS = """Du schreibst den Wochenbericht eines Smart Homes („Hauswerk“) für die Bewohner – als Text einer Push-Nachricht.
+Regeln:
+- Deutsch, Du-Form, freundlich und sachlich. Höchstens 5 kurze Sätze, höchstens 600 Zeichen. Keine Begrüßung, keine Überschrift, kein Markdown, keine Aufzählungszeichen.
+- Nutze ausschließlich die Fakten unten. Erfinde keine Zahlen, Räume oder Geräte und rechne nichts Neues aus – Vergleiche nur, wenn sie in den Fakten stehen.
+- Zuerst das Auffälligste der Woche (Abweichung zur Vorwoche, Warnung, Fehler, Fälliges), dann Zusammenhänge zwischen den Bereichen, wenn die Fakten sie hergeben (z. B. viel gelüftet und mehr geheizt).
+- Zum Schluss genau ein konkreter, umsetzbarer Tipp – nur wenn die Fakten einen hergeben.
+- War nichts besonders, sag das in einem Satz.
+- Höchstens 3 dezente Emojis.
+
+Fakten der letzten 7 Tage:
+"""
+
 HD_DEFAULTS: dict[str, Any] = {
     "hd_modes": {k: list(v["default"]) for k, v in MODES.items()},
     "hd_tasks": [],               # [{id, name, icon, days, last}]
     "hd_weekly": True,
     "hd_weekly_day": 6,           # 0 = Montag … 6 = Sonntag
     "hd_weekly_time": "18:00",
+    "hd_ai": False,               # Wochenbericht mit KI formulieren (Home Assistant „AI Task“)
+    "hd_ai_entity": None,         # ai_task.… (leer = erste gefundene)
 }
 HD_KEYS = set(HD_DEFAULTS)
 
@@ -246,9 +264,89 @@ class Dienste:
         self._save()
         rep = await self.async_weekly_report()
         self.haus.notify(f"weekly:{week}", "weekly", rep["title"], rep["text"])
+        if rep.get("ai_error"):
+            self.log.add("notify", "Wochenbericht ohne KI", rep["ai_error"], module="haus")
 
-    async def async_weekly_report(self) -> dict[str, Any]:
-        """Das Wichtigste der letzten 7 Tage aus allen Modulen – kurz, je Modul eine Zeile."""
+    def ai_entity(self) -> str | None:
+        """Gewählte bzw. erste gefundene AI-Task-Entität (z. B. ai_task.openai_ai_task)."""
+        want = self.settings.get("hd_ai_entity")
+        if want and self.hass.states.get(want) is not None:
+            return want
+        ids = getattr(self.hass.states, "async_entity_ids", None)
+        found = sorted(ids("ai_task")) if ids else []
+        return next((e for e in found if "ai_task" in e.split(".", 1)[1]), found[0] if found else None)
+
+    def _facts(self) -> list[str]:
+        """Fakten für die KI: genauer als die Zeilen, mit Vergleich zur Vorwoche – ohne Personennamen."""
+        out: list[str] = []
+        ctl = self._mod(MODULE_HEATING)
+        if ctl is not None:
+            try:
+                rep = ctl.report(14)
+                ana = rep.pop("_analysis", {})
+                VERD = {"good": "passt", "tight": "knapp", "weak": "reicht nicht", "reserve": "hat Reserve", "sensor": "Messung prüfen", "nodata": "zu wenig Daten"}
+                for rid, rows in rep.items():
+                    room = ctl.rooms.get(rid) or {}
+                    now_, prev = rows[7:], rows[:7]
+                    h, hp = sum(r.get("heat_min", 0) for r in now_) / 60, sum(r.get("heat_min", 0) for r in prev) / 60
+                    o, op = sum(r.get("openings", 0) for r in now_), sum(r.get("openings", 0) for r in prev)
+                    pause = sum(r.get("pause_min", 0) for r in now_) / 60
+                    temps = [r["avg_temp"] for r in now_ if r.get("avg_temp") is not None]
+                    line = f"Heizen {room.get('name') or rid}: {h:.1f} Std. geheizt (Vorwoche {hp:.1f}), {o}× Fenster geöffnet (Vorwoche {op}), {pause:.1f} Std. Fensterpause"
+                    if temps:
+                        line += f", Ø {sum(temps) / len(temps):.1f} °C"
+                    a = ana.get(rid) or {}
+                    if a.get("verdict") and a["verdict"] != "nodata":
+                        line += f", Heizleistung {VERD.get(a['verdict'], a['verdict'])}"
+                    warn = [x["title"] for x in a.get("findings") or [] if x.get("level") == "warn"]
+                    if warn:
+                        line += f" – Auffällig: {', '.join(warn[:2])}"
+                    out.append(line)
+                outs = [r["outside_avg"] for rows in rep.values() for r in rows[7:] if r.get("outside_avg") is not None]
+                outp = [r["outside_avg"] for rows in rep.values() for r in rows[:7] if r.get("outside_avg") is not None]
+                if outs:
+                    out.append(f"Außentemperatur Ø {sum(outs) / len(outs):.1f} °C" + (f" (Vorwoche {sum(outp) / len(outp):.1f} °C)" if outp else ""))
+            except Exception:  # noqa: BLE001
+                pass
+        lw = self._mod(MODULE_LIGHT)
+        if lw is not None:
+            try:
+                rep = lw.report()
+                ls = sorted(rep.get("lights", {}).items(), key=lambda kv: -kv[1]["week_h"])
+                if ls:
+                    out.append("Licht: " + ", ".join(f"{lw._name(e)} {x['week_h']:.0f} Std." + (f" ({x['manual']}× von Hand)" if x.get("manual") else "") for e, x in ls[:4]))
+                for x in (rep.get("suggestions") or [])[:2]:
+                    out.append(f"Licht-Vorschlag: {x.get('text')}")
+            except Exception:  # noqa: BLE001
+                pass
+        return out
+
+    async def async_ai_text(self, lines: list[str]) -> tuple[str | None, str | None]:
+        """Bericht von der KI formulieren lassen (Home Assistant „AI Task“). Antwort: (Text, Fehler)."""
+        ent = self.ai_entity()
+        if not ent:
+            return None, "keine KI eingerichtet (AI Task)"
+        facts = "\n".join(f"- {x}" for x in [*self._facts(), *lines])
+        try:
+            res = await asyncio.wait_for(self.hass.services.async_call(
+                "ai_task", "generate_data", {"task_name": "Hauswerk Wochenbericht", "entity_id": ent, "instructions": AI_INSTRUCTIONS + facts},
+                blocking=True, return_response=True, context=self._ctx), timeout=90)
+        except Exception as err:  # noqa: BLE001 - Netz, Kontingent, Zeitüberschreitung
+            _LOGGER.warning("Wochenbericht mit KI fehlgeschlagen: %s", err)
+            return None, f"KI nicht erreichbar ({err.__class__.__name__}: {err})"[:200]
+        text = str((res or {}).get("data") or "").strip()
+        return (text[:900], None) if text else (None, "KI hat nichts geliefert")
+
+    async def async_weekly_report(self, ai: bool | None = None) -> dict[str, Any]:
+        """Das Wichtigste der letzten 7 Tage aus allen Modulen – kurz, je Modul eine Zeile; auf Wunsch von der KI formuliert."""
+        rep = await self._async_weekly_lines()
+        if ai if ai is not None else self.settings.get("hd_ai"):
+            rep["ai_text"], rep["ai_error"] = await self.async_ai_text(rep["lines"])
+            if rep["ai_text"]:
+                rep["text"] = rep["ai_text"]
+        return rep
+
+    async def _async_weekly_lines(self) -> dict[str, Any]:
         lines: list[str] = []
         ctl = self._mod(MODULE_HEATING)
         if ctl is not None:
@@ -344,4 +442,5 @@ class Dienste:
             "tasks": self.tasks(),
             "templates": TASK_TEMPLATES,
             "weekly_sent": self._persist.get("weekly_sent"),
+            "ai_entity": self.ai_entity(),
         }

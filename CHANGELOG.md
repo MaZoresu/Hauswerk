@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.88.0 – 2026-11-22
+
+### Neu (Hauswerk › Wochenbericht)
+- **Wochenbericht mit KI formulieren** (optional, Einstellungen › Haus › Wochenbericht): Über die Home-Assistant-Schnittstelle „AI Task“ (z. B. OpenAI, Google, Ollama) wird aus dem Bericht ein kurzer Text mit Zusammenhängen und einem Tipp – z. B. „Das Kinderzimmer war 23× offen und hat dadurch gut 20 % mehr geheizt als in der Vorwoche. Tipp: lieber 5 Min. stoßlüften statt kippen.“
+- **Die Zahlen rechnet weiter Hauswerk:** je Raum Heizstunden, Fensteröffnungen und Fensterpause mit Vorwoche, Ø Temperatur, Heizleistung und Auffälligkeiten, Außentemperatur mit Vorwoche, Licht je Leuchte mit „von Hand“ und Vorschlägen, dazu Energie, Mähen, Klingel und Wartung. Die KI bekommt nur diese Fakten und die Vorgabe, nichts zu erfinden.
+- **Sicher im Alltag:** Antwortet die KI nicht (Netz, Kontingent, 90 s Zeitlimit), kommt der normale Bericht; im Protokoll steht „Wochenbericht ohne KI“. An den KI-Dienst gehen Raum- und Gerätenamen und Wochenwerte, keine Personen.
+- **Vorschau: normal und mit KI** nebeneinander im Fenster; die KI-Entität ist wählbar (leer = erste gefundene).
+
 ## 0.87.0 – 2026-11-22
 
 ### Neu (Lichtwerk › Leuchte antippen)

@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.87.0";
+const VERSION = "0.88.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -240,6 +240,7 @@ const PICKERS = {
   ww_alarm: { scope: "settings", multi: false, domains: ["alarm_control_panel"] },
   ww_bell: { scope: "settings", multi: false, domains: ["event", "binary_sensor"] },
   ww_camera: { scope: "settings", multi: false, domains: ["camera"] },
+  hd_ai_entity: { scope: "settings", multi: false, domains: ["ai_task"] },
   bw_mower: { scope: "settings", multi: false, domains: ["lawn_mower"] },
   bw_soil: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "moisture" },
   bw_watering: { scope: "settings", multi: false, domains: ["binary_sensor"] },
@@ -5189,8 +5190,14 @@ class HauswerkPanel extends HTMLElement {
           body: `<div class="wxrows">${this._setRow("hdw", "Wochenbericht senden", "das Wichtigste der Woche aus allen Modulen", sw("hd_weekly"), "Heizstunden und Lüften, Energie, Licht, Mähen, Klingel und Warnungen sowie fällige Wartung – je Modul eine Zeile. Kanal unter Benachrichtigungen › Hauswerk › Wochenbericht.")}</div>
             <div class="field"><span><ha-icon icon="mdi:calendar-week"></ha-icon> Tag</span><div class="segs small">${DAYS.map((d, i) => `<button class="seg ${Number(p.hd_weekly_day ?? 6) === i ? "on" : ""}" data-action="set-seg" data-key="hd_weekly_day" data-v="${i}" ${dis}>${d}</button>`).join("")}</div></div>
             <label class="field narrow"><span><ha-icon icon="mdi:clock-outline"></ha-icon> Uhrzeit</span><input type="time" data-set="hd_weekly_time" value="${esc(p.hd_weekly_time || "18:00")}" ${dis}></label>
-            <div class="qrow"><button class="secondary" data-action="weekly" data-send="0"><ha-icon icon="mdi:eye-outline"></ha-icon>Vorschau</button><button class="secondary" data-action="weekly" data-send="1"><ha-icon icon="mdi:send-outline"></ha-icon>Jetzt senden</button></div>
-            ${rep ? `<div class="card wk-prev"><b>${esc(rep.title)}</b>${(rep.lines.length ? rep.lines : [rep.text]).map((l) => `<p>${esc(l)}</p>`).join("")}</div>` : ""}` };
+            ${head("mdi:creation-outline", "Mit KI formulieren")}
+            ${hd.ai_entity ? `<div class="wxrows">${this._setRow("hdai", "Wochenbericht mit KI", `über ${esc(this._entityName(p.hd_ai_entity || hd.ai_entity))}`, sw("hd_ai"), "Hauswerk rechnet alle Zahlen selbst aus (je Raum Heizstunden, Lüften und Heizleistung mit Vorwoche, Licht, Energie, Mähen, Klingel, Wartung). Die KI macht daraus nur ein paar Sätze mit Zusammenhängen und einem Tipp – ohne eigene Zahlen. Antwortet sie nicht, kommt der normale Bericht. Dafür gehen Raum- und Gerätenamen und die Wochenwerte an den KI-Dienst, keine Personen.")}</div>
+            <div class="field"><span><ha-icon icon="mdi:robot-outline"></ha-icon> KI (AI Task)${!p.hd_ai_entity ? ` – leer = ${esc(this._entityName(hd.ai_entity))}` : ""}</span>${this._picker("hd_ai_entity", p.hd_ai_entity ? [p.hd_ai_entity] : [])}</div>`
+              : `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Keine KI gefunden. In Home Assistant z. B. OpenAI oder Ollama einrichten – dann erscheint hier „AI Task“.</p>`}
+            <div class="qrow"><button class="secondary" data-action="weekly" data-send="0"><ha-icon icon="mdi:eye-outline"></ha-icon>${hd.ai_entity ? "Vorschau: normal und mit KI" : "Vorschau"}</button><button class="secondary" data-action="weekly" data-send="1"><ha-icon icon="mdi:send-outline"></ha-icon>Jetzt senden</button></div>
+            ${this._pop?.draft?.weeklyBusy ? `<p class="muted small"><ha-icon icon="mdi:timer-sand"></ha-icon>Die KI schreibt …</p>` : ""}
+            ${rep ? `<div class="card wk-prev"><div class="lbl">Normal</div>${(rep.lines.length ? rep.lines : [rep.text]).map((l) => `<p>${esc(l)}</p>`).join("")}</div>
+              ${rep.ai_text ? `<div class="card wk-prev ai"><div class="lbl"><ha-icon icon="mdi:creation-outline"></ha-icon> Mit KI</div><p>${esc(rep.ai_text)}</p></div>` : rep.ai_error ? `<p class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon>${esc(rep.ai_error)}</p>` : ""}` : ""}` };
       }
       default:
         return null;
@@ -11741,7 +11748,14 @@ class HauswerkPanel extends HTMLElement {
         break;
       }
       case "weekly": {
-        const rep = await this._ws({ type: "hauswerk/dienste/weekly", send: el.dataset.send === "1" });
+        const send = el.dataset.send === "1";
+        if (this._pop) { this._pop.draft = { ...(this._pop.draft || {}), weeklyBusy: true }; this._renderPop?.(); }
+        let rep;
+        try {
+          rep = await this._ws({ type: "hauswerk/dienste/weekly", send, ...(send ? {} : { ai: !!this._status?.dienste?.ai_entity }) });
+        } finally {
+          if (this._pop?.draft) this._pop.draft.weeklyBusy = false;
+        }
         if (this._pop) this._pop.draft = { ...(this._pop.draft || {}), weekly: rep };
         this._renderPop?.();
         if (el.dataset.send === "1") this._toast("Wochenbericht gesendet");
@@ -15145,6 +15159,9 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .hd-add .unit { width:120px; }
 .wk-prev { margin-top:12px; padding:12px 14px; white-space:pre-line; }
 .wk-prev p { margin:6px 0 0; }
+.wk-prev .lbl { margin:0; display:flex; align-items:center; gap:6px; }
+.wk-prev.ai { border-color:color-mix(in srgb, #8b5cf6 45%, var(--line)); background:color-mix(in srgb, #8b5cf6 7%, var(--card)); }
+.wk-prev.ai .lbl ha-icon { color:#8b5cf6; --mdc-icon-size:18px; }
 .bw-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:14px; margin-top:14px; }
 .bw-c { display:flex; flex-direction:column; gap:12px; }
 .bw-h { display:flex; align-items:center; gap:12px; } .bw-h b { display:block; font-size:16px; } .bw-h small { color:var(--muted); font-size:13px; }

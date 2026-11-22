@@ -307,6 +307,8 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("hd_weekly"): bool,
         vol.Optional("hd_weekly_day"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
         vol.Optional("hd_weekly_time"): _hm,
+        vol.Optional("hd_ai"): bool,
+        vol.Optional("hd_ai_entity"): _opt(vol.All(str, vol.Match(r"^ai_task\.[a-z0-9_]+$"))),
         vol.Optional("bw_plan_days"): vol.All([vol.In(["mo", "tu", "we", "th", "fr", "sa", "su"])], vol.Length(min=1, max=7)),
         # Lichtwerk
         vol.Optional("lw_lights"): vol.All([vol.All(str, vol.Match(r"^(light|switch|input_boolean)\.[a-z0-9_]+$"))], vol.Length(max=80)),
@@ -558,7 +560,8 @@ async def ws_task_done(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"], {"status": hd.status()})
 
 
-@websocket_api.websocket_command({vol.Required("type"): "hauswerk/dienste/weekly", vol.Optional("send", default=False): bool})
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/dienste/weekly", vol.Optional("send", default=False): bool,
+                                  vol.Optional("ai"): bool})
 @require_editor
 @websocket_api.async_response
 async def ws_weekly(hass: HomeAssistant, connection, msg) -> None:
@@ -566,7 +569,7 @@ async def ws_weekly(hass: HomeAssistant, connection, msg) -> None:
     hd = _hd(hass)
     if hd is None:
         return _not_ready(connection, msg)
-    rep = await hd.async_weekly_report()
+    rep = await hd.async_weekly_report(msg.get("ai"))
     if msg["send"]:
         _haus(hass).send(_haus(hass).channels_for("weekly"), rep["title"], rep["text"], key="weekly:test", kind="weekly")
     connection.send_result(msg["id"], rep)

@@ -156,6 +156,11 @@ class Hass:
                     raise RuntimeError("XMLRPC Fault -1: Failure")
                 return {f"{a}:{data['channel']}": getattr(self, "links", {}).get(f"{a}:{data['channel']}", [])}
             return {a: getattr(self, "links", {}).get(a, [])}
+        if (domain, service) == ("ai_task", "generate_data"):
+            if getattr(self, "ai_fail", False):
+                raise RuntimeError("quota")
+            self.ai_prompt = data["instructions"]
+            return {"conversation_id": "x", "data": getattr(self, "ai_reply", "")}
         if (domain, service) == ("weather", "get_forecasts"):
             if data.get("type") == "hourly" and getattr(self, "hourly", None) is not None:
                 return {data["entity_id"]: {"forecast": self.hourly}}
@@ -2489,6 +2494,19 @@ def test_wachwerk_und_hausdienste(hw):
         await hd._async_weekly()
         await asyncio.sleep(0)
         assert hass.sent().count("Wochenbericht") == 1
+        # mit KI: Fakten gehen mit (Vorwoche), Text ersetzt die Zeilen; Fehler → normaler Bericht
+        hass.set("ai_task.openai_ai_task", "unknown", {}, "OpenAI AI Task")
+        hass.ai_reply = "Ruhige Woche – 1× geklingelt. 🔔"
+        await hd.async_save_settings({"hd_ai": True}, by="Test")
+        rep = await hd.async_weekly_report()
+        assert rep["text"] == "Ruhige Woche – 1× geklingelt. 🔔" and rep["lines"] and not rep.get("ai_error")
+        assert "Erfinde keine Zahlen" in hass.ai_prompt and "Wachwerk: 1× geklingelt" in hass.ai_prompt
+        assert ("ai_task", "generate_data") in [(c[0], c[1]) for c in hass.calls]
+        hass.ai_fail = True
+        rep = await hd.async_weekly_report()
+        assert rep["text"] == "\n".join(rep["lines"]) and "KI nicht erreichbar" in rep["ai_error"]
+        rep = await hd.async_weekly_report(ai=False)
+        assert "ai_text" not in rep
         await ww.async_stop()
         await hd.async_stop()
 
