@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.94.0";
+const VERSION = "0.94.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -5201,7 +5201,7 @@ class HauswerkPanel extends HTMLElement {
   /** Hausmodi als Knopfleiste (Startseite und Tablet). */
   _modesBar() {
     const hd = this._status?.dienste;
-    if (!hd?.modes) return "";
+    if (!hd?.modes || !this._data?.settings?.hd_modes_show) return "";
     const last = hd.last_mode && Date.now() - new Date(hd.last_mode.at) < 12 * 3600000 ? hd.last_mode.mode : null;
     return `<div class="hmodes">${Object.entries(hd.modes).map(([k, m]) => `<button class="hmode ${last === k ? "on" : ""}" data-action="house-mode" data-mode="${k}" title="${esc((m.actions || []).map((a) => hd.actions?.[a] || a).join(" · "))}"><ha-icon icon="${m.icon}"></ha-icon><span>${esc(m.name)}</span></button>`).join("")}
       ${this._admin ? `<button class="hmode set" data-action="settings-go" data-sub="modes" title="Hausmodi einstellen"><ha-icon icon="mdi:tune-variant"></ha-icon></button>` : ""}</div>`;
@@ -5237,7 +5237,8 @@ class HauswerkPanel extends HTMLElement {
           return `${head(m.icon, m.name)}<div class="rq-quick">${Object.entries(acts).map(([a, l]) => `<button class="pill ${on.has(a) ? "on" : ""}" data-action="hd-mode-act" data-mode="${k}" data-a="${a}" ${dis}>${esc(l)}</button>`).join("")}</div>`;
         };
         return { icon: "mdi:home-switch-outline", c: "#14b8a6", title: "Hausmodi", sub: "Hauswerk · ein Tipp, alle Module",
-          body: `<p class="muted">Die Knöpfe auf der Startseite. Jeder Modus erledigt die gewählten Schritte über die Module (Lichtwerk, Rollwerk, Heizwerk, Beetwerk, Wachwerk) und sagt danach, was noch offen ist.</p>
+          body: `<div class="wxrows">${this._setRow("hdms", "Knöpfe auf der Startseite", "Gute Nacht, Guten Morgen, Wir gehen, Wir sind da", sw("hd_modes_show"), "Zeigt die vier Hausmodi als Knöpfe auf der Startseite und am Tablet. Aus = keine Knöpfe; was ein Modus tut, bleibt hier gespeichert.")}</div>
+            <p class="muted">Jeder Modus erledigt die gewählten Schritte über die Module (Lichtwerk, Rollwerk, Heizwerk, Beetwerk, Wachwerk) und sagt danach, was noch offen ist.</p>
             ${Object.entries(hd.modes || {}).map(([k, m]) => blk(k, m)).join("")}` };
       }
       case "maint": {
@@ -8715,7 +8716,7 @@ class HauswerkPanel extends HTMLElement {
           const due = (hd.tasks || []).filter((t) => t.left != null && t.left <= 0);
           const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
           return hd.modes ? [
-            { g: "Alltag", id: "modes", t: "oft", icon: "mdi:home-switch-outline", c: "#14b8a6", title: "Hausmodi", sum: Object.values(hd.modes).map((m) => `${m.name}: ${(m.actions || []).length} Schritte`).join(" · "), words: "gute nacht guten morgen wir gehen wir sind da modus szene" },
+            { g: "Alltag", id: "modes", icon: "mdi:home-switch-outline", c: "#14b8a6", title: "Hausmodi", sum: p.hd_modes_show ? `auf der Startseite · ${Object.values(hd.modes).map((m) => m.name).join(", ")}` : "Knöpfe ausgeblendet", words: "gute nacht guten morgen wir gehen wir sind da modus szene" },
             { g: "Alltag", id: "maint", t: "oft", icon: "mdi:wrench-clock", c: "#14b8a6", title: "Wartung", sum: due.length ? `fällig: ${due.slice(0, 3).map((t) => t.name).join(", ")}${due.length > 3 ? " …" : ""}` : `${(hd.tasks || []).length} Aufgaben · nichts fällig`, val: due.length ? String(due.length) : "", warn: due.length > 0, words: "wartung fällig rauchmelder filter entlüften batterie aufgabe erinnerung" },
             { g: "Alltag", id: "weekly", icon: "mdi:newspaper-variant-outline", c: "#14b8a6", title: "Wochenbericht", sum: p.hd_weekly !== false ? `${DAYS[Number(p.hd_weekly_day ?? 6)]} ${p.hd_weekly_time || "18:00"} Uhr` : "aus", val: p.hd_weekly !== false ? "an" : "aus", words: "wochenbericht bericht woche zusammenfassung" },
           ] : [];

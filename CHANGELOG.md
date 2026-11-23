@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.94.1 – 2026-11-23
+
+### Geändert
+- **Hausmodi-Knöpfe ausgeblendet:** „Gute Nacht“, „Guten Morgen“, „Wir gehen“ und „Wir sind da“ stehen nicht mehr auf der Startseite und am Tablet. Wieder einblenden unter Einstellungen › Haus › Hausmodi › „Knöpfe auf der Startseite“; die Schritte je Modus bleiben gespeichert.
+
 ## 0.94.0 – 2026-11-23
 
 ### Neu (Darstellung)

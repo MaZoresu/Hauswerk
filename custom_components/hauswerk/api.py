@@ -309,6 +309,7 @@ SETTINGS_SCHEMA = vol.Schema(
                                             vol.Required("days"): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
                                             vol.Optional("last"): _opt(vol.All(str, vol.Match(r"^\d{4}-\d{2}-\d{2}$")))}], vol.Length(max=50)),
         vol.Optional("hd_weekly"): bool,
+        vol.Optional("hd_modes_show"): bool,
         vol.Optional("hd_weekly_day"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
         vol.Optional("hd_weekly_time"): _hm,
         vol.Optional("hd_ai"): bool,

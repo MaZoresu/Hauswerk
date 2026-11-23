@@ -2144,6 +2144,9 @@ def test_wachwerk_und_hausdienste(panel):
     # Hausmodi auf der Startseite
     p.view("start")
     p.wait(300)
+    assert not p.has(".hmode")  # Standard: keine Knöpfe auf der Startseite
+    p.js(f"() => {{ {EL}._data.settings.hd_modes_show = true; {EL}._renderMain(); }}")
+    p.wait(300)
     assert p.js(f"[...{EL}.shadowRoot.querySelectorAll('.hmode')].map((b) => b.textContent.trim()).slice(0, 4)") == ["Gute Nacht", "Guten Morgen", "Wir gehen", "Wir sind da"]
     p.click('.hmode[data-mode="night"]')
     p.wait(300)

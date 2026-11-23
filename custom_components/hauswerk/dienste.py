@@ -57,6 +57,7 @@ Fakten der letzten 7 Tage:
 HD_DEFAULTS: dict[str, Any] = {
     "hd_modes": {k: list(v["default"]) for k, v in MODES.items()},
     "hd_tasks": [],               # [{id, name, icon, days, last}]
+    "hd_modes_show": False,       # Knöpfe der Hausmodi auf der Startseite (Standard aus)
     "hd_weekly": True,
     "hd_weekly_day": 6,           # 0 = Montag … 6 = Sonntag
     "hd_weekly_time": "18:00",
