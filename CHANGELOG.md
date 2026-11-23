@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.93.1 – 2026-11-23
+
+### Geändert (Benachrichtigungen › Frost erwartet)
+- **Frostwarnung einmal am Tag zu fester Uhrzeit:** Standard jetzt täglich um 07:00 Uhr – solange Frost vorhergesagt ist, kommt die Nachricht genau einmal am Tag, auch wenn die Vorhersage zwischendurch über und unter die Grenze schwankt (das löste bisher immer neue Warnungen aus). Einstellbar unter Benachrichtigungen › Anlässe › Frost erwartet › „Senden“: sofort oder täglich um 6:00 bis 20:00 Uhr.
+
 ## 0.93.0 – 2026-11-22
 
 ### Neu – Nachrichten mit Knöpfen (Home-Assistant-App)

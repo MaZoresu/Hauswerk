@@ -123,6 +123,8 @@ class Haus:
         self._actions: dict[str, dict] = {}
         self._acked: dict[str, float] = {}         # Anlass gesehen – bis er erledigt ist (clear) nicht erneut
         self._snooze: dict[str, float] = {}        # Anlass später erinnern – bis Zeitpunkt nicht senden
+        self._frost_day: str | None = None         # Frostwarnung heute schon gesendet (bei fester Uhrzeit)
+        self._frost_msg: str | None = None
         self.action_handlers: dict[str, Any] = {}  # Name → async (data, by) – von den Modulen eingetragen
         self._bundle: dict[str, dict] = {}         # Kanal → {last, items, timer}  # (Kanal, Titel, Text) → gesendet um: gegen Doppel nach Neuladen o. Ä.
         self._active: set[str] = set()
@@ -184,11 +186,12 @@ class Haus:
         self._actions = {k: v for k, v in (stored.get("notify_actions") or {}).items() if v.get("exp", 0) > now}
         self._acked = dict(stored.get("notify_acked") or {})
         self._snooze = {k: v for k, v in (stored.get("notify_snooze") or {}).items() if v > now}
+        self._frost_day = stored.get("frost_day")
         await self._store.async_save(self._data())
 
     def _data(self) -> dict:
         return {"settings": self.settings, "notify_health": self.notify_health, "notify_hist": self.notify_hist[-40:],
-                "notify_actions": self._actions, "notify_acked": self._acked, "notify_snooze": self._snooze}
+                "notify_actions": self._actions, "notify_acked": self._acked, "notify_snooze": self._snooze, "frost_day": self._frost_day}
 
     def _save(self) -> None:
         self._store.async_delay_save(self._data, 2)
@@ -251,6 +254,7 @@ class Haus:
         await self._async_refresh_waste()
         self._waste_remind()
         await self._async_refresh_forecast()
+        self._frost_send()
         self._flush_queue()
         self.update_radio()
         self.update()
@@ -1051,10 +1055,33 @@ class Haus:
             moment, _ = parse_when(when) if when else (None, False)
             if moment is not None:
                 day_text = " am " + ("heute" if moment.date() == dt_util.now().date() else moment.strftime("%d.%m."))
-            self.notify("frost", "frost", "Frost erwartet",
-                        f"Tiefstwert {_de(low)} °C{day_text} (Grenze {_de(limit)} °C)")
+            self._frost_msg = f"Tiefstwert {_de(low)} °C{day_text} (Grenze {_de(limit)} °C)"
+            self._frost_send()
         else:
+            self._frost_msg = None
             self.clear("frost")
+
+    def _frost_send(self) -> None:
+        """Frostwarnung: sofort – oder höchstens einmal am Tag zur eingestellten Uhrzeit (Standard 07:00)."""
+        msg = getattr(self, "_frost_msg", None)
+        if not msg:
+            return
+        at = self.settings.get("frost_time")
+        if not at:
+            self.notify("frost", "frost", "Frost erwartet", msg)
+            return
+        local = dt_util.now()
+        try:
+            h, m = (int(x) for x in str(at).split(":")[:2])
+        except ValueError:
+            h, m = 7, 0
+        today = local.date().isoformat()
+        if local.hour * 60 + local.minute < h * 60 + m or self._frost_day == today:
+            return
+        self._frost_day = today
+        self._sent.pop("frost", None)  # die Wiederholsperre gilt hier nicht – einmal je Tag ist gewollt
+        self.notify("frost", "frost", "Frost erwartet", msg)
+        self._save()
 
     async def _async_refresh_hourly(self, entity_id: str) -> None:
         """Stunden-Vorhersage (Temperatur, Feuchte, Regen) für die besten Lüftzeiten – leer, wenn der Dienst keine hat."""

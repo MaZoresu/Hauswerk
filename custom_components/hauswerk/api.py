@@ -323,6 +323,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_offline"): NOTIFY_MODE,
         vol.Optional("notify_offline_min"): vol.All(vol.Coerce(int), vol.Range(min=1, max=720)),
         vol.Optional("notify_frost"): NOTIFY_MODE,
+        vol.Optional("frost_time"): vol.Any(None, "", _hm),
         vol.Optional("notify_battery"): NOTIFY_MODE,
         vol.Optional("notify_cold"): NOTIFY_MODE,
         vol.Optional("notify_vent"): NOTIFY_MODE,

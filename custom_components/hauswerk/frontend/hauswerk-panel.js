@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.93.0";
+const VERSION = "0.93.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -8425,10 +8425,13 @@ class HauswerkPanel extends HTMLElement {
       offline: () => minutes("notify_offline_min", 15, 1, 720, 5),
       cover: () => minutes("notify_offline_min", 15, 1, 720, 5),
       battery: () => minutes("battery_low", 20, 5, 60, 5, "%"),
+      frost: () => `<span class="nk-frost"><select data-set="frost_time" ${dis}>${[["", "sofort"], ...["06:00", "06:30", "07:00", "07:30", "08:00", "12:00", "17:00", "18:00", "19:00", "20:00"].map((t) => [t, `täglich ${t} Uhr`])]
+        .concat(p.frost_time && !["06:00", "06:30", "07:00", "07:30", "08:00", "12:00", "17:00", "18:00", "19:00", "20:00"].includes(p.frost_time) ? [[p.frost_time, `täglich ${p.frost_time} Uhr`]] : [])
+        .map(([v, t]) => `<option value="${v}" ${(p.frost_time === undefined ? "07:00" : p.frost_time || "") === v ? "selected" : ""}>${t}</option>`).join("")}</select></span>`,
     };
     const sub = (x) => ({
       window: `ab ${p.notify_window_min ?? 30} Min.`, offline: `seit ${p.notify_offline_min ?? 15} Min.`, cover: `seit ${p.notify_offline_min ?? 15} Min.`,
-      battery: `unter ${p.battery_low ?? 20} %`, frost: `unter ${fmt(p.cold_snap_temp ?? 0)} °C`,
+      battery: `unter ${p.battery_low ?? 20} %`, frost: `unter ${fmt(p.cold_snap_temp ?? 0)} °C · ${p.frost_time === undefined ? "täglich 07:00 Uhr" : p.frost_time ? `täglich ${p.frost_time} Uhr` : "sofort"}`,
       waste: p.waste_remind ? `Vorabend ab ${p.waste_remind}` : "Erinnerung unter Kalender aus",
     }[x.k] || x.sub);
 
@@ -8457,7 +8460,7 @@ class HauswerkPanel extends HTMLElement {
           <label class="switch"><input type="checkbox" data-action="nk-onoff" data-k="${x.k}" ${on ? "checked" : ""} ${dis}><span></span></label></div>
         ${open ? `<div class="nk-body">
           <div class="nk-modes">${segs(key, MODES_N, x.def).replace('class="segs small"', 'class="segs small n4"')}</div>
-          ${thr[x.k] ? `<label class="field narrow"><span>${x.k === "battery" ? "Grenze" : "Ab"}</span>${thr[x.k]()}</label>` : ""}
+          ${thr[x.k] ? `<label class="field narrow"><span>${x.k === "battery" ? "Grenze" : x.k === "frost" ? "Senden" : "Ab"}</span>${thr[x.k]()}</label>` : ""}
           <p class="muted small">${esc(x.text)}</p>
           ${!["off", "log"].includes(mode) ? `<label class="ch-own"><input type="checkbox" ${own ? "checked" : ""} data-action="ch-route" data-kind="${x.k}" data-on="${own ? "0" : "1"}" ${dis}> eigene Kanäle für diesen Anlass${own ? "" : ` <span class="muted">(sonst: ${esc((p.notify_channels || []).map((c) => chInfo(c).label).join(", ") || "–")})</span>`}</label>
             ${own ? this._chPicker(`route:${x.k}`, routes[x.k], { disabled: dis, test: false }) : ""}

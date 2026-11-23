@@ -330,6 +330,44 @@ def test_einstellungen_getrennt(hw):
     assert hw.const.DEFAULT_SETTINGS == {**hw.const.HOUSE_DEFAULTS, **hw.const.HEAT_DEFAULTS}
 
 
+def test_frost_einmal_am_tag(hw):
+    """Frostwarnung höchstens einmal am Tag zur eingestellten Uhrzeit; leer = sofort."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 23, 4, 0, tzinfo=timezone.utc)  # 05:00 Ortszeit
+        hass = Hass()
+        hass.set("weather.home", "cloudy", {"temperature": 1.0})
+        hass.forecast = [{"datetime": "2026-11-23", "temperature": 2.0, "templow": -3.0}]
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"notify_targets": ["mobile_app_pixel"], "notify_quiet": False})
+        frost = lambda: hass.sent().count("Frost erwartet")  # noqa: E731
+        await haus._async_refresh_forecast(force=True)
+        await asyncio.sleep(0)
+        assert frost() == 0  # vor 07:00
+        NOW[0] = datetime(2026, 11, 23, 6, 1, tzinfo=timezone.utc)  # 07:01
+        haus._frost_send()
+        await asyncio.sleep(0)
+        assert frost() == 1
+        NOW[0] = datetime(2026, 11, 23, 20, 0, tzinfo=timezone.utc)
+        haus.clear("frost")
+        await haus._async_refresh_forecast(force=True)
+        haus._frost_send()
+        await asyncio.sleep(0)
+        assert frost() == 1  # heute nicht noch einmal, auch nach Auf und Ab
+        NOW[0] = datetime(2026, 11, 24, 6, 0, tzinfo=timezone.utc)
+        haus._frost_send()
+        await asyncio.sleep(0)
+        assert frost() == 2  # nächster Tag 07:00
+        await haus.async_save_settings({"frost_time": None})
+        haus.clear("frost")
+        await haus._async_refresh_forecast(force=True)
+        await asyncio.sleep(0)
+        assert frost() == 3  # sofort
+
+    asyncio.run(run())
+
+
 def _reg(entity_id, device_id, device_class=None):
     REG[entity_id] = types.SimpleNamespace(entity_id=entity_id, device_id=device_id, domain=entity_id.split(".")[0],
                                            disabled_by=None, device_class=device_class, original_device_class=device_class)

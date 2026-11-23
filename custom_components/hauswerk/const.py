@@ -53,7 +53,7 @@ SETTING_LABELS = {
     "summer_mode": "Sommerpause", "summer_temp": "Heizgrenze", "summer_action": "Sommerpause-Verhalten",
     "summer_fallback": "Ersatz bei Sensorausfall", "summer_basis": "Sommerpause nach", "season_entity": "Heizperiode-Entität",
     "outside_sensor": "Außentemperatur", "wind_sensor": "Böen-Sensor", "weather_entity": "Wetterquelle",
-    "cold_snap_temp": "Kälteeinbruch", "storm_kmh": "Sturm",
+    "cold_snap_temp": "Kälteeinbruch", "frost_time": "Frostwarnung um", "storm_kmh": "Sturm",
     "frost_temp": "Frostschutz", "boost_minutes": "Boost-Dauer", "liming": "Entkalken", "liming_day": "Entkalken",
     "liming_time": "Entkalken", "liming_minutes": "Entkalken", "liming_winter": "Entkalken",
     "preheat_mode": "Vorheizen", "lead_radiator": "Vorheizen", "lead_floor": "Vorheizen",
@@ -124,6 +124,7 @@ HOUSE_DEFAULTS = {
     "weather_entity": None,       # weather.* (leer = erste gefundene)
     "outside_sensor": None,       # eigene Außentemperatur statt Wetterdienst
     "cold_snap_temp": 0.0,        # Kälteeinbruch: Tiefstwert der nächsten 3 Tage darunter
+    "frost_time": "07:00",        # Frostwarnung einmal am Tag um diese Uhrzeit (leer = sofort, höchstens alle 12 Std.)
     "storm_kmh": 70.0,            # Sturm: Böen der nächsten 24 Stunden ab dieser Stärke
     "sun_entity": "sun.sun",      # Sonnenstand (Darstellung nach Tageszeit, Rollwerk)
     "wind_sensor": None,          # eigener Böen-/Windsensor (leer = Wetterdienst), z. B. für den Sturmschutz von Rollwerk
