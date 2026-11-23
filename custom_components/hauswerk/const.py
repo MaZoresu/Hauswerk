@@ -132,7 +132,7 @@ HOUSE_DEFAULTS = {
     "start_widgets": None,        # Widgets der Startseite (None = Grundauswahl im Panel)
     "start_widgets_tablet": None, # eigene Startseite im Tabletmodus (None = wie Handy/PC)
     "tablet_wake": [],            # Bewegungsmelder o. Ä.: weckt den Bildschirmschoner der Tablets
-    "look_theme": "auto",         # auto = wie Home Assistant | sun = nach Sonnenstand | light | dark
+    "look_theme": "auto",         # auto = wie Home Assistant | sun = nach Sonnenstand | light | dark | xmas = Weihnachten
     "look_accent": None,          # "#rrggbb" oder None = Türkis
     "look_background": "pattern", # pattern = Muster | daytime = Kopfzeile nach Tageszeit | plain = schlicht
     "look_header_weather": True,  # Außentemperatur und Wetter oben rechts

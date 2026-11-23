@@ -2276,3 +2276,16 @@ def test_einheitliches_muster(panel):
     p.wait()
     assert p.has('#pop .sheet-head [data-action="room-edit"]')
     p.js(f"{EL}._closePop()")
+
+
+def test_weihnachten_design(panel):
+    """Darstellung › Design „Weihnachten“: dunkles Tannengrün mit Lichterkette – wird sofort gespeichert."""
+    p = panel
+    p.js(f"() => {EL}._openPop('look')")
+    p.wait()
+    p.click('#pop [data-key="look_theme"][data-v="xmas"]')
+    p.wait(300)
+    saved = [m for m in p.sent() if m["type"] == "hauswerk/heizen/settings/save"][-1]["settings"]
+    assert saved["look_theme"] == "xmas"
+    assert p.js(f"{EL}.hasAttribute('xmas') && {EL}.hasAttribute('dark')")
+    p.js(f"{EL}._closePop()")

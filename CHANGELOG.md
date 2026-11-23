@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.94.0 – 2026-11-23
+
+### Neu (Darstellung)
+- **Design „Weihnachten“** unter Darstellung › Design: dunkles Tannengrün mit Kerzenrot und Gold, eine leuchtende Lichterkette unter der Kopfzeile (rot, gold, grün, blau, leise funkelnd) und ruhiger Schneefall im Hintergrund. Eine eigene Akzentfarbe gilt weiter. Am Tablet unter Darstellung › Tabletmodus › Hell/Dunkel ebenfalls wählbar („Weihnachten“, oder „Wie Darstellung“). Ist am Gerät „Bewegung reduzieren“ eingestellt, stehen Schnee und Lichter still.
+
 ## 0.93.1 – 2026-11-23
 
 ### Geändert (Benachrichtigungen › Frost erwartet)

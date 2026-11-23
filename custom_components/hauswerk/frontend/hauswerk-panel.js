@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.93.1";
+const VERSION = "0.94.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -777,10 +777,13 @@ class HauswerkPanel extends HTMLElement {
     // Tablet: eigenes Design je Gerät (Standard: nach Sonnenstand – Fully meldet den Dunkelmodus oft nicht)
     if (this._tablet) { const t = this._tabletOpt("theme", "sun"); if (t !== "global") theme = t; }
     // auto = hell oder dunkel wie in Home Assistant eingestellt (Profil › Design); sun = dunkel nach Sonnenuntergang
-    const dark = theme === "dark" || (theme === "auto" && !!this._hass?.themes?.darkMode) || (theme === "sun" && this._sunDark());
+    // xmas = Weihnachten: dunkles Tannengrün, Rot und Gold, Lichterkette oben, leiser Schneefall
+    const xmas = theme === "xmas";
+    const dark = xmas || theme === "dark" || (theme === "auto" && !!this._hass?.themes?.darkMode) || (theme === "sun" && this._sunDark());
     this.toggleAttribute("dark", dark);
+    this.toggleAttribute("xmas", xmas);
     // Weicht die Wahl von Home Assistant ab, gelten Hauswerks eigene Farben (sonst bliebe „Hell“ bei dunklem HA dunkel)
-    this.toggleAttribute("own", dark !== !!this._hass?.themes?.darkMode);
+    this.toggleAttribute("own", xmas || dark !== !!this._hass?.themes?.darkMode);
     const c = /^#[0-9a-f]{6}$/i.test(p.look_accent || "") ? p.look_accent : null;
     if (c) {
       const [r, g, b] = [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16) / 255);
@@ -1646,7 +1649,7 @@ class HauswerkPanel extends HTMLElement {
         <span class="grow"><b>Tabletmodus</b><small>Leisten unten, kein Scrollen – höchstens zwei Seiten zum Wischen –, Bildschirmschoner mit großer Uhr.</small></span>
         <ha-icon class="xc-ic" icon="mdi:tablet"></ha-icon></button>
       ${on ? `
-      <div class="field"><span>Hell / Dunkel auf diesem Tablet</span><div class="segs small">${[["sun", "Nach Sonnenstand"], ["global", "Wie Darstellung"], ["light", "Hell"], ["dark", "Dunkel"]].map(([v, l]) => opt("theme", v, l, this._tabletOpt("theme", "sun"))).join("")}</div></div>
+      <div class="field"><span>Hell / Dunkel auf diesem Tablet</span><div class="segs small">${[["sun", "Nach Sonnenstand"], ["global", "Wie Darstellung"], ["light", "Hell"], ["dark", "Dunkel"], ["xmas", "Weihnachten"]].map(([v, l]) => opt("theme", v, l, this._tabletOpt("theme", "sun"))).join("")}</div></div>
       <p class="muted small">„Nach Sonnenstand“ wird dunkel, sobald die Sonne untergeht (sun.sun), und morgens wieder hell. „Wie Home Assistant“ klappt in Fully oft nicht, weil das Tablet den Dunkelmodus nicht meldet.</p>
       <div class="field"><span>Kacheln</span><div class="segs small">${[["wall", "Groß"], ["auto", "Automatisch"], ["detail", "Details"]].map(([v, l]) => opt("tview", v, l, this._tabletOpt("tview", "wall"))).join("")}</div></div>
       <p class="muted small">„Automatisch“: große Wand-Kacheln (lesbar aus Abstand), nach der ersten Berührung die Kacheln mit allen Details – bis zum Bildschirmschoner.</p>
@@ -8694,7 +8697,7 @@ class HauswerkPanel extends HTMLElement {
       }[p.vacation_source || "period"];
       const n = this._widgets().length;
       const su = this._setupSteps(p).slice(1, -1);
-      const themeName = { auto: "Wie HA", sun: "Sonne", light: "Hell", dark: "Dunkel" }[p.look_theme || "auto"];
+      const themeName = { auto: "Wie HA", sun: "Sonne", light: "Hell", dark: "Dunkel", xmas: "Weihnachten" }[p.look_theme || "auto"];
       const nch = (p.notify_channels || []).length;
       const list = [
         { g: "Einrichten", act: "setup-open", val: `${su.filter((x) => x.done).length}/${su.length}`, icon: "mdi:rocket-launch-outline", c: "#2dd4bf", title: "Einrichtung",
@@ -8731,7 +8734,7 @@ class HauswerkPanel extends HTMLElement {
           sum: this._tablet ? `Startseite ${this._tabletOpt("tstart", "wall") === "wall" ? "Wand" : "Widgets"} · Kacheln ${{ wall: "groß", auto: "automatisch", detail: "Details" }[this._tabletOpt("tview", "wall")] || "groß"} · Bildschirmschoner nach ${this._tabletOpt("saver", "2")} Min.` : "Tabletmodus für ein Wand-Tablet – große Kacheln, Bildschirmschoner, kein Scrollen",
           val: this._tablet ? "an" : "aus", words: "tablet tabletmodus wand fully kiosk bildschirmschoner schoner nacht sperren startseite kacheln wand details zurück" },
         { g: "Darstellung", id: "look", val: themeName, icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung",
-          sum: `${{ auto: "Wie Home Assistant", sun: "Nach Sonnenstand", light: "Hell", dark: "Dunkel" }[p.look_theme || "auto"]} · Akzent ${(ACCENTS.find(([v]) => v === (p.look_accent || null)) || [0, "eigene Farbe"])[1]} · Hintergrund ${{ pattern: "Muster", daytime: "Tageszeit", plain: "schlicht" }[p.look_background || "pattern"]}`,
+          sum: `${{ auto: "Wie Home Assistant", sun: "Nach Sonnenstand", light: "Hell", dark: "Dunkel", xmas: "Weihnachten" }[p.look_theme || "auto"]} · Akzent ${(ACCENTS.find(([v]) => v === (p.look_accent || null)) || [0, "eigene Farbe"])[1]} · Hintergrund ${{ pattern: "Muster", daytime: "Tageszeit", plain: "schlicht" }[p.look_background || "pattern"]}`,
           words: "design farbe akzent hell dunkel hintergrund tageszeit himmel uhr uhrzeit wetter kopfzeile größe tablet" },
         { g: "Darstellung", id: "legend", act: "legend-open", icon: "mdi:help-circle-outline", c: "#64748b", title: "Symbole & Farben",
           sum: "Was die Zeichen und Farben in Heizwerk, Rollwerk, Kraftwerk und Lichtwerk bedeuten – mit Suche (am Computer auch Taste „?“)", words: "symbole farben legende zeichen bedeutung hilfe erklärung icon" },
@@ -10272,7 +10275,7 @@ class HauswerkPanel extends HTMLElement {
           icon: "mdi:palette-outline", c: "#a78bfa", title: "Darstellung", sub: "Hauswerk · für alle Module und Benutzer",
           body: `
             ${head("mdi:theme-light-dark", "Design")}
-            <div class="field">${segs("look_theme", [["auto", "Wie Home Assistant", "mdi:home-assistant"], ["sun", "Nach Sonnenstand", "mdi:weather-sunset"], ["light", "Hell", "mdi:white-balance-sunny"], ["dark", "Dunkel", "mdi:weather-night"]], "auto")}</div>
+            <div class="field">${segs("look_theme", [["auto", "Wie Home Assistant", "mdi:home-assistant"], ["sun", "Nach Sonnenstand", "mdi:weather-sunset"], ["light", "Hell", "mdi:white-balance-sunny"], ["dark", "Dunkel", "mdi:weather-night"], ["xmas", "Weihnachten", "mdi:pine-tree"]], "auto")}</div>
             ${head("mdi:palette-outline", "Akzentfarbe")}
             <div class="swatches">
               ${ACCENTS.map(([v, name, show]) => `<button class="sw ${acc === v ? "on" : ""}" style="--c:${show || v}" data-action="look-accent" data-v="${v || ""}" title="${name}" aria-label="${name}" ${dis}></button>`).join("")}
@@ -14933,6 +14936,36 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 :host([sky="day"]) .top { --text:#0b2545; --muted:rgba(11,37,69,.72); --card:rgba(255,255,255,.6); --line:rgba(255,255,255,.7); --line2:rgba(255,255,255,.9); }
 :host([sky]) .top .ttl small { color:var(--text); opacity:.85; }
 :host([sky]) .top .mtab, :host([sky]) .top .bell, :host([sky]) .top .hinfo { backdrop-filter:blur(8px); }
+/* Weihnachten: Tannengrün, Kerzenrot und Gold – Lichterkette in der Kopfzeile, leiser Schneefall im Hintergrund */
+:host([xmas][dark][own]) {
+  --text:#f7f1e3; --muted:#bccbb8; --bg:#0b1d15; --card:#12281e; --card2:#183427; --line:rgba(242,193,78,.16); --line2:rgba(242,193,78,.3);
+  --accent:#e0383e; --ink:#fff; --gold:#f2c14e; color-scheme:dark;
+  background-color:var(--bg);
+  background-image:
+    radial-gradient(2px 2px at 12% 18%, rgba(255,255,255,.55), transparent 60%), radial-gradient(1.5px 1.5px at 33% 72%, rgba(255,255,255,.45), transparent 60%),
+    radial-gradient(2.5px 2.5px at 58% 34%, rgba(255,255,255,.4), transparent 60%), radial-gradient(1.5px 1.5px at 81% 61%, rgba(255,255,255,.5), transparent 60%),
+    radial-gradient(2px 2px at 92% 9%, rgba(255,255,255,.45), transparent 60%), radial-gradient(1.5px 1.5px at 46% 92%, rgba(255,255,255,.4), transparent 60%),
+    radial-gradient(120% 60% at 50% 0%, rgba(224,56,62,.10), transparent 70%);
+  background-size:260px 260px, 310px 310px, 370px 370px, 290px 290px, 410px 410px, 340px 340px, 100% 100%;
+  background-attachment:fixed;
+  animation:xsnow 90s linear infinite;
+}
+@keyframes xsnow {
+  from { background-position:0 0, 0 0, 0 0, 0 0, 0 0, 0 0, 0 0; }
+  to { background-position:40px 1040px, -30px 1240px, 20px 1110px, -20px 1160px, 30px 1230px, -40px 1020px, 0 0; }
+}
+:host([xmas]) .top { background:linear-gradient(135deg, #7a1620 0%, #4a1a1c 45%, #123d2a 100%); border-bottom:none; padding-bottom:14px;
+  --text:#fff8ea; --muted:rgba(255,248,234,.78); --card:rgba(255,255,255,.12); --line:rgba(242,193,78,.35); }
+:host([xmas]) .top::after { content:""; position:absolute; left:0; right:0; bottom:2px; height:12px; pointer-events:none;
+  background:
+    radial-gradient(circle at 12px 7px, #ff4d4d 3.2px, transparent 4.2px), radial-gradient(circle at 36px 8px, #f2c14e 3.2px, transparent 4.2px),
+    radial-gradient(circle at 60px 7px, #4ade80 3.2px, transparent 4.2px), radial-gradient(circle at 84px 8px, #60a5fa 3.2px, transparent 4.2px),
+    radial-gradient(ellipse 50px 6px at 48px 0, transparent 4.6px, rgba(255,248,234,.35) 5px, transparent 6px);
+  background-size:96px 12px; background-repeat:repeat-x; filter:drop-shadow(0 0 3px rgba(255,220,140,.6)); animation:xtwinkle 2.4s ease-in-out infinite alternate; }
+@keyframes xtwinkle { from { opacity:.75; } to { opacity:1; } }
+:host([xmas]) .card { border-color:var(--line); }
+:host([xmas]) .bnav, :host([xmas]) .rail { background:color-mix(in srgb, #0b1d15 92%, #7a1620); }
+@media (prefers-reduced-motion: reduce) { :host([xmas][dark][own]), :host([xmas]) .top::after { animation:none; } }
 :host([bg="plain"]) { background-image:none !important; }
 :host([size="s"]) .top, :host([size="s"]) .app, :host([size="s"]) .bnav, :host([size="s"]) .sheet, :host([size="s"]) .toast { zoom:.9; }
 :host([size="l"]) .top, :host([size="l"]) .app, :host([size="l"]) .bnav, :host([size="l"]) .sheet, :host([size="l"]) .toast { zoom:1.15; }
