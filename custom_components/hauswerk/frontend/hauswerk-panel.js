@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.95.0";
+const VERSION = "0.96.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2275,12 +2275,12 @@ class HauswerkPanel extends HTMLElement {
     const items = (this._forecast(wid, "hourly")?.list || []).filter((x) => new Date(x.datetime) > now - 30 * 60000).slice(0, 12);
     if (RAIN.includes(this._hass.states[wid]?.state)) {
       const dry = items.find((x) => !RAIN.includes(x.condition) && (x.precipitation_probability ?? 0) < 50);
-      return dry ? `Regen bis etwa ${new Date(dry.datetime).toLocaleTimeString("de-DE", { hour: "2-digit" })} Uhr` : "Regen hält an";
+      return dry ? `Regen bis etwa ${new Date(dry.datetime).getHours()} Uhr` : "Regen hält an";
     }
     const wet = items.find((x) => RAIN.includes(x.condition) || (x.precipitation_probability ?? 0) >= 60);
     if (!wet) return null;
     const snow = /snow/.test(wet.condition);
-    return `ab ${new Date(wet.datetime).toLocaleTimeString("de-DE", { hour: "2-digit" })} Uhr ${snow ? "Schnee" : "Regen"}`;
+    return `ab ${new Date(wet.datetime).getHours()} Uhr ${snow ? "Schnee" : "Regen"}`;
   }
 
   // ------------------------------------------------------------ Lüften
@@ -2660,7 +2660,7 @@ class HauswerkPanel extends HTMLElement {
       <div class="sv-in" style="transform:translate(${dx}vw, ${dy}vh)">
         <div class="sv-time">${time}</div>
         <div class="sv-date">${esc(date)}</div>
-        ${w ? `<div class="sv-wx"><ha-icon icon="${w.icon}"></ha-icon><b>${fmt(w.temp)}°</b><span>${esc(w.label)}</span>${fcHtml}</div>` : ""}
+        ${w ? `<div class="sv-wx"><ha-icon icon="${w.icon}"></ha-icon><b>${fmt(w.temp)}°</b><span>${esc(this._wxSentence() || w.label)}</span></div>` : ""}
         ${mods.length ? `<div class="sv-mods">${mods.map(([m, x]) => `<div class="sv-mod"><span class="sv-logo">${MODULE_LOGOS[m] || ""}</span>${x.join("")}</div>`).join("")}</div>` : ""}
         ${urgentHtml}
         ${side.length ? `<div class="sv-side">${side.join("")}</div>` : ""}
@@ -2776,7 +2776,20 @@ class HauswerkPanel extends HTMLElement {
       <div class="ws-l">
         <div class="ws-time" data-wsclock>${now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</div>
         <div class="ws-date">${now.toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" })}</div>
-        ${w ? `<div class="ws-wx"><ha-icon icon="${w.icon}"></ha-icon><b>${fmt(w.temp)}°</b><span>${esc(w.label)}</span></div>` : ""}
+        ${w ? (() => {
+          // Wetter am Tablet: Satz, 5 Tage und was es fürs Haus heißt – Antippen öffnet die Details
+          const x = this._wxData();
+          const sent = this._wxSentence(x);
+          const days = (x?.daily || []).slice(0, 5);
+          const dn = (d) => { const dt = new Date(d); return dt.toDateString() === new Date().toDateString() ? "Heute" : dt.toLocaleDateString("de-DE", { weekday: "short" }); };
+          const house = this._wxHouse(x).filter((h) => h.icon !== "mdi:alert").slice(0, 2);
+          return `<button class="ws-wxb" data-action="pop-open" data-pop="wx" title="Wetter im Detail">
+            <div class="ws-wx"><ha-icon icon="${w.icon}"></ha-icon><b>${fmt(w.temp)}°</b><span>${esc(w.label)}</span><ha-icon class="wxchev" icon="mdi:chevron-right"></ha-icon></div>
+            ${sent ? `<div class="ws-wxs">${esc(sent)}</div>` : ""}
+            ${days.length ? `<div class="ws-days">${days.map((d) => `<span><small>${dn(d.datetime)}</small><ha-icon icon="${(WEATHER[d.condition] || ["mdi:weather-partly-cloudy"])[0]}"></ha-icon><b style="color:${tint(tempColor(d.temperature))}">${fmt(d.temperature, 0)}°</b><em>${d.templow != null ? `${fmt(d.templow, 0)}°` : ""}</em>${(d.precipitation_probability ?? 0) >= 40 || (d.precipitation ?? 0) >= 1 ? `<i>${d.precipitation_probability != null ? `${fmt(d.precipitation_probability, 0)} %` : `${fmt(d.precipitation, 1)} mm`}</i>` : "<i>&nbsp;</i>"}</span>`).join("")}</div>` : ""}
+            ${house.map((h) => `<div class="ws-wxh" style="--c:${h.c}"><ha-icon icon="${h.icon}"></ha-icon>${esc(h.text)}</div>`).join("")}
+          </button>`;
+        })() : ""}
         ${this._nowBox(warn, true) || `<div class="ws-ok"><ha-icon icon="mdi:check-circle-outline"></ha-icon>Alles in Ordnung</div>`}
         ${this._modesBar()}
         <button class="link tiny ws-sw" data-action="tablet-opt" data-k="tstart" data-v="widgets"><ha-icon icon="mdi:view-dashboard-edit-outline"></ha-icon>Widgets anzeigen</button>
@@ -3073,14 +3086,18 @@ class HauswerkPanel extends HTMLElement {
   _w_weather(w, z) {
     const wx = this._weather();
     if (!wx) return `<p class="muted small">Keine Wetter-Entität gefunden. Unter Einstellungen › Wetter auswählen.</p>`;
-    const head = `<div class="wwx"><ha-icon icon="${wx.icon}"></ha-icon><div><b>${fmt(wx.temp)} °C</b><span>${esc(wx.label)}</span></div></div>`;
+    // Antippen öffnet das Wetter im Detail (24 Stunden, 7 Tage, fürs Haus)
+    const head = `<button class="wwx wxopen" data-action="pop-open" data-pop="wx" title="Wetter im Detail"><ha-icon icon="${wx.icon}"></ha-icon><div><b>${fmt(wx.temp)} °C</b><span>${esc(wx.label)}</span></div><ha-icon class="wxchev" icon="mdi:chevron-right"></ha-icon></button>`;
     const rain = this._rainHint();
     const rainLine = rain ? `<div class="wline" style="--c:#3b82f6"><ha-icon icon="mdi:weather-pouring"></ha-icon>${esc(rain)}</div>` : "";
     if (z === "s") return head + rainLine;
     const extra = wx.extra ? `<p class="muted small" style="margin:8px 0 0">${wx.extra}</p>` : "";
-    if (z === "m") return head + rainLine + extra;
-    // groß: dazu die nächsten Stunden
-    return `<div class="wsplit"><div>${head}${rainLine}${extra}</div><div>${this._w_forecast({ mode: "hourly", entities: [] }, "s", true)}</div></div>`;
+    // Fürs Haus: eine Zeile, nur wenn es etwas gibt
+    const hs = this._wxHouse();
+    const house = hs.length ? `<div class="wline wxh" style="--c:${hs[0].c}"><ha-icon icon="${hs[0].icon}"></ha-icon>${esc(hs[0].text)}</div>` : "";
+    if (z === "m") return head + rainLine + extra + house;
+    // groß: dazu die nächsten Stunden (mit Regen)
+    return `<div class="wsplit"><div>${head}${rainLine}${extra}${house}</div><div>${this._w_forecast({ mode: "hourly", entities: [] }, "s", true)}</div></div>`;
   }
 
   _w_rooms(w, z) {
@@ -3365,6 +3382,7 @@ class HauswerkPanel extends HTMLElement {
         (msg) => {
           this._fc[key] = { list: msg.forecast || [] };
           if (this._tab === "start" && !this._busy) this._renderMain();
+          if (this._pop?.id === "wx") this._renderPop();
         },
         { type: "weather/subscribe_forecast", entity_id: entityId, forecast_type: type }
       );
@@ -3414,6 +3432,9 @@ class HauswerkPanel extends HTMLElement {
     };
     const pos = (t) => (hi > lo ? ((t - lo) / (hi - lo)) * 100 : 50);
     const detail = z === "l" && !embedded;
+    // „jetzt“ zeigt den gemessenen Wert (wie oben in der Kachel), nicht die Vorhersage dieser Stunde
+    const measured = this._weather()?.temp;
+    const nowT = (x, i) => (hourly && i === 0 && measured != null ? measured : x.temperature);
     return `
       ${hint ? `<div class="fchints">${hint}</div>` : ""}
       <div class="fc ${hourly ? "hourly" : "daily"} ${z === "s" || embedded ? "tight" : ""}">${items
@@ -3424,7 +3445,8 @@ class HauswerkPanel extends HTMLElement {
           <div class="fci" title="${esc(text)}">
             <small>${label(x, i)}</small>
             <ha-icon icon="${icon}"></ha-icon>
-            <b style="color:${tint(tempColor(x.temperature))}">${fmt(x.temperature, 0)}°</b>
+            <b style="color:${tint(tempColor(nowT(x, i)))}">${fmt(nowT(x, i), 0)}°</b>
+            ${embedded && hourly ? `<span class="fcrb" title="Regen ${rain != null ? `${fmt(rain, 0)} %` : x.precipitation ? `${fmt(x.precipitation, 1)} mm` : "–"}"><i style="height:${Math.min(100, rain ?? (x.precipitation ? x.precipitation * 40 : 0))}%"></i></span><small class="fcrp">${rain != null && rain >= 30 ? `${fmt(rain, 0)} %` : x.precipitation >= 0.2 ? `${fmt(x.precipitation, 1)}` : "&nbsp;"}</small>` : ""}
             ${!hourly && x.templow != null ? `
               ${detail ? `<span class="fcr"><i style="bottom:${pos(x.templow)}%; height:${Math.max(6, pos(x.temperature) - pos(x.templow))}%"></i></span>` : ""}
               <em>${fmt(x.templow, 0)}°</em>` : ""}
@@ -3678,6 +3700,172 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Wetter aus der gewählten weather-Entität, sonst der ersten gefundenen. */
+  // ------------------------------------------------------------ Wetter: Satz, fürs Haus, Details
+  /** Wetterdaten: Entität, aktuelle Werte, Stunden (24 h ab jetzt) und Tage (7). */
+  _wxData() {
+    const id = this._data.settings.weather_entity || Object.keys(this._hass.states).find((e) => e.startsWith("weather."));
+    const st = id && this._hass.states[id];
+    if (!st) return null;
+    const feat = Number(st.attributes.supported_features || 0);
+    const now = Date.now();
+    const hourly = feat & 2 ? (this._forecast(id, "hourly")?.list || []).filter((x) => new Date(x.datetime) > now - 45 * 60000).slice(0, 25) : [];
+    const daily = feat & 1 ? (this._forecast(id, "daily")?.list || []).slice(0, 7) : [];
+    return { id, st, a: st.attributes || {}, hourly, daily, w: this._weather() };
+  }
+
+  /** Tiefstwert der kommenden Nacht (18–8 Uhr) aus der Stunden-Vorhersage. */
+  _wxNight(x) {
+    const hrs = x.hourly.filter((h) => { const d = new Date(h.datetime); const hh = d.getHours(); return (hh >= 18 || hh <= 8) && d - Date.now() < 20 * 3600e3; });
+    const t = hrs.map((h) => h.temperature).filter((v) => v != null);
+    return t.length ? Math.min(...t) : null;
+  }
+
+  /** Ein Satz zum Wetter: z. B. „Heute Nacht Frost bis −3 °C, ab 14 Uhr Regen, morgen sonnig bis 4 °C.“ */
+  _wxSentence(x = this._wxData()) {
+    if (!x) return "";
+    const parts = [];
+    const now = new Date();
+    const today = x.hourly.filter((h) => new Date(h.datetime).toDateString() === now.toDateString()).map((h) => h.temperature).filter((v) => v != null);
+    if (now.getHours() < 15 && today.length) parts.push(`heute bis ${fmt(Math.max(...today), 0)} °C`);
+    const rain = this._rainHint();
+    if (rain) parts.push(rain);
+    const night = this._wxNight(x);
+    if (night != null) parts.push(night <= 0 ? `heute Nacht Frost bis ${fmt(night, 0)} °C` : `heute Nacht bis ${fmt(night, 0)} °C`);
+    const tm = new Date(now); tm.setDate(tm.getDate() + 1);
+    const d = x.daily.find((f) => new Date(f.datetime).toDateString() === tm.toDateString());
+    if (d) parts.push(`morgen ${(WEATHER[d.condition] || [null, d.condition || ""])[1].toLowerCase()}${d.temperature != null ? ` bis ${fmt(d.temperature, 0)} °C` : ""}`);
+    const s = parts.slice(0, 3).join(", ");
+    return s ? `${s[0].toUpperCase()}${s.slice(1)}.` : "";
+  }
+
+  /** Was das Wetter fürs Haus bedeutet – aus den Modulen, wichtigstes zuerst: [{icon, c, text}]. */
+  _wxHouse(x = this._wxData(), all = false) {
+    if (!x) return [];
+    const out = [];
+    const set = this._data.settings;
+    const hm = (d) => String(new Date(d).getHours()).padStart(2, "0");
+    for (const w of this._status?.wachwerk?.warnings || []) out.push({ icon: "mdi:alert", c: "#f59e0b", text: w.title });
+    // Sturm: Böen der nächsten 24 Stunden gegen die Sturmgrenze (Rollwerk fährt dann hoch)
+    const storm = Number(set.storm_kmh ?? 70);
+    const gust = x.hourly.map((h) => ({ v: h.wind_gust_speed ?? h.wind_speed, at: h.datetime })).filter((g) => g.v != null).reduce((a, b) => (!a || b.v > a.v ? b : a), null);
+    if (gust && gust.v >= storm * 0.8) out.push({ icon: "mdi:weather-windy", c: gust.v >= storm ? "#ef4444" : "#f59e0b",
+      text: `Böen bis ${fmt(gust.v, 0)} km/h um ${hm(gust.at)} Uhr${gust.v >= storm ? " – Rollläden fahren hoch" : " – nahe der Sturmgrenze"}` });
+    // Frost heute Nacht: Mäher bleibt in der Station
+    const night = this._wxNight(x);
+    const mower = this._status?.beetwerk?.entities?.mower;
+    if (night != null && night <= 0) out.push({ icon: "mdi:snowflake", c: "#38bdf8", text: `Frost heute Nacht bis ${fmt(night, 0)} °C${mower ? " – Mäher bleibt in der Station" : ""}` });
+    // Regen und offene Fenster
+    const rain = this._rainHint();
+    const open = this._openWindows();
+    if (rain && open.length) out.push({ icon: "mdi:weather-pouring", c: "#3b82f6", text: `${rain[0].toUpperCase()}${rain.slice(1)} – Fenster offen: ${[...new Set(open.map((o) => o.room.name))].join(", ")}` });
+    // beste Lüftzeit
+    const vp = this._status?.vent_plan?.times?.[0];
+    if (vp) out.push({ icon: "mdi:weather-windy-variant", c: "#22d3ee", text: `Beste Lüftzeit ${hm(vp.at)} Uhr (${fmt(vp.temp, 0)} °C außen, ${vp.minutes} Min.)` });
+    if (all) {
+      const lows = x.daily.map((d) => ({ t: d.templow ?? d.temperature, at: d.datetime })).filter((d) => d.t != null);
+      const cold = lows.length ? lows.reduce((a, b) => (b.t < a.t ? b : a)) : null;
+      if (cold) out.push({ icon: "mdi:radiator", c: "#f97316", text: `Kälteste Nacht der Woche: ${new Date(cold.at).toLocaleDateString("de-DE", { weekday: "long" })} ${fmt(cold.t, 0)} °C` });
+      const sp = this._kwSolarPlan?.(this._kwForecast?.(), null);
+      if (sp) out.push({ icon: "mdi:solar-power-variant", c: "#eab308", text: `Solar ${sp.off ? "morgen" : "heute noch"} ca. ${fmt(sp.kwh, 1)} kWh, Spitze um ${hm(sp.peak.at)} Uhr` });
+      const plan = this._status?.beetwerk?.plan;
+      const next = (plan?.days || []).find((d) => (d.windows || []).length && new Date(`${d.date}T00:00`) >= new Date(new Date().toDateString()));
+      const mm = (m) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+      if (next) out.push({ icon: "mdi:robot-mower-outline", c: "#16a34a", text: `Mähen: ${new Date(`${next.date}T12:00`).toLocaleDateString("de-DE", { weekday: "long" })} ${next.windows.map(([a, b]) => `${mm(a)}–${mm(b)}`).join(", ")} Uhr` });
+      else if (mower && this._status?.beetwerk?.pause?.why) out.push({ icon: "mdi:robot-mower-outline", c: "#16a34a", text: `Mäher pausiert: ${this._status.beetwerk.pause.why}` });
+    }
+    return out;
+  }
+
+  /** 24 Stunden als Kurve: Temperatur, 0-°-Linie, Regen als Balken, Nacht grau. */
+  _wxChart(x) {
+    const hs = x.hourly.slice(0, 25);
+    if (hs.length < 4) return "";
+    const W = 640, H = 210, X0 = 30, X1 = 630, Y0 = 150, Y1 = 22, R0 = 196, RH = 34;
+    const t0 = new Date(hs[0].datetime).getTime(), t1 = new Date(hs[hs.length - 1].datetime).getTime();
+    const x_ = (t) => X0 + ((t - t0) / Math.max(1, t1 - t0)) * (X1 - X0);
+    const temps = hs.map((h) => h.temperature).filter((v) => v != null);
+    const lo = Math.min(...temps, 0) - 1, hi = Math.max(...temps) + 1;
+    const y_ = (v) => Y0 - ((v - lo) / (hi - lo)) * (Y0 - Y1);
+    // Nacht aus sun.sun
+    const sun = this._hass.states[this._data.settings.sun_entity || "sun.sun"]?.attributes || {};
+    const ns = sun.next_setting ? Date.parse(sun.next_setting) : null, nr = sun.next_rising ? Date.parse(sun.next_rising) : null;
+    const nights = ns && nr ? (ns < nr ? [[ns, nr]] : [[t0, nr], [ns, ns + 15 * 3600e3]]) : [];
+    const shade = nights.map(([a, b]) => [Math.max(a, t0), Math.min(b, t1)]).filter(([a, b]) => b > a)
+      .map(([a, b]) => `<rect x="${x_(a)}" y="${Y1 - 12}" width="${x_(b) - x_(a)}" height="${R0 - Y1 + 12}" class="wxn"/>`).join("");
+    const pts = hs.filter((h) => h.temperature != null).map((h) => `${x_(new Date(h.datetime).getTime()).toFixed(1)},${y_(h.temperature).toFixed(1)}`);
+    const area = `M${pts[0].split(",")[0]},${Y0} L${pts.join(" L")} L${pts[pts.length - 1].split(",")[0]},${Y0} Z`;
+    const bw = Math.max(6, (X1 - X0) / hs.length - 4);
+    const rain = hs.map((h) => {
+      const p = h.precipitation_probability ?? (h.precipitation != null ? Math.min(100, h.precipitation * 40) : null);
+      if (!p) return "";
+      const hh = (p / 100) * RH;
+      return `<rect x="${x_(new Date(h.datetime).getTime()) - bw / 2}" y="${R0 - hh}" width="${bw}" height="${hh}" rx="2" class="wxr" opacity="${0.35 + p / 160}"/>`;
+    }).join("");
+    const lbl = hs.map((h, i) => (i % 3 ? "" : `<text x="${x_(new Date(h.datetime).getTime())}" y="${H - 0}" class="wxs c">${i === 0 ? "jetzt" : `${new Date(h.datetime).getHours()}`}</text>`)).join("");
+    const iMax = hs.reduce((a, h, i) => (h.temperature != null && (a < 0 || h.temperature > hs[a].temperature) ? i : a), -1);
+    const iMin = hs.reduce((a, h, i) => (h.temperature != null && (a < 0 || h.temperature < hs[a].temperature) ? i : a), -1);
+    const mark = (i, below) => { const h = hs[i]; const X = x_(new Date(h.datetime).getTime()); const Y = y_(h.temperature);
+      return `<circle cx="${X}" cy="${Y}" r="4" fill="${tint(tempColor(h.temperature))}"/><text x="${X}" y="${below ? Y + 20 : Y - 9}" class="wxv c">${fmt(h.temperature, 0)}°</text>`; };
+    return `<div class="wxchart"><svg viewBox="0 0 ${W} ${H + 4}" role="img" aria-label="Temperatur und Regen der nächsten 24 Stunden">
+      ${shade}
+      ${lo < 0 && hi > 0 ? `<line x1="${X0}" x2="${X1}" y1="${y_(0)}" y2="${y_(0)}" class="wx0"/><text x="${X0 - 4}" y="${y_(0) + 4}" class="wxs e">0°</text>` : ""}
+      <path d="${area}" class="wxa"/><path d="M${pts.join(" L")}" class="wxl"/>
+      ${rain}<line x1="${X0}" x2="${X1}" y1="${R0}" y2="${R0}" class="wxb"/>
+      ${iMax >= 0 ? mark(iMax, false) : ""}${iMin >= 0 && iMin !== iMax ? mark(iMin, true) : ""}
+      ${lbl}
+    </svg></div>`;
+  }
+
+  /** Wetter im Detail (Fenster): jetzt, Satz, Warnungen, 24 Stunden, 7 Tage, fürs Haus. */
+  _wxDetail() {
+    const x = this._wxData();
+    if (!x || !x.w) return `<p class="muted">Keine Wetter-Entität. Unter Einstellungen › Wetter auswählen.</p>`;
+    const { a, w } = x;
+    const unit = a.wind_speed_unit || "km/h";
+    const sun = this._hass.states[this._data.settings.sun_entity || "sun.sun"]?.attributes || {};
+    const hm = (d) => new Date(d).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+    const gustSensor = this._data.settings.gust_sensor ? Number(this._hass.states[this._data.settings.gust_sensor]?.state) : null;
+    const gust = a.wind_gust_speed ?? (Number.isFinite(gustSensor) ? gustSensor : null);
+    const facts = [
+      a.apparent_temperature != null ? ["mdi:thermometer", "gefühlt", `${fmt(a.apparent_temperature)} °C`] : null,
+      a.wind_speed != null ? ["mdi:weather-windy", "Wind", `${fmt(a.wind_speed, 0)}${gust != null ? ` · Böen ${fmt(gust, 0)}` : ""} ${unit}`] : null,
+      a.humidity != null ? ["mdi:water-percent", "Feuchte", `${fmt(a.humidity, 0)} %`] : null,
+      a.pressure != null ? ["mdi:gauge", "Luftdruck", `${fmt(a.pressure, 0)} ${a.pressure_unit || "hPa"}`] : null,
+      a.uv_index != null ? ["mdi:sun-wireless-outline", "UV", fmt(a.uv_index, 0)] : null,
+      sun.next_rising ? ["mdi:weather-sunset-up", "Sonne", `${hm(sun.next_rising)} – ${hm(sun.next_setting)}`] : null,
+    ].filter(Boolean);
+    const sentence = this._wxSentence(x);
+    const warn = (this._status?.wachwerk?.warnings || []).map((wn) => `<div class="wxwarn"><ha-icon icon="mdi:alert"></ha-icon><span><b>${esc(wn.title)}</b>${wn.text ? `<small>${esc(wn.text)}</small>` : ""}</span></div>`).join("");
+    const days = x.daily;
+    const all = days.flatMap((d) => [d.templow, d.temperature]).filter((v) => v != null);
+    const dlo = Math.min(...all), dhi = Math.max(...all);
+    const pos = (t) => (dhi > dlo ? ((t - dlo) / (dhi - dlo)) * 100 : 50);
+    const dayName = (d) => { const dt = new Date(d); const td = new Date(); if (dt.toDateString() === td.toDateString()) return "Heute"; td.setDate(td.getDate() + 1); return dt.toDateString() === td.toDateString() ? "Morgen" : dt.toLocaleDateString("de-DE", { weekday: "short" }); };
+    const week = days.length ? `<div class="wxdays">${days.map((d) => {
+      const [icon, text] = WEATHER[d.condition] || ["mdi:weather-partly-cloudy", d.condition || ""];
+      const lo = d.templow ?? d.temperature, hi = d.temperature;
+      const rain = [d.precipitation ? `${fmt(d.precipitation, 1)} mm` : "", d.precipitation_probability ? `${fmt(d.precipitation_probability, 0)} %` : ""].filter(Boolean).join(" · ");
+      return `<div class="wxd" title="${esc(text)}"><b>${dayName(d.datetime)}</b><ha-icon icon="${icon}"></ha-icon>
+        <em style="color:${tint(tempColor(lo))}">${fmt(lo, 0)}°</em>
+        <span class="wxrng"><i style="left:${pos(lo)}%; width:${Math.max(4, pos(hi) - pos(lo))}%; background:linear-gradient(90deg, ${tint(tempColor(lo))}, ${tint(tempColor(hi))})"></i></span>
+        <em style="color:${tint(tempColor(hi))}">${fmt(hi, 0)}°</em>
+        <small class="${(d.precipitation_probability ?? 0) >= 50 || (d.precipitation ?? 0) >= 2 ? "wet" : ""}">${rain || "trocken"}</small>
+        <small>${d.wind_speed != null ? `${fmt(d.wind_speed, 0)} ${unit}` : ""}</small></div>`;
+    }).join("")}</div>` : "";
+    const house = this._wxHouse(x, true).filter((h) => h.icon !== "mdi:alert");
+    return `<div class="wxdet">
+      <div class="wxnow"><ha-icon icon="${w.icon}"></ha-icon><div><b>${fmt(w.temp)} °C</b><span>${esc(w.label)}</span></div></div>
+      ${sentence ? `<p class="wxsent">${esc(sentence)}</p>` : ""}
+      ${facts.length ? `<div class="wxfacts">${facts.map(([i, l, v]) => `<span><ha-icon icon="${i}"></ha-icon><small>${l}</small><b>${esc(v)}</b></span>`).join("")}</div>` : ""}
+      ${warn}
+      <div class="wxcols">
+        ${x.hourly.length ? `<div class="wxc"><div class="lbl">Nächste 24 Stunden</div>${this._wxChart(x)}</div>` : ""}
+        ${week ? `<div class="wxc wxc-d"><div class="lbl">7 Tage</div>${week}</div>` : ""}
+        ${house.length ? `<div class="wxc wxc-h"><div class="lbl">Fürs Haus</div><div class="wxhouse">${house.map((h) => `<div style="--c:${h.c}"><ha-icon icon="${h.icon}"></ha-icon><span>${esc(h.text)}</span></div>`).join("")}</div></div>` : ""}
+      </div>
+    </div>`;
+  }
+
   _weather() {
     const id = this._data.settings.weather_entity || Object.keys(this._hass.states).find((e) => e.startsWith("weather."));
     const w = id && this._hass.states[id];
@@ -9375,7 +9563,7 @@ class HauswerkPanel extends HTMLElement {
        ${this._admin ? `<button class="primary" data-action="pop-save"><ha-icon icon="mdi:content-save-outline"></ha-icon>Speichern</button>` : ""}`;
     host.innerHTML = `
       <div class="backdrop" data-action="pop-close"></div>
-      <div class="sheet pop" role="dialog" aria-label="${esc(def.title)}">
+      <div class="sheet pop ${def.wide ? "wide" : ""}" role="dialog" aria-label="${esc(def.title)}">
         <div class="sheet-head">
           <span class="sr-ic big" style="--c:${def.c}"><ha-icon icon="${def.icon}"></ha-icon></span>
           <div class="grow"><h2>${def.title}</h2>${def.sub ? `<div class="muted">${def.sub}</div>` : ""}</div>
@@ -9458,6 +9646,11 @@ class HauswerkPanel extends HTMLElement {
 
   _popDef(id) {
     if (id === "agenda") return this._agendaPop();
+    if (id === "wx") {
+      const w = this._weather();
+      return { icon: w?.icon || "mdi:weather-partly-cloudy", c: "#f59e0b", title: "Wetter", sub: esc(this._wxData()?.a?.friendly_name || ""), wide: true,
+        gear: `data-action="settings-go" data-sub="weather"`, body: this._wxDetail(), foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+    }
     if (id === "rwiz") return this._wizPop();
     if (id === "cwiz") {
       if (!this._pop.draft.covers) Object.assign(this._pop.draft, this._cwizDraft());
@@ -13919,6 +14112,57 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px col
 .btable td, .btable th { text-align:right; }
 .btable td:first-child, .btable th:first-child { text-align:left; }
 @media (prefers-reduced-motion: reduce) { .bgraph .bpipe.flow, .bgraph .bflame { animation:none; } }
+.wxopen { all:unset; cursor:pointer; box-sizing:border-box; width:100%; }
+.wxopen .wxchev { margin-left:auto; color:var(--muted); --mdc-icon-size:22px; }
+.wxh { margin-top:8px; }
+.fcrb { display:block; width:8px; height:22px; margin:4px auto 0; border-radius:4px; background:color-mix(in srgb, #3b82f6 14%, transparent); position:relative; overflow:hidden; }
+.fcrb i { position:absolute; left:0; right:0; bottom:0; background:#3b82f6; border-radius:4px; }
+.fcrp { font-size:10.5px !important; color:#60a5fa !important; min-height:13px; }
+.sheet.pop.wide { width:min(980px, 96vw); max-width:min(980px, 96vw); }
+.wxdet { display:flex; flex-direction:column; gap:10px; }
+.wxnow { display:flex; align-items:center; gap:16px; }
+.wxnow > ha-icon { --mdc-icon-size:64px; color:#f59e0b; }
+.wxnow b { font-size:40px; font-weight:700; display:block; line-height:1.05; }
+.wxnow span { color:var(--muted); font-size:16px; }
+.wxsent { margin:0; font-size:17px; font-weight:600; line-height:1.35; }
+.wxfacts { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:8px; }
+.wxfacts span { display:grid; grid-template-columns:auto 1fr; column-gap:8px; padding:8px 10px; border-radius:12px; background:var(--card2); }
+.wxfacts ha-icon { grid-row:span 2; align-self:center; color:var(--muted); --mdc-icon-size:22px; }
+.wxfacts small { color:var(--muted); font-size:12px; }
+.wxfacts b { font-size:15px; }
+.wxwarn { display:flex; gap:10px; padding:10px 12px; border-radius:12px; background:color-mix(in srgb, #f59e0b 16%, transparent); border:1px solid color-mix(in srgb, #f59e0b 45%, transparent); }
+.wxwarn ha-icon { color:#f59e0b; flex:none; }
+.wxwarn span { display:flex; flex-direction:column; } .wxwarn small { color:var(--muted); }
+.wxchart svg { width:100%; height:auto; display:block; }
+.wxchart .wxn { fill:color-mix(in srgb, var(--text) 6%, transparent); }
+.wxchart .wx0 { stroke:#38bdf8; stroke-width:1.5; stroke-dasharray:5 5; opacity:.8; }
+.wxchart .wxa { fill:color-mix(in srgb, #f59e0b 14%, transparent); }
+.wxchart .wxl { fill:none; stroke:#f59e0b; stroke-width:3.5; stroke-linejoin:round; stroke-linecap:round; }
+.wxchart .wxr { fill:#3b82f6; }
+.wxchart .wxb { stroke:var(--line); }
+.wxchart text { fill:var(--text); font-family:inherit; }
+.wxchart .wxs { font-size:17px; fill:var(--muted); } .wxchart .wxv { font-size:20px; font-weight:700; }
+.wxchart .c { text-anchor:middle; } .wxchart .e { text-anchor:end; }
+.wxdays { display:flex; flex-direction:column; gap:4px; }
+.wxd { display:grid; grid-template-columns:62px 28px 38px minmax(70px, 1fr) 38px minmax(64px, auto) minmax(52px, auto); align-items:center; gap:8px; padding:6px 4px; border-bottom:1px solid var(--line); font-size:14px; }
+.wxd:last-child { border-bottom:none; }
+.wxd ha-icon { --mdc-icon-size:24px; color:#f59e0b; }
+.wxd em { font-style:normal; font-weight:700; text-align:right; }
+.wxd em:nth-of-type(2) { text-align:left; }
+.wxd small { color:var(--muted); font-size:12.5px; text-align:right; }
+.wxd small.wet { color:#60a5fa; font-weight:600; }
+.wxrng { position:relative; height:8px; min-width:70px; border-radius:99px; background:var(--card2); }
+.wxrng i { position:absolute; top:0; bottom:0; border-radius:99px; }
+@media (max-width:600px) { .wxd { grid-template-columns:52px 26px 32px 1fr 32px; } .wxd small { grid-column:2 / -1; text-align:left; } .wxd small:last-child { display:none; } }
+.wxhouse { display:flex; flex-direction:column; gap:6px; }
+.wxhouse div { display:flex; gap:10px; align-items:center; padding:9px 12px; border-radius:12px; background:color-mix(in srgb, var(--c) 10%, transparent); font-size:14px; }
+.wxhouse ha-icon { color:var(--c); flex:none; --mdc-icon-size:22px; }
+.wxcols { display:flex; flex-direction:column; gap:10px; }
+@media (min-width:900px) { .sheet.pop.wide .wxdet { display:grid; grid-template-columns:auto 1fr; gap:10px 24px; align-items:center; } .sheet.pop.wide .wxdet > * { grid-column:1 / -1; }
+  .sheet.pop.wide .wxdet > .wxnow, .sheet.pop.wide .wxdet > .wxsent { grid-column:auto; }
+  .sheet.pop.wide .wxcols { display:grid; grid-template-columns:1.25fr 1fr; gap:10px 24px; align-items:start; }
+  .sheet.pop.wide .wxc-d { grid-column:2; grid-row:1 / span 2; }
+  .sheet.pop.wide .wxchart svg { max-height:300px; } }
 .rp-todo { display:flex; gap:8px; align-items:flex-start; margin:12px 0 0; padding:10px 12px; border-radius:12px; background:color-mix(in srgb, var(--c) 10%, transparent); font-size:14px; }
 .rp-todo ha-icon { color:var(--c); --mdc-icon-size:20px; flex:none; }
 .rp-bars { display:flex; gap:4px; align-items:flex-end; height:110px; margin:12px 0 4px; }
@@ -15167,6 +15411,14 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .ws-time { font-size:96px; font-weight:200; line-height:.95; letter-spacing:-.03em; font-variant-numeric:tabular-nums; }
 .ws-date { font-size:22px; font-weight:500; color:var(--muted); }
 .ws-wx { display:flex; align-items:center; gap:10px; font-size:20px; } .ws-wx ha-icon { --mdc-icon-size:40px; } .ws-wx b { font-size:34px; font-weight:400; }
+.ws-wxb { all:unset; cursor:pointer; display:flex; flex-direction:column; gap:8px; box-sizing:border-box; width:100%; }
+.ws-wx .wxchev { --mdc-icon-size:26px; color:var(--muted); margin-left:auto; }
+.ws-wxs { font-size:17px; line-height:1.35; color:var(--text); }
+.ws-days { display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; margin-top:2px; }
+.ws-days span { display:flex; flex-direction:column; align-items:center; gap:2px; padding:8px 4px; border-radius:14px; background:color-mix(in srgb, var(--text) 6%, transparent); }
+.ws-days small { font-size:13px; color:var(--muted); } .ws-days ha-icon { --mdc-icon-size:28px; color:#f59e0b; }
+.ws-days b { font-size:18px; } .ws-days em { font-style:normal; font-size:13px; color:var(--muted); } .ws-days i { font-style:normal; font-size:12px; color:#60a5fa; min-height:14px; }
+.ws-wxh { display:flex; align-items:center; gap:8px; font-size:15px; } .ws-wxh ha-icon { color:var(--c); --mdc-icon-size:20px; }
 .ws-l .now-box { margin:6px 0 0; flex:1; min-height:0; overflow:hidden; }
 .ws-l .now-t b { font-size:16px; } .ws-l .now-t small { font-size:13px; }
 .ws-ok { display:flex; align-items:center; gap:8px; font-size:18px; color:#22c55e; margin-top:8px; } .ws-ok ha-icon { --mdc-icon-size:26px; }

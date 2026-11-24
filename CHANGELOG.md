@@ -2,6 +2,12 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.96.0 – 2026-11-24
+- Wetter: Antippen der Wetterkachel öffnet Details – jetzt (gefühlt, Wind/Böen, Feuchte, Sonne), Satz zum Tag, amtliche Warnungen, 24-Stunden-Kurve mit 0°-Linie, Regen und Nacht, 7 Tage mit Spannbalken, Regen und Wind, „Fürs Haus“ (Böen, Frost/Mäher, Regen bei offenen Fenstern, Lüften, kälteste Nacht, Sonne, Mähen).
+- Handy-Kachel: Regenbalken mit Wahrscheinlichkeit je Stunde und eine „Fürs Haus“-Zeile.
+- Tablet: Wetter auf der Startseite mit Satz, 5 Tagen und Hinweisen; Bildschirmschoner zeigt den Satz.
+- Fix: „jetzt“ zeigt den gemessenen Wert statt der Vorhersage; „20 Uhr Uhr“ behoben.
+
 ## 0.95.0 – 2026-11-24
 
 ### Neu (Benachrichtigungen)

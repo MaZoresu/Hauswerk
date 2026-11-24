@@ -2292,3 +2292,21 @@ def test_weihnachten_design(panel):
     assert saved["look_theme"] == "xmas"
     assert p.js(f"{EL}.hasAttribute('xmas') && {EL}.hasAttribute('dark')")
     p.js(f"{EL}._closePop()")
+
+
+def test_wetter_details(panel):
+    """Wetter: Kachel antippen öffnet die Details – Satz, 24 Stunden mit Regen, 7 Tage, fürs Haus; „jetzt“ = gemessener Wert."""
+    p = panel
+    p.view("start")
+    p.wait(800)
+    p.click(".wxopen")
+    p.wait(600)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    for w in ("Nächste 24 Stunden", "7 Tage", "Fürs Haus", "heute Nacht Frost", "Böen bis 62 km/h", "Mähen" if False else "Kälteste Nacht"):
+        assert w in txt, (w, txt)
+    assert p.has("#pop .wxchart svg .wxl") and p.js(f"{EL}.shadowRoot.querySelectorAll('#pop .wxd').length") == 7
+    assert " Uhr Uhr" not in txt
+    p.js(f"{EL}._closePop()")
+    # groß: Regenbalken je Stunde, „jetzt“ mit dem gemessenen Wert
+    html = p.js(f"{EL}._w_forecast({{ mode: 'hourly', entities: [] }}, 's', true)")
+    assert "fcrb" in html and f">{p.js(f'Math.round({EL}._weather().temp)')}°<" in html
