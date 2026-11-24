@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.94.1";
+const VERSION = "0.95.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -8442,7 +8442,9 @@ class HauswerkPanel extends HTMLElement {
     // ---------- Reiter „Anlässe“
     const preview = (x, chs) => {
       const voice = voiceOf(chs);
-      return `<div class="nk-prev"><div class="nk-phone"><ha-icon icon="mdi:home-automation"></ha-icon><span class="grow"><b>${esc(p.notify_emoji !== false ? nkEmoji(x.ex[0], x.k) : x.ex[0])}</b><small>${esc(x.ex[1])}</small>${NK_BTNS[x.k] ? `<span class="nk-btns">${NK_BTNS[x.k].map((b) => `<i>${esc(b)}</i>`).join("")}</span>` : ""}</span><em>jetzt</em></div>
+      const lg0 = (NK_GROUPS[x.g] || [])[1] || "";
+      const lg = lg0.startsWith("logo:") ? lg0 : x.g === "Lüften" ? "logo:heizen" : null;
+      return `<div class="nk-prev"><div class="nk-phone">${p.notify_icons !== false && lg ? `<span class="nk-logo">${modIcon(lg)}</span>` : `<ha-icon icon="mdi:home-automation"></ha-icon>`}<span class="grow"><b>${esc(p.notify_emoji !== false ? nkEmoji(x.ex[0], x.k) : x.ex[0])}</b><small>${esc(x.ex[1])}</small>${NK_BTNS[x.k] ? `<span class="nk-btns">${NK_BTNS[x.k].map((b) => `<i>${esc(b)}</i>`).join("")}</span>` : ""}</span><em>jetzt</em></div>
         ${this._admin && chs.length ? `<div class="nk-pa">
           <button class="secondary small" data-action="nk-try" data-k="${x.k}" ${dis}><ha-icon icon="mdi:send-outline"></ha-icon>So senden</button>
           ${voice.length ? `<button class="secondary small" data-action="nk-try" data-k="${x.k}" data-voice="1" ${dis}><ha-icon icon="mdi:account-voice"></ha-icon>Probehören</button>` : ""}</div>` : ""}</div>`;
@@ -8536,6 +8538,7 @@ class HauswerkPanel extends HTMLElement {
         ${this._admin ? `<button class="secondary small" data-action="nk-add-open"><ha-icon icon="mdi:plus"></ha-icon>Kanal hinzufügen</button>` : ""}</div>
       ${failing.length ? `<div class="note warn"><ha-icon icon="mdi:alert-outline"></ha-icon><span class="grow">Nicht zugestellt: ${failing.map((c) => esc(chInfo(c).label)).join(", ")}</span>${this._admin ? `<button class="secondary small" data-action="ch-test1" data-ch="${esc(failing.join(","))}">Testen</button>` : ""}</div>` : ""}
       ${used.length ? `<div class="nk-cards">${used.map(card).join("")}</div>` : `<p class="muted">Noch kein Kanal gewählt – unten hinzufügen.</p>`}
+      <div class="wxrows">${this._setRow("nico", "Modul-Logo in Benachrichtigungen", "z. B. das Wachwerk-Logo bei „Niemand zu Hause – noch offen“", sw("notify_icons"), "Zeigt das Logo des Moduls, aus dem die Meldung kommt: in der Mitteilung in Home Assistant vor dem Text, in der App auf dem iPhone als kleines Bild rechts (nicht, wenn schon ein Kamerabild dabei ist), auf Android als großes Symbol und das Modul-Symbol in der Statusleiste.")}</div>
       <div class="wxrows">${this._setRow("nemo", "Emojis in Benachrichtigungen", "dezent eins vor dem Titel, z. B. 🪟 🤖 ✅", sw("notify_emoji"), "Ein passendes Emoji vor dem Titel macht Meldungen auf einen Blick erkennbar – 🪟 Fenster, ❄️ Frost, 🪫 Batterie, 📡 nicht erreichbar, 🤖 Mähroboter, 🧺 Waschmaschine fertig … Ansagen über Lautsprecher bleiben ohne.")}</div>
       ${anyVoice ? `<div class="wxrows">${this._setRow("nva", "Ansagen nur, wenn jemand zu Hause ist", "sonst nur Wichtiges", sw("notify_voice_away"), "Ist niemand zu Hause (Hauswerk › Anwesenheit), sagt Hauswerk nichts an – außer bei „Wichtig“. Ruhezeit gilt für Ansagen immer.")}</div>` : ""}
       <section class="nk-addsec ${addOpen ? "open" : ""}" id="nk-add">
@@ -15410,6 +15413,8 @@ button.br-l:hover { background:color-mix(in srgb, var(--text) 6%, transparent); 
 .nk-chev { color:var(--muted); --mdc-icon-size:20px; }
 .nk-body { padding:0 12px 12px; display:flex; flex-direction:column; gap:8px; }
 .nk-prev { display:flex; flex-direction:column; gap:6px; }
+.nk-logo { width:32px; height:32px; flex:none; display:block; }
+.nk-logo svg { width:100%; height:100%; display:block; }
 .nk-btns { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px; }
 .nk-btns i { font-style:normal; font-size:12px; font-weight:600; padding:3px 10px; border-radius:99px; background:color-mix(in srgb, var(--accent, #0ea5e9) 14%, transparent); color:var(--text); }
 .nk-phone { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:16px; background:var(--card2); box-shadow:0 1px 3px rgba(0,0,0,.12); max-width:420px; }

@@ -23,6 +23,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from .const import STATIC_URL
 from .const import (
     CALENDAR_REFRESH,
     FORECAST_REFRESH,
@@ -82,6 +83,20 @@ async def async_calendar_events(hass: HomeAssistant, entity_id: str, start, end)
     )
     return list(((response or {}).get(entity_id) or {}).get("events") or [])
 
+
+
+# Benachrichtigung → Modul (für das Logo in der Mitteilung)
+KIND_MODULE = {
+    "window": "heizwerk", "offline": "heizwerk", "frost": "heizwerk", "battery": "heizwerk", "cold": "heizwerk", "vent": "heizwerk",
+    "vent_done": "heizwerk", "storm": "rollwerk", "cover": "rollwerk", "light_away": "lichtwerk", "light_offline": "lichtwerk",
+    "mower": "beetwerk", "mower_guard": "beetwerk", "mower_care": "beetwerk", "smoke": "wachwerk", "water": "wachwerk",
+    "warn": "wachwerk", "door": "wachwerk", "leave": "wachwerk", "bell": "wachwerk", "appliance": "kraftwerk",
+    "maint": "hauswerk", "weekly": "hauswerk", "waste": "hauswerk",
+}
+MODULE_NAMES = {"heizwerk": "Heizwerk", "rollwerk": "Rollwerk", "kraftwerk": "Kraftwerk", "lichtwerk": "Lichtwerk",
+                "beetwerk": "Beetwerk", "wachwerk": "Wachwerk", "hauswerk": "Hauswerk"}
+MODULE_MDI = {"heizwerk": "mdi:radiator", "rollwerk": "mdi:window-shutter", "kraftwerk": "mdi:lightning-bolt",
+              "lichtwerk": "mdi:lightbulb", "beetwerk": "mdi:sprout", "wachwerk": "mdi:shield-home", "hauswerk": "mdi:home-automation"}
 
 class Haus:
     """Zentrale Einstellungen und Hauszustände von Hauswerk."""
@@ -717,7 +732,8 @@ class Haus:
                 sent.append(ch)
                 continue
             shown = title if voice else self._deco(title, kind)
-            self.hass.async_create_task(self._async_channel(ch, shown, message, important, key, image=image, actions=actions))
+            self.hass.async_create_task(self._async_channel(ch, shown, message, important, key, image=image, actions=actions,
+                                                            module=KIND_MODULE.get(kind or "", "hauswerk")))
             sent.append(ch)
         return sent
 
@@ -745,16 +761,35 @@ class Haus:
             b["timer"] = async_call_later(self.hass, max(1, 300 - (now - b["last"])), flush)
         return True
 
+    def _app_os(self, service: str) -> str | None:
+        """Betriebssystem eines Handys der Home-Assistant-App („ios“/„android“) aus der mobile_app-Einrichtung."""
+        try:
+            try:
+                from homeassistant.util import slugify  # noqa: PLC0415
+            except ImportError:
+                import re  # noqa: PLC0415
+                slugify = lambda t: re.sub(r"[^a-z0-9]+", "_", t.lower()).strip("_")  # noqa: E731
+            for entry in self.hass.config_entries.async_entries("mobile_app"):
+                if f"mobile_app_{slugify(entry.data.get('device_name') or '')}" == service:
+                    return "ios" if "ios" in str(entry.data.get("os_name") or "").lower() else "android"
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+
     def _health(self, ch: str, ok: bool, error: str | None = None) -> None:
         self.notify_health[ch] = {"ok": ok, "at": dt_util.utcnow().isoformat(), **({"error": error} if error else {})}
         self._save()
 
     async def _async_channel(self, ch: str, title: str, message: str, important: bool = False,
                              key: str | None = None, raise_errors: bool = False, image: str | None = None,
-                             actions: list[dict] | None = None) -> None:
+                             actions: list[dict] | None = None, module: str | None = None) -> None:
         kind, _, rest = ch.partition(":")
+        icons = bool(module) and self.settings.get("notify_icons", True)
+        logo = f"{STATIC_URL}/logos/{module}.png?v=1" if icons else None
         if ch == "ha":
-            domain, service, data = "persistent_notification", "create", {"title": title, "message": message}
+            # Mitteilung in Home Assistant: Modul-Logo vor dem Text
+            text = f'<img src="{logo}" width="26" height="26" alt="{MODULE_NAMES.get(module, "Hauswerk")}"> {message}' if logo else message
+            domain, service, data = "persistent_notification", "create", {"title": title, "message": text}
             if key:
                 data["notification_id"] = self._ha_id(key)
         elif kind == "svc":
@@ -766,6 +801,16 @@ class Haus:
             if image:
                 # Bild in der Mitteilung der Home-Assistant-App, z. B. /api/camera_proxy/camera.garten
                 data.setdefault("data", {})["image"] = image
+            if logo and rest.startswith("mobile_app_"):
+                d = data.setdefault("data", {})
+                if self._app_os(rest) == "ios":
+                    # iPhone: das Logo als kleines Bild rechts in der Mitteilung (nur ohne Kamerabild)
+                    if not image:
+                        d["attachment"] = {"url": logo, "content-type": "png", "hide-thumbnail": False}
+                else:
+                    # Android: Modul-Symbol in der Statusleiste und das Logo groß in der Mitteilung
+                    d["notification_icon"] = MODULE_MDI.get(module, "mdi:home-automation")
+                    d["icon_url"] = logo
             if actions and rest.startswith("mobile_app_"):
                 # Knöpfe in der Mitteilung der Home-Assistant-App (höchstens 3)
                 data.setdefault("data", {})["actions"] = [

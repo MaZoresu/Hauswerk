@@ -2495,6 +2495,37 @@ def test_knoepfe_in_nachrichten(hw):
     asyncio.run(run())
 
 
+def test_modul_logo_in_benachrichtigung(hw):
+    """Modul-Logo: Mitteilung in Home Assistant mit Bild vor dem Text; App: iPhone als Anhang, Android als Symbol."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        hass = Hass()
+        hass.config_entries = types.SimpleNamespace(async_entries=lambda d: [
+            types.SimpleNamespace(data={"device_name": "iPhone Jens", "os_name": "iOS"}),
+            types.SimpleNamespace(data={"device_name": "Pixel", "os_name": "Android"})] if d == "mobile_app" else [])
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"notify_targets": ["mobile_app_iphone_jens", "mobile_app_pixel"], "notify_quiet": False})
+        haus.notify("ww_leave", "leave", "Niemand zu Hause – noch offen", "Licht an")
+        await asyncio.sleep(0)
+        calls = {c[1]: c[2] for c in hass.calls if c[0] in ("notify", "persistent_notification")}
+        assert calls["mobile_app_iphone_jens"]["data"]["attachment"]["url"] == "/hauswerk_static/logos/wachwerk.png?v=1"
+        assert calls["mobile_app_pixel"]["data"]["icon_url"].endswith("/logos/wachwerk.png?v=1") and calls["mobile_app_pixel"]["data"]["notification_icon"] == "mdi:shield-home"
+        await haus._async_channel("ha", "Titel", "Licht an", module="wachwerk")
+        assert hass.calls[-1][2]["message"].startswith('<img src="/hauswerk_static/logos/wachwerk.png?v=1"'), hass.calls[-1]
+        await haus.async_save_settings({"notify_icons": False})
+        haus.clear("ww_leave")
+        n = len(hass.calls)
+        haus.notify("ww_leave", "leave", "Niemand zu Hause – noch offen", "Licht an, Kerze an")
+        await asyncio.sleep(0)
+        calls = {c[1]: c[2] for c in hass.calls[n:] if c[0] in ("notify", "persistent_notification")}
+        assert "attachment" not in (calls["mobile_app_iphone_jens"].get("data") or {})
+        await haus._async_channel("ha", "Titel", "Licht an", module="wachwerk")
+        assert hass.calls[-1][2]["message"] == "Licht an"
+
+    asyncio.run(run())
+
+
 def test_therme_erkennen(hw):
     """Therme (myVaillant) und eigene Fühler werden erkannt; der Heizkreis-Fühler über das gemeinsame Gerät (Shelly)."""
     async def run():

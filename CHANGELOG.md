@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.95.0 – 2026-11-24
+
+### Neu (Benachrichtigungen)
+- **Modul-Logo in jeder Benachrichtigung:** Man sieht sofort, aus welchem Modul eine Meldung kommt – z. B. das Wachwerk-Logo bei „Niemand zu Hause – noch offen“, das Heizwerk-Logo bei „Fenster lange offen“, das Hauswerk-Logo bei Müll und Wartung.
+  - **Mitteilung in Home Assistant:** das Logo vor dem Text.
+  - **App auf dem iPhone:** das Logo als kleines Bild rechts in der Mitteilung (nicht, wenn schon ein Kamerabild dabei ist, z. B. bei der Klingel).
+  - **App auf Android:** das Logo als großes Symbol, dazu das Modul-Symbol in der Statusleiste.
+- Abschaltbar unter Benachrichtigungen › Empfänger › „Modul-Logo in Benachrichtigungen“. Die Vorschau je Anlass zeigt das Logo mit.
+
 ## 0.94.1 – 2026-11-23
 
 ### Geändert
