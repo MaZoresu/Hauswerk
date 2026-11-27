@@ -2869,3 +2869,43 @@ def test_beetwerk_zone_mit_zwei_ventilen(hw):
         assert bw.status()["water_until"] is None
 
     asyncio.run(run())
+
+
+def test_lueften_uebersteht_neustart(hw):
+    """Neustart: Fenster-Öffnungszeit und laufende Lüftung bleiben – kein neuer Lüft-Timer, kein neues „morgens lüften“."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 16, 7, 0, tzinfo=timezone.utc)
+
+        def states(hass, changed):
+            hass.set("climate.wz", "heat", {"current_temperature": 20.0, "temperature": 21.0}, "Thermostat Wohnzimmer")
+            hass.set("binary_sensor.fenster", "on", name="Fenster Wohnzimmer")
+            hass.st["binary_sensor.fenster"].last_changed = changed
+            hass.set("weather.home", "cloudy", {"temperature": 3.0, "humidity": 85})
+
+        hass = Hass()
+        states(hass, NOW[0] - timedelta(minutes=8))
+        log, haus, ctl = await _setup(hw, hass)
+        await ctl.async_save_room({"id": "wz", "name": "Wohnzimmer", "type": "heizkoerper", "comfort": 21, "eco": 18,
+                                   "climates": ["climate.wz"], "windows": ["binary_sensor.fenster"], "enabled": True,
+                                   "schedule": []})
+        await ctl.async_evaluate()
+        since = ctl.status()["rooms"]["wz"]["air"]["open"]["since"]
+        ctl.runtime["wz"]["vs"]["done"] = "10 Min. gelüftet"
+        ctl._save(0)
+        # Neustart: last_changed beginnt neu
+        NOW[0] += timedelta(minutes=3)
+        hass2 = Hass()
+        states(hass2, NOW[0])
+        _log2, _haus2, ctl2 = await _setup(hw, hass2)
+        await ctl2.async_evaluate()
+        air = ctl2.status()["rooms"]["wz"]["air"]
+        assert air["open"]["since"] == since and air["open"]["minutes"] >= 10
+        assert air["open"]["done"] == "10 Min. gelüftet"
+        # Fenster zu: Lüftung mit voller Dauer in der Bilanz, gemerkte Öffnung vergessen
+        hass2.set("binary_sensor.fenster", "off", name="Fenster Wohnzimmer")
+        await ctl2.async_evaluate()
+        assert ctl2.vent_log["wz"][-1]["min"] >= 10 and "binary_sensor.fenster" not in ctl2.win_open
+
+    asyncio.run(run())

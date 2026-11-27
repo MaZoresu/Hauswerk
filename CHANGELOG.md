@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.98.1 – 2026-11-27
+
+### Behoben (Heizwerk › Lüften)
+- **Lüften übersteht einen Neustart von Home Assistant:** Bisher galt ein offenes Fenster nach dem Neustart als „gerade geöffnet“ – Lüft-Timer, „genug gelüftet“, die gewollte Nacht beim Schlafzimmer und „Fenster lange offen“ begannen von vorn, und eine Lüftung über den Neustart hinweg fehlte in der Bilanz. Jetzt merkt sich Heizwerk, seit wann jedes Fenster offen ist, die laufenden Lüftungen und wie oft „Fenster schließen“ heute kam. Ist das Fenster während des Neustarts zugegangen, kommt die Lüftung mit voller Dauer in die Bilanz.
+
 ## 0.98.0 – 2026-11-27
 
 ### Geändert (Heizwerk › Lüften) – absolute Luftfeuchte
