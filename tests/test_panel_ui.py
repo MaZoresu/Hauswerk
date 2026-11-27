@@ -811,12 +811,10 @@ def test_tablet_gleiche_leisten_und_kacheln(browser, server):
     p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
     p.js("localStorage.setItem('hauswerk.tablet.tview', 'wall')")
     heights = {}
-    for view in ("overview", "shutters", "kwflow"):
+    for view in ("overview", "shutters"):
         p.view(view)
         p.wait(300)
         heights[view] = p.js(f"Math.round({EL}.shadowRoot.querySelector('.brief').getBoundingClientRect().height)")
-        if view == "kwflow":
-            continue
         cut = p.js(f"""(() => {{ const m = {EL}.shadowRoot.getElementById('main').getBoundingClientRect(); const pg = {EL}._tPage[{EL}._tab] || 0;
             const per = Math.ceil({EL}.shadowRoot.querySelectorAll('.wgrid > *').length / {EL}._tPages);
             return [...{EL}.shadowRoot.querySelectorAll('.wgrid > *')].slice(pg * per, pg * per + per).filter((a) => {{ const r = a.getBoundingClientRect();
@@ -1766,7 +1764,7 @@ def test_tablet_wand_startseite_und_details(tablet):
     assert st and all(v.endswith("°") or v == "–" for v, _ in st) and all(h <= 24 for _, h in st), st
     p.view("kwflow")
     p.wait(400)
-    assert p.has(".kw2")
+    assert p.has(".kwwall")
     # Zurück zur Startseite nach 2 Min. ohne Berührung (vor dem Schoner)
     p.js(f"() => {{ localStorage.setItem('hauswerk.tablet.saver', '10'); {EL}._lastAct = Date.now() - 130000; {EL}._homed = false; {EL}._saverTick(); }}")
     p.wait(200)
@@ -2491,3 +2489,38 @@ def test_handy_start_anwesenheit_leiste_mehr(panel):
     p.js("window.scrollTo(0, 300)")
     p.js(f"{EL}._scrollSave()")
     assert p.js("JSON.parse(localStorage.getItem('hauswerk-scroll')).start.y") >= 0
+
+
+def test_kraftwerk_abschlag_standby_wand(panel, browser, server):
+    """Kraftwerk: Auffälliges oben und unter der Glocke, Bericht mit Standby und Abschlag (Einstellung speichert), Tablet-Wand."""
+    p = panel
+    p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    p.view("kwflow")
+    p.wait(800)
+    assert "Kühlschrank braucht mehr Strom" in p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert any(h["text"] == "Kühlschrank braucht mehr Strom" for h in p.js(f"{EL}._hints()"))
+    p.view("kwrep")
+    p.wait(2500)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "Standby je Gerät" in txt and "Abschlag prüfen" in txt
+    p.js(f"{EL}._openPop('kwbill')")
+    p.wait(300)
+    p.js(f"() => {{ const i = {EL}.shadowRoot.querySelector('#pop input[data-set=\"kw_bill_amount\"]'); i.value = '85'; i.dispatchEvent(new Event('input', {{ bubbles: true }})); i.dispatchEvent(new Event('change', {{ bubbles: true }})); }}")
+    if p.has('#pop [data-action="pop-save"]'):
+        p.click('#pop [data-action="pop-save"]')
+    p.wait(500)
+    saved = {k: v for m in p.sent() if m["type"].endswith("settings/save") for k, v in m.get("settings", {}).items()}
+    assert saved.get("kw_bill_amount") == 85, saved
+    p.js(f"{EL}._data.settings.kw_bill_amount = 85")
+    p.view("kwrep")
+    p.wait(2000)
+    assert "Guthaben ca." in p.js(f"{EL}.shadowRoot.querySelector('#main').innerText") or "Nachzahlung ca." in p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    page = browser.new_page(viewport={"width": 1280, "height": 800})
+    page.goto(f"{server}/dev/vorschau.html?tablet")
+    page.wait_for_function(f"{EL} && {EL}._data")
+    t = Panel(page)
+    t.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    t.view("kwflow")
+    t.wait(1500)
+    assert t.has(".kwwall .kwwall-now") and t.has(".kwwall .kw-flow")
+    page.close()

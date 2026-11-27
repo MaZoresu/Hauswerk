@@ -16,6 +16,7 @@ from .appliance import Appliances
 from .appliance_logic import TYPES as APPLIANCE_TYPES
 from .const import POWER_STORAGE_KEY
 from .core import Haus
+from .kw_watch import KwWatch
 from .log import Protokoll, log_settings
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,6 +36,9 @@ KW_DEFAULTS: dict[str, Any] = {
     "kw_consumers": [],          # einzelne Verbraucher (Wärmepumpe, Wallbox …)
     "kw_names": {},              # eigene Namen der Verbraucher: {sensor: "Wärmepumpe"}
     "kw_invest": None,           # Anschaffungskosten der Solaranlage (€) fürs Sparschwein im Bericht
+    "kw_bill_amount": None,      # Abschlag Strom (€ im Monat) – Hochrechnung bis zum Ende des Abrechnungsjahrs
+    "kw_bill_start": 1,          # erster Monat des Abrechnungsjahrs (1–12)
+    "kw_bill_base": None,        # Grundpreis (€ im Monat), falls nicht in den Preisen des Energie-Dashboards
     # Geräte mit Fertigerkennung: [{id, name, type, power, door?, status?, status_done?, notify[], notify_ha, important}]
     "kw_appliances": [],
 }
@@ -52,6 +56,8 @@ class Kraftwerk:
         self.settings: dict[str, Any] = dict(KW_DEFAULTS)
         self.appliances = Appliances(hass, log, haus, lambda: list(self.settings.get("kw_appliances") or []))
         haus.extra_status["appliances"] = self.appliances.status
+        self.watch = KwWatch(hass, log, haus, lambda: self.settings)
+        haus.extra_status["kw_watch"] = self.watch.status
 
     async def async_load(self) -> None:
         stored = await self._store.async_load() or {}
@@ -60,9 +66,11 @@ class Kraftwerk:
 
     async def async_start(self) -> None:
         self.appliances.async_setup()
+        self.watch.async_setup()
 
     async def async_stop(self) -> None:
         self.appliances.async_stop()
+        self.watch.async_stop()
         await self.appliances._store.async_save(self.appliances._data())
 
     def _save(self) -> None:

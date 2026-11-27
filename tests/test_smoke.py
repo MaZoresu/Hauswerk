@@ -71,7 +71,7 @@ def _stub_homeassistant():
                                  async_get=lambda hass: types.SimpleNamespace(async_get_area=lambda a: None))
     _mod("homeassistant.helpers.dispatcher", async_dispatcher_send=lambda *a: None)
     _mod("homeassistant.helpers.event", async_call_later=noop, async_track_state_change_event=noop,
-         async_track_time_interval=noop)
+         async_track_time_interval=noop, async_track_time_change=noop)
     _mod("homeassistant.helpers.storage", Store=Store)
     _mod("homeassistant.util")
     dt = _mod(
@@ -96,7 +96,7 @@ def hw(tmp_path_factory):
     pkg = root / "hw"
     pkg.mkdir()
     _mod("homeassistant.config_entries", ConfigEntry=object)
-    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py", "hmlinks.py", "beetwerk.py", "wachwerk.py", "dienste.py"):
+    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py", "hmlinks.py", "beetwerk.py", "wachwerk.py", "dienste.py", "kw_watch.py"):
         shutil.copy(SRC / name, pkg / name)
     (pkg / "__init__.py").write_text("")
     sys.path.insert(0, str(root))
@@ -111,6 +111,7 @@ def hw(tmp_path_factory):
         Beetwerk=importlib.import_module("hw.beetwerk").Beetwerk,
         Wachwerk=importlib.import_module("hw.wachwerk").Wachwerk,
         Dienste=importlib.import_module("hw.dienste").Dienste,
+        kw_watch=importlib.import_module("hw.kw_watch"),
         light=importlib.import_module("hw.light_logic"),
         const=importlib.import_module("hw.const"),
     )
@@ -2966,5 +2967,47 @@ def test_wachwerk_wetter_schutz(hw):
         await ww.async_evaluate()
         assert haus.severe is None and ww.status()["wx"]["active"] is None
         assert "storm" not in bw._reasons({}, NOW[0].timestamp())
+
+    asyncio.run(run())
+
+
+
+def test_kraftwerk_waechter(hw):
+    """Kraftwerk-Wächter: Stromfresser, Grundlast, Akku nicht voll (reine Rechnung); live: Solar liefert nichts trotz Sonne, Zähler sendet nicht."""
+    W = hw.kw_watch
+    days = {"sensor.kuehl": [0.8] * 25 + [1.3] * 5, "sensor.tv": [0.3] * 25 + [0.32] * 5}
+    j = W.device_jumps(days, {"sensor.kuehl": "Kühlschrank"})
+    assert [x["name"] for x in j] == ["Kühlschrank"] and j[0]["pct"] == 62
+    assert W.base_jump([180] * 25 + [260] * 5) == {"now": 260, "base": 180}
+    assert W.base_jump([180] * 25 + [190] * 5) is None
+    assert W.battery_not_full([(84, 3.0), (82, 2.0), (80, 4.1), (60, 0.2)]) == {"max": 84, "days": 3}
+    assert W.battery_not_full([(100, 3.0), (82, 2.0), (80, 4.1)]) is None
+
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 6, 16, 10, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("sun.sun", "above_horizon", {"elevation": 45})
+        hass.set("weather.home", "sunny", {"temperature": 22.0})
+        hass.set("sensor.pv", "3", {"unit_of_measurement": "W"}, "PV-Leistung")
+        hass.set("sensor.zaehler", "unavailable", {"unit_of_measurement": "W"}, "Stromzähler")
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"notify_targets": ["mobile_app_pixel"], "notify_quiet": False})
+        kw = hw.Kraftwerk(hass, log, haus)
+        await kw.async_load()
+        kw.settings.update({"kw_solar": ["sensor.pv"], "kw_grid": "sensor.zaehler"})
+        await kw.watch._async_live()
+        assert not kw.watch.live
+        NOW[0] += timedelta(minutes=35)
+        await kw.watch._async_live()
+        await asyncio.sleep(0)
+        titles = [f["title"] for f in kw.watch.status()["findings"]]
+        assert "Solar liefert nichts – trotz Sonne" in titles and "Stromzähler sendet nicht" in titles, titles
+        assert any("Solar liefert nichts" in t for t in hass.sent())
+        # Sonne liefert wieder
+        hass.set("sensor.pv", "2400", {"unit_of_measurement": "W"}, "PV-Leistung")
+        await kw.watch._async_live()
+        assert "Solar liefert nichts – trotz Sonne" not in [f["title"] for f in kw.watch.status()["findings"]]
 
     asyncio.run(run())

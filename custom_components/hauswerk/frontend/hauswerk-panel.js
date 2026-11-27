@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.105.0";
+const VERSION = "0.106.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -110,7 +110,7 @@ const LEGEND = [
 const NK_EMOJI_WORDS = [[["regen"], "🌧️"], [["sturm"], "💨"], [["winterpause", "frost"], "❄️"], [["saison starten"], "🌱"], [["bleibt kalt"], "🌡️"], [["batterie", "akku"], "🪫"],
   [["nicht erreichbar"], "📡"], [["fenster"], "🪟"], [["lüften"], "🌬️"], [["braucht hilfe"], "🆘"], [["fährt heim"], "🧒"], [["nachts"], "🌙"], [["messer", "wartung"], "🔧"],
   [["mähroboter", "mäher"], "🤖"], [["licht", "leuchte"], "💡"], [["müll"], "🗑️"], [["waschmaschine"], "🧺"], [["trockner"], "👕"], [["spül", "geschirr"], "🍽️"], [["meldungen"], "📬"], [[" fertig"], "✅"], [["testnachricht", "hauswerk"], "👋"]];
-const NK_EMOJI_KINDS = { window: "🪟", offline: "📡", frost: "❄️", battery: "🪫", cold: "🌡️", vent: "🌬️", vent_done: "🪟", storm: "💨", cover: "📡", light_away: "💡", light_offline: "📡", mower: "🤖", mower_care: "🔧", mower_guard: "🧒", waste: "🗑️", appliance: "✅", smoke: "🔥", water: "💧", warn: "⚠️", door: "🚪", leave: "🏠", bell: "🔔", maint: "🔧", weekly: "📰" };
+const NK_EMOJI_KINDS = { window: "🪟", offline: "📡", frost: "❄️", battery: "🪫", cold: "🌡️", vent: "🌬️", vent_done: "🪟", storm: "💨", cover: "📡", light_away: "💡", light_offline: "📡", mower: "🤖", mower_care: "🔧", mower_guard: "🧒", waste: "🗑️", appliance: "✅", power: "⚡", smoke: "🔥", water: "💧", warn: "⚠️", door: "🚪", leave: "🏠", bell: "🔔", maint: "🔧", weekly: "📰" };
 const nkEmoji = (title, kind) => {
   const low = ` ${String(title).toLowerCase()}`;
   const hit = NK_EMOJI_WORDS.find(([w]) => w.some((x) => low.includes(x)));
@@ -133,6 +133,7 @@ const NK_KINDS = [
   { k: "mower", g: "Beetwerk", icon: "mdi:robot-mower-outline", c: C.alert, title: "Mähroboter braucht Hilfe", def: "important", ex: ["Mähroboter braucht Hilfe", "Automower: Mäher steckt fest"], text: "Meldet der Mähroboter einen Fehler (steckt fest, außerhalb des Drahts, Messer blockiert …)." },
   { k: "mower_guard", g: "Beetwerk", icon: "mdi:human-child", c: "#16a34a", title: "Mäher fährt heim", def: "log", ex: ["Mäher fährt heim", "Jemand im Garten – Automower wartet in der Station"], text: "Die Kamera meldet Kinder oder Tiere im Garten und Beetwerk schickt den Mäher in die Station – mit Kamerabild in der App." },
   { k: "mower_care", g: "Beetwerk", icon: "mdi:saw-blade", c: "#16a34a", title: "Mähroboter: Wartung", def: "log", ex: ["Mähroboter: Messer wechseln", "seit 62 Tagen im Einsatz (Hinweis ab 60)"], text: "Messer lange im Einsatz – Hinweis unter der Glocke, auf Wunsch als Nachricht." },
+  { k: "power", g: "Kraftwerk", icon: "mdi:meter-electric-outline", c: "#eab308", title: "Auffälliger Stromverbrauch & Störungen", def: "normal", ex: ["Kühlschrank braucht mehr Strom", "Seit 5 Tagen im Schnitt 1,3 kWh am Tag statt 0,8 kWh (+62 %)"], text: "Stromfresser (Gerät aus dem Energie-Dashboard braucht deutlich mehr), Grundlast gestiegen, Solar liefert nichts trotz Sonne, Akku wird nicht mehr voll, Stromzähler sendet nicht." },
   { k: "smoke", g: "Wachwerk", icon: "mdi:fire-alert", c: C.alert, title: "Rauch- oder CO-Alarm", def: "important", ex: ["Rauchalarm!", "Rauchmelder Wohnzimmer – Rollläden fahren hoch, Licht geht an"], text: "Ein Rauch-, CO- oder Gasmelder schlägt an. Wichtig: kommt auch in der Ruhezeit." },
   { k: "water", g: "Wachwerk", icon: "mdi:water-alert", c: C.alert, title: "Wasser erkannt", def: "important", ex: ["Wasser erkannt!", "Wassermelder HWR"], text: "Ein Wassermelder meldet Feuchte – Leck, Waschmaschine, Keller." },
   { k: "warn", g: "Wachwerk", icon: "mdi:alert-outline", c: "#f59e0b", title: "Amtliche Warnung", def: "normal", ex: ["Amtliche Warnung vor Sturmböen", "Böen bis 70 km/h"], text: "Neue Warnung von NINA bzw. DWD, mit Überschrift und Text – einmal je Warnung." },
@@ -147,7 +148,7 @@ const NK_KINDS = [
 const NK_BTNS = {
   light_away: ["Alle aus", "Gesehen"], leave: ["Lichter aus", "Gesehen"], window: ["In 30 Min.", "Gesehen"], vent_done: ["10 Min. später", "Gesehen"],
   storm: ["In 30 Min.", "Gesehen"], door: ["Schließen (Tor)", "In 30 Min.", "Gesehen"], mower_guard: ["Garten frei", "2 Std. belegt"], mower: ["Gesehen"],
-  maint: ["Erledigt", "In 1 Woche"], weekly: ["Hauswerk öffnen"], bell: ["Wachwerk öffnen"], waste: ["Erledigt"], battery: ["Gesehen"],
+  maint: ["Erledigt", "In 1 Woche"], weekly: ["Hauswerk öffnen"], power: ["Gesehen"], bell: ["Wachwerk öffnen"], waste: ["Erledigt"], battery: ["Gesehen"],
 };
 const NK_GROUPS = { Heizwerk: ["#f97316", "logo:heizen"], "Lüften": ["#22d3ee", "mdi:weather-windy"], Rollwerk: ["#0ea5e9", "logo:rollwerk"], Kraftwerk: ["#eab308", "logo:kraftwerk"], Lichtwerk: ["#6366f1", "logo:lichtwerk"], Beetwerk: ["#16a34a", "logo:beetwerk"], Wachwerk: ["#dc2626", "logo:wachwerk"], Hauswerk: ["#14b8a6", "mdi:home-outline"] };
 const NK_GICON = { App: "mdi:cellphone", Pushover: "mdi:message-badge-outline", Telegram: "mdi:send-circle-outline", "E-Mail": "mdi:email-outline", Sprachausgabe: "mdi:account-voice", Bildschirm: "mdi:tablet", Weitere: "mdi:bell-outline", "Home Assistant": "mdi:home-assistant" };
@@ -598,7 +599,7 @@ const APP_TYPES = {
   sonstiges: { label: "Anderes Gerät", icon: "mdi:power-plug-outline", match: null },
 };
 const APP_STATE = { idle: ["Bereit", "#64748b", "mdi:power-sleep"], running: ["Läuft", "#38bdf8", "mdi:play-circle-outline"], ending: ["Ende wird geprüft", "#f59e0b", "mdi:timer-sand"], done: ["Fertig", "#22c55e", "mdi:check-circle"] };
-const KW_POPS = ["kwdetect", "kwsolar", "kwgrid", "kwbatt", "kwhome", "kwcons", "kwinvest"];
+const KW_POPS = ["kwdetect", "kwsolar", "kwgrid", "kwbatt", "kwhome", "kwcons", "kwinvest", "kwbill"];
 // Geplante Module: nur ausgegraut angezeigt, noch ohne Funktion.
 const COMING = [];
 const SLUGS = { start: "start", house: "einstellungen", log: "protokoll", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])),
@@ -1343,6 +1344,7 @@ class HauswerkPanel extends HTMLElement {
     const set = this._data?.settings || {};
     const bad = (id) => !S[id] || ["unavailable", "unknown"].includes(S[id].state);
     const add = (lvl, icon, text, sub, action, data = {}) => out.push({ lvl, icon, text, sub, action, data });
+    for (const f of s.kw_watch?.findings || []) add("warn", f.icon || "mdi:meter-electric-outline", f.title, f.text, "tab", { tab: "kwflow" });
     for (const [aid, a] of Object.entries(s.appliances || {})) {
       const c = (this._data?.settings?.kw_appliances || []).find((x) => x.id === aid);
       if (c && a.state === "done") add("warn", APP_TYPES[c.type]?.icon || "mdi:check-circle-outline", `${c.name} fertig`, a.last ? `${this._durTxt(a.last.dur)} · ${fmt(a.last.wh / 1000, 2)} kWh – ausräumen` : "ausräumen", "tab", { tab: "kwdev", app: aid });
@@ -1808,7 +1810,7 @@ class HauswerkPanel extends HTMLElement {
     // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
     const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
     // Einstellungen und der Heizwerk-Bericht: vollständig und scrollbar (zwei Spalten, keine Karte wird geteilt oder abgeschnitten)
-    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house", "report"].includes(tab) || (tab === "lights" && !!tin.querySelector(".lwwall"));
+    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house", "report"].includes(tab) || (tab === "lights" && !!tin.querySelector(".lwwall")) || (tab === "kwflow" && !!tin.querySelector(".kwwall"));
     box.classList.toggle("tscroll", scroll);
     if (scroll) {
       Object.assign(tin.style, { zoom: f, width: "", height: "", columnWidth: "", columnGap: "", transform: "", clipPath: "" });
@@ -7285,14 +7287,139 @@ class HauswerkPanel extends HTMLElement {
       </section>`;
     const consHtml = fl.cons.length && (!this._tablet || fl.cons.some((c) => (c.w ?? 0) >= 50)) ? `<section class="card">${this._sectionHead("mdi:power-plug-outline", "Verbraucher jetzt")}<div id="kw-cons" class="kc">${this._kwConsHtml(fl)}</div></section>` : "";
     const todayHtml = P && !P.ok ? this._kwEnergyHint() : `<section class="card">${this._sectionHead("mdi:calendar-today", "Heute", `<button class="link tiny" data-action="tab" data-tab="kwrep"><span>Verlauf</span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`)}${today}</section>`;
-    if (this._tablet) return `<div id="kw-brief">${this._kwBrief(fl, st)}</div>
+    const finds = this._kwFindings();
+    if (this._wall()) return this._kwWall(fl, st, P, flowHtml, finds);
+    if (this._tablet) return `<div id="kw-brief">${this._kwBrief(fl, st)}</div>${finds}
       <div class="kw2"><div>${flowHtml}${consHtml}</div><div>${todayHtml}${this._kwForecastCard(fl)}</div></div>`;
     return `
       <div id="kw-brief">${this._kwBrief(fl, st)}</div>
+      ${finds}
       ${flowHtml}
       ${this._kwForecastCard(fl)}
       ${consHtml}
       ${todayHtml}`;
+  }
+
+  /** Auffälliges aus dem Kraftwerk-Wächter (Stromfresser, Grundlast, Störungen). */
+  _kwFindings() {
+    const list = this._status?.kw_watch?.findings || [];
+    if (!list.length) return "";
+    return `<section class="card kw-find">${this._sectionHead("mdi:alert-circle-outline", "Auffällig")}<div class="evlist">${list.map((f) => `<div class="ev"><ha-icon icon="${f.icon || "mdi:alert"}" style="color:#f59e0b"></ha-icon><span class="grow"><b>${esc(f.title)}</b><small>${esc(f.text)}</small></span></div>`).join("")}</div></section>`;
+  }
+
+  /** Tablet (Wand): großer Energiefluss, daneben „jetzt“ in einem Satz, heute als Ringe, Prognose und Auffälliges. */
+  _kwWall(fl, st, P, flowHtml, finds) {
+    const W = (x) => this._kwFmt(Math.abs(x));
+    const grid = fl.grid, solar = fl.solar ?? 0, batt = fl.batt ?? 0;
+    const apps = (this._data.settings.kw_appliances || []).filter((c) => !["running", "ending"].includes(this._status?.appliances?.[c.id]?.state)).map((c) => c.name);
+    const what = apps.length ? apps.slice(0, 3).join(", ") : "Waschmaschine, Trockner & Co.";
+    let tone = "#94a3b8", icon = "mdi:flash-outline", big, sub;
+    if (grid != null && grid < -100) { tone = "#22c55e"; icon = "mdi:solar-power-variant"; big = `${W(grid)} Überschuss`; sub = `Jetzt ist eine gute Zeit für ${what}.`; }
+    else if (fl.has.solar && solar > 50 && (grid == null || Math.abs(grid) <= 100)) { tone = "#22c55e"; icon = "mdi:solar-power-variant"; big = "Solar deckt den Verbrauch"; sub = `${W(solar)} vom Dach – Großes lieber erst bei Überschuss starten.`; }
+    else if (fl.has.batt && batt > 50 && (grid == null || grid <= 100)) { tone = "#ec4899"; icon = "mdi:home-battery-outline"; big = `Akku liefert ${W(batt)}`; sub = fl.soc != null ? `Ladestand ${fmt(fl.soc, 0)} % – Großes lieber später.` : "Großes lieber später."; }
+    else if (grid != null && grid > 0) { tone = grid > 2500 ? "#ef4444" : "#8b5cf6"; icon = "mdi:transmission-tower-import"; big = `Netz ${W(grid)}`; sub = (() => { const plan = fl.has.solar ? this._kwSolarPlan(this._kwForecast(), this._kwBase()?.w) : null; return plan?.surplus ? `Überschuss erwartet ab ${plan.surplus.from.getHours()} Uhr – ${what} dann starten.` : "Strom kommt gerade aus dem Netz."; })(); }
+    else { big = fl.home != null ? `Verbrauch ${W(fl.home)}` : "Keine Leistungswerte"; sub = ""; }
+    const t = st?.total;
+    const ring = (pct, c, label, val) => `<div class="kwr"><svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="42"></circle><circle class="f" cx="50" cy="50" r="42" pathLength="100" style="stroke:${c};stroke-dasharray:${Math.max(0, Math.min(100, pct ?? 0)).toFixed(1)} 100"></circle></svg><b>${pct != null ? `${fmt(pct, 0)} %` : "–"}</b><small>${label}</small>${val ? `<em>${val}</em>` : ""}</div>`;
+    const today = t ? `<section class="card kwwall-today">${this._sectionHead("mdi:calendar-today", "Heute")}<div class="kwrs">
+        ${ring(t.autark, "#0ea5e9", "autark", `${this._kwKwh(t.use)} verbraucht`)}${P?.solar.length ? ring(t.own, "#f59e0b", "selbst genutzt", `${this._kwKwh(t.solar)} erzeugt`) : ""}</div></section>` : "";
+    return `<div class="kwwall">
+      <div class="kwwall-l">${flowHtml}</div>
+      <div class="kwwall-r">
+        <section class="card kwwall-now" style="--c:${tone}"><ha-icon icon="${icon}"></ha-icon><div><b>${esc(big)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div></section>
+        ${finds}${today}${this._kwForecastCard(fl)}
+      </div></div>`;
+  }
+
+  /** Standby je Gerät: niedrigste übliche Leistung (10 % der Stunden der letzten 7 Tage) und Kosten im Jahr. */
+  _kwStandbyCard() {
+    const ids = this._kwConsIds().filter((e) => this._hass.states[e]);
+    if (!ids.length) return "";
+    this._kwSb = this._kwSb || {};
+    if (!this._kwSb.at || Date.now() - this._kwSb.at > 30 * 60000) {
+      if (!this._kwSb.loading) {
+        this._kwSb.loading = true;
+        const start = new Date(Date.now() - 7 * 86400000);
+        this._hass.callWS({ type: "recorder/statistics_during_period", start_time: start.toISOString(), statistic_ids: ids, period: "hour", types: ["mean"] })
+          .then((res) => {
+            const out = [];
+            for (const id of ids) {
+              const kw = String(this._hass.states[id]?.attributes?.unit_of_measurement || "W").toLowerCase() === "kw";
+              const v = (res?.[id] || []).map((x) => x.mean).filter((x) => x != null).map((x) => (kw ? x * 1000 : x)).sort((a, b) => a - b);
+              if (v.length < 24) continue;
+              const p10 = v[Math.floor(v.length * 0.1)];
+              const med = v[Math.floor(v.length / 2)];
+              out.push({ id, w: Math.max(0, p10), med });
+            }
+            this._kwSb = { at: Date.now(), rows: out };
+            this._renderMain();
+          })
+          .catch(() => { this._kwSb = { at: Date.now(), rows: [], error: true }; });
+      }
+      if (!this._kwSb.rows) return `<section class="card">${this._sectionHead("mdi:power-standby", "Standby je Gerät")}<div class="chart-empty"><div class="spinner"></div></div></section>`;
+    }
+    const pr = this._kwPrices(null);
+    const rows = (this._kwSb.rows || []).filter((r) => r.w >= 1).sort((a, b) => b.w - a.w);
+    if (!rows.length) return `<section class="card">${this._sectionHead("mdi:power-standby", "Standby je Gerät")}<p class="muted small">Kein gemessenes Gerät braucht im Ruhezustand 1 W oder mehr.</p></section>`;
+    const mx = Math.max(...rows.map((r) => r.w));
+    const sum = rows.reduce((a, r) => a + r.w, 0);
+    const p = this._data.settings;
+    return `<section class="card kwd">${this._sectionHead("mdi:power-standby", "Standby je Gerät", `<span class="muted small">7 Tage</span>`)}
+      ${rows.map((r) => `<div class="kwd-r"><ha-icon icon="${this._kwConsIcon(r.id, p)}"></ha-icon><span class="grow"><b>${esc(this._kwConsName(r.id, p))}</b><span class="kwd-bar"><i style="width:${((r.w / mx) * 100).toFixed(1)}%"></i></span>
+        <small class="muted">${r.med > r.w * 3 ? "Ruhezustand" : "läuft fast immer so (z. B. Kühlschrank, Router)"}</small></span>
+        <span class="kwd-v"><b>${this._kwFmt(r.w)}</b><small>${pr.imp != null ? `ca. ${this._kwEur((r.w / 1000) * 8760 * pr.imp)} im Jahr` : `${fmt((r.w / 1000) * 8760, 0)} kWh im Jahr`}</small></span></div>`).join("")}
+      <p class="muted small">Zusammen ${this._kwFmt(sum)} – ${pr.imp != null ? `ca. ${this._kwEur((sum / 1000) * 8760 * pr.imp)}` : `${fmt((sum / 1000) * 8760, 0)} kWh`} im Jahr. Gemessen an Messsteckdosen bzw. den Leistungen der Geräte aus dem Energie-Dashboard: die niedrigste übliche Leistung (in 10 % der Stunden darunter). Abhilfe: Steckdosenleiste mit Schalter, Steckdose nachts per Zeitplan aus.</p>
+    </section>`;
+  }
+
+  /** Abschlag prüfen: Kosten seit Beginn des Abrechnungsjahrs, Hochrechnung bis zum Ende, gegen die Abschläge. */
+  _kwBillCard() {
+    const p = this._data.settings;
+    const amount = Number(p.kw_bill_amount) || 0;
+    const head = this._sectionHead("mdi:file-document-outline", "Abschlag prüfen", this._admin ? `<button class="icon" data-action="pop-open" data-pop="kwbill" title="Abschlag einstellen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : "");
+    if (!amount) return this._admin ? `<section class="card">${head}<p class="muted small">Trag deinen monatlichen <button class="link inline" data-action="pop-open" data-pop="kwbill">Abschlag</button> ein, dann rechnet Kraftwerk hoch, ob am Ende des Abrechnungsjahrs ein Guthaben oder eine Nachzahlung kommt.</p></section>` : "";
+    const st = this._kwFetch("all", new Date(2015, 0, 1), new Date(), "month");
+    if (!st) return `<section class="card">${head}<div class="chart-empty"><div class="spinner"></div></div></section>`;
+    const pr = this._kwPrices(st.total);
+    const base = Number(p.kw_bill_base) || 0;
+    const now = new Date();
+    const sm = Math.max(1, Math.min(12, Number(p.kw_bill_start) || 1)) - 1;
+    const y0 = now.getMonth() >= sm ? now.getFullYear() : now.getFullYear() - 1;
+    const start = new Date(y0, sm, 1);
+    const key = (d) => `${d.getFullYear()}-${d.getMonth()}`;
+    const by = new Map(st.buckets.map((b) => [key(new Date(b.start)), b]));
+    const cost = (b) => (b ? (b.costV ?? (pr.imp != null ? b.imp * pr.imp : 0)) - (b.compV ?? (pr.exp != null ? b.exp * pr.exp : 0)) : null);
+    const months = [];
+    let so = 0, proj = 0, known = 0;
+    const curDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
+      const isPast = d < new Date(now.getFullYear(), now.getMonth(), 1), isCur = key(d) === key(now);
+      const act = cost(by.get(key(d)));
+      const ly = cost(by.get(key(new Date(d.getFullYear() - 1, d.getMonth(), 1))));
+      let v, kind;
+      if (isPast) { v = act ?? ly ?? null; kind = act != null ? "ist" : "fehlt"; }
+      else if (isCur) { const frac = now.getDate() / curDays; v = (act ?? 0) + (ly != null ? ly * (1 - frac) : (act ?? 0) / Math.max(frac, 0.05) * (1 - frac)); kind = "jetzt"; }
+      else { v = ly; kind = "schätzung"; }
+      months.push({ d, v, kind });
+      if (v != null) { if (isPast || isCur) so += isCur ? (act ?? 0) : v; known++; }
+    }
+    // Monate ohne Vorjahr: Mittel der bekannten
+    const avg = months.filter((m) => m.v != null).reduce((a, m) => a + m.v, 0) / Math.max(1, months.filter((m) => m.v != null).length);
+    for (const m of months) if (m.v == null) { m.v = avg; m.kind = "schätzung"; }
+    proj = months.reduce((a, m) => a + m.v, 0) + base * 12;
+    const paid = amount * 12;
+    const diff = paid - proj;
+    const end = new Date(start.getFullYear() + 1, start.getMonth(), 0);
+    const mx = Math.max(...months.map((m) => m.v + base), amount, 1);
+    const bars = months.map((m) => `<div class="kb-m ${m.kind}" title="${m.d.toLocaleDateString("de-DE", { month: "long", year: "numeric" })}: ${m.kind === "ist" ? "" : "ca. "}${this._kwEur(m.v + base)}"><i style="height:${(((m.v + base) / mx) * 100).toFixed(1)}%"></i><small>${m.d.toLocaleDateString("de-DE", { month: "narrow" })}</small></div>`).join("");
+    return `<section class="card kb">${head}
+      <div class="kb-res" style="--c:${diff >= 0 ? "#22c55e" : "#ef4444"}"><b>${diff >= 0 ? "Guthaben" : "Nachzahlung"} ca. ${this._kwEur(Math.abs(diff))}</b>
+        <small>bis ${end.toLocaleDateString("de-DE", { day: "numeric", month: "long", year: "numeric" })} · ${this._kwEur(amount)} Abschlag im Monat (${this._kwEur(paid)}) gegen ca. ${this._kwEur(proj)} Kosten</small></div>
+      <div class="kb-chart"><i class="kb-line" style="bottom:${((amount / mx) * 100).toFixed(1)}%" title="Abschlag ${this._kwEur(amount)}"></i>${bars}</div>
+      <div class="klegend"><span><i class="ist"></i>bisher</span><span><i class="sch"></i>geschätzt (Vorjahresmonat)</span><span><i class="ab"></i>Abschlag</span></div>
+      <p class="muted small">Bisher ${this._kwEur(so + base * months.filter((m) => m.kind !== "schätzung").length)} seit ${start.toLocaleDateString("de-DE", { month: "long", year: "numeric" })}. Kosten = Netzbezug − Einspeisung mit den Preisen aus dem ${pr.src}${base ? ` + ${this._kwEur(base)} Grundpreis im Monat` : ""}. Der Rest des Jahres ist mit den Vorjahresmonaten geschätzt.</p>
+    </section>`;
   }
 
   /** Solar-Prognose als Stundenbalken mit Grundlast-Linie. */
@@ -7779,7 +7906,7 @@ class HauswerkPanel extends HTMLElement {
   /** Monatsberichte: Energie pro Tag, Kosten und Vorteil, Geräte aus dem Energie-Dashboard, Sparschwein. */
   _kwMonthHtml() {
     const m = this._kwMonthCard();
-    return m.html + (m.st ? this._kwCostCard(m.st.total, m.title) + this._kwDevCard(m.st, m.title) : "") + this._kwPiggyCard();
+    return m.html + (m.st ? this._kwCostCard(m.st.total, m.title) + this._kwDevCard(m.st, m.title) : "") + this._kwStandbyCard() + this._kwBillCard() + this._kwPiggyCard();
   }
 
   // ---- Einstellungen
@@ -7805,6 +7932,8 @@ class HauswerkPanel extends HTMLElement {
       { g: "Tageswerte", act: "kw-energy", icon: "mdi:chart-box-outline", c: "#10b981", title: "Energie-Dashboard von Home Assistant",
         sum: !P ? "wird gelesen …" : P.ok ? [P.solar.length ? "Solar ✓" : "", P.imp.length ? "Netzbezug ✓" : "", P.exp.length ? "Einspeisung ✓" : "", P.bin.length || P.bout.length ? "Batterie ✓" : "", P.cost.length || P.priceImp != null ? "Preise ✓" : "ohne Preise"].filter(Boolean).join(" · ") : "Noch nicht eingerichtet – dort Netz und Solar eintragen",
         warn: !!P && !P.ok, words: "energie dashboard kwh zähler preis kosten statistik" },
+      { g: "Bericht", id: "kwbill", icon: "mdi:file-document-outline", c: "#8b5cf6", title: "Abschlag",
+        sum: p.kw_bill_amount ? `${this._kwEur(Number(p.kw_bill_amount))} im Monat · Jahr ab ${new Date(2026, (Number(p.kw_bill_start) || 1) - 1, 1).toLocaleDateString("de-DE", { month: "long" })}` : "für „Guthaben oder Nachzahlung“ im Bericht", words: "abschlag rechnung nachzahlung guthaben grundpreis" },
       { g: "Bericht", id: "kwinvest", icon: "mdi:piggy-bank-outline", c: "#f59e0b", title: "Anschaffung der Solaranlage",
         sum: p.kw_invest ? `${this._kwEur(Number(p.kw_invest))} – fürs Sparschwein im Bericht` : "für „wie viel ist schon bezahlt“ im Bericht", words: "anschaffung kosten amortisation sparschwein invest" },
       { g: "Allgemein", act: "kw-log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll", sum: "Änderungen an den Einstellungen von Kraftwerk", words: "protokoll log änderungen" },
@@ -7888,6 +8017,12 @@ class HauswerkPanel extends HTMLElement {
             <div class="wxrows">${p.kw_grid_export ? "" : row("kwg1", "Vorzeichen umdrehen", "an, wenn Einspeisung positiv angezeigt wird", sw("kw_grid_invert"), "Manche Zähler zeigen die Einspeisung positiv. Schalte das an, wenn unten bei Sonne „Bezug“ steht, obwohl du einspeist.")}</div>
             <div class="field"><span><ha-icon icon="mdi:transmission-tower-export"></ha-icon> Einspeisung getrennt (optional)</span>${this._picker("kw_grid_export", p.kw_grid_export)}</div>` : `<p class="muted small"><ha-icon icon="mdi:school-outline"></ha-icon>Vorzeichen umdrehen und getrennte Einspeisung: Experteneinstellungen unter Kraftwerk › Einstellungen.</p>`}
             ${p.kw_grid ? live(fl.grid == null ? "kein Wert" : `jetzt ${this._kwFmt(Math.abs(fl.grid))} ${fl.grid > 5 ? "Bezug" : fl.grid < -5 ? "Einspeisung" : "ausgeglichen"}`, fl.grid > 5 ? "#8b5cf6" : "#10b981") : ""}` };
+      case "kwbill":
+        return { icon: "mdi:file-document-outline", c: "#8b5cf6", title: "Abschlag", sub: "Kraftwerk · Bericht",
+          body: `<p class="muted">Mit dem Abschlag rechnet Kraftwerk hoch, ob am Ende des Abrechnungsjahrs ein Guthaben oder eine Nachzahlung kommt.</p>
+            <div class="wxrows">${row("kb1", "Abschlag", "im Monat, laut Stromrechnung", `<div class="unit"><input type="number" min="0" max="5000" step="1" data-set="kw_bill_amount" value="${p.kw_bill_amount ?? ""}" placeholder="–"><i>€</i></div>`, "")}
+            ${row("kb2", "Abrechnungsjahr beginnt", "Monat der letzten Jahresabrechnung", `<select data-set="kw_bill_start">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${Number(p.kw_bill_start || 1) === i + 1 ? "selected" : ""}>${new Date(2026, i, 1).toLocaleDateString("de-DE", { month: "long" })}</option>`).join("")}</select>`, "")}
+            ${row("kb3", "Grundpreis", "im Monat – nur, wenn er nicht schon in den Preisen des Energie-Dashboards steckt", `<div class="unit"><input type="number" min="0" max="500" step="0.01" data-set="kw_bill_base" value="${p.kw_bill_base ?? ""}" placeholder="–"><i>€</i></div>`, "")}</div>` };
       case "kwinvest":
         return { icon: "mdi:piggy-bank-outline", c: "#f59e0b", title: "Anschaffung der Solaranlage", sub: "Kraftwerk · Bericht",
           body: `<p class="muted">Mit den Anschaffungskosten zeigt das Sparschwein im Bericht, wie viel der Anlage schon bezahlt ist und wann sie sich etwa bezahlt gemacht hat.</p>
@@ -16376,6 +16511,27 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .wt-ctl { display:flex; gap:10px; margin-top:4px; }
 .wbtn { all:unset; cursor:pointer; flex:1; height:48px; border-radius:14px; display:grid; place-items:center; background:color-mix(in srgb, var(--text) 8%, transparent); }
 .wbtn ha-icon { --mdc-icon-size:26px; } .wbtn:disabled { opacity:.4; }
+/* Kraftwerk: Wand, Auffälliges, Abschlag */
+.kwwall { display:grid; grid-template-columns:1.25fr 1fr; gap:14px; align-items:start; }
+.kwwall-l .kw-flow { min-height:100%; } .kwwall-l .kw-flow svg { width:100%; height:auto; max-height:520px; }
+.kwwall-r { display:flex; flex-direction:column; gap:14px; }
+.kwwall-now { display:flex; align-items:center; gap:16px; padding:18px 20px; border-left:5px solid var(--c); background:color-mix(in srgb, var(--c) 10%, var(--card)); --mdc-icon-size:44px; }
+.kwwall-now > ha-icon { color:var(--c); } .kwwall-now b { display:block; font-size:28px; line-height:1.15; } .kwwall-now small { display:block; color:var(--muted); font-size:16px; margin-top:4px; }
+.kwrs { display:flex; gap:20px; justify-content:space-around; }
+.kwr { position:relative; width:150px; text-align:center; } .kwr svg { width:120px; height:120px; transform:rotate(-90deg); }
+.kwr circle { fill:none; stroke:var(--card2); stroke-width:10; } .kwr .f { stroke-linecap:round; }
+.kwr b { position:absolute; top:40px; left:0; right:0; font-size:26px; } .kwr small { display:block; color:var(--muted); font-weight:600; } .kwr em { display:block; font-style:normal; font-size:12px; color:var(--muted); }
+.kw-find .ev small { white-space:normal; }
+.kb-res { padding:12px 16px; border-radius:14px; background:color-mix(in srgb, var(--c) 12%, var(--card)); border-left:4px solid var(--c); margin:6px 0 12px; }
+.kb-res b { display:block; font-size:20px; color:var(--c); } .kb-res small { display:block; color:var(--muted); white-space:normal; }
+.kb-chart { position:relative; display:grid; grid-template-columns:repeat(12, 1fr); gap:5px; height:120px; margin-bottom:20px; }
+.kb-m { position:relative; display:flex; align-items:flex-end; } .kb-m i { display:block; width:100%; border-radius:4px 4px 0 0; background:#8b5cf6; }
+.kb-m.schätzung i, .kb-m.fehlt i { background:repeating-linear-gradient(-45deg, color-mix(in srgb, #8b5cf6 45%, transparent), color-mix(in srgb, #8b5cf6 45%, transparent) 4px, color-mix(in srgb, #8b5cf6 20%, transparent) 4px, color-mix(in srgb, #8b5cf6 20%, transparent) 8px); }
+.kb-m.jetzt i { background:linear-gradient(to top, #8b5cf6 60%, color-mix(in srgb, #8b5cf6 40%, transparent)); }
+.kb-m small { position:absolute; top:100%; left:0; right:0; text-align:center; font-size:11px; color:var(--muted); margin-top:3px; }
+.kb-line { position:absolute; left:-4px; right:-4px; height:0; border-top:2px dashed #ef4444; z-index:1; }
+.klegend i.ist { background:#8b5cf6; } .klegend i.sch { background:color-mix(in srgb, #8b5cf6 40%, transparent); } .klegend i.ab { background:#ef4444; height:2px; }
+@media (max-width:1000px) { .kwwall { grid-template-columns:1fr; } }
 /* Kraftwerk › Bericht: Monat, Kosten, Sparschwein, Geräte */
 .kwm-nav { display:flex; gap:4px; }
 .kwm-chart { display:flex; gap:6px; margin-top:6px; }

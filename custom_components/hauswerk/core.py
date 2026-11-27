@@ -90,7 +90,7 @@ KIND_MODULE = {
     "window": "heizwerk", "offline": "heizwerk", "frost": "heizwerk", "battery": "heizwerk", "cold": "heizwerk", "vent": "heizwerk",
     "vent_done": "heizwerk", "storm": "rollwerk", "cover": "rollwerk", "light_away": "lichtwerk", "light_offline": "lichtwerk",
     "mower": "beetwerk", "mower_guard": "beetwerk", "mower_care": "beetwerk", "smoke": "wachwerk", "water": "wachwerk",
-    "warn": "wachwerk", "door": "wachwerk", "leave": "wachwerk", "bell": "wachwerk", "appliance": "kraftwerk",
+    "warn": "wachwerk", "door": "wachwerk", "leave": "wachwerk", "bell": "wachwerk", "appliance": "kraftwerk", "power": "kraftwerk",
     "maint": "hauswerk", "weekly": "hauswerk", "waste": "hauswerk",
 }
 MODULE_NAMES = {"heizwerk": "Heizwerk", "rollwerk": "Rollwerk", "kraftwerk": "Kraftwerk", "lichtwerk": "Lichtwerk",

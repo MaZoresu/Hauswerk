@@ -243,6 +243,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("notify_light_offline"): NOTIFY_MODE,
         vol.Optional("notify_mower"): NOTIFY_MODE,
         vol.Optional("notify_mower_care"): NOTIFY_MODE,
+        vol.Optional("notify_power"): NOTIFY_MODE,
         vol.Optional("notify_mower_guard"): NOTIFY_MODE,
         vol.Optional("notify_smoke"): NOTIFY_MODE,
         vol.Optional("notify_water"): NOTIFY_MODE,
@@ -358,6 +359,9 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("kw_consumers"): vol.All([SENSOR], vol.Length(max=20)),
         vol.Optional("kw_names"): vol.All(dict, vol.Length(max=20), {SENSOR: vol.All(str, vol.Length(max=40))}),
         vol.Optional("kw_invest"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=500000))),
+        vol.Optional("kw_bill_amount"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=5000))),
+        vol.Optional("kw_bill_start"): vol.All(vol.Coerce(int), vol.Range(min=1, max=12)),
+        vol.Optional("kw_bill_base"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=500))),
         vol.Optional("kw_appliances"): vol.All([vol.Schema({
             vol.Required("id"): vol.All(str, vol.Match(r"^[a-z0-9_]{1,40}$")),
             vol.Required("name"): vol.All(str, vol.Length(min=1, max=40)),

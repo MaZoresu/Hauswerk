@@ -2,6 +2,16 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.106.0 – 2026-11-27
+
+### Neu – Kraftwerk
+- **Stromfresser erkennen:** Braucht ein Gerät aus dem Energie-Dashboard („Einzelne Geräte“) in den letzten 5 Tagen deutlich mehr als sonst (+30 %, mind. 0,15 kWh am Tag), kommt z. B. „Kühlschrank braucht mehr Strom – seit 5 Tagen 1,3 kWh am Tag statt 0,8 kWh (+62 %)“. Ebenso **„Grundlast gestiegen“**, wenn der Verbrauch nachts (1–5 Uhr) deutlich über dem der Wochen davor liegt. Täglich um 7:40 Uhr geprüft.
+- **Standby je Gerät** (Bericht): niedrigste übliche Leistung jeder Messsteckdose bzw. jedes Geräts aus dem Energie-Dashboard über 7 Tage, mit Kosten im Jahr – z. B. „Fernseher 8 W – ca. 22 € im Jahr“; unterscheidet Ruhezustand und Dauerläufer (Kühlschrank, Router).
+- **Abschlag prüfen** (Bericht): Kosten seit Beginn des Abrechnungsjahrs (Netzbezug − Einspeisung, auf Wunsch + Grundpreis), der Rest mit den Vorjahresmonaten hochgerechnet – „Guthaben ca. 120 €“ bzw. „Nachzahlung ca. …“, mit Monatsbalken und Abschlag-Linie. Abschlag, Beginn und Grundpreis unter Kraftwerk › Einstellungen › Abschlag.
+- **Tablet-Wand:** großer Energiefluss, daneben in einem Satz, was gerade gilt („1,7 kW Überschuss – jetzt ist eine gute Zeit für Waschmaschine, Trockner“), heute Autarkie und selbst genutzt als Ringe, Solar-Prognose und Auffälliges.
+- **Störungen melden:** Solar liefert trotz Sonne nichts bzw. der Wechselrichter meldet sich nicht (je 30 Min.), Akku wird an Tagen mit Einspeisung nicht mehr voll, Stromzähler sendet seit 30 Min. keinen Wert.
+- Alles erscheint oben unter Kraftwerk › Energiefluss („Auffällig“), unter der Glocke und als Nachricht – neuer Anlass „Auffälliger Stromverbrauch & Störungen“ unter Benachrichtigungen › Kraftwerk (Knopf „Gesehen“).
+
 ## 0.105.0 – 2026-11-27
 
 ### Geändert – Handy

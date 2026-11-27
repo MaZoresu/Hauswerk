@@ -206,6 +206,7 @@ const status = {
     stats: { week_hours: 18.5, week_charges: 9, week_errors: 3, cap_max: 1650,
       days: Array.from({ length: 14 }, (_, i) => ({ day: new Date(Date.now() - (13 - i) * 86400e3).toISOString().slice(0, 10), hours: [0, 3.2, 0, 4.1, 0, 2.5, 0, 3.8, 0, 4.2, 1.1, 3.6, 0, 2.4][i], charges: i % 2, errors: i === 9 ? 2 : i === 11 ? 1 : 0 })),
       errors: [{ text: "Mäher steckt fest", count: 3, from: 14, to: 15 }], last_errors: [] } },
+  kw_watch: { findings: [{ key: "kw_dev:sensor.kuehlschrank_energie", icon: "mdi:trending-up", level: "warn", title: "Kühlschrank braucht mehr Strom", text: "Seit 5 Tagen im Schnitt 1,3 kWh am Tag statt 0,8 kWh (+62 %)." }], checked: null },
   appliances: {
     waschmaschine: { state: "running", label: "Läuft", learning: false, n: 6, watt: 1932, gap: false,
       model: { n: 6, learning: false, active_w: 8, quiet_w: 3.1, start_w: 10, pause_max: 1500, end_wait: 2070, dur_med: 6300, dur_lo: 5400, dur_hi: 6900, kwh_med: 1.24, tail_s: 1620, tail_w: 2, interval: 150 },
