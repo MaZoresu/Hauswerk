@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.97.0";
+const VERSION = "0.98.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2347,6 +2347,7 @@ class HauswerkPanel extends HTMLElement {
       else state = `<div class="vt-ok"><ha-icon icon="mdi:check-circle-outline"></ha-icon><span>${s.humidity == null && a.co2 == null ? "Ohne Feuchtesensor nur Lüft-Timer und Bilanz" : "Kein Lüften nötig"}</span></div>`;
       const facts = [
         s.humidity != null ? [`${fmt(s.humidity, 0)} %`, `Luftfeuchte · ab ${fmt(a.limit, 0)} % lüften`, s.humidity >= (a.limit || 99) ? "#f59e0b" : ""] : null,
+        a.abs?.in != null ? [`${fmt(a.abs.in)} g/m³`, a.abs.out != null ? `Wasser in der Luft · draußen ${fmt(a.abs.out)} g/m³ – ${a.abs.in - a.abs.out >= 1 ? "Lüften trocknet" : "Lüften trocknet nicht"}` : "Wasser in der Luft", a.abs.out != null && a.abs.in - a.abs.out >= 1 ? "#14b8a6" : ""] : null,
         a.mold ? [`${a.mold.wall_rh} %`, `an der Außenwand (${fmt(a.mold.wall_temp)} °C) · ${amp[a.mold.level][1]}`, amp[a.mold.level][0]] : null,
         a.co2 != null ? [`${a.co2} ppm`, "CO₂", a.co2 >= (set.vent_co2 || 1000) ? "#f59e0b" : ""] : null,
         a.last ? [ago(a.last.at), `zuletzt gelüftet · ${fmt(a.last.min, 0)} Min.${a.last.rh0 != null && a.last.rh1 != null ? ` · ${fmt(a.last.rh0, 0)} → ${fmt(a.last.rh1, 0)} %` : ""}`, ""] : null,

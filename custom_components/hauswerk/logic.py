@@ -880,10 +880,21 @@ def next_dry_hour(hours: list[dict], now_ts: float, in_temp: float, in_rh: float
 
 
 def vent_done(minutes_open: float, target_min: float, rh_start: float | None, rh_now: float | None,
-              t_start: float | None, t_now: float | None, limit_rh: float) -> str | None:
-    """Genug gelüftet? Zeit erreicht, Feuchte deutlich gesunken oder Raum zu stark abgekühlt – mit Grund."""
+              t_start: float | None, t_now: float | None, limit_rh: float,
+              out_temp: float | None = None, out_rh: float | None = None) -> str | None:
+    """Genug gelüftet? Zeit erreicht, Wasser in der Luft deutlich gesunken oder Raum zu stark abgekühlt – mit Grund.
+
+    Mit Außenwerten zählt die absolute Feuchte (g/m³): Beim Lüften kühlt der Raum ab, die relative Feuchte sinkt
+    dann kaum oder steigt sogar, obwohl viel Wasser hinausgeht. Genug, wenn so viel Wasser hinaus ist wie 10 %-Punkte bei der Anfangstemperatur.
+    """
     if minutes_open >= target_min:
         return f"{int(target_min)} Min. gelüftet"
+    if None not in (rh_start, rh_now, t_start, t_now, out_temp, out_rh) and minutes_open >= 3:
+        a0, a1, ao = abs_humidity(t_start, rh_start), abs_humidity(t_now, rh_now), abs_humidity(out_temp, out_rh)
+        gap = a0 - ao
+        # so viel Wasser wie 10 %-Punkte bei der Anfangstemperatur – höchstens die Hälfte des Unterschieds zu draußen
+        if gap >= 1.0 and a0 - a1 >= min(0.5 * gap, abs_humidity(t_start, 10)):
+            return f"Feuchte {a0:.1f} → {a1:.1f} g/m³".replace(".", ",")
     if rh_start is not None and rh_now is not None and minutes_open >= 3 and rh_now <= min(rh_start - 10, limit_rh - 5):
         return f"Luftfeuchte {rh_start:.0f} → {rh_now:.0f} %"
     if t_start is not None and t_now is not None and t_start - t_now >= 3:
@@ -898,6 +909,18 @@ def drop_within(samples: list[tuple[float, float]], now: float, seconds: float) 
     if len(recent) < 2:
         return 0.0
     return round(max(recent) - recent[-1], 2)
+
+
+def abs_rise_points(samples: list[tuple[float, float]], now: float, seconds: float, temp: float | None) -> float | None:
+    """Anstieg der absoluten Feuchte (Proben in g/m³) in den letzten seconds Sekunden, umgerechnet in %-Punkte
+    bei der aktuellen Raumtemperatur – damit die Grenze „steigt um x %-Punkte“ gleich bleibt, aber Abkühlen
+    (Heizung regelt runter, Fenster) keinen Fehlalarm mehr auslöst. None ohne Temperatur bzw. Proben."""
+    if temp is None:
+        return None
+    recent = [v for ts, v in samples if now - ts <= seconds]
+    if len(recent) < 2:
+        return None
+    return round((recent[-1] - min(recent)) / abs_humidity(temp, 1.0), 2)
 
 
 def rise_within(samples: list[tuple[float, float]], now: float, seconds: float) -> float:

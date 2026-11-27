@@ -80,6 +80,8 @@ from .logic import (
     occupied,
     radio_should_send,
     retry_wait,
+    abs_humidity,
+    abs_rise_points,
     rise_within,
     room_setting,
     snap,
@@ -1424,6 +1426,7 @@ class Heizen:
             room_temp, humidity = self._room_values(room)
             self._sample(rt, "temps", room_temp, now)
             self._sample(rt, "hums", humidity, now)
+            self._sample(rt, "ahs", round(abs_humidity(room_temp, humidity), 2) if room_temp is not None and humidity is not None else None, now)
             open_since, closed_since = self._windows_open_since(room)
             rt["windows_open"] = open_since is not None
             paused = window_paused(
@@ -1697,11 +1700,17 @@ class Heizen:
         self._save()
         await self.async_evaluate()
 
+    def _hum_rise(self, rt: dict, now: float) -> float:
+        """Feuchte-Anstieg in 15 Min. (%-Punkte): aus der absoluten Feuchte, sonst aus der relativen."""
+        temps = [v for _ts, v in rt.get("temps") or []]
+        x = abs_rise_points(rt.get("ahs") or [], now, 900, temps[-1] if temps else None)
+        return x if x is not None else rise_within(rt.get("hums") or [], now, 900)
+
     def _shower(self, room_id: str, room: dict, rt: dict, override: dict | None, paused: bool, now: float) -> dict | None:
         minutes = int(room.get("shower_boost") or 0)
         if not minutes or paused or not room.get("humidity_sensor") or (override and not override.get("shower")):
             return None
-        rise = rise_within(rt.get("hums") or [], now, 900)
+        rise = self._hum_rise(rt, now)
         if rise < float(room.get("shower_rise") or 10) or now - rt.get("shower_at", 0) < 3600:
             return None
         rt["shower_at"] = now
@@ -1781,7 +1790,7 @@ class Heizen:
                     and humidity is not None and ventilate_advice(room_temp, humidity, out_temp, out_rh, 1.0):
                 reasons.append(f"Schimmelgefahr an Außenwänden ({mold['wall_rh']} %)")
                 kind = kind or "mold"
-            rise = rise_within(rt.get("hums") or [], now, 900)
+            rise = self._hum_rise(rt, now)
             if rise >= float(room.get("shower_rise") or 10):
                 rt["rise_at"] = now
             if now - rt.get("rise_at", 0) < 1800 and humidity is not None:
@@ -1853,7 +1862,8 @@ class Heizen:
                 if session["cool"]:
                     why = "draußen wärmer als drinnen" if out_temp is not None and room_temp is not None and out_temp >= room_temp else None
                 else:
-                    why = vent_done(open_min, session["target"], session["rh0"], humidity, session["t0"], room_temp, limit or 65)
+                    why = vent_done(open_min, session["target"], session["rh0"], humidity, session["t0"], room_temp, limit or 65,
+                                    out_temp, out_rh)
                 if why:
                     session["done"] = why
                     self.log.add("window", "Genug gelüftet – Fenster schließen", why, room_id, name)
@@ -1922,6 +1932,8 @@ class Heizen:
                      "rh_drop": round(sum(drops) / len(drops)) if drops else None, "nights": len(week_all) - len(week)},
             "night_ok": self._night_allowed(room),
             "balance": balance,
+            "abs": {"in": round(abs_humidity(room_temp, humidity), 1) if room_temp is not None and humidity is not None else None,
+                    "out": round(abs_humidity(out_temp, out_rh), 1) if out_temp is not None and out_rh is not None else None},
         }
         vent = None
         if need:

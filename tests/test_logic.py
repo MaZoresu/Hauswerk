@@ -710,3 +710,19 @@ def test_morning_vent_done():
     assert f([{"at": t0 + 7.5 * 3600, "min": 5}], t0, start, night, False)
     # nachts nur 10 Min. offen: zählt nicht
     assert not f([{"at": t0 + 3600, "min": 10}], t0, start, night, False)
+
+
+def test_abs_humidity_vent():
+    """Lüften nach absoluter Feuchte: Ende erkannt, obwohl die relative Feuchte beim Abkühlen kaum sinkt; Duschen ohne Fehlalarm beim Abkühlen."""
+    # 21 °C/60 % → 18,5 °C/56 %: relativ nur 4 Punkte, absolut 2 g/m³ hinaus (draußen 2 °C/85 %)
+    why = L.vent_done(5, 10, 60, 56, 21, 18.5, 65, 2, 85)
+    assert why and "g/m³" in why
+    assert L.vent_done(5, 10, 60, 56, 21, 18.5, 65) is None           # ohne Außenwerte: alte Regel
+    assert L.vent_done(5, 10, 60, 59, 21, 20.8, 65, 2, 85) is None    # kaum Wasser hinaus
+    # Raum kühlt ab: relativ +8 Punkte, absolut gleich → kein Anstieg
+    a = L.abs_humidity(21, 50)
+    assert L.abs_rise_points([(0, a), (600, a)], 600, 900, 19) == 0
+    # Duschen: absolut +3 g/m³ ≈ 16 %-Punkte bei 22 °C
+    pts = L.abs_rise_points([(0, 9.0), (600, 12.0)], 600, 900, 22)
+    assert 14 < pts < 18
+    assert L.abs_rise_points([(0, 9.0)], 600, 900, 22) is None and L.abs_rise_points([(0, 9.0), (1, 10)], 600, 900, None) is None

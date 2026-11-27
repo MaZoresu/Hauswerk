@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.98.0 – 2026-11-27
+
+### Geändert (Heizwerk › Lüften) – absolute Luftfeuchte
+- **„Genug gelüftet“ nach Wasser in der Luft:** Beim Lüften kühlt der Raum ab – die relative Feuchte sinkt dann kaum oder steigt sogar, obwohl viel Wasser hinausgeht. Jetzt zählt die absolute Feuchte (g/m³): genug, wenn so viel Wasser hinaus ist wie 10 %-Punkte bei der Anfangstemperatur (höchstens die Hälfte des Unterschieds zu draußen). Grund z. B. „Feuchte 11,0 → 8,9 g/m³“. Ohne Außenwerte wie bisher.
+- **„Feuchte steigt schnell“ (Duschen, Kochen) und Nachheizen nach dem Duschen** aus der absoluten Feuchte: kein Fehlalarm mehr, wenn der Raum abkühlt (Heizung regelt herunter, Fenster). Die Grenze bleibt „%-Punkte in 15 Min.“, umgerechnet bei der Raumtemperatur.
+- **Anzeige je Raum** auf der Seite Lüften: „9,1 g/m³ – Wasser in der Luft · draußen 4,2 g/m³ – Lüften trocknet“ (bzw. „trocknet nicht“).
+- Ob ein Raum zu feucht ist, sagt weiter die relative Feuchte (Grenze je Raumart) – sie entscheidet über Schimmel und Wohlgefühl.
+
 ## 0.97.0 – 2026-11-27
 
 ### Geändert
