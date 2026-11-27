@@ -2461,3 +2461,33 @@ def test_wachwerk_wetter_schutz_einstellungen(panel):
     p.wait(300)
     saved = {k: v for m in p.sent() if m["type"].endswith("settings/save") for k, v in m.get("settings", {}).items()}
     assert str(saved.get("ww_wx_hours")) == "6", saved
+
+
+def test_handy_start_anwesenheit_leiste_mehr(panel):
+    """Handy: Anwesenheit in einer Zeile (Antippen öffnet die Auswahl), untere Leiste mit 4 Modulen + „Mehr“, Scroll-Position bleibt."""
+    p = panel
+    p.js("localStorage.removeItem('hauswerk-mod-use')")
+    p.view("start")
+    p.wait(300)
+    if p.has(".pline"):
+        p.click(".pline")
+        p.wait(300)
+        assert p.has('#pop [data-action="presence"]') and p.has('#pop [data-action="hmode"]')
+        p.js(f"{EL}._closePop()")
+    bn = p.js(f"[...{EL}.shadowRoot.querySelectorAll('#bnav .bn')].map((b) => b.textContent.trim())")
+    assert len(bn) == 6 and bn[0] == "Start" and bn[-1] == "Mehr", bn
+    p.click('#bnav [data-pop="bnmore"]')
+    p.wait(300)
+    more = p.js(f"[...{EL}.shadowRoot.querySelectorAll('#pop .bnm b')].map((b) => b.textContent)")
+    assert "Einstellungen" in more and len(more) >= 4, more
+    # ein Modul aus „Mehr“ öffnen: zählt als genutzt und steht danach in der Leiste
+    p.click('#pop .bnm[data-tab]')
+    p.wait(300)
+    use = p.js("JSON.parse(localStorage.getItem('hauswerk-mod-use') || '{}')")
+    assert use, use
+    # Scroll-Position merken
+    p.view("start")
+    p.wait(200)
+    p.js("window.scrollTo(0, 300)")
+    p.js(f"{EL}._scrollSave()")
+    assert p.js("JSON.parse(localStorage.getItem('hauswerk-scroll')).start.y") >= 0

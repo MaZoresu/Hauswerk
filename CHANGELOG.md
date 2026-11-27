@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.105.0 – 2026-11-27
+
+### Geändert – Handy
+- **Anwesenheit in einer Zeile:** Das Widget zeigt nur noch „Zu Hause · Jens · Julia (460 m)“ mit dem Modus-Symbol und aktiven Schaltern (Gäste, Party, Eco). Antippen öffnet die Auswahl mit Zu Hause / Abwesend / Urlaub, Gäste / Party / Eco und den Personen; das Zahnrad führt zu den Einstellungen.
+- **Untere Leiste entlastet:** Start, die vier Module, die du auf diesem Gerät am häufigsten öffnest (das gerade offene ist immer dabei), und **Mehr** – dort die übrigen Module, Einstellungen und Protokoll. Keine abgeschnittenen Namen mehr.
+- **Nach unten ziehen zum Aktualisieren:** ganz oben auf einer Seite nach unten ziehen lädt alle Werte neu.
+- **Scroll-Position bleibt:** Beim Zurückkehren in die App (oder nach dem Neuladen, bis 30 Min.) steht die Seite wieder dort, wo du warst.
+
 ## 0.104.0 – 2026-11-27
 
 ### Neu – Wachwerk › Wetter-Schutz

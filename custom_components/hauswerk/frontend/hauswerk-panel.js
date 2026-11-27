@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.104.0";
+const VERSION = "0.105.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -858,6 +858,16 @@ class HauswerkPanel extends HTMLElement {
 
   connectedCallback() {
     if (this._hass && this._data && !this._unsub) this._subscribe();
+    if (!this._scrollBound) {
+      this._scrollBound = true;
+      let t = null;
+      window.addEventListener("scroll", () => { clearTimeout(t); t = setTimeout(() => this._scrollSave(), 250); }, { passive: true });
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") this._scrollSave();
+        else this._scrollRestore();
+      });
+      window.addEventListener("touchstart", (e) => this._pullStart(e), { passive: true });
+    }
     window.addEventListener("location-changed", this._onLocation);
     window.addEventListener("popstate", this._onLocation);
     // Uhrzeit in der Kopfzeile aktuell halten (ohne die Seite neu zu zeichnen)
@@ -909,6 +919,7 @@ class HauswerkPanel extends HTMLElement {
       this._renderShell();
       this._renderMain();
       this._subscribe();
+      this._scrollRestore();
     } catch (err) {
       this._error = err.message || String(err);
       this._renderMain();
@@ -921,6 +932,7 @@ class HauswerkPanel extends HTMLElement {
         this._status = status;
         if (["start", "overview", "security"].includes(this._tab) && !this._busy) this._renderMain();
         else this._renderChrome();
+        if (this._pop?.id === "presq") this._renderPop();
       },
       { type: "hauswerk/heizen/subscribe" }
     );
@@ -1055,6 +1067,7 @@ class HauswerkPanel extends HTMLElement {
         <div id="tdots" class="tdots"></div>
       </div>
       <nav id="bnav" class="bnav" aria-label="Navigation"></nav>
+      <div id="ptr" class="ptr" aria-hidden="true"><ha-icon icon="mdi:refresh"></ha-icon></div>
       <div id="dialog"></div>
       <div id="pop"></div>
       <div id="toast" class="toast" hidden></div>
@@ -1163,6 +1176,69 @@ class HauswerkPanel extends HTMLElement {
     window.scrollTo({ top: 0 });
   }
 
+  /** Scroll-Position je Seite merken (30 Min.) – nach dem Zurückkehren in die App bzw. Neuladen wiederherstellen. */
+  _scrollSave() {
+    if (this._tablet || !this._tab) return;
+    try {
+      const m = JSON.parse(localStorage.getItem("hauswerk-scroll") || "{}");
+      m[this._tab] = { y: Math.round(window.scrollY), at: Date.now() };
+      localStorage.setItem("hauswerk-scroll", JSON.stringify(m));
+    } catch (e) { /* privat */ }
+  }
+
+  _scrollRestore() {
+    if (this._tablet || !this._tab) return;
+    try {
+      const m = JSON.parse(localStorage.getItem("hauswerk-scroll") || "{}")[this._tab];
+      if (m && m.y > 0 && Date.now() - m.at < 30 * 60000 && window.scrollY < 10) {
+        requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo({ top: m.y })));
+      }
+    } catch (e) { /* privat */ }
+  }
+
+  /** Nach unten ziehen zum Aktualisieren (Handy, ganz oben auf der Seite). */
+  _pullStart(e) {
+    if (this._tablet || window.scrollY > 0 || this._pop || this._dialog || !this._phone()) return;
+    if (e.composedPath().some((n) => n.classList?.contains?.("sheet") || n.dataset?.lwdim !== undefined || n.dataset?.drag !== undefined)) return;
+    const y0 = e.touches?.[0]?.clientY;
+    if (y0 == null) return;
+    const ind = this.shadowRoot.getElementById("ptr");
+    let dy = 0;
+    const move = (ev) => {
+      dy = (ev.touches?.[0]?.clientY ?? y0) - y0;
+      if (window.scrollY > 0 || dy <= 0) { ind?.classList.remove("show"); return; }
+      if (ind) { ind.classList.add("show"); ind.style.setProperty("--p", Math.min(1, dy / 90).toFixed(2)); ind.classList.toggle("ready", dy > 90); }
+    };
+    const end = () => {
+      window.removeEventListener("touchmove", move);
+      window.removeEventListener("touchend", end);
+      window.removeEventListener("touchcancel", end);
+      if (dy > 90 && window.scrollY <= 0) this._pullRefresh();
+      else ind?.classList.remove("show", "ready");
+    };
+    window.addEventListener("touchmove", move, { passive: true });
+    window.addEventListener("touchend", end);
+    window.addEventListener("touchcancel", end);
+  }
+
+  async _pullRefresh() {
+    const ind = this.shadowRoot.getElementById("ptr");
+    ind?.classList.add("show", "busy");
+    try {
+      this._data = await this._hass.callWS({ type: "hauswerk/heizen/get" });
+      this._status = this._data.status;
+      this._kwS = {};
+      this._fc = {};
+      this._renderChrome();
+      this._renderMain();
+      this._toast("Aktualisiert");
+    } catch (err) {
+      this._toast(`Das hat nicht geklappt: ${err.message || err}`);
+    } finally {
+      ind?.classList.remove("show", "busy", "ready");
+    }
+  }
+
   // ------------------------------------------------------------ Kopfleiste, Modul-Reiter, Status-Chips
   _renderChrome() {
     const head = this.shadowRoot.getElementById("head");
@@ -1195,19 +1271,55 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Untere Leiste fürs Handy: Start · Module · Einstellungen (Unterseiten eines Moduls über seine Unterleiste). */
+  /** Wie oft ein Modul geöffnet wurde (je Gerät) – für die untere Leiste am Handy. */
+  _modUse(id) {
+    try {
+      const u = JSON.parse(localStorage.getItem("hauswerk-mod-use") || "{}");
+      if (id) { u[id] = (u[id] || 0) + 1; localStorage.setItem("hauswerk-mod-use", JSON.stringify(u)); }
+      return u;
+    } catch (e) { return {}; }
+  }
+
+  /** Module für die untere Leiste: die 4 meistgenutzten (das offene immer dabei), Rest unter „Mehr“. */
+  _bnavMods() {
+    const u = this._modUse();
+    const sorted = [...MODULES].sort((a, b) => (u[b.id] || 0) - (u[a.id] || 0) || a.no - b.no);
+    let top = sorted.slice(0, 4);
+    const cur = MODULES.find((m) => m.views.includes(this._tab));
+    if (cur && !top.includes(cur)) top = [...top.slice(0, 3), cur];
+    top.sort((a, b) => a.no - b.no);
+    return { top, more: MODULES.filter((m) => !top.includes(m)) };
+  }
+
   _bnavHtml() {
     const f = this._data ? this._facts() : null;
     const on = (ids) => (ids.includes(this._tab) ? "on" : "");
-    const item = (tab, ids, icon, label, badge = "") =>
-      `<button class="bn ${on(ids)}" data-action="tab" data-tab="${tab}"><span class="bi">${modIcon(icon)}${badge}</span><span>${label}</span></button>`;
+    const item = (tab, ids, icon, label, badge = "", act = "tab") =>
+      `<button class="bn ${on(ids)}" data-action="${act}" data-tab="${tab}"><span class="bi">${modIcon(icon)}${badge}</span><span>${label}</span></button>`;
+    const badge = (m) => (m.id === "heizen" && f && (f.open || f.heating) ? `<em class="${f.open ? "warn" : ""}">${f.open || f.heating}</em>` : "");
+    const { top, more } = this._bnavMods();
+    const moreOn = [...more.flatMap((m) => m.views), ...SET_VIEWS, "log"].includes(this._tab);
+    const moreBadge = more.some((m) => badge(m)) ? `<em class="dot"></em>` : "";
     return [
       item("start", ["start"], "mdi:view-dashboard-outline", "Start"),
-      ...MODULES.map((m) =>
-        item(m.views.includes(this._tab) ? this._tab : m.views[0], m.views, m.logo ? `logo:${m.logo}` : m.icon, m.name,
-          m.id === "heizen" && f && (f.open || f.heating) ? `<em class="${f.open ? "warn" : ""}">${f.open || f.heating}</em>` : "")
-      ),
-      item("house", [...SET_VIEWS, "log"], "mdi:cog-outline", "Einstellungen"),
+      ...top.map((m) => item(m.views.includes(this._tab) ? this._tab : m.views[0], m.views, m.logo ? `logo:${m.logo}` : m.icon, m.name, badge(m), "bn-mod")),
+      `<button class="bn ${moreOn ? "on" : ""}" data-action="pop-open" data-pop="bnmore"><span class="bi"><ha-icon icon="mdi:dots-grid"></ha-icon>${moreBadge}</span><span>Mehr</span></button>`,
     ].join("");
+  }
+
+  _phone() {
+    return !this._tablet && window.matchMedia?.("(max-width: 600px)").matches;
+  }
+
+  _bnMorePop() {
+    const f = this._facts();
+    const { more } = this._bnavMods();
+    const tile = (tab, icon, name, sub = "") => `<button class="bnm" data-action="bn-go" data-tab="${tab}"><span class="bi">${modIcon(icon)}</span><b>${esc(name)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
+    return { icon: "mdi:dots-grid", c: "var(--accent)", title: "Mehr", sub: "Module und Einstellungen",
+      body: `<div class="bnm-grid">${more.map((m) => tile(m.views[0], m.logo ? `logo:${m.logo}` : m.icon, m.name, m.id === "heizen" && (f.open || f.heating) ? `${f.heating} heizen${f.open ? ` · ${f.open} offen` : ""}` : "")).join("")}
+        ${tile("house", "mdi:cog-outline", "Einstellungen")}${tile("log", "mdi:text-box-search-outline", "Protokoll")}</div>
+        <p class="muted small">Die untere Leiste zeigt die vier Module, die du auf diesem Gerät am häufigsten öffnest.</p>`,
+      foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
   }
 
   _facts() {
@@ -3196,7 +3308,23 @@ class HauswerkPanel extends HTMLElement {
       .join("")}</div>`;
   }
 
+  /** Anwesenheit in einer Zeile (Handy): Modus, wer zu Hause ist, aktive Schalter – Antippen öffnet die Auswahl. */
+  _presenceLine() {
+    const s = this._status || {};
+    const set = this._data.settings;
+    const mode = s.vacation ? "urlaub" : s.away ? "abwesend" : "home";
+    const [icon, label, c] = { home: ["mdi:home-heart", "Zu Hause", C.ok], abwesend: ["mdi:home-export-outline", "Abwesend", "#94a3b8"], urlaub: ["mdi:palm-tree", "Urlaub", "#f59e0b"] }[mode];
+    const people = this._people();
+    const home = people.filter((p) => p.home), away = people.filter((p) => !p.home);
+    const who = [home.map((p) => p.name).join(", "), away.map((p) => `${p.name} (${p.distTxt || p.where})`).join(", ")].filter(Boolean).join(" · ");
+    const chips = [["guest", "mdi:account-group-outline", "Gäste"], ["party", "mdi:party-popper", "Party"], ["eco_force", "mdi:leaf", "Eco"]]
+      .filter(([k]) => set[k]).map(([, i, l]) => `<span class="pl-chip"><ha-icon icon="${i}"></ha-icon>${l}</span>`).join("");
+    return `<button class="pline" data-action="pop-open" data-pop="presq" style="--c:${c}"><ha-icon class="pl-ic" icon="${icon}"></ha-icon>
+      <span class="grow"><b>${label}</b>${who ? `<small>${esc(who)}</small>` : ""}</span>${chips}<ha-icon class="pl-go" icon="mdi:chevron-right"></ha-icon></button>`;
+  }
+
   _w_presence(w, z) {
+    if (z !== "s" && this._phone()) return this._presenceLine();
     if (z !== "s") return this._presenceCompact(z);
     // klein: nur der aktuelle Zustand und drei Knöpfe
     const s = this._status || {};
@@ -10402,6 +10530,9 @@ class HauswerkPanel extends HTMLElement {
     if (KW_POPS.includes(id)) return this._kwPop(id);
     if (id.startsWith("kwday:")) return this._kwDayPop(id.slice(6));
     if (id === "lwhouse") return this._lwHousePop();
+    if (id === "bnmore") return this._bnMorePop();
+    if (id === "presq") return { icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit", sub: "Hauswerk",
+      gear: this._admin ? `data-action="settings-go" data-sub="presence"` : null, body: `<div class="presq">${this._presenceCompact("m")}</div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     if (id.startsWith("lwtl:")) {
       const [, m, a] = id.split(":");
       const g = (this._lwTlGroups || []).find((x) => String(x.m) === m && x.action === a);
@@ -13717,6 +13848,19 @@ class HauswerkPanel extends HTMLElement {
         this._closePop();
         break;
       }
+      case "bn-mod": {
+        const m = MODULES.find((x) => x.views.includes(el.dataset.tab));
+        if (m) this._modUse(m.id);
+        this._setView(el.dataset.tab);
+        break;
+      }
+      case "bn-go": {
+        const m = MODULES.find((x) => x.views.includes(el.dataset.tab));
+        if (m) this._modUse(m.id);
+        this._closePop();
+        this._setView(el.dataset.tab);
+        break;
+      }
       case "lwh-move":
         this._lwhSet(el.dataset.a, this._lwFloorOf(el.dataset.a).floor, Number(el.dataset.d));
         break;
@@ -15785,6 +15929,19 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 }
 /* Untere Navigationsleiste (nur Handy) */
 .bnav { display:none; }
+.ptr { position:fixed; top:8px; left:50%; z-index:30; width:40px; height:40px; margin-left:-20px; border-radius:50%; display:grid; place-items:center;
+  background:var(--card); box-shadow:0 4px 14px rgba(0,0,0,.25); color:var(--accent); transform:translateY(calc(-60px + var(--p, 0) * 70px)) rotate(calc(var(--p, 0) * 270deg)); opacity:0; pointer-events:none; transition:opacity .15s; }
+.ptr.show { opacity:1; } .ptr.ready { color:var(--text); background:color-mix(in srgb, var(--accent) 30%, var(--card)); }
+.ptr.busy { transform:translateY(10px); animation:ptrspin .8s linear infinite; } @keyframes ptrspin { to { transform:translateY(10px) rotate(360deg); } }
+.bn .bi em.dot { min-width:9px; width:9px; height:9px; padding:0; top:-1px; right:12px; }
+.bnm-grid { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; margin-bottom:10px; }
+.bnm { all:unset; cursor:pointer; display:flex; flex-direction:column; align-items:center; gap:4px; padding:14px 6px; border-radius:16px; background:var(--card2); text-align:center; }
+.bnm .bi { display:grid; place-items:center; height:34px; } .bnm .mlogo { width:32px; height:32px; } .bnm ha-icon { --mdc-icon-size:28px; color:var(--muted); }
+.bnm b { font-size:14px; } .bnm small { font-size:11px; color:var(--muted); }
+.pline { all:unset; box-sizing:border-box; cursor:pointer; display:flex; align-items:center; gap:12px; width:100%; padding:4px 0; }
+.pl-ic { color:var(--c); --mdc-icon-size:28px; } .pline b { display:block; font-size:17px; } .pline small { display:block; color:var(--muted); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.pl-chip { display:inline-flex; align-items:center; gap:3px; padding:3px 8px; border-radius:99px; font-size:12px; font-weight:600; background:var(--card2); --mdc-icon-size:14px; }
+.pl-go { color:var(--muted); }
 @media (max-width:600px) {
   .bnav { display:flex; position:fixed; left:0; right:0; bottom:0; z-index:8; padding:6px 8px calc(6px + env(safe-area-inset-bottom)); gap:4px;
     background:color-mix(in srgb, var(--card) 92%, transparent); backdrop-filter:blur(12px); border-top:1px solid var(--line); }
