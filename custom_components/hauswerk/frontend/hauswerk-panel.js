@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.99.0";
+const VERSION = "0.100.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1074,6 +1074,7 @@ class HauswerkPanel extends HTMLElement {
       root.addEventListener("pointerdown", (e) => this._wDragStart(e));
       root.addEventListener("pointerdown", (e) => this._rwWinDrag(e));
       root.addEventListener("pointerdown", (e) => this._lwDimStart(e));
+      root.addEventListener("toggle", (e) => { if (e.target?.dataset?.vok !== undefined) this._ventOkOpen = e.target.open; }, true);
       root.addEventListener("pointerdown", (e) => this._tSwipeStart(e));
       root.addEventListener("pointerdown", (e) => this._unlockPress(e));
       root.addEventListener("pointerdown", (e) => this._svAckPress(e));
@@ -2325,64 +2326,187 @@ class HauswerkPanel extends HTMLElement {
     return base;
   }
 
+  /** Zustand eines Raums fürs Lüften: Gruppe (act = jetzt tun, run = lüftet gerade, ok), eine Aussage, eine Farbe. */
+  _ventState(r) {
+    const s = this._status?.rooms?.[r.id] || {};
+    const a = s.air || {};
+    const hh = (iso) => { const d = new Date(iso); return `${d.toDateString() === new Date().toDateString() ? "" : "morgen "}${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`; };
+    const AIR = C.air, ORANGE = "#f59e0b", RED = "#ef4444", GREY = "var(--muted)";
+    if (a.open?.done) return { g: "act", c: AIR, icon: "mdi:window-closed-variant", text: "Genug gelüftet – Fenster schließen", sub: a.open.done, prio: 0 };
+    if (a.open?.night) return { g: "run", c: "#6366f1", icon: "mdi:weather-night", text: "Nachts offen – gewollt", sub: `keine Erinnerung bis ${hh(a.open.night_until)} Uhr`, prio: 5 };
+    if (a.long) return { g: "act", c: ORANGE, icon: "mdi:window-open-variant", text: `Seit ${a.long.minutes} Min. offen – kostet Wärme`, sub: `ca. ${fmt(a.long.kwh)} kWh · lieber kurz stoßlüften`, prio: 1 };
+    if (a.open?.cool) return { g: "run", c: "#38bdf8", icon: "mdi:snowflake", text: `Kühlt seit ${Math.floor(a.open.minutes)} Min.`, sub: "Hinweis, sobald es draußen wärmer ist", prio: 4 };
+    if (a.open) return { g: "run", c: AIR, icon: "mdi:timer-sand", text: `Lüftet – ${a.open.target} Min. empfohlen`, sub: a.open.learned ? "Dauer gelernt" : "", prio: 3 };
+    if (s.vent) return { g: "act", c: AIR, icon: "mdi:weather-windy", text: `Jetzt ${s.vent.minutes} Min. stoßlüften`, sub: (s.vent.reasons || []).join(" · "), prio: 2 };
+    if (a.mold?.level === "bad") return { g: "act", c: RED, icon: "mdi:alert-octagon-outline", text: "Schimmelgefahr", sub: `an der Außenwand ca. ${a.mold.wall_rh} % – lüften und gleichmäßig heizen`, prio: 1 };
+    if (a.wait) return { g: "ok", c: ORANGE, icon: "mdi:weather-fog", text: "Feucht – Lüften trocknet gerade nicht", sub: a.wait.dry_at ? `ab ${hh(a.wait.dry_at)} Uhr trockener` : "draußen ist mehr Wasser in der Luft", prio: 6 };
+    if (a.balance && a.balance.level !== "ok") return { g: "ok", c: ORANGE, icon: "mdi:clock-alert-outline", text: a.balance.level === "bad" ? "Zu selten gelüftet" : "Bald lüften", sub: a.balance.text || "", prio: 7 };
+    return { g: "ok", c: GREY, icon: "mdi:check-circle-outline", text: s.humidity == null && a.co2 == null ? "Nur Lüft-Timer (ohne Feuchtesensor)" : "Alles gut", sub: "", prio: 9 };
+  }
+
+  /** Laufende Lüftung: Ring mit Restzeit und drei Haken – Zeit, Feuchte gesunken, Raum kühler. */
+  _ventRun(r, big = false) {
+    const s = this._status?.rooms?.[r.id] || {};
+    const o = s.air?.open;
+    if (!o || o.night) return "";
+    const frac = Math.min(1, o.minutes / (o.target || 10));
+    const end = new Date(new Date(o.since).getTime() + (o.target || 10) * 60000).toISOString();
+    const dRh = o.rh0 != null && s.humidity != null ? o.rh0 - s.humidity : null;
+    const dT = o.t0 != null && s.temperature != null ? o.t0 - s.temperature : null;
+    const checks = [
+      ["mdi:timer-outline", "Zeit", frac >= 1, `${Math.floor(o.minutes)}/${o.target} Min.`],
+      ...(dRh != null ? [["mdi:water-percent", "Feuchte", dRh >= 10 || /Feuchte/.test(o.done || ""), `${dRh >= 0 ? "−" : "+"}${fmt(Math.abs(dRh), 0)} %`]] : []),
+      ...(dT != null ? [["mdi:thermometer-low", "Kühler", dT >= 3, `−${fmt(Math.max(0, dT))} °C`]] : []),
+    ];
+    return `<div class="vt-run2 ${big ? "big" : ""} ${o.done ? "done" : ""}">
+      <svg class="vt-ring" viewBox="0 0 100 100" style="--f:${frac.toFixed(3)}"><circle cx="50" cy="50" r="44"></circle><circle class="f" cx="50" cy="50" r="44" pathLength="1"></circle>
+        <text x="50" y="${o.done ? 56 : 52}" class="t">${o.done ? "zu!" : o.cool ? `${Math.floor(o.minutes)}′` : ""}</text></svg>
+      ${o.done || o.cool ? "" : `<span class="vt-left"><b data-lw-until="${esc(end)}">${this._lwLeft(end)}</b><small>noch</small></span>`}
+      <div class="vt-checks">${checks.map(([i, t, ok, v]) => `<span class="${ok ? "ok" : ""}"><ha-icon icon="${ok ? "mdi:check-circle" : i}"></ha-icon><b>${t}</b><small>${esc(v)}</small></span>`).join("")}</div>
+    </div>`;
+  }
+
+  /** Kleine Anzeigen: Feuchte mit Grenze, Wasser in der Luft drinnen/draußen, Schimmel-Ampel. */
+  _ventGauges(r) {
+    const s = this._status?.rooms?.[r.id] || {};
+    const a = s.air || {};
+    const out = [];
+    if (s.humidity != null) {
+      const lim = a.limit || 65;
+      out.push(`<div class="vg"><small>Feuchte</small><div class="vg-bar"><i style="width:${Math.min(100, s.humidity)}%;background:${s.humidity >= lim ? "#f59e0b" : "var(--muted)"}"></i><em style="left:${lim}%" title="ab ${fmt(lim, 0)} % lüften"></em></div><b>${fmt(s.humidity, 0)} %</b></div>`);
+    }
+    if (a.abs?.in != null && a.abs?.out != null) {
+      const mx = Math.max(a.abs.in, a.abs.out, 12);
+      const helps = a.abs.in - a.abs.out >= 1;
+      out.push(`<div class="vg"><small>Wasser</small><div class="vg-two"><span><i style="width:${(a.abs.in / mx) * 100}%"></i><em>drinnen ${fmt(a.abs.in)}</em></span><span class="out"><i style="width:${(a.abs.out / mx) * 100}%"></i><em>draußen ${fmt(a.abs.out)}</em></span></div><b style="color:${helps ? C.air : "#f59e0b"}">${helps ? "trocknet" : "trocknet nicht"}</b></div>`);
+    }
+    if (a.mold) {
+      const m = { ok: ["#22c55e", "kein Risiko"], warn: ["#f59e0b", "aufpassen"], bad: ["#ef4444", "Gefahr"] }[a.mold.level];
+      out.push(`<div class="vg"><small>Schimmel</small><span class="vg-dot" style="--c:${m[0]}"><i></i>${m[1]}</span><b>${a.mold.wall_rh} %</b></div>`);
+    }
+    if (a.co2 != null) out.push(`<div class="vg"><small>CO₂</small><span></span><b style="${a.co2 >= (this._data.settings.vent_co2 || 1000) ? "color:#f59e0b" : ""}">${a.co2} ppm</b></div>`);
+    return out.length ? `<div class="vgs">${out.join("")}</div>` : "";
+  }
+
+  /** Woche als Mini-Leiste: je Tag Balken (Minuten), Zahl der Lüftungen, Mond = nachts offen. */
+  _ventWeek(r) {
+    const days = this._status?.rooms?.[r.id]?.air?.week?.days;
+    if (!days?.length) return "";
+    const mx = Math.max(20, ...days.map((d) => d.min));
+    return `<div class="vweek" title="Lüften der letzten 7 Tage">${days.map((d) => {
+      const wd = new Date(`${d.d}T12:00`).toLocaleDateString("de-DE", { weekday: "short" }).slice(0, 2);
+      return `<span title="${wd}: ${d.count}× · ${d.min} Min.${d.night ? " · nachts offen" : ""}"><i style="height:${d.count ? Math.max(12, (d.min / mx) * 100) : 0}%"></i>${d.night ? `<ha-icon icon="mdi:weather-night"></ha-icon>` : ""}<small>${wd}</small></span>`;
+    }).join("")}</div>`;
+  }
+
+  /** Lüftzeiten als Tagesleiste: 24 Stunden – Regen, trockene Luft, Nacht; die besten Zeiten markiert. */
+  _ventDayStrip() {
+    const x = this._wxData();
+    const hrs = (x?.hourly || []).slice(0, 24);
+    if (hrs.length < 6) return "";
+    const absH = (t, rh) => (6.112 * Math.exp((17.67 * t) / (t + 243.5)) * rh * 2.1674) / (273.15 + t);
+    const inside = absH(21, 55);
+    const best = (this._status?.vent_plan?.times || []).map((t) => new Date(t.at).getHours());
+    const cells = hrs.map((h, i) => {
+      const d = new Date(h.datetime), hr = d.getHours();
+      const rain = (h.precipitation_probability ?? 0) >= 50 || (h.precipitation ?? 0) >= 0.2;
+      const night = hr >= 22 || hr < 6;
+      const good = !rain && h.humidity != null && h.temperature != null && inside - absH(h.temperature, h.humidity) >= 1;
+      const cls = rain ? "rain" : night ? "night" : good ? "good" : "meh";
+      const tip = `${hr} Uhr · ${fmt(h.temperature, 0)} °C${h.humidity != null ? ` · ${fmt(h.humidity, 0)} %` : ""}${rain ? " · Regen" : night ? " · Nacht" : good ? " · trocken – gut zum Lüften" : ""}`;
+      return `<span class="${cls} ${best.includes(hr) && i < 24 ? "best" : ""}" title="${esc(tip)}">${best.includes(hr) ? `<ha-icon icon="mdi:star-four-points"></ha-icon>` : ""}${i % 3 === 0 ? `<small>${hr}</small>` : ""}</span>`;
+    }).join("");
+    return `<div class="vday">${cells}</div><div class="vday-leg"><span class="good"><i></i>gut</span><span class="rain"><i></i>Regen</span><span class="night"><i></i>Nacht</span><span><ha-icon icon="mdi:star-four-points"></ha-icon>beste Zeit</span></div>`;
+  }
+
   _viewVent() {
     const rooms = this._rooms().filter((r) => r.enabled !== false);
     const st = this._status?.rooms || {};
-    const set = this._data.settings;
-    const [outT, outRh] = (() => { const w = this._weather(); return [w?.temp ?? null, null]; })();
+    const w = this._weather();
+    const outT = w?.temp ?? null;
     const mins = outT == null ? 10 : outT < 0 ? 5 : outT < 10 ? 10 : outT < 15 ? 15 : 25;
-    const amp = { ok: ["#22c55e", "kein Risiko"], warn: ["#f59e0b", "aufpassen"], bad: ["#ef4444", "Schimmelgefahr"] };
+    const hh = (iso) => { const d = new Date(iso); return `${d.toDateString() === new Date().toDateString() ? "" : "morgen "}${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`; };
     const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 60 ? `vor ${Math.max(1, m)} Min.` : m < 1440 ? `vor ${Math.floor(m / 60)} Std.` : `vor ${Math.floor(m / 1440)} Tg.`; };
-    const hh = (iso) => { const d = new Date(iso); const today = d.toDateString() === new Date().toDateString(); return `${today ? "" : "morgen "}${d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`; };
-    const card = (r) => {
-      const s = st[r.id] || {};
-      const a = s.air || {};
-      const chip = this._ventChip(s);
-      let state;
-      if (a.open?.night) {
-        state = `<div class="vt-run night"><ha-icon icon="mdi:weather-night"></ha-icon><b>Nachts bei offenem Fenster – gewollt</b>
-          <small>Keine Erinnerung bis ${new Date(a.open.night_until).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} Uhr – ist es dann noch offen, kommt „Fenster schließen“. Die Heizung bleibt solange in der Fensterpause.</small></div>`;
-      } else if (a.open) {
-        const pc = a.open.cool ? 100 : Math.min(100, (a.open.minutes / a.open.target) * 100);
-        state = `<div class="vt-run ${a.open.done ? "done" : ""}"><div class="vt-bar"><i style="width:${pc}%"></i></div>
-          <b>${a.open.done ? `Genug gelüftet – Fenster schließen` : a.open.cool ? `Kühlt seit ${Math.floor(a.open.minutes)} Min.` : `Lüftet ${Math.floor(a.open.minutes)} von ${a.open.target} Min.`}</b>
-          <small>${a.open.done ? esc(a.open.done) : a.open.cool ? "Hinweis kommt, sobald es draußen wärmer ist" : `Ende: Zeit um, Feuchte gesunken oder Raum zu kühl${a.open.learned ? " · Dauer gelernt" : ""}`}${a.long ? ` · ca. ${fmt(a.long.kwh)} kWh Wärme` : ""}</small></div>`;
-      } else if (s.vent) state = `<div class="vt-need"><ha-icon icon="mdi:weather-windy"></ha-icon><span><b>Jetzt ${s.vent.minutes} Min. stoßlüften${a.learned ? ` <em class="vt-learn" title="aus den letzten Lüftungen dieses Raums gelernt">gelernt</em>` : ""}</b><small>${esc((s.vent.reasons || []).join(" · "))}</small></span></div>`;
-      else if (a.wait) state = `<div class="vt-wait"><ha-icon icon="mdi:weather-fog"></ha-icon><span><b>Feucht – aber Lüften trocknet gerade nicht</b><small>Draußen ist mehr Wasser in der Luft${a.wait.dry_at ? ` · ab ${hh(a.wait.dry_at)} Uhr trockener` : " · später noch einmal versuchen"}</small></span></div>`;
-      else state = `<div class="vt-ok"><ha-icon icon="mdi:check-circle-outline"></ha-icon><span>${s.humidity == null && a.co2 == null ? "Ohne Feuchtesensor nur Lüft-Timer und Bilanz" : "Kein Lüften nötig"}</span></div>`;
-      const facts = [
-        s.humidity != null ? [`${fmt(s.humidity, 0)} %`, `Luftfeuchte · ab ${fmt(a.limit, 0)} % lüften`, s.humidity >= (a.limit || 99) ? "#f59e0b" : ""] : null,
-        a.abs?.in != null ? [`${fmt(a.abs.in)} g/m³`, a.abs.out != null ? `Wasser in der Luft · draußen ${fmt(a.abs.out)} g/m³ – ${a.abs.in - a.abs.out >= 1 ? "Lüften trocknet" : "Lüften trocknet nicht"}` : "Wasser in der Luft", a.abs.out != null && a.abs.in - a.abs.out >= 1 ? "#14b8a6" : ""] : null,
-        a.mold ? [`${a.mold.wall_rh} %`, `an der Außenwand (${fmt(a.mold.wall_temp)} °C) · ${amp[a.mold.level][1]}`, amp[a.mold.level][0]] : null,
-        a.co2 != null ? [`${a.co2} ppm`, "CO₂", a.co2 >= (set.vent_co2 || 1000) ? "#f59e0b" : ""] : null,
-        a.last ? [ago(a.last.at), `zuletzt gelüftet · ${fmt(a.last.min, 0)} Min.${a.last.rh0 != null && a.last.rh1 != null ? ` · ${fmt(a.last.rh0, 0)} → ${fmt(a.last.rh1, 0)} %` : ""}`, ""] : null,
-        a.week?.count ? [`${a.week.count}×`, `7 Tage · ${a.week.minutes} Min.${a.week.kwh ? ` · ca. ${fmt(a.week.kwh)} kWh` : ""}`, ""] : null,
-        a.week?.nights ? [`${a.week.nights}×`, "nachts offen · 7 Tage", "#6366f1"] : null,
-        a.tau ? [`${fmt(a.minutes, 0)} Min.`, "gelernte Lüftdauer", ""] : null,
-        a.balance?.rh_morning != null ? [`${a.balance.rh_morning} %`, "morgens (Ø 3 Tage)", a.balance.level !== "ok" ? VB[a.balance.level][0] : ""] : null,
-      ].filter(Boolean);
-      return `<article class="card vt-c" data-action="room-page" data-id="${esc(r.id)}" role="button" tabindex="0">
-        <div class="vt-h"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><b>${esc(r.name)}</b>${a.balance ? `<span class="vt-amp" style="--c:${VB[a.balance.level][0]}" title="Lüft-Bilanz: ${esc(a.balance.text)}"><i></i>${VB[a.balance.level][1]}</span>` : ""}${chip ? `<span class="vt-chip" style="--c:${chip[2]}" title="${esc(chip[3])}"><ha-icon icon="${chip[0]}"></ha-icon>${esc(chip[1])}</span>` : ""}</div>
-        ${state}
-        ${facts.length ? `<div class="vt-f">${facts.map(([v, l, c]) => `<span ${c ? `style="--c:${c}" class="on"` : ""}><b>${esc(v)}</b><small>${esc(l)}</small></span>`).join("")}</div>` : ""}
-      </article>`;
-    };
-    const need = rooms.filter((r) => st[r.id]?.vent || st[r.id]?.air?.open?.done);
+    const all = rooms.map((r) => ({ r, s: st[r.id] || {}, v: this._ventState(r) })).sort((a, b) => a.v.prio - b.v.prio || a.r.name.localeCompare(b.r.name, "de"));
+    const act = all.filter((x) => x.v.g === "act"), run = all.filter((x) => x.v.g === "run"), ok = all.filter((x) => x.v.g === "ok");
     const plan = this._status?.vent_plan;
-    const head = this._brief({
-      cls: "card br-mod-heat", tone: need.some((r) => st[r.id]?.air?.open?.done) ? "warn" : need.length ? "active" : "ok", icon: "mdi:weather-windy",
-      label: `<ha-icon icon="mdi:weather-windy"></ha-icon>Lüften`,
-      big: `${mins}<span> Min.</span>`,
-      // beste Lüftzeiten aus der Stunden-Vorhersage
-      title: need.length ? need.map((r) => `${r.name}: ${st[r.id].air?.open?.done ? "Fenster schließen" : `${st[r.id].vent.minutes} Min. lüften`}`).join(" · ") : "Gerade muss nirgends gelüftet werden",
-      side: `<button class="link" data-action="settings-go" data-sub="vent"><ha-icon icon="mdi:tune-variant"></ha-icon>Einstellen</button>`,
-      lines: [
-        ...(plan?.times?.length ? [{ icon: "mdi:clock-check-outline", text: `Am besten lüften: ${plan.times.map((t) => `${hh(t.at)} Uhr (${fmt(t.temp, 0)} °C, ${t.minutes} Min.)`).join(" · ")}` }]
-          : plan ? [{ icon: "mdi:weather-rainy", text: "Heute kaum trockene Luft ohne Regen – nur bei Bedarf kurz lüften" }] : []),
-        { icon: "mdi:thermometer", text: `Richtwert Stoßlüften bei ${outT == null ? "–" : fmt(outT)} °C draußen: ${mins} Min. – mit Feuchtesensor lernt jeder Raum seine eigene Dauer` },
-        { icon: "mdi:information-outline", text: "Kurz und weit öffnen statt kippen: tauscht die Luft, ohne Wände auszukühlen" }],
-    });
-    return head + `<div class="vt-grid">${rooms.map(card).join("")}</div>`;
+    // Kopf: groß, was zu tun ist; beste Zeiten als Knöpfe; Richtwert hinter ⓘ
+    const headTitle = act.length ? `${act.length} ${act.length === 1 ? "Raum" : "Räume"}: ${act.map((x) => x.r.name).join(", ")}` : run.length ? `${run.length} ${run.length === 1 ? "Raum lüftet" : "Räume lüften"} gerade` : "Alles gut – nirgends lüften nötig";
+    const head = `<section class="card vhead">
+      <div class="vhead-t"><span class="vhead-ic" style="--c:${act.length ? C.air : run.length ? C.air : "#22c55e"}"><ha-icon icon="${act.length ? "mdi:weather-windy" : run.length ? "mdi:timer-sand" : "mdi:check-circle-outline"}"></ha-icon></span>
+        <span class="grow"><b>${esc(headTitle)}</b><small>${act.length ? "jetzt tun" : run.length ? "Fenster offen" : "Lüften"}${outT != null ? ` · draußen ${fmt(outT)} °C – Richtwert ${mins} Min.` : ""}</small></span>
+        <button class="icon" data-action="pop-open" data-pop="ventinfo" title="So lüftet Hauswerk"><ha-icon icon="mdi:information-outline"></ha-icon></button>
+        ${this._admin ? `<button class="icon" data-action="settings-go" data-sub="vent" title="Einstellen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}</div>
+      ${plan?.times?.length ? `<div class="vhead-best"><small>Am besten lüften</small>${plan.times.map((t) => `<span class="vbest"><ha-icon icon="mdi:clock-check-outline"></ha-icon><b>${hh(t.at)}</b><small>${fmt(t.temp, 0)} °C · ${t.minutes} Min.</small></span>`).join("")}</div>`
+        : plan ? `<div class="vhead-best"><small>Heute kaum trockene Luft ohne Regen – nur bei Bedarf kurz lüften</small></div>` : ""}
+      ${this._ventDayStrip()}
+    </section>`;
+    const sec = (t, n) => `<div class="vsec"><b>${t}</b><span>${n}</span></div>`;
+    if (this._wall()) {
+      const tile = ({ r, s, v }) => {
+        const o = s.air?.open;
+        const ring = o && !o.night && !o.done ? `<svg class="vt-ring sm" viewBox="0 0 100 100" style="--f:${Math.min(1, o.minutes / (o.target || 10)).toFixed(3)}"><circle cx="50" cy="50" r="44"></circle><circle class="f" cx="50" cy="50" r="44" pathLength="1"></circle></svg>` : "";
+        const end = o && !o.night && !o.done && !o.cool ? new Date(new Date(o.since).getTime() + (o.target || 10) * 60000).toISOString() : null;
+        return this._wallTile({
+          act: `data-action="pop-open" data-pop="vent:${esc(r.id)}"`, color: v.g === "ok" && v.c === "var(--muted)" ? C.rest : v.c,
+          ic: `<span class="wt-ic vt-wic" style="color:${v.c}">${ring}<ha-icon icon="${v.icon}"></ha-icon></span>`, name: r.name,
+          value: s.humidity != null ? fmt(s.humidity, 0) : "–", unit: s.humidity != null ? "%" : "",
+          status: `<span style="color:${v.c === "var(--muted)" ? "" : v.c}">${end ? `noch <span data-lw-until="${esc(end)}">${this._lwLeft(end)}</span>` : esc(v.text)}</span>`,
+          cls: v.g === "act" ? "on" : "",
+        });
+      };
+      return `<div class="vwall">${head}<div class="wgrid">${all.map(tile).join("")}</div></div>`;
+    }
+    const card = ({ r, s, v }) => `<article class="card vt2" style="--c:${v.c}" data-action="pop-open" data-pop="vent:${esc(r.id)}" role="button" tabindex="0">
+        <div class="vt2-h"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><b>${esc(r.name)}</b><span class="grow"></span><ha-icon class="vt2-go" icon="mdi:chevron-right"></ha-icon></div>
+        <div class="vt2-say"><ha-icon icon="${v.icon}"></ha-icon><span><b>${esc(v.text)}</b>${v.sub ? `<small>${esc(v.sub)}</small>` : ""}</span></div>
+        ${v.g === "run" ? this._ventRun(r) : ""}
+        ${this._ventGauges(r)}
+        ${this._ventWeek(r)}
+      </article>`;
+    const okOpen = this._ventOkOpen ?? !(act.length || run.length);
+    const okList = ok.length ? `<details class="card vok" ${okOpen ? "open" : ""} data-vok>
+      <summary><b>Alles gut</b><span class="vok-dots">${ok.map(({ v }) => `<i style="background:${v.c === "var(--muted)" ? "#22c55e" : v.c}"></i>`).join("")}</span><span class="grow"></span><small>${ok.length} ${ok.length === 1 ? "Raum" : "Räume"}</small><ha-icon icon="mdi:chevron-down"></ha-icon></summary>
+      ${ok.map(({ r, s, v }) => `<button class="vok-r" data-action="pop-open" data-pop="vent:${esc(r.id)}"><i style="background:${v.c === "var(--muted)" ? "#22c55e" : v.c}"></i>
+        <span class="grow"><b>${esc(r.name)}</b><small>${esc(v.text === "Alles gut" ? (s.air?.last ? `zuletzt gelüftet ${ago(s.air.last.at)}` : "noch nicht gelüftet") : `${v.text}${v.sub ? ` · ${v.sub}` : ""}`)}</small></span>
+        ${s.humidity != null ? `<em>${fmt(s.humidity, 0)} %</em>` : ""}<ha-icon icon="mdi:chevron-right"></ha-icon></button>`).join("")}
+    </details>` : "";
+    return head
+      + (act.length ? sec("Jetzt lüften", act.length) + `<div class="vt-grid">${act.map(card).join("")}</div>` : "")
+      + (run.length ? sec("Lüftet gerade", run.length) + `<div class="vt-grid">${run.map(card).join("")}</div>` : "")
+      + okList;
+  }
+
+  /** Fenster „Lüften“ eines Raums: Aussage, laufende Lüftung, Anzeigen, Woche und alle Zahlen. */
+  _ventPop(rid) {
+    const r = this._rooms().find((x) => x.id === rid);
+    if (!r) return null;
+    const s = this._status?.rooms?.[rid] || {};
+    const a = s.air || {};
+    const v = this._ventState(r);
+    const set = this._data.settings;
+    const ago = (iso) => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 60 ? `vor ${Math.max(1, m)} Min.` : m < 1440 ? `vor ${Math.floor(m / 60)} Std.` : `vor ${Math.floor(m / 1440)} Tg.`; };
+    const facts = [
+      s.humidity != null ? [`${fmt(s.humidity, 0)} %`, `Luftfeuchte · ab ${fmt(a.limit, 0)} % lüften`] : null,
+      a.abs?.in != null ? [`${fmt(a.abs.in)} g/m³`, `Wasser in der Luft${a.abs.out != null ? ` · draußen ${fmt(a.abs.out)} g/m³` : ""}`] : null,
+      a.mold ? [`${a.mold.wall_rh} %`, `an der Außenwand (${fmt(a.mold.wall_temp)} °C)`] : null,
+      a.co2 != null ? [`${a.co2} ppm`, `CO₂ · Grenze ${set.vent_co2 || 1000} ppm`] : null,
+      a.last ? [ago(a.last.at), `zuletzt gelüftet · ${fmt(a.last.min, 0)} Min.${a.last.rh0 != null && a.last.rh1 != null ? ` · ${fmt(a.last.rh0, 0)} → ${fmt(a.last.rh1, 0)} %` : ""}`] : null,
+      a.week?.count ? [`${a.week.count}×`, `7 Tage · ${a.week.minutes} Min.${a.week.kwh ? ` · ca. ${fmt(a.week.kwh)} kWh` : ""}${a.week.rh_drop ? ` · Ø −${a.week.rh_drop} %` : ""}`] : null,
+      a.week?.nights ? [`${a.week.nights}×`, "nachts offen · 7 Tage"] : null,
+      a.tau ? [`${fmt(a.minutes, 0)} Min.`, "gelernte Lüftdauer"] : null,
+      a.balance?.rh_morning != null ? [`${a.balance.rh_morning} %`, "morgens (Ø 3 Tage)"] : null,
+    ].filter(Boolean);
+    return {
+      icon: v.icon, c: v.c === "var(--muted)" ? "#22c55e" : v.c, title: esc(r.name), sub: "Lüften",
+      gear: this._admin ? `data-action="room-page" data-id="${esc(rid)}"` : null,
+      body: `<div class="vt2-say big" style="--c:${v.c}"><ha-icon icon="${v.icon}"></ha-icon><span><b>${esc(v.text)}</b>${v.sub ? `<small>${esc(v.sub)}</small>` : ""}</span></div>
+        ${v.g === "run" ? this._ventRun(r, true) : ""}
+        ${this._ventGauges(r)}
+        ${a.week?.days ? `<div class="lbl">Letzte 7 Tage</div>${this._ventWeek(r)}` : ""}
+        ${facts.length ? `<div class="lbl">Alle Werte</div><div class="vt-f">${facts.map(([x, l]) => `<span><b>${esc(x)}</b><small>${esc(l)}</small></span>`).join("")}</div>` : ""}`,
+      foot: `<button class="secondary" data-action="pop-close">Schließen</button>`,
+    };
   }
 
   _w_vent(w, z) {
@@ -9847,6 +9971,17 @@ class HauswerkPanel extends HTMLElement {
 
   _popDef(id) {
     if (id === "agenda") return this._agendaPop();
+    if (id.startsWith("vent:")) return this._ventPop(id.slice(5)) || { title: "Raum nicht gefunden", body: "", foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+    if (id === "ventinfo") {
+      const outT = this._weather()?.temp ?? null;
+      return { icon: "mdi:information-outline", c: C.air, title: "So lüftet Hauswerk", sub: "Heizwerk · Lüften",
+        body: `<div class="evlist">
+          <div class="ev"><ha-icon icon="mdi:thermometer" style="color:${C.air}"></ha-icon><span class="grow"><b>Richtwert Stoßlüften</b><small>${outT == null ? "" : `Bei ${fmt(outT)} °C draußen: `}unter 0 °C 5 Min., bis 10 °C 10 Min., bis 15 °C 15 Min., darüber 25 Min. Mit Feuchtesensor lernt jeder Raum seine eigene Dauer.</small></span></div>
+          <div class="ev"><ha-icon icon="mdi:water-percent" style="color:${C.air}"></ha-icon><span class="grow"><b>Wann lüften?</b><small>Ab der Feuchte-Grenze je Raumart (Bad 70 %, Schlafzimmer 60 %), bei viel CO₂ oder morgens – aber nur, wenn draußen weniger Wasser in der Luft ist.</small></span></div>
+          <div class="ev"><ha-icon icon="mdi:check-circle-outline" style="color:${C.air}"></ha-icon><span class="grow"><b>Wann genug?</b><small>Zeit um, genug Wasser hinaus (g/m³) oder der Raum 3 °C kühler – dann kommt „Fenster schließen“.</small></span></div>
+          <div class="ev"><ha-icon icon="mdi:window-open-variant" style="color:#f59e0b"></ha-icon><span class="grow"><b>Kurz und weit öffnen statt kippen</b><small>tauscht die Luft, ohne Wände auszukühlen.</small></span></div>
+        </div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+    }
     if (id === "wx") {
       const w = this._weather();
       return { icon: w?.icon || "mdi:weather-partly-cloudy", c: "#f59e0b", title: "Wetter", sub: esc(this._wxData()?.a?.friendly_name || ""), wide: true,
@@ -15675,6 +15810,66 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .wt-ctl { display:flex; gap:10px; margin-top:4px; }
 .wbtn { all:unset; cursor:pointer; flex:1; height:48px; border-radius:14px; display:grid; place-items:center; background:color-mix(in srgb, var(--text) 8%, transparent); }
 .wbtn ha-icon { --mdc-icon-size:26px; } .wbtn:disabled { opacity:.4; }
+/* Heizwerk › Lüften */
+.vhead { padding:14px 16px; display:flex; flex-direction:column; gap:10px; }
+.vhead-t { display:flex; align-items:center; gap:12px; }
+.vhead-ic { width:46px; height:46px; flex:none; border-radius:14px; display:grid; place-items:center; color:var(--c); background:color-mix(in srgb, var(--c) 16%, transparent); --mdc-icon-size:26px; }
+.vhead-t b { display:block; font-size:18px; } .vhead-t small { color:var(--muted); }
+.vhead-best { display:flex; flex-wrap:wrap; align-items:center; gap:8px; } .vhead-best > small { color:var(--muted); width:100%; }
+.vbest { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:99px; background:color-mix(in srgb, var(--air, #14b8a6) 14%, var(--card2)); --mdc-icon-size:16px; color:#14b8a6; }
+.vbest b { color:var(--text); } .vbest small { color:var(--muted); }
+.vday { display:grid; grid-template-columns:repeat(24, 1fr); gap:2px; height:26px; margin-top:2px; }
+.vday span { position:relative; border-radius:3px; background:var(--card2); }
+.vday span.good { background:color-mix(in srgb, #14b8a6 55%, transparent); } .vday span.rain { background:color-mix(in srgb, #3b82f6 55%, transparent); }
+.vday span.night { background:repeating-linear-gradient(-45deg, var(--card2), var(--card2) 3px, color-mix(in srgb, var(--text) 8%, var(--card2)) 3px, color-mix(in srgb, var(--text) 8%, var(--card2)) 6px); }
+.vday span.best { outline:2px solid #14b8a6; outline-offset:1px; z-index:1; }
+.vday span ha-icon { position:absolute; inset:0; margin:auto; --mdc-icon-size:12px; color:#fff; display:grid; place-items:center; }
+.vday span small { position:absolute; top:100%; left:0; font-size:10px; color:var(--muted); margin-top:2px; }
+.vday-leg { display:flex; flex-wrap:wrap; gap:12px; margin-top:14px; font-size:12px; color:var(--muted); --mdc-icon-size:12px; }
+.vday-leg i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:-1px; background:var(--card2); }
+.vday-leg .good i { background:#14b8a6; } .vday-leg .rain i { background:#3b82f6; } .vday-leg .night i { background:color-mix(in srgb, var(--text) 20%, var(--card2)); }
+.vsec { display:flex; align-items:center; gap:8px; margin:6px 4px 0; font-size:14px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+.vsec span { background:var(--card2); border-radius:99px; padding:0 8px; font-weight:700; }
+.vt2 { padding:14px 16px; display:flex; flex-direction:column; gap:10px; cursor:pointer; border-left:4px solid var(--c); }
+.vt2-h { display:flex; align-items:center; gap:8px; } .vt2-h b { font-size:16px; } .vt2-go { color:var(--muted); }
+.vt2-say { display:flex; gap:10px; align-items:flex-start; color:var(--c); --mdc-icon-size:26px; }
+.vt2-say b { display:block; font-size:18px; color:var(--text); } .vt2-say small { display:block; color:var(--muted); margin-top:2px; }
+.vt2-say.big b { font-size:20px; }
+.vt-run2 { display:flex; align-items:center; gap:14px; position:relative; }
+.vt-ring { width:64px; height:64px; flex:none; transform:rotate(-90deg); }
+.vt-run2.big .vt-ring { width:96px; height:96px; }
+.vt-ring circle { fill:none; stroke:var(--card2); stroke-width:9; } .vt-ring .f { stroke:#14b8a6; stroke-linecap:round; stroke-dasharray:var(--f) 1; }
+.vt-run2.done .vt-ring .f { stroke:#14b8a6; }
+.vt-ring .t { transform:rotate(90deg); transform-origin:50px 50px; text-anchor:middle; font-size:24px; font-weight:800; fill:#14b8a6; }
+.vt-left { position:absolute; left:0; width:64px; text-align:center; line-height:1.05; } .vt-run2.big .vt-left { width:96px; }
+.vt-left b { display:block; font-size:15px; } .vt-run2.big .vt-left b { font-size:20px; } .vt-left small { font-size:11px; color:var(--muted); }
+.vt-checks { display:flex; flex-wrap:wrap; gap:6px; }
+.vt-checks span { display:inline-flex; align-items:center; gap:5px; padding:5px 10px; border-radius:99px; background:var(--card2); font-size:13px; color:var(--muted); --mdc-icon-size:16px; }
+.vt-checks span b { color:var(--text); font-weight:600; }
+.vt-checks span.ok { background:color-mix(in srgb, #14b8a6 18%, var(--card2)); color:#14b8a6; }
+.vgs { display:flex; flex-direction:column; gap:6px; }
+.vg { display:grid; grid-template-columns:72px 1fr auto; align-items:center; gap:10px; font-size:13px; }
+.vg > small { color:var(--muted); } .vg > b { font-size:14px; text-align:right; min-width:64px; }
+.vg-bar { position:relative; height:8px; border-radius:99px; background:var(--card2); }
+.vg-bar i { position:absolute; inset:0 auto 0 0; border-radius:99px; } .vg-bar em { position:absolute; top:-3px; bottom:-3px; width:2px; background:var(--text); opacity:.6; }
+.vg-two { display:flex; flex-direction:column; gap:3px; }
+.vg-two span { position:relative; height:12px; border-radius:4px; background:var(--card2); overflow:hidden; }
+.vg-two i { position:absolute; inset:0 auto 0 0; background:color-mix(in srgb, #14b8a6 45%, transparent); } .vg-two .out i { background:color-mix(in srgb, var(--text) 22%, transparent); }
+.vg-two em { position:relative; font-size:10px; font-style:normal; padding-left:6px; line-height:12px; display:block; color:var(--text); }
+.vg-dot { display:inline-flex; align-items:center; gap:6px; color:var(--c); } .vg-dot i { width:10px; height:10px; border-radius:50%; background:var(--c); }
+.vweek { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; height:46px; }
+.vweek span { position:relative; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; padding-bottom:14px; }
+.vweek i { width:100%; max-width:22px; border-radius:4px 4px 1px 1px; background:color-mix(in srgb, #14b8a6 60%, transparent); }
+.vweek span::before { content:""; position:absolute; left:0; right:0; bottom:14px; height:1px; background:var(--card2); }
+.vweek small { position:absolute; bottom:0; font-size:10px; color:var(--muted); } .vweek ha-icon { position:absolute; top:0; --mdc-icon-size:12px; color:#6366f1; }
+.vok { padding:0; } .vok summary { list-style:none; display:flex; align-items:center; gap:10px; padding:14px 16px; cursor:pointer; } .vok summary::-webkit-details-marker { display:none; }
+.vok[open] summary ha-icon { transform:rotate(180deg); }
+.vok-dots { display:flex; gap:3px; } .vok-dots i { width:8px; height:8px; border-radius:50%; }
+.vok-r { all:unset; box-sizing:border-box; cursor:pointer; display:flex; align-items:center; gap:12px; width:100%; padding:10px 16px; border-top:1px solid var(--line, color-mix(in srgb, var(--text) 8%, transparent)); }
+.vok-r > i { width:10px; height:10px; border-radius:50%; flex:none; } .vok-r b { display:block; } .vok-r small { display:block; color:var(--muted); font-size:13px; }
+.vok-r em { font-style:normal; font-weight:700; } .vok-r ha-icon { color:var(--muted); }
+.vt-wic { position:relative; } .vt-ring.sm { position:absolute; inset:-6px; width:auto; height:auto; }
+.vwall { display:flex; flex-direction:column; gap:14px; }
 /* Lichtwerk im Tablet (Wand) */
 .lwwall { display:flex; flex-direction:column; gap:14px; }
 .lwhead { display:grid; grid-template-columns:auto minmax(150px, 0.6fr) 1.6fr; grid-template-areas:"house txt tl" "house moods moods"; gap:8px 22px; align-items:center; padding:14px 18px; }

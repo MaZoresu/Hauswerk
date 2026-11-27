@@ -1905,7 +1905,7 @@ class Heizen:
             long_min = float(self.settings.get("vent_long_min") or 30)
             info["open"] = {"since": dt_util.utc_from_timestamp(session["start"]).isoformat(), "minutes": round(open_min, 1),
                             "target": session["target"], "done": session["done"], "cool": session["cool"],
-                            "learned": bool(session.get("learned")),
+                            "learned": bool(session.get("learned")), "rh0": session.get("rh0"), "t0": session.get("t0"),
                             "night": bool(session.get("night")) and in_night,
                             "night_until": self._night_end(local).isoformat() if session.get("night") and in_night else None}
             # „Kippen kostet Wärme“: nicht in der gewollten Nacht – danach ab Ende der Nacht gezählt
@@ -1956,7 +1956,8 @@ class Heizen:
             "last": {"at": dt_util.utc_from_timestamp(last["at"]).isoformat(), "min": last["min"],
                      "rh0": last.get("rh0"), "rh1": last.get("rh1")} if last else None,
             "week": {"count": len(week), "minutes": round(sum(v["min"] for v in week)), "kwh": round(sum(v.get("kwh") or 0 for v in week), 1),
-                     "rh_drop": round(sum(drops) / len(drops)) if drops else None, "nights": len(week_all) - len(week)},
+                     "rh_drop": round(sum(drops) / len(drops)) if drops else None, "nights": len(week_all) - len(week),
+                     "days": self._vent_days(week_all, local)},
             "night_ok": self._night_allowed(room),
             "balance": balance,
             "abs": {"in": round(abs_humidity(room_temp, humidity), 1) if room_temp is not None and humidity is not None else None,
@@ -1967,6 +1968,18 @@ class Heizen:
             vent = {**(advice or {}), "rh": round(humidity) if humidity is not None else None, "minutes": minutes,
                     "reasons": reasons, "kind": kind}
         return {"vent": vent, "air": air}
+
+    @staticmethod
+    def _vent_days(log: list[dict], local) -> list[dict]:
+        """Lüften je Tag der letzten 7 Tage (älteste zuerst): wie oft, wie lange, Nacht bei offenem Fenster."""
+        today = local.date()
+        out = []
+        for back in range(6, -1, -1):
+            d = today - timedelta(days=back)
+            vs = [v for v in log if dt_util.as_local(dt_util.utc_from_timestamp(v["at"])).date() == d]
+            day = [v for v in vs if not v.get("night")]
+            out.append({"d": d.isoformat(), "count": len(day), "min": round(sum(v["min"] for v in day)), "night": len(vs) > len(day)})
+        return out
 
     def _room_notices(self, room_id: str, room: dict, result: dict, open_since: float | None, now: float) -> None:
         """Nachrichten aufs Handy: Fenster lange offen, Thermostat nicht erreichbar, Batterie schwach."""

@@ -2,6 +2,19 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.100.0 – 2026-11-27
+
+### Geändert – Heizwerk › Lüften übersichtlich (Handy und Tablet)
+- **Nach Handlungsbedarf geordnet:** oben „Jetzt lüften“ (stoßlüften, Fenster schließen, lange offen, Schimmelgefahr), darunter „Lüftet gerade“, unten „Alles gut“ als kompakte, aufklappbare Liste mit Ampelpunkt, Feuchte und „zuletzt gelüftet“ (zugeklappt, solange oben etwas zu tun ist).
+- **Eine Aussage je Raum** mit einer Farbe, z. B. „Jetzt 10 Min. stoßlüften“; alle Zahlen im Fenster des Raums (Antippen) unter „Alle Werte“.
+- **Laufende Lüftung als Ring** mit Restzeit (läuft sekundengenau) und drei Haken: Zeit, Feuchte gesunken, Raum kühler.
+- **Kleine Anzeigen statt Zahlenblöcken:** Feuchte als Balken mit Strich an der Grenze, Wasser in der Luft drinnen/draußen als zwei Balken („trocknet“ / „trocknet nicht“), Schimmel als Ampelpunkt, CO₂.
+- **Woche als Mini-Leiste:** Lüften je Tag der letzten 7 Tage, Mond = nachts offen.
+- **Feste Farben:** Türkis = lüften/Fenster, Orange = bald bzw. lange offen, Rot = Schimmelgefahr, Grau = alles gut.
+- **Kopfkarte einfacher:** groß, was zu tun ist, die besten Lüftzeiten als Knöpfe, Richtwert und Tipps hinter ⓘ, Einstellungen am Zahnrad.
+- **Lüftzeiten als Tagesleiste:** 24 Stunden mit gut (trockene Luft, kein Regen), Regen, Nacht und den besten Zeiten.
+- **Tablet:** Wand-Kacheln je Raum – große Feuchte, eine Statuszeile, Farbe nach Zustand, beim Lüften Ring und Restzeit; Antippen öffnet die Details.
+
 ## 0.99.0 – 2026-11-27
 
 ### Neu – Lichtwerk im Tabletmodus

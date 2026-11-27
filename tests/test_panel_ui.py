@@ -1054,7 +1054,7 @@ def test_lueften_seite_und_kacheln(panel):
     p = panel
     p.view("vent")
     text = p.js(f"{EL}.shadowRoot.textContent")
-    assert "Jetzt 10 Min. stoßlüften" in text and "Lüftet 4 von 10 Min." in text and "Schimmelgefahr" in text
+    assert "Jetzt 10 Min. stoßlüften" in text and "Lüftet – 10 Min. empfohlen" in text and "Gefahr" in text
     p.view("overview")
     text = p.js(f"{EL}.shadowRoot.textContent")
     assert "4/10 Min." in text and "Lüften: " in text
@@ -1712,8 +1712,11 @@ def test_lueft_bilanz_ampel(panel):
     p = panel
     p.view("vent")
     p.wait()
-    main = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
-    assert "zu selten gelüftet" in main and "morgens (Ø 3 Tage)" in main, main
+    p.js(f"{EL}._openPop('vent:a1')")
+    p.wait()
+    main = p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    assert "morgens (Ø 3 Tage)" in main, main
+    p.js(f"{EL}._closePop()")
     p.js(f"() => {{ delete {EL}._status.rooms.a1.air.open; delete {EL}._status.rooms.a1.vent; }}")
     h = [x for x in p.js(f"{EL}._hints()") if x["text"] == "Zu selten gelüftet"]
     assert h and h[0]["lvl"] == "warn" and "3 Tage nicht gelüftet, Feuchte morgens 68 %" in h[0]["sub"]
@@ -1946,9 +1949,13 @@ def test_lueften_gelernt_beste_zeit(panel):
     p.view("vent")
     p.wait(300)
     txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
-    assert "Am besten lüften:" in txt and " Uhr (" in txt and "ct" not in txt and "€" not in txt
+    p.js(f"() => {{ {EL}.shadowRoot.querySelector('details.vok').open = true; }}")
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "Am besten lüften" in txt and " °C · " in txt and "ct" not in txt and "€" not in txt
     assert "Lüften trocknet gerade nicht" in txt and "trockener" in txt
-    assert "gelernte Lüftdauer" in txt
+    p.js(f"{EL}._openPop('vent:' + Object.keys({EL}._status.rooms).find((r) => {EL}._status.rooms[r].air?.tau))")
+    p.wait()
+    assert "gelernte Lüftdauer" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
 
 
 def test_kraftwerk_verbraucher_name_sofort_und_geraete(panel):
@@ -2355,3 +2362,39 @@ def test_tablet_lichtwerk_wand(tablet):
     p.js(f"{EL}._openPop('lwarea:Wohnzimmer')")
     p.wait(300)
     assert p.has('#pop [data-action="lw-mood"][data-m="Nachtlicht"]')
+
+
+
+def test_lueften_uebersichtlich(panel, browser, server):
+    """Lüften: Bereiche nach Bedarf, eine Aussage je Raum, Ring mit Haken, Anzeigen, Woche, „Alles gut“-Liste, Details-Fenster; Tablet als Wand-Kacheln."""
+    p = panel
+    p.js(f"""() => {{ const s = {EL}._status.rooms; const ids = Object.keys(s).sort((a, b) => !!s[b].air?.open - !!s[a].air?.open);
+        s[ids[0]].air.week = {{ ...(s[ids[1]].air.week || {{}}), days: [0,1,2,3,4,5,6].map((i) => ({{ d: new Date(Date.now() - (6 - i) * 864e5).toISOString().slice(0, 10), count: i % 3, min: (i % 3) * 8, night: i === 2 }})) }};
+        s[ids[0]].air.open.rh0 = 60; s[ids[0]].air.open.t0 = 21; }}""")
+    p.view("vent")
+    p.wait(300)
+    secs = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.vsec b')].map((x) => x.textContent)")
+    assert secs == ["Jetzt lüften", "Lüftet gerade"], secs
+    assert p.has(".vt2 .vt-ring") and p.has(".vt-checks span") and p.has(".vgs .vg-bar em") and p.has(".vweek span i")
+    # „Alles gut“: Raum ohne Bedarf als Zeile
+    p.js(f"""() => {{ const s = {EL}._status.rooms; const id = Object.keys(s).find((r) => !s[r].air?.open); s[id].vent = null; s[id].air = {{ ...s[id].air, mold: null, balance: null, open: null }}; {EL}._renderMain(); }}""")
+    p.wait(200)
+    assert p.has("details.vok .vok-r")
+    # Details-Fenster und Info
+    p.click(".vok-r")
+    p.wait(300)
+    assert "Alle Werte" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    p.js(f"{EL}._closePop()")
+    p.click('[data-pop="ventinfo"]')
+    p.wait(200)
+    assert "Richtwert Stoßlüften" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    # Tablet: Wand-Kacheln je Raum
+    page = browser.new_page(viewport={"width": 1280, "height": 800})
+    page.goto(f"{server}/dev/vorschau.html?tablet")
+    page.wait_for_function(f"{EL} && {EL}._data")
+    t = Panel(page)
+    t.view("vent")
+    t.wait(400)
+    n = t.js(f"{EL}._rooms().filter((r) => r.enabled !== false).length")
+    assert t.js(f"{EL}.shadowRoot.querySelectorAll('.vwall .wgrid .wt').length") == n
+    page.close()
