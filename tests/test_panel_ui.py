@@ -2394,7 +2394,8 @@ def test_lueften_uebersichtlich(panel, browser, server):
     t.view("vent")
     t.wait(400)
     n = t.js(f"{EL}._rooms().filter((r) => r.enabled !== false).length")
-    assert t.js(f"{EL}.shadowRoot.querySelectorAll('.vwall .wgrid .wt').length") == n
+    assert t.js(f"{EL}.shadowRoot.querySelectorAll('.vwall .vgrid .vtile').length") == n
+    assert t.has(".vhead.compact .vday.sm") and not t.has(".vhead.compact .vday-leg")
     page.close()
 
 

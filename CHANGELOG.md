@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.106.1 – 2026-11-27
+
+### Geändert – Heizwerk › Lüften im Tabletmodus
+- **Alle Räume auf einer Seite:** flachere Kacheln zu dritt bzw. viert (ab 7 Räumen) statt großer Wand-Kacheln auf zwei Seiten; die Seite scrollt bei Bedarf, statt zu blättern.
+- **Kachel:** Raum, Feuchte groß mit Wasser in g/m³, Aussage in der Farbe des Zustands und eine Zeile darunter – beim Lüften Ring und Restzeit, sonst der Grund bzw. „zuletzt vor 3 Std.“. Räume ohne Bedarf zurückhaltend, „jetzt lüften“ kräftig.
+- **Kopfkarte in einer Zeile:** Titel, beste Lüftzeiten rechts daneben, darunter die 24-Stunden-Leiste schmal (Legende unter ⓘ).
+- **Kein Widerspruch mehr:** Statt „Alles gut – nirgends lüften nötig“ bei Räumen mit „Bald lüften“ steht „Gerade nichts zu tun · 2 Räume bald lüften“ (orange). Ab 3 Räumen heißt es „4 Räume jetzt lüften“ statt einer langen Namensliste.
+
 ## 0.106.0 – 2026-11-27
 
 ### Neu – Kraftwerk

@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.106.0";
+const VERSION = "0.106.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1810,7 +1810,7 @@ class HauswerkPanel extends HTMLElement {
     // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
     const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
     // Einstellungen und der Heizwerk-Bericht: vollständig und scrollbar (zwei Spalten, keine Karte wird geteilt oder abgeschnitten)
-    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house", "report"].includes(tab) || (tab === "lights" && !!tin.querySelector(".lwwall")) || (tab === "kwflow" && !!tin.querySelector(".kwwall"));
+    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house", "report"].includes(tab) || (tab === "lights" && !!tin.querySelector(".lwwall")) || (tab === "kwflow" && !!tin.querySelector(".kwwall")) || (tab === "vent" && !!tin.querySelector(".vwall"));
     box.classList.toggle("tscroll", scroll);
     if (scroll) {
       Object.assign(tin.style, { zoom: f, width: "", height: "", columnWidth: "", columnGap: "", transform: "", clipPath: "" });
@@ -2515,7 +2515,7 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Lüftzeiten als Tagesleiste: 24 Stunden – Regen, trockene Luft, Nacht; die besten Zeiten markiert. */
-  _ventDayStrip() {
+  _ventDayStrip(compact = false) {
     const x = this._wxData();
     const hrs = (x?.hourly || []).slice(0, 24);
     if (hrs.length < 6) return "";
@@ -2531,6 +2531,7 @@ class HauswerkPanel extends HTMLElement {
       const tip = `${hr} Uhr · ${fmt(h.temperature, 0)} °C${h.humidity != null ? ` · ${fmt(h.humidity, 0)} %` : ""}${rain ? " · Regen" : night ? " · Nacht" : good ? " · trocken – gut zum Lüften" : ""}`;
       return `<span class="${cls} ${best.includes(hr) && i < 24 ? "best" : ""}" title="${esc(tip)}">${best.includes(hr) ? `<ha-icon icon="mdi:star-four-points"></ha-icon>` : ""}${i % 3 === 0 ? `<small>${hr}</small>` : ""}</span>`;
     }).join("");
+    if (compact) return `<div class="vday sm" title="24 Stunden: türkis = gut lüften, blau = Regen, gestreift = Nacht, Stern = beste Zeit">${cells}</div>`;
     return `<div class="vday">${cells}</div><div class="vday-leg"><span class="good"><i></i>gut</span><span class="rain"><i></i>Regen</span><span class="night"><i></i>Nacht</span><span><ha-icon icon="mdi:star-four-points"></ha-icon>beste Zeit</span></div>`;
   }
 
@@ -2546,31 +2547,42 @@ class HauswerkPanel extends HTMLElement {
     const act = all.filter((x) => x.v.g === "act"), run = all.filter((x) => x.v.g === "run"), ok = all.filter((x) => x.v.g === "ok");
     const plan = this._status?.vent_plan;
     // Kopf: groß, was zu tun ist; beste Zeiten als Knöpfe; Richtwert hinter ⓘ
-    const headTitle = act.length ? `${act.length} ${act.length === 1 ? "Raum" : "Räume"}: ${act.map((x) => x.r.name).join(", ")}` : run.length ? `${run.length} ${run.length === 1 ? "Raum lüftet" : "Räume lüften"} gerade` : "Alles gut – nirgends lüften nötig";
-    const head = `<section class="card vhead">
-      <div class="vhead-t"><span class="vhead-ic" style="--c:${act.length ? C.air : run.length ? C.air : "#22c55e"}"><ha-icon icon="${act.length ? "mdi:weather-windy" : run.length ? "mdi:timer-sand" : "mdi:check-circle-outline"}"></ha-icon></span>
+    const soon = ok.filter((x) => x.v.c !== "var(--muted)");
+    const headTitle = act.length ? (act.length > 2 ? `${act.length} Räume jetzt lüften` : `${act.length} ${act.length === 1 ? "Raum" : "Räume"}: ${act.map((x) => x.r.name).join(", ")}`)
+      : run.length ? `${run.length} ${run.length === 1 ? "Raum lüftet" : "Räume lüften"} gerade`
+      : soon.length ? `Gerade nichts zu tun · ${soon.length} ${soon.length === 1 ? "Raum" : "Räume"} bald lüften` : "Alles gut – nirgends lüften nötig";
+    const hc = act.length || run.length ? C.air : soon.length ? "#f59e0b" : "#22c55e";
+    const hi = act.length ? "mdi:weather-windy" : run.length ? "mdi:timer-sand" : soon.length ? "mdi:clock-alert-outline" : "mdi:check-circle-outline";
+    const wall = this._wall();
+    const best = plan?.times?.length ? plan.times.map((t) => `<span class="vbest"><ha-icon icon="mdi:clock-check-outline"></ha-icon><b>${hh(t.at)}</b><small>${fmt(t.temp, 0)} °C · ${t.minutes} Min.</small></span>`).join("") : "";
+    const head = `<section class="card vhead ${wall ? "compact" : ""}">
+      <div class="vhead-t"><span class="vhead-ic" style="--c:${hc}"><ha-icon icon="${hi}"></ha-icon></span>
         <span class="grow"><b>${esc(headTitle)}</b><small>${act.length ? "jetzt tun" : run.length ? "Fenster offen" : "Lüften"}${outT != null ? ` · draußen ${fmt(outT)} °C – Richtwert ${mins} Min.` : ""}</small></span>
+        ${wall && best ? `<span class="vhead-best in"><small>Am besten</small>${best}</span>` : ""}
         <button class="icon" data-action="pop-open" data-pop="ventinfo" title="So lüftet Hauswerk"><ha-icon icon="mdi:information-outline"></ha-icon></button>
         ${this._admin ? `<button class="icon" data-action="settings-go" data-sub="vent" title="Einstellen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>` : ""}</div>
-      ${plan?.times?.length ? `<div class="vhead-best"><small>Am besten lüften</small>${plan.times.map((t) => `<span class="vbest"><ha-icon icon="mdi:clock-check-outline"></ha-icon><b>${hh(t.at)}</b><small>${fmt(t.temp, 0)} °C · ${t.minutes} Min.</small></span>`).join("")}</div>`
+      ${wall ? "" : best ? `<div class="vhead-best"><small>Am besten lüften</small>${best}</div>`
         : plan ? `<div class="vhead-best"><small>Heute kaum trockene Luft ohne Regen – nur bei Bedarf kurz lüften</small></div>` : ""}
-      ${this._ventDayStrip()}
+      ${this._ventDayStrip(wall)}
     </section>`;
     const sec = (t, n) => `<div class="vsec"><b>${t}</b><span>${n}</span></div>`;
-    if (this._wall()) {
+    if (wall) {
       const tile = ({ r, s, v }) => {
         const o = s.air?.open;
-        const ring = o && !o.night && !o.done ? `<svg class="vt-ring sm" viewBox="0 0 100 100" style="--f:${Math.min(1, o.minutes / (o.target || 10)).toFixed(3)}"><circle cx="50" cy="50" r="44"></circle><circle class="f" cx="50" cy="50" r="44" pathLength="1"></circle></svg>` : "";
-        const end = o && !o.night && !o.done && !o.cool ? new Date(new Date(o.since).getTime() + (o.target || 10) * 60000).toISOString() : null;
-        return this._wallTile({
-          act: `data-action="pop-open" data-pop="vent:${esc(r.id)}"`, color: v.g === "ok" && v.c === "var(--muted)" ? C.rest : v.c,
-          ic: `<span class="wt-ic vt-wic" style="color:${v.c}">${ring}<ha-icon icon="${v.icon}"></ha-icon></span>`, name: r.name,
-          value: s.humidity != null ? fmt(s.humidity, 0) : "–", unit: s.humidity != null ? "%" : "",
-          status: `<span style="color:${v.c === "var(--muted)" ? "" : v.c}">${end ? `noch <span data-lw-until="${esc(end)}">${this._lwLeft(end)}</span>` : esc(v.text)}</span>`,
-          cls: v.g === "act" ? "on" : "",
-        });
+        const run = o && !o.night && !o.done;
+        const end = run && !o.cool ? new Date(new Date(o.since).getTime() + (o.target || 10) * 60000).toISOString() : null;
+        const ring = run ? `<svg class="vt-ring" viewBox="0 0 100 100" style="--f:${Math.min(1, o.minutes / (o.target || 10)).toFixed(3)}"><circle cx="50" cy="50" r="44"></circle><circle class="f" cx="50" cy="50" r="44" pathLength="1"></circle></svg>` : "";
+        const c = v.c === "var(--muted)" ? "#22c55e" : v.c;
+        const last = s.air?.last ? `zuletzt ${ago(s.air.last.at)}` : "";
+        const second = run ? (end ? `noch <span data-lw-until="${esc(end)}">${this._lwLeft(end)}</span>` : `${Math.floor(o.minutes)} Min. offen`) : v.g === "ok" && v.c === "var(--muted)" ? last : esc(v.sub || last);
+        return `<button class="vtile ${v.g}" style="--c:${c}" data-action="pop-open" data-pop="vent:${esc(r.id)}">
+          <span class="vtile-h"><span class="vtile-ic">${ring}<ha-icon icon="${v.icon}"></ha-icon></span><b>${esc(r.name)}</b></span>
+          <span class="vtile-v">${s.humidity != null ? `${fmt(s.humidity, 0)}<small>%</small>` : "–"}${s.air?.abs?.in != null ? `<em>${fmt(s.air.abs.in)} g/m³</em>` : ""}</span>
+          <span class="vtile-s"><b>${esc(v.text)}</b>${second ? `<small>${second}</small>` : ""}</span>
+        </button>`;
       };
-      return `<div class="vwall">${head}<div class="wgrid">${all.map(tile).join("")}</div></div>`;
+      const cols = all.length <= 6 ? 3 : 4;
+      return `<div class="vwall">${head}<div class="vgrid" style="--cols:${cols}">${all.map(tile).join("")}</div></div>`;
     }
     const card = ({ r, s, v }) => `<article class="card vt2" style="--c:${v.c}" data-action="pop-open" data-pop="vent:${esc(r.id)}" role="button" tabindex="0">
         <div class="vt2-h"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><b>${esc(r.name)}</b><span class="grow"></span><ha-icon class="vt2-go" icon="mdi:chevron-right"></ha-icon></div>
@@ -10624,6 +10636,7 @@ class HauswerkPanel extends HTMLElement {
           <div class="ev"><ha-icon icon="mdi:thermometer" style="color:${C.air}"></ha-icon><span class="grow"><b>Richtwert Stoßlüften</b><small>${outT == null ? "" : `Bei ${fmt(outT)} °C draußen: `}unter 0 °C 5 Min., bis 10 °C 10 Min., bis 15 °C 15 Min., darüber 25 Min. Mit Feuchtesensor lernt jeder Raum seine eigene Dauer.</small></span></div>
           <div class="ev"><ha-icon icon="mdi:water-percent" style="color:${C.air}"></ha-icon><span class="grow"><b>Wann lüften?</b><small>Ab der Feuchte-Grenze je Raumart (Bad 70 %, Schlafzimmer 60 %), bei viel CO₂ oder morgens – aber nur, wenn draußen weniger Wasser in der Luft ist.</small></span></div>
           <div class="ev"><ha-icon icon="mdi:check-circle-outline" style="color:${C.air}"></ha-icon><span class="grow"><b>Wann genug?</b><small>Zeit um, genug Wasser hinaus (g/m³) oder der Raum 3 °C kühler – dann kommt „Fenster schließen“.</small></span></div>
+          <div class="ev"><ha-icon icon="mdi:clock-check-outline" style="color:${C.air}"></ha-icon><span class="grow"><b>Tagesleiste</b><small>24 Stunden ab jetzt: türkis = trockene Luft, gut zum Lüften · blau = Regen · gestreift = Nacht · Stern = beste Zeit.</small></span></div>
           <div class="ev"><ha-icon icon="mdi:window-open-variant" style="color:#f59e0b"></ha-icon><span class="grow"><b>Kurz und weit öffnen statt kippen</b><small>tauscht die Luft, ohne Wände auszukühlen.</small></span></div>
         </div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     }
@@ -16631,7 +16644,24 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .vok-r > i { width:10px; height:10px; border-radius:50%; flex:none; } .vok-r b { display:block; } .vok-r small { display:block; color:var(--muted); font-size:13px; }
 .vok-r em { font-style:normal; font-weight:700; } .vok-r ha-icon { color:var(--muted); }
 .vt-wic { position:relative; } .vt-ring.sm { position:absolute; inset:-6px; width:auto; height:auto; }
-.vwall { display:flex; flex-direction:column; gap:14px; }
+.vwall { display:flex; flex-direction:column; gap:12px; }
+.vhead.compact { gap:8px; padding:10px 14px; }
+.vhead.compact .vhead-ic { width:40px; height:40px; --mdc-icon-size:22px; } .vhead.compact .vhead-t b { font-size:17px; }
+.vhead-best.in { display:flex; align-items:center; gap:6px; flex-wrap:nowrap; } .vhead-best.in > small { color:var(--muted); font-size:12px; margin-right:2px; }
+.vhead-best.in .vbest { padding:4px 10px; font-size:13px; white-space:nowrap; }
+.vday.sm { height:14px; gap:1px; } .vday.sm span ha-icon { --mdc-icon-size:9px; } .vday.sm span small { font-size:9px; }
+.vday.sm + * { margin-top:0; } .vhead.compact .vday.sm { margin-bottom:12px; }
+.vgrid { display:grid; grid-template-columns:repeat(var(--cols, 3), minmax(0, 1fr)); gap:10px; }
+.vtile { all:unset; box-sizing:border-box; cursor:pointer; display:flex; flex-direction:column; gap:4px; min-height:128px; padding:12px 14px; border-radius:18px;
+  background:color-mix(in srgb, var(--c) 9%, var(--card)); border:1px solid color-mix(in srgb, var(--c) 30%, transparent); }
+.vtile.act { background:color-mix(in srgb, var(--c) 20%, var(--card)); border-color:var(--c); }
+.vtile.ok { background:var(--card); border-color:var(--line, color-mix(in srgb, var(--text) 8%, transparent)); }
+.vtile-h { display:flex; align-items:center; gap:8px; min-width:0; } .vtile-h b { font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.vtile-ic { position:relative; width:30px; height:30px; flex:none; display:grid; place-items:center; border-radius:10px; color:var(--c); background:color-mix(in srgb, var(--c) 16%, transparent); --mdc-icon-size:18px; }
+.vtile-ic .vt-ring { position:absolute; inset:-5px; width:auto; height:auto; }
+.vtile-v { font-size:36px; font-weight:300; line-height:1; display:flex; align-items:baseline; gap:2px; } .vtile-v small { font-size:15px; color:var(--muted); } .vtile-v em { margin-left:auto; font-style:normal; font-size:12px; color:var(--muted); }
+.vtile-s b { display:block; font-size:14px; color:var(--c); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .vtile.ok .vtile-s b { color:var(--muted); font-weight:600; }
+.vtile-s small { display:block; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 /* Lichtwerk im Tablet (Wand) */
 .lwwall { display:flex; flex-direction:column; gap:14px; }
 .lwhead { display:grid; grid-template-columns:auto minmax(150px, 0.6fr) 1.6fr; grid-template-areas:"house txt tl" "house moods moods"; gap:8px 22px; align-items:center; padding:14px 18px; }
