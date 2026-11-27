@@ -1693,11 +1693,12 @@ def test_jetzt_wichtig_und_quittieren(panel):
             p.wait()
             assert key in p.js("JSON.parse(localStorage.getItem('hauswerk.ack')).keys")
             assert any(f"{h['text']}|{h.get('sub') or ''}" == key for h in p.js(f"{EL}._hints()"))  # Glocke behält es
-    # Müll: Termin nicht doppelt
+    # Bildschirmschoner: nur Warnungen, keine normalen Hinweise – Müll steht als Termin
     p.js(f"() => {{ {EL}._status.waste_due = {{ when: 'heute', types: ['Biotonne'] }}; {EL}._cal = [{{ title: 'Biotonne', allDay: true, start: new Date().toISOString().slice(0, 10) }}]; {EL}._calLoad = () => {{}}; {EL}._saverShow(); }}")
     p.wait(200)
     side = p.js(f"{EL}.shadowRoot.querySelector('#saver .sv-side')?.innerText || ''")
-    assert "Biotonne" not in side, side
+    assert "Biotonne" in side, side
+    assert not p.has("#saver .sv-hints") and "Müllabfuhr" not in p.js(f"{EL}.shadowRoot.getElementById('saver').innerText")
     more = p.js(f"!!{EL}.shadowRoot.querySelector('#saver .sv-more')")
     if more:
         p.js(f"{EL}.shadowRoot.querySelector('#saver .sv-more').click()")

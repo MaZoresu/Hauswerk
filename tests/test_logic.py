@@ -693,3 +693,20 @@ def test_heizwerk_zusatzberichte_logik():
     assert eco["key"] == "eco" and eco["hours"] == 20.0 and eco["kwh"] == round((2880 / 1440 / 2) * 20, 1)
     assert sv["kwh"] == round(eco["kwh"] + sv["items"][1]["kwh"], 1)
     assert L.savings_summary({"a": [{"savings": {"eco": [60, 60.0]}}]}, None)["kwh"] is None
+
+
+def test_morning_vent_done():
+    """Morgens lüften entfällt, wenn nachts bei offenem Fenster geschlafen wurde (auch wenn es vor der Erinnerung zu ging)."""
+    t0 = 1_000_000_000.0  # Mitternacht
+    start, night = 7 * 60, 21 * 60
+    f = L.morning_vent_done
+    assert f([], t0, start, night, True)                                  # offen jetzt
+    assert not f([], t0, start, night, False)
+    # 22:30 bis 06:50 offen (Kinderzimmer, ohne Nacht-Erlaubnis)
+    assert f([{"at": t0 - 5400, "min": 500}], t0, start, night, False)
+    # nur 19:00–19:10 abends gelüftet: zählt nicht
+    assert not f([{"at": t0 - 5 * 3600, "min": 10}], t0, start, night, False)
+    # heute nach 07:00 gelüftet
+    assert f([{"at": t0 + 7.5 * 3600, "min": 5}], t0, start, night, False)
+    # nachts nur 10 Min. offen: zählt nicht
+    assert not f([{"at": t0 + 3600, "min": 10}], t0, start, night, False)

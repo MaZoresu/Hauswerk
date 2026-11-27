@@ -1071,6 +1071,23 @@ COLD_MINUTES = 60  # so lange Ventil (fast) ganz offen ohne Erwärmung = Heizkö
 NO_HEAT_MODES = ("fenster", "sommer", "aus", "warm", "entkalken")
 
 
+def morning_vent_done(log: list[dict], today0: float, start_min: int, night_from_min: int, open_now: bool) -> bool:
+    """„Morgens lüften“ schon erledigt? Fenster jetzt offen, heute ab der Erinnerungszeit gelüftet –
+    oder nachts bei offenem Fenster geschlafen (mind. 30 Min. offen zwischen „Nachts ab“ und der Erinnerungszeit)."""
+    if open_now:
+        return True
+    morning = today0 + start_min * 60
+    night0 = today0 + night_from_min * 60 - (86400 if night_from_min > start_min else 0)
+    for v in log or []:
+        at = float(v.get("at") or 0)
+        end = at + float(v.get("min") or 0) * 60
+        if at >= morning:
+            return True
+        if min(end, morning) - max(at, night0) >= 30 * 60:
+            return True
+    return False
+
+
 def vent_balance(last_at: float | None, rh_morning: dict[str, float], limit: float, mold: dict | None,
                  now: float, today: str) -> dict:
     """Lüft-Bilanz eines Raums als Ampel: wie lange nicht gelüftet und wie feucht morgens (Mittel der letzten 3 Tage).

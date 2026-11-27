@@ -2,6 +2,14 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.97.0 – 2026-11-27
+
+### Geändert
+- **Bildschirmschoner nur mit Wichtigem:** Im Tabletmodus zeigt der Bildschirmschoner nur noch Warnungen (z. B. Sturm, Fenster offen bei Regen, amtliche Warnungen) – keine normalen Hinweise mehr. Diese stehen weiter unter der Glocke. Die Müllabfuhr steht dafür wieder bei den Terminen.
+
+### Behoben (Heizwerk › Lüften)
+- **Kein „morgens lüften“ nach einer Nacht bei offenem Fenster:** War das Fenster nachts mindestens 30 Min. offen (zwischen „Nachts ab“ und der Erinnerungszeit), entfällt die Erinnerung – in jedem Raum, auch wenn das Fenster vor der Erinnerung schon wieder zu ist. Bisher galt das nur für Räume, in denen das Fenster nachts offen bleiben darf.
+
 ## 0.96.0 – 2026-11-24
 - Wetter: Antippen der Wetterkachel öffnet Details – jetzt (gefühlt, Wind/Böen, Feuchte, Sonne), Satz zum Tag, amtliche Warnungen, 24-Stunden-Kurve mit 0°-Linie, Regen und Nacht, 7 Tage mit Spannbalken, Regen und Wind, „Fürs Haus“ (Böen, Frost/Mäher, Regen bei offenen Fenstern, Lüften, kälteste Nacht, Sonne, Mähen).
 - Handy-Kachel: Regenbalken mit Wahrscheinlichkeit je Stunde und eine „Fürs Haus“-Zeile.

@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.96.0";
+const VERSION = "0.97.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -2564,8 +2564,8 @@ class HauswerkPanel extends HTMLElement {
     const w = this._weather();
     // neue Hinweise merken (5 Minuten hervorgehoben)
     const urgent = this._urgent().filter((h) => !this._acked(h));
-    const hints = this._hints().filter((h) => h.lvl !== "warn" && !this._acked(h));
-    for (const h of [...urgent, ...hints]) {
+    // nur Wichtiges (Warnungen); normale Hinweise stehen unter der Glocke
+    for (const h of urgent) {
       const k = `${h.text}|${h.sub}`;
       if (!this._saverSeen.has(k)) { this._saverSeen.add(k); this._saverNew[k] = t; }
     }
@@ -2648,14 +2648,10 @@ class HauswerkPanel extends HTMLElement {
       if (items.length) fcHtml = `<div class="sv-fc">${items.map((x) => `<span><small>${new Date(x.datetime).toLocaleTimeString("de-DE", { hour: "2-digit" })}</small><ha-icon icon="${(WEATHER[x.condition] || ["mdi:weather-partly-cloudy"])[0]}"></ha-icon><b>${fmt(x.temperature, 0)}°</b></span>`).join("")}</div>`;
     }
     const day = (d) => { const x = new Date(d); const td = new Date(); td.setHours(0, 0, 0, 0); const diff = Math.round((new Date(x.getFullYear(), x.getMonth(), x.getDate()) - td) / 86400000); return diff <= 0 ? "Heute" : diff === 1 ? "Morgen" : x.toLocaleDateString("de-DE", { weekday: "short" }); };
-    // Müll heute/morgen steht schon als Hinweis da: denselben Termin nicht doppelt zeigen
-    const waste = this._status?.waste_due;
-    const dupe = (e) => waste && (waste.types || []).some((x) => String(e.title).toLowerCase().includes(String(x).toLowerCase())) && ["Heute", "Morgen"].includes(day(e.start));
-    const cal = (this._cal || []).filter((e) => (e.allDay || new Date(e.start) > now - 30 * 60000) && !dupe(e));
+    const cal = (this._cal || []).filter((e) => e.allDay || new Date(e.start) > now - 30 * 60000);
     const side = [
       ...cal.slice(0, 3).map((e) => `<div class="sv-row"><ha-icon icon="${this._calIcon(e.title)[0]}" style="color:${this._calIcon(e.title)[1]}"></ha-icon><span><b>${day(e.start)}${e.allDay ? "" : ` ${new Date(e.start).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}`}</b><small>${esc(e.title)}</small></span></div>`),
     ];
-    const smallHints = hints.slice(0, urgent.length ? 1 : 2);
     el.innerHTML = `
       <div class="sv-in" style="transform:translate(${dx}vw, ${dy}vh)">
         <div class="sv-time">${time}</div>
@@ -2664,8 +2660,7 @@ class HauswerkPanel extends HTMLElement {
         ${mods.length ? `<div class="sv-mods">${mods.map(([m, x]) => `<div class="sv-mod"><span class="sv-logo">${MODULE_LOGOS[m] || ""}</span>${x.join("")}</div>`).join("")}</div>` : ""}
         ${urgentHtml}
         ${side.length ? `<div class="sv-side">${side.join("")}</div>` : ""}
-        ${smallHints.length ? `<div class="sv-hints">${smallHints.map((h) => `<div class="sv-h ${fresh(h) ? "new" : ""}" data-ack="${esc(this._ackKey(h))}"><ha-icon icon="${h.icon}"></ha-icon><span><b>${esc(h.text)}</b>${h.sub ? `<small>${esc(h.sub)}</small>` : ""}</span></div>`).join("")}${hints.length > smallHints.length ? more(hints.length - smallHints.length, "weiterer Hinweis", "weitere Hinweise") : ""}</div>` : ""}
-        <div class="sv-tap">Antippen zum Aufwecken · Hinweis lange drücken: für heute ausblenden</div>
+        <div class="sv-tap">Antippen zum Aufwecken${urgentHtml ? " · Warnung lange drücken: für heute ausblenden" : ""}</div>
       </div>`;
   }
 

@@ -35,7 +35,7 @@ from .const import (
     STORAGE_VERSION,
     WINDOW_OPEN_STATES,
 )
-from .logic import degree_days, punctual_summary, savings_summary
+from .logic import degree_days, morning_vent_done, punctual_summary, savings_summary
 from .logic import (
     MAX_TEMP,
     MIN_TEMP,
@@ -1804,8 +1804,8 @@ class Heizen:
                 start = parse_hm(morning)
                 now_min = local.hour * 60 + local.minute
                 today0 = dt_util.start_of_local_day().timestamp()
-                done_today = any(v["at"] >= today0 + start * 60 or (v.get("night") and v["at"] + v["min"] * 60 >= today0)
-                                 for v in self.vent_log.get(room_id) or []) or open_since is not None
+                done_today = morning_vent_done(self.vent_log.get(room_id) or [], today0, start, self._night_window()[0],
+                                               open_since is not None)
                 if start <= now_min < start + 90 and not done_today:
                     reasons.append("morgens lüften")
                     kind = kind or "morning"
