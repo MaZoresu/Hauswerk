@@ -726,3 +726,35 @@ def test_abs_humidity_vent():
     pts = L.abs_rise_points([(0, 9.0), (600, 12.0)], 600, 900, 22)
     assert 14 < pts < 18
     assert L.abs_rise_points([(0, 9.0)], 600, 900, 22) is None and L.abs_rise_points([(0, 9.0), (1, 10)], 600, 900, None) is None
+
+
+def _rows(n=5, out=8.0, cn=300, under=0, fv=None, fn=0, assist=None):
+    return [{"date": f"2026-11-{10 + i}", "heat_min": 300, "pause_min": 0, "comfort_n": cn, "under_min": under, "comfort_dev": -0.1,
+             "measured_min": cn, "over_min": 0, "full_min": 250, "comfort_over": 0, "valve_avg": 70, "outside_avg": out,
+             "fire_min": 0, "openings": 0, "floor_valve": fv, "floor_n": fn, "assist_min": assist} for i in range(n)]
+
+
+def test_room_analysis_fussbodenheizung_und_mischbetrieb():
+    """FBH: Einschaltdauer statt „Ventil ganz auf“; Mischbetrieb: Zusatz-Anteil statt „Thermostat prüfen“."""
+    # FBH: Stellantrieb oft an (Ventil ≥ 90 % in 250 von 300 Min.), Raum warm → kein „weak“, keine „ganz auf“-Angabe
+    a = L.room_analysis(_rows(fv=60, fn=300), 0.4, "flaeche")
+    assert a["verdict"] == "good" and a["facts"]["full_pct"] is None and a["facts"]["floor_duty"] == 60
+    # Mischbetrieb ohne FBH-Werte, zu kalt, Zusatz-Ventile zu → nicht „Thermostat prüfen“
+    rows = _rows(under=120, assist=10)
+    for r in rows:
+        r["valve_avg"] = 5
+        r["full_min"] = 0
+    a = L.room_analysis(rows, 0.4, "flaeche", mixed=True)
+    assert a["verdict"] != "sensor", a
+    # Mischbetrieb: Zusatz oft nötig an milden Tagen → knapp mit Hinweis
+    a = L.room_analysis(_rows(fv=90, fn=300, assist=90), 1.5, "flaeche", mixed=True)
+    assert a["facts"]["assist_mild"] == 30 and a["verdict"] == "tight"
+    assert any("Zusatz-Heizkörper oft nötig" in f["title"] for f in a["findings"])
+    assert not any(f["title"] == "Heizt schnell auf" for f in a["findings"])
+    # Zusatz nur bei Frost
+    rows = _rows(n=3, out=-2, fv=80, fn=300, assist=60) + _rows(n=3, out=8, fv=50, fn=300, assist=3)
+    a = L.room_analysis(rows, 0.4, "flaeche", mixed=True)
+    assert any(f["title"] == "Zusatz-Heizkörper hilft nur bei Frost" for f in a["findings"]), a["findings"]
+    # Heizkörper unverändert
+    a = L.room_analysis(_rows(under=120), 1.0)
+    assert a["verdict"] == "weak"

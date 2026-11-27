@@ -435,6 +435,24 @@ class Heizen:
                 radiator.append(value)
         return (max(radiator) if radiator else None), (max(every) if every else None)
 
+    def _floor_valve(self, room_id: str) -> float | None:
+        """Öffnung der Fußbodenheizung (Stellantrieb an = 100 %) – ohne die Zusatz-Heizkörper des Mischbetriebs."""
+        room = self.rooms.get(room_id) or {}
+        assist = set(room.get("assist_entities") or [])
+        reg = er.async_get(self.hass)
+        adev = {e.device_id for a in assist if (e := reg.async_get(a)) and e.device_id}
+        vals = []
+        for entity_id in self._valve_src.get(room_id) or []:
+            if entity_id in assist:
+                continue
+            ent = reg.async_get(entity_id)
+            if ent and ent.device_id in adev:
+                continue
+            value, _is_valve = self._valve_of(entity_id)
+            if value is not None:
+                vals.append(value)
+        return max(vals) if vals else None
+
     def _duty_blocked(self, entity_id: str) -> bool:
         return any(
             (s := self.hass.states.get(b)) is not None and s.state == "on" for b in self._dev_duty.get(entity_id) or []
@@ -2422,6 +2440,14 @@ class Heizen:
                     bucket["under"] = bucket.get("under", 0) + 1
                 # zu warm nur in der Komfortzeit zählen – nach dem Absenken auf Eco ist der Raum natürlich noch wärmer
                 bucket["co"] = bucket.get("co", 0) + (1 if temp > target + 1.0 else 0)
+                room = self.rooms[room_id]
+                if room.get("type") == "flaeche":
+                    fv = self._floor_valve(room_id)
+                    if fv is not None:
+                        bucket["fv"] = round(bucket.get("fv", 0.0) + fv, 1)
+                        bucket["fvn"] = bucket.get("fvn", 0) + 1
+                    if room.get("assist_entities"):
+                        bucket["as"] = bucket.get("as", 0) + (1 if self._rt(room_id).get("assist_on") else 0)
             if temp is not None and target is not None and mode not in ("fenster", "aus", "sommer", "entkalken"):
                 bucket["mn"] = bucket.get("mn", 0) + 1
                 if temp > target + 1.0:
@@ -2761,11 +2787,15 @@ class Heizen:
                         "savings": b.get("sav") or {},
                         "outside_avg": round(b["osum"] / b["on"], 1) if b.get("on") else None,
                         "fire_min": b.get("fire", 0),
+                        # Fußbodenheizung: Ø Einschaltdauer des Stellantriebs in der Komfortzeit; Mischbetrieb: Minuten mit Zusatz
+                        "floor_valve": round(b["fv"] / b["fvn"]) if b.get("fvn") else None, "floor_n": b.get("fvn", 0),
+                        "assist_min": b.get("as"),
                     }
                 )
             out[room_id] = rows
         out["_analysis"] = {
-            room_id: room_analysis(out[room_id], self.heat_rates.get(room_id), room.get("type") or "heizkoerper")
+            room_id: room_analysis(out[room_id], self.heat_rates.get(room_id), room.get("type") or "heizkoerper",
+                                   mixed=room.get("type") == "flaeche" and bool(room.get("assist_entities")))
             for room_id, room in self.rooms.items()
         }
         return out

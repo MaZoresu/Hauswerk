@@ -623,6 +623,12 @@ def test_mischbetrieb(hw):
         res = ctl.status()["rooms"]["bad"]
         assert res["assist"]["on"] is True
         assert hass.calls[-1][2] == {"entity_id": "climate.trv_zusatz", "temperature": 22.0}
+        # Bericht: Minute mit Zusatz zählt; Fußbodenheizung ohne die Zusatz-Ventile
+        ctl._record_stats()
+        b = ctl._stat("bad")
+        assert b.get("as") == 1
+        rows = ctl.report(1)["bad"]
+        assert rows[-1]["assist_min"] == 1
         # bis kurz vor Soll an, dann wieder zu
         hass.set("climate.wth", "heat", {"current_temperature": 20.95, "temperature": 21.0, "model": "HmIP-WTH-2"}, "WTH Bad")
         hass.set("climate.trv_zusatz", "heat", {"current_temperature": 22.0, "temperature": 22.0, "model": "HMIP-eTRV"}, "Heizkörper Zusatz")

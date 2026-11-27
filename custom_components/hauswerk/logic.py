@@ -1307,7 +1307,7 @@ def shade_wanted(prof: dict, start: dict, end: dict, active: bool) -> bool:
 
 
 # ---------------------------------------------------------------- Bericht: Heizleistung je Raum
-def room_analysis(rows: list[dict], heat_rate: float | None, room_type: str = "heizkoerper") -> dict:
+def room_analysis(rows: list[dict], heat_rate: float | None, room_type: str = "heizkoerper", mixed: bool = False) -> dict:
     """Einschätzung der Heizleistung eines Raums aus den Tageswerten des Berichts.
 
     Kennzahlen (alle nur in der Komfortzeit, ohne die Aufheizzeit nach dem Lüften):
@@ -1315,11 +1315,22 @@ def room_analysis(rows: list[dict], heat_rate: float | None, room_type: str = "h
     - zu warm: Anteil, in dem er mehr als 1 °C über Soll lag (Eco-Zeiten zählen nicht – nach dem Absenken ist es
       natürlich noch wärmer),
     - Ø Abweichung vom Soll, Ø Ventilöffnung, Anteil der Heizzeit mit Ventil ≥ 90 %, Aufheizgeschwindigkeit.
+    Fußbodenheizung: Der Stellantrieb kennt nur auf/zu – statt „Ventil ganz auf“ zählt die Einschaltdauer in der
+    Komfortzeit (ab 85 % am Limit). Mischbetrieb (Fußbodenheizung + Zusatz-Heizkörper): Die Zusatz-Heizkörper sind
+    absichtlich zu; bewertet wird die Fußbodenheizung und wie oft der Zusatz mithelfen musste (Frost/mild getrennt).
     Daraus ein Urteil (good/tight/weak/reserve/sensor/nodata) und Hinweise. Die Hinweise widersprechen dem Urteil nicht:
     z. B. kein „Reserve“ zusammen mit „bei Frost zu kalt“, kein „heizt schnell auf“ bei „zu schwach“.
     """
-    floor = room_type == "flaeche"
+    floor = room_type == "flaeche" or mixed
     sum_ = lambda k: sum(r.get(k) or 0 for r in rows)  # noqa: E731
+    # Fußbodenheizung: Einschaltdauer des Stellantriebs in der Komfortzeit
+    fl_rows = [r for r in rows if r.get("floor_n")]
+    fl_n = sum(r["floor_n"] for r in fl_rows)
+    duty = round(sum(r["floor_valve"] * r["floor_n"] for r in fl_rows) / fl_n) if floor and fl_n >= 60 else None
+    # Mischbetrieb: Anteil der Komfortzeit, in der der Zusatz-Heizkörper mithalf
+    def assist_pct(rs):
+        n = sum(r.get("comfort_n") or 0 for r in rs if r.get("assist_min") is not None)
+        return round(100 * sum(r.get("assist_min") or 0 for r in rs if r.get("assist_min") is not None) / n) if mixed and n >= 60 else None
     cn, under, full, heat = sum_("comfort_n"), sum_("under_min"), sum_("full_min"), sum_("heat_min")
     pause, openings, fire = sum_("pause_min"), sum_("openings"), sum_("fire_min")
     devs = [(r["comfort_dev"], r["comfort_n"]) for r in rows if r.get("comfort_dev") is not None and r.get("comfort_n")]
@@ -1337,54 +1348,91 @@ def room_analysis(rows: list[dict], heat_rate: float | None, room_type: str = "h
     mild = [r for r in rows if r.get("outside_avg") is not None and r["outside_avg"] >= 3 and r.get("comfort_n")]
     pct = lambda rs: round(100 * sum(r["comfort_n"] - r["under_min"] for r in rs) / sum(r["comfort_n"] for r in rs)) if rs else None  # noqa: E731
     ok_cold, ok_mild = pct(cold), pct(mild)
+    a_all, a_cold, a_mild = assist_pct(rows), assist_pct(cold), assist_pct(mild)
+    if floor:
+        # „Ventil ganz auf“ ist bei einem Stellantrieb (0/100 %) nichts Besonderes – stattdessen die Einschaltdauer
+        full_pct = None
+        if duty is not None:
+            valve = duty
     findings: list[dict] = []
     add = lambda level, title, text: findings.append({"level": level, "title": title, "text": text})  # noqa: E731
     facts = {"ok_pct": ok_pct, "dev": dev, "valve": valve, "full_pct": full_pct, "over_pct": over_pct,
              "heat_h": round(heat / 60, 1), "rate": round(heat_rate, 2) if heat_rate else None,
              "ok_cold": ok_cold, "ok_mild": ok_mild, "pause_h": round(pause / 60, 1), "openings": openings,
-             "fire_h": round(fire / 60, 1)}
+             "fire_h": round(fire / 60, 1), "floor_duty": duty, "mixed": mixed,
+             "assist_pct": a_all, "assist_cold": a_cold, "assist_mild": a_mild}
     if cn < 120:
         return {"verdict": "nodata", "facts": facts,
                 "findings": [{"level": "info", "title": "Noch zu wenig Daten",
                               "text": "Für eine Einschätzung braucht Hauswerk mindestens 2 Stunden Komfortzeit mit Messwert im gewählten Zeitraum."}]}
     heater = "die Fußbodenheizung" if floor else "der Heizkörper"
+    vword = "der Stellantrieb der Fußbodenheizung läuft" if duty is not None else "das Ventil ist"
+    helps_a = (a_all or 0) >= 40
     de = lambda x: f"{x:.1f}".replace(".", ",")  # noqa: E731
     dev_txt = f" – im Schnitt {de(abs(dev))} °C {'unter' if dev < 0 else 'über'} Soll" if dev is not None and abs(dev) >= 0.1 else ""
     frost = ok_cold is not None and ok_mild is not None and len(cold) >= 2 and ok_cold < 85 and ok_mild - ok_cold >= 20
     verdict = "good"
-    if ok_pct < 75 and valve is None:
+    if ok_pct < 75 and valve is None and not helps_a:
         verdict = "weak"
         add("warn", "Wird nicht warm genug",
             f"Nur in {ok_pct} % der Komfortzeit warm genug{dev_txt}. Ohne Werte zur Ventilöffnung lässt sich nicht sagen, "
             f"ob {heater} zu wenig Wärme liefert oder das Thermostat zu früh abregelt.")
-    elif ok_pct < 75 and (valve >= 60 or (full_pct or 0) >= 30):
+    elif ok_pct < 75 and (helps_a or (valve or 0) >= (80 if duty is not None else 60) or (full_pct or 0) >= 30):
         verdict = "weak"
+        how = (f"obwohl der Stellantrieb der Fußbodenheizung {valve} % der Komfortzeit an war" if duty is not None
+               else f"obwohl das Ventil weit offen ist (im Schnitt {valve} %" + (f", {full_pct} % der Heizzeit fast ganz auf" if full_pct else "") + ")"
+               if valve is not None else "obwohl die Heizung lief")
         add("warn", "Zu schwach – wird nicht warm genug",
-            f"Nur in {ok_pct} % der Komfortzeit warm genug, obwohl das Ventil weit offen ist (im Schnitt {valve} %"
-            + (f", {full_pct} % der Heizzeit fast ganz auf" if full_pct else "") + f"). {heater[0].upper()}{heater[1:]} gibt also nicht genug Wärme ab. "
+            f"Nur in {ok_pct} % der Komfortzeit warm genug, {how}"
+            + (f" und der Zusatz-Heizkörper in {a_all} % mithalf" if mixed and a_all else "")
+            + f". {heater[0].upper()}{heater[1:]} gibt also nicht genug Wärme ab. "
             + ("Mögliche Ursachen: Vorlauftemperatur zu niedrig oder zu wenig Durchfluss im Heizkreis (hydraulischer Abgleich)."
                if floor else "Mögliche Ursachen: Heizkörper zu klein, Vorlauftemperatur bzw. Heizkurve zu niedrig, Luft im Heizkörper oder fehlender hydraulischer Abgleich."))
+    elif ok_pct < 75 and mixed and duty is None:
+        # Mischbetrieb ohne Werte der Fußbodenheizung: die Zusatz-Heizkörper sind absichtlich zu – keine Aussage übers Thermostat
+        verdict = "weak"
+        add("warn", "Wird nicht warm genug",
+            f"Nur in {ok_pct} % der Komfortzeit warm genug{dev_txt}. Ohne Werte vom Stellantrieb der Fußbodenheizung lässt sich nicht sagen, "
+            "ob sie zu wenig Wärme liefert. Tipp: den Schalter bzw. Stellantrieb unter Raum › Geräte eintragen.")
     elif ok_pct < 75:
         verdict = "sensor"
-        add("warn", "Zu kalt, aber das Ventil bleibt fast zu",
-            f"Nur in {ok_pct} % der Komfortzeit warm genug, das Ventil ist dabei im Schnitt nur {valve} % offen. Die Heizung könnte mehr – "
-            "das Thermostat regelt zu früh ab, vermutlich weil es direkt am Heizkörper zu warm misst. "
-            "Abhilfe: Raumsensor eintragen, Kalibrierung oder „Thermostat nachführen“ einschalten (Raum › Regelung).")
+        add("warn", f"Zu kalt, aber {'die Fußbodenheizung läuft kaum' if duty is not None else 'das Ventil bleibt fast zu'}",
+            f"Nur in {ok_pct} % der Komfortzeit warm genug, {vword} dabei im Schnitt nur {valve} % {'der Zeit' if duty is not None else 'offen'}. Die Heizung könnte mehr – "
+            + ("das Wandthermostat regelt zu früh ab, z. B. weil es zu warm hängt (Sonne, Lampe, Außenwand-Nische) oder das Soll am Thermostat niedriger ist. "
+               "Abhilfe: Kalibrierung oder Raumsensor (Raum › Regelung)." if duty is not None else
+               "das Thermostat regelt zu früh ab, vermutlich weil es direkt am Heizkörper zu warm misst. "
+               "Abhilfe: Raumsensor eintragen, Kalibrierung oder „Thermostat nachführen“ einschalten (Raum › Regelung)."))
     elif ok_pct < 90:
         verdict = "tight"
         add("info", "Meist warm genug, aber knapp",
             f"In {ok_pct} % der Komfortzeit warm genug{dev_txt}. "
             + ("Hilft meist: früher vorheizen (Vorheizen › Lernen) oder die Heizkurve etwas anheben." if not floor
                else "Hilft meist: längere Vorheizzeit oder die Heizkurve etwas anheben."))
-    elif valve is not None and valve < 25 and (over_pct or 0) < 15 and not frost:
+    elif valve is not None and valve < 25 and (over_pct or 0) < 15 and not frost and (a_all or 0) < 5:
         verdict = "reserve"
         add("ok", "Wird warm – mit Reserve",
-            f"In {ok_pct} % der Komfortzeit warm genug, das Ventil ist dabei im Schnitt nur {valve} % offen. "
+            f"In {ok_pct} % der Komfortzeit warm genug, {vword} dabei im Schnitt nur {valve} % {'der Zeit' if duty is not None else 'offen'}. "
             f"{heater[0].upper()}{heater[1:]} schafft mehr als nötig. Die Vorlauftemperatur ließe sich etwas senken – das spart Energie, besonders mit Wärmepumpe.")
     else:
         add("ok", "Wird warm",
             f"In {ok_pct} % der Komfortzeit warm genug{dev_txt}."
-            + (f" Das Ventil ist dabei im Schnitt {valve} % offen" + (" – die Heizung arbeitet schon kräftig." if valve >= 60 else ".") if valve is not None else ""))
+            + ((f" Der Stellantrieb der Fußbodenheizung lief dabei {valve} % der Zeit" if duty is not None else f" Das Ventil ist dabei im Schnitt {valve} % offen")
+               + (" – die Heizung arbeitet schon kräftig." if valve >= (85 if duty is not None else 60) else ".") if valve is not None else ""))
+    if mixed and a_all is not None:
+        if a_mild is not None and a_mild >= 20 and len(mild) >= 2:
+            if verdict in ("good", "reserve"):
+                verdict = "tight"
+            add("warn", "Zusatz-Heizkörper oft nötig – auch an milden Tagen",
+                f"Der Zusatz-Heizkörper half an milden Tagen in {a_mild} % der Komfortzeit mit"
+                + (f", bei Frost in {a_cold} %" if a_cold is not None else "") + ". Die Fußbodenheizung allein reicht hier nicht. "
+                "Abhilfe: Vorlauf bzw. Heizkurve des Fußbodenheizkreises etwas anheben, hydraulischen Abgleich (Durchfluss) und den Stellantrieb prüfen.")
+        elif a_cold is not None and a_cold >= 10 and (a_mild is None or a_mild < 10):
+            add("ok", "Zusatz-Heizkörper hilft nur bei Frost",
+                f"Bei Frost half er in {a_cold} % der Komfortzeit mit, an milden Tagen {'kaum' if a_mild is not None else 'noch ohne Daten'}. So ist der Mischbetrieb gedacht.")
+        elif a_all < 5:
+            add("ok", "Fußbodenheizung reicht allein", f"Der Zusatz-Heizkörper musste nur in {a_all} % der Komfortzeit mithelfen.")
+        else:
+            add("info", "Zusatz-Heizkörper hilft ab und zu", f"In {a_all} % der Komfortzeit half der Zusatz-Heizkörper mit – meist beim Vorheizen oder nach dem Lüften.")
     if frost and verdict != "weak":
         add("warn", "Bei Frost zu kalt",
             f"An Frosttagen (unter 3 °C außen) nur in {ok_cold} % der Komfortzeit warm genug, an milden Tagen in {ok_mild} %. "
@@ -1407,8 +1455,8 @@ def room_analysis(rows: list[dict], heat_rate: float | None, room_type: str = "h
                     f"Gelernt: {de(heat_rate)} °C pro Stunde. Hauswerk heizt deshalb früher vor – der Raum ist trotzdem rechtzeitig warm.")
             else:
                 add("warn", "Heizt langsam auf",
-                    f"Gelernt: {de(heat_rate)} °C pro Stunde – wenig für {'Fußbodenheizung' if floor else 'Heizkörper'}. Deshalb startet das Vorheizen früh.")
-        elif heat_rate > fast and verdict not in ("weak", "sensor"):
+                    f"Gelernt: {de(heat_rate)} °C pro Stunde{' (mit Zusatz-Heizkörper)' if mixed else ''} – wenig für {'Fußbodenheizung' if floor else 'Heizkörper'}. Deshalb startet das Vorheizen früh.")
+        elif heat_rate > fast and verdict not in ("weak", "sensor") and not mixed:
             add("ok", "Heizt schnell auf", f"Gelernt: {de(heat_rate)} °C pro Stunde – kurze Vorheizzeit reicht.")
     if fire >= 30:
         add("info", "Zusätzliche Wärme herausgerechnet",

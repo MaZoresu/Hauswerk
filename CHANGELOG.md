@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.103.0 – 2026-11-27
+
+### Geändert – Heizwerk › Bericht › Heizleistung: Fußbodenheizung und Mischbetrieb richtig bewertet
+- **Fußbodenheizung nach Einschaltdauer:** Der Stellantrieb kennt nur auf/zu – „Ventil ganz auf“ wurde bisher wie bei einem voll aufgedrehten Heizkörper gewertet und konnte „Zu schwach“ auslösen. Jetzt zählt, wie lange der Stellantrieb in der Komfortzeit an war („Fußbodenheizung an 60 % der Komfortzeit“); am Limit erst ab 80–85 %.
+- **Mischbetrieb (Fußbodenheizung + Zusatz-Heizkörper):** neue Kennzahl „Zusatz half“ – Anteil der Komfortzeit, getrennt nach Frost und mild – mit eigenen Aussagen: „Fußbodenheizung reicht allein“, „Zusatz-Heizkörper hilft nur bei Frost“ (so gedacht) oder „Zusatz-Heizkörper oft nötig – auch an milden Tagen“ (Vorlauf/Heizkurve des Fußbodenheizkreises anheben, Abgleich und Stellantrieb prüfen; Urteil dann „Knapp“).
+- **Kein falsches „Thermostat prüfen“ mehr im Mischbetrieb:** Die Zusatz-Heizkörper sind absichtlich zu – ohne Werte vom Stellantrieb der Fußbodenheizung heißt es jetzt „Wird nicht warm genug“ mit dem Tipp, den Stellantrieb einzutragen.
+- **Aufheizen im Mischraum** ist als „mit Zusatz“ gekennzeichnet; „Heizt schnell auf“ entfällt dort. Die Raumkarte zeigt „Fußbodenheizung + Zusatz“.
+- Die neuen Werte werden ab jetzt gesammelt – aussagekräftig nach einigen Tagen.
+
 ## 0.102.1 – 2026-11-27
 
 ### Geändert – Lichtwerk im Tabletmodus

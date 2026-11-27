@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.102.1";
+const VERSION = "0.103.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -9148,14 +9148,16 @@ class HauswerkPanel extends HTMLElement {
       const [vl, vc, vi] = V[a.verdict] || V.nodata;
       const f = a.facts || {};
       return `<div class="pw-room" style="--c:${vc}">
-        <div class="pw-h"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><b>${esc(r.name)}</b><small>${r.type === "flaeche" ? "Fußbodenheizung" : "Heizkörper"}</small><span class="grow"></span><em class="pw-v"><ha-icon icon="${vi}"></ha-icon>${vl}</em></div>
+        <div class="pw-h"><span class="rdot" style="background:${this._roomColor(r.id)}"></span><b>${esc(r.name)}</b><small>${r.type === "flaeche" ? (r.assist_entities?.length ? "Fußbodenheizung + Zusatz" : "Fußbodenheizung") : "Heizkörper"}</small><span class="grow"></span><em class="pw-v"><ha-icon icon="${vi}"></ha-icon>${vl}</em></div>
         ${f.ok_pct != null ? `<div class="pw-bar" title="Warm genug in der Komfortzeit"><i style="width:${f.ok_pct}%"></i></div>` : ""}
         <div class="pw-fs">
           ${fact("Warm genug", f.ok_pct != null ? `${f.ok_pct} %` : null, "der Komfortzeit")}
           ${fact("Zu warm", f.over_pct ? `${f.over_pct} %` : null, "der Komfortzeit")}
           ${fact("Ø zum Soll", f.dev != null ? `${f.dev > 0 ? "+" : ""}${fmt(f.dev)} °C` : null, "in der Komfortzeit")}
-          ${fact("Ventil offen", f.valve != null ? `Ø ${f.valve} %` : null, f.full_pct ? `${f.full_pct} % der Heizzeit ganz auf` : "")}
-          ${fact("Aufheizen", f.rate != null ? `${fmt(f.rate, 1)} °C/Std.` : null)}
+          ${f.floor_duty != null ? fact("Fußbodenheizung an", `${f.floor_duty} %`, "der Komfortzeit")
+            : r.type === "flaeche" ? "" : fact("Ventil offen", f.valve != null ? `Ø ${f.valve} %` : null, f.full_pct ? `${f.full_pct} % der Heizzeit ganz auf` : "")}
+          ${fact("Zusatz half", f.assist_pct != null ? `${f.assist_pct} %` : null, f.assist_cold != null || f.assist_mild != null ? `Frost ${f.assist_cold ?? "–"} % · mild ${f.assist_mild ?? "–"} %` : "der Komfortzeit")}
+          ${fact("Aufheizen", f.rate != null ? `${fmt(f.rate, 1)} °C/Std.` : null, f.mixed && f.rate != null ? "mit Zusatz" : "")}
           ${fact("Warm genug bei Frost / mild", f.ok_cold != null && f.ok_mild != null ? `${f.ok_cold} / ${f.ok_mild} %` : null)}
           ${fact("Kamin u. Ä.", f.fire_h ? `${fmt(f.fire_h, 1)} h` : null, f.fire_h ? "herausgerechnet" : "")}
         </div>
@@ -9165,7 +9167,7 @@ class HauswerkPanel extends HTMLElement {
     };
     return `<section class="card">
       ${this._sectionHead("mdi:radiator", `Heizleistung je Raum · ${days} Tage`)}
-      <p class="pw-sum"><b>${head}</b><small>Bewertet wird nur die Komfortzeit, ohne die Aufheizzeit nach dem Lüften. „Warm genug“ = höchstens 0,5 °C unter Soll, „zu warm“ = mehr als 1 °C darüber. Zusammen mit der Ventilöffnung zeigt das, ob die Heizung reicht: zu kalt bei weit offenem Ventil = Heizung zu schwach; zu kalt bei fast zu = Thermostat regelt zu früh ab.</small></p>
+      <p class="pw-sum"><b>${head}</b><small>Bewertet wird nur die Komfortzeit, ohne die Aufheizzeit nach dem Lüften. „Warm genug“ = höchstens 0,5 °C unter Soll, „zu warm“ = mehr als 1 °C darüber. Zusammen mit der Ventilöffnung zeigt das, ob die Heizung reicht: zu kalt bei weit offenem Ventil = Heizung zu schwach; zu kalt bei fast zu = Thermostat regelt zu früh ab. Bei Fußbodenheizung zählt statt der Öffnung, wie lange der Stellantrieb an war; im Mischbetrieb zusätzlich, wie oft der Zusatz-Heizkörper mithelfen musste.</small></p>
       <div class="pw-grid">${list.map(card).join("")}</div>
     </section>`;
   }
