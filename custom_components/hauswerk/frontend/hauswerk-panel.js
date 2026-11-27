@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.98.1";
+const VERSION = "0.99.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -533,6 +533,9 @@ const LW_MOODS = [
   { name: "Sonnenuntergang", icon: "mdi:weather-sunset", rgb: [255, 70, 40], b: 55 }, { name: "Weihnachten", icon: "mdi:pine-tree", rgb: [255, 20, 20], b: 50 },
   { name: "Party", icon: "mdi:party-popper", rgb: [220, 0, 255], b: 100 },
 ];
+const LW_NIGHT_MOOD = { name: "Nachtlicht", icon: "mdi:weather-night", k: 2200, b: 5 };
+const LW_MOODS_ALL = [...LW_MOODS, LW_NIGHT_MOOD];
+const LW_MOODS_HOUSE = [LW_MOODS[0], LW_MOODS[4], LW_NIGHT_MOOD];
 /** Weißton (Kelvin) als ungefähre Bildschirmfarbe. */
 const kelvinRgb = (k) => {
   const t = k / 100;
@@ -866,6 +869,7 @@ class HauswerkPanel extends HTMLElement {
       const wc = this.shadowRoot.querySelector("[data-wsclock]");
       if (wc) wc.textContent = new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
       for (const el of this.shadowRoot.querySelectorAll("[data-lw-until]")) el.textContent = this._lwLeft(el.dataset.lwUntil);
+      for (const el of this.shadowRoot.querySelectorAll("[data-lw-ring]")) el.style.setProperty("--rf", this._lwRingFrac(el.dataset.lwRing, +el.dataset.dur));
     }, 1000);
     this._timer = setInterval(() => {
       this._reports = {};
@@ -1069,6 +1073,7 @@ class HauswerkPanel extends HTMLElement {
       root.addEventListener("click", (e) => this._onClick(e));
       root.addEventListener("pointerdown", (e) => this._wDragStart(e));
       root.addEventListener("pointerdown", (e) => this._rwWinDrag(e));
+      root.addEventListener("pointerdown", (e) => this._lwDimStart(e));
       root.addEventListener("pointerdown", (e) => this._tSwipeStart(e));
       root.addEventListener("pointerdown", (e) => this._unlockPress(e));
       root.addEventListener("pointerdown", (e) => this._svAckPress(e));
@@ -1689,7 +1694,7 @@ class HauswerkPanel extends HTMLElement {
     // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
     const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
     // Einstellungen und der Heizwerk-Bericht: vollständig und scrollbar (zwei Spalten, keine Karte wird geteilt oder abgeschnitten)
-    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house", "report"].includes(tab);
+    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house", "report"].includes(tab) || (tab === "lights" && !!tin.querySelector(".lwwall"));
     box.classList.toggle("tscroll", scroll);
     if (scroll) {
       Object.assign(tin.style, { zoom: f, width: "", height: "", columnWidth: "", columnGap: "", transform: "", clipPath: "" });
@@ -1976,7 +1981,7 @@ class HauswerkPanel extends HTMLElement {
     if (!this._tablet || (this._tPages || 1) < 2) return;
     const path = e.composedPath();
     if (!path.includes(this.shadowRoot.getElementById("main"))) return;
-    if (path.some((n) => n.dataset?.drag !== undefined || n.dataset?.rwwin !== undefined || ["INPUT", "SELECT", "TEXTAREA"].includes(n.tagName))) return;
+    if (path.some((n) => n.dataset?.drag !== undefined || n.dataset?.rwwin !== undefined || n.dataset?.lwdim !== undefined || ["INPUT", "SELECT", "TEXTAREA"].includes(n.tagName))) return;
     const x0 = e.clientX, y0 = e.clientY;
     let done = false;
     const move = (ev) => {
@@ -4476,6 +4481,206 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Lichter eines Raums als eine Wand-Kachel (ein Licht: seine eigene Kachel). */
+  /** Was eine Leuchte kann: dimmen, Weißton, Farbe (mit Kelvin-Bereich). */
+  _lwCaps(l) {
+    const st = l?.st || this._hass?.states?.[l?.id];
+    const modes = l?.ls?.modes || st?.attributes?.supported_color_modes || [];
+    const isL = String(l?.id || "").startsWith("light.");
+    const color = isL && modes.some((m) => ["hs", "rgb", "rgbw", "rgbww", "xy"].includes(m));
+    return { dim: isL && modes.some((m) => m !== "onoff"), color, temp: isL && (modes.includes("color_temp") || color),
+      kMin: st?.attributes?.min_color_temp_kelvin || 2000, kMax: st?.attributes?.max_color_temp_kelvin || 6500 };
+  }
+
+  _lwRingFrac(at, dur) {
+    if (!dur) return 1;
+    const left = Math.max(0, (new Date(at) - Date.now()) / 1000);
+    return Math.max(0, Math.min(1, left / dur)).toFixed(3);
+  }
+
+  /** Stimmungen als Knöpfe – für die Lichter der Liste (an bzw. alle des Raums). */
+  _lwMoodBar(list, moods, off = false) {
+    const ok = list.filter((l) => l.st && !["unavailable", "unknown"].includes(l.st.state));
+    if (!ok.length) return "";
+    const ids = ok.map((l) => l.id).join(",");
+    return `<div class="lwmoods">${moods.map((m) => `<button class="lwmood" data-action="lw-mood" data-m="${esc(m.name)}" data-ids="${esc(ids)}" style="--sw:${rgbCss(m.rgb || kelvinRgb(m.k))}"><ha-icon icon="${m.icon}"></ha-icon><span>${m.name}</span></button>`).join("")}
+      ${off ? `<button class="lwmood off" data-action="lw-cmd" data-ids="${esc(ok.filter((l) => l.st.state === "on").map((l) => l.id).join(","))}" data-a="off"><ha-icon icon="mdi:power"></ha-icon><span>Alles aus</span></button>` : ""}</div>`;
+  }
+
+  /** Haus bei Nacht: je Raum ein Fenster, das in der Lichtfarbe leuchtet, wenn dort Licht an ist. */
+  _lwHouse(sorted) {
+    const rooms = sorted.slice(0, 8);
+    const n = rooms.length || 1;
+    const cols = Math.min(4, Math.ceil(n / 2)), rowsN = Math.ceil(n / cols);
+    const W = 220, wx = 26, wy = 62, ww = (W - 2 * wx - (cols - 1) * 10) / cols, wh = rowsN > 1 ? 34 : 46;
+    const H = wy + rowsN * (wh + 22) + 6;
+    const win = rooms.map(([area, list], i) => {
+      const on = list.filter((l) => l.st?.state === "on");
+      const x = wx + (i % cols) * (ww + 10), y = wy + Math.floor(i / cols) * (wh + 22);
+      const c = on.length ? this._lwColor(on[0]) : "";
+      const pct = on.length ? Math.max(...on.map((l) => this._lwPct(l) ?? 100)) : 0;
+      const pop = list.length === 1 ? `lwbri:${list[0].id}` : `lwarea:${area}`;
+      return `<g class="lwh-w ${on.length ? "on" : ""}" data-action="pop-open" data-pop="${esc(pop)}" style="--wc:${c};--wo:${(0.45 + 0.55 * pct / 100).toFixed(2)}" role="button">
+        <title>${esc(area)} – ${on.length ? `${on.length} an` : "aus"}</title>
+        <rect x="${x}" y="${y}" width="${ww}" height="${wh}" rx="4"></rect>
+        <line x1="${x + ww / 2}" y1="${y}" x2="${x + ww / 2}" y2="${y + wh}"></line><line x1="${x}" y1="${y + wh / 2}" x2="${x + ww}" y2="${y + wh / 2}"></line>
+        <text x="${x + ww / 2}" y="${y + wh + 14}">${esc(area.length > 11 ? `${area.slice(0, 10)}…` : area)}</text></g>`;
+    }).join("");
+    return `<svg class="lwhouse" viewBox="0 0 ${W} ${H}" aria-label="Haus">
+      <defs><filter id="lwglow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5"></feGaussianBlur></filter></defs>
+      <path class="lwh-roof" d="M8 ${wy - 10} L${W / 2} 6 L${W - 8} ${wy - 10}"></path>
+      <rect class="lwh-body" x="16" y="${wy - 14}" width="${W - 32}" height="${H - wy + 8}" rx="6"></rect>${win}</svg>`;
+  }
+
+  /** Zeitleiste des Abends: jetzt bis Mitternacht bzw. bis zum nächsten Wechsel – Schaltungen laut Plan, Sonnenunter-/aufgang. */
+  _lwTimeline(lights) {
+    const now = new Date();
+    const nowM = now.getHours() * 60 + now.getMinutes();
+    const ev = new Map();
+    const add = (m, action, l, reason) => {
+      if (m <= nowM || m > nowM + 1440) return;
+      const k = `${m}:${action}`;
+      if (!ev.has(k)) ev.set(k, { m, action, ls: [], reason });
+      ev.get(k).ls.push(l);
+    };
+    for (const l of lights) {
+      if (l.cfg.auto === false) continue;
+      for (const p of l.ls.plan || []) {
+        add(p.start, "on", l, p.reason);
+        if (p.end < 1440 || p.end > nowM) add(Math.min(p.end, 1440 + 1439), "off", l, p.until);
+      }
+      const nx = l.ls.next;
+      if (nx) add(nx.min + (nx.day ? 1440 : 0), nx.action, l, nx.reason);
+    }
+    // gleiche Leuchte, gleicher Wechsel doppelt (Plan und „als Nächstes“): einmal
+    for (const e of ev.values()) e.ls = [...new Map(e.ls.map((l) => [l.id, l])).values()];
+    const list = [...ev.values()].sort((a, b) => a.m - b.m);
+    const S = this._hass.states[this._data?.settings?.sun_entity || "sun.sun"]?.attributes || {};
+    const sunM = (iso) => { if (!iso) return null; const d = new Date(iso); let m = d.getHours() * 60 + d.getMinutes(); if (d.toDateString() !== now.toDateString()) m += 1440; return m; };
+    const set = sunM(S.next_setting), rise = sunM(S.next_rising);
+    const endM = Math.max(nowM + 240, Math.min(nowM + 1080, Math.max(list[list.length - 1]?.m ?? 0, rise != null && rise < nowM + 1080 ? rise : 0) + 30));
+    const span = endM - nowM;
+    const X = (m) => `${(((m - nowM) / span) * 100).toFixed(2)}%`;
+    const tt = (m) => `${m >= 1440 ? "morgen " : ""}${t2(m % 1440)}`;
+    const shown = list.filter((e) => e.m <= endM).slice(0, 8);
+    const sun = [[set, "mdi:weather-sunset-down", "Sonnenuntergang"], [rise, "mdi:weather-sunset-up", "Sonnenaufgang"]]
+      .filter(([m]) => m != null && m > nowM && m <= endM)
+      .map(([m, i, t]) => `<span class="lwtl-sun" style="left:${X(m)}" title="${t} ${tt(m)}"><ha-icon icon="${i}"></ha-icon><small>${t2(m % 1440)}</small></span>`).join("");
+    const dark = set != null && set <= endM ? `<i class="lwtl-dark" style="left:${X(Math.max(set, nowM))};right:${rise != null && rise <= endM ? `${(100 - ((rise - nowM) / span) * 100).toFixed(2)}%` : "0"}"></i>` : this._sunDark() ? `<i class="lwtl-dark" style="left:0;right:${rise != null && rise <= endM ? `${(100 - ((rise - nowM) / span) * 100).toFixed(2)}%` : "0"}"></i>` : "";
+    const marks = shown.map((e) => {
+      const pop = e.ls.length === 1 ? `lwbri:${e.ls[0].id}` : `lwarea:${e.ls[0].ls.area || "Ohne Raum"}`;
+      const who = e.ls.length === 1 ? this._lwName(e.ls[0]) : `${e.ls.length} Lichter`;
+      return `<button class="lwtl-m ${e.action}" style="left:${X(e.m)}" data-action="pop-open" data-pop="${esc(pop)}" title="${esc(`${tt(e.m)} ${e.action === "on" ? "an" : "aus"} – ${e.ls.map((l) => this._lwNameRoom(l)).join(", ")}${e.reason ? ` (${e.reason})` : ""}`)}">
+        <ha-icon icon="${e.action === "on" ? "mdi:lightbulb-on" : "mdi:lightbulb-off-outline"}"></ha-icon><b>${t2(e.m % 1440)}</b><small>${esc(who)}</small></button>`;
+    }).join("");
+    return `<div class="lwtl"><div class="lwtl-track">${dark}<span class="lwtl-now" style="left:0"><small>jetzt</small></span>${sun}${marks}</div>
+      ${shown.length ? "" : `<small class="muted lwtl-none">Keine Schaltung geplant bis ${tt(endM)}</small>`}</div>`;
+  }
+
+  /** Kachel einer eingeschalteten Leuchte: Lampe mit Schein in Lichtfarbe, Pegel = Helligkeit, Wischen dimmt. */
+  _lwOnTile(l, area) {
+    const pct = this._lwPct(l);
+    const c = this._lwCaps(l);
+    const col = this._lwColor(l);
+    const off = l.ls.off;
+    const ring = off?.at && off.dur ? `<svg class="lwt-ring" viewBox="0 0 100 100" data-lw-ring="${esc(off.at)}" data-dur="${off.dur}" style="--rf:${this._lwRingFrac(off.at, off.dur)}"><circle cx="50" cy="50" r="46"></circle><circle class="rf" cx="50" cy="50" r="46" pathLength="1"></circle></svg>` : "";
+    const st = off?.at ? `<span class="lwt-tm"><ha-icon icon="mdi:timer-outline"></ha-icon>aus in <span data-lw-until="${esc(off.at)}">${this._lwLeft(off.at)}</span></span>`
+      : l.ls.ccu ? `<span style="color:#38bdf8"><ha-icon icon="mdi:link-variant"></ha-icon>HmIP</span>`
+      : l.ls.manual && l.cfg.auto !== false ? `<span style="color:${C.hand}"><ha-icon icon="mdi:hand-back-right-outline"></ha-icon>von Hand</span>`
+      : l.ls.night ? `<span><ha-icon icon="mdi:weather-night"></ha-icon>Nachtlicht</span>`
+      : l.cfg.auto !== false && l.ls.cause ? `<span>${esc(l.ls.cause)}</span>` : "";
+    const nx = l.ls.next && l.cfg.auto !== false && l.ls.next.action === "off" ? `<span class="lwt-nx">aus ${this._lwWhen(l.ls.next)}</span>` : "";
+    return `<article class="card lwt" style="--lc:${col};--lv:${pct ?? 100}" data-lwdim="${esc(l.id)}" data-dim="${c.dim ? 1 : 0}" role="button" tabindex="0" aria-label="${esc(this._lwName(l))}">
+      <i class="lwt-fill"></i>
+      <div class="lwt-top"><span class="lwt-lamp">${ring}<i class="lwt-glow"></i><ha-icon icon="${this._lwIco(l, true)}"></ha-icon></span>
+        <button class="lwt-more" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" title="Helligkeit und Farbe"><ha-icon icon="mdi:dots-horizontal"></ha-icon></button></div>
+      <div class="lwt-n">${area && area !== this._lwName(l) && area !== "Ohne Raum" ? `<small>${esc(area)}</small>` : ""}<b>${esc(this._lwName(l))}</b></div>
+      <div class="lwt-v"><b data-lwval>${c.dim && pct != null ? pct : "an"}</b>${c.dim && pct != null ? "<small>%</small>" : ""}</div>
+      <div class="lwt-s">${st}${nx}</div>
+    </article>`;
+  }
+
+  /** Ausgeschaltete (oder nicht erreichbare) Leuchte als kleiner Knopf: Lampe schaltet ein, Name öffnet das Fenster. */
+  _lwOffChip(l, area) {
+    const bad = !l.st || ["unavailable", "unknown"].includes(l.st.state);
+    const mot = this._lwMotion(l);
+    const nx = l.ls.next && l.cfg.auto !== false && l.ls.next.action === "on" ? `an ${this._lwWhen(l.ls.next)}` : "";
+    return `<div class="lwoff ${bad ? "bad" : ""}">
+      <button class="lwoff-b" data-action="lw-cmd" data-ids="${esc(l.id)}" data-a="on" ${bad ? "disabled" : ""} title="Einschalten"><ha-icon icon="${this._lwIco(l, false, false)}"></ha-icon>${bad ? `<span class="lwoff-warn"><ha-icon icon="mdi:alert"></ha-icon></span>` : mot ? `<span class="lw-mot"><ha-icon icon="mdi:motion-sensor"></ha-icon></span>` : ""}</button>
+      <button class="lwoff-n" data-action="pop-open" data-pop="lwbri:${esc(l.id)}"><b>${esc(this._lwName(l))}</b><small>${esc(bad ? "nicht erreichbar" : [area !== "Ohne Raum" && area !== this._lwName(l) ? area : "", l.ls.manual && l.cfg.auto !== false ? "von Hand aus" : nx].filter(Boolean).join(" · ") || "aus")}</small></button>
+    </div>`;
+  }
+
+  /** Lichtwerk im Tablet (Wand): Haus bei Nacht, Zeitleiste, Stimmungen; eingeschaltete Lichter groß, ausgeschaltete als Knöpfe. */
+  _lwWallPage(lights, sorted) {
+    const isBad = (l) => !l.st || ["unavailable", "unknown"].includes(l.st.state);
+    const on = lights.filter((l) => !isBad(l) && l.st.state === "on");
+    const rest = lights.filter((l) => !on.includes(l));
+    const areaOf = (l) => l.ls.area || "Ohne Raum";
+    const s = this._lwStatus || {};
+    const manual = lights.filter((l) => l.ls.manual && !l.ls.ccu && l.cfg.auto !== false);
+    const bad = lights.filter(isBad);
+    const sub = s.away && on.length ? `<span style="color:${C.sun}">Niemand zu Hause – ${on.length === 1 ? "1 Licht brennt" : `${on.length} Lichter brennen`}</span>`
+      : manual.length ? `<span style="color:${C.hand}">${esc(manual.map((l) => this._lwNameRoom(l)).slice(0, 2).join(", "))} von Hand – Automatik wartet</span>`
+      : bad.length ? `<span style="color:${C.alert}">${bad.length} nicht erreichbar</span>`
+      : on.length ? esc(on.map((l) => this._lwName(l)).slice(0, 3).join(", ")) : "Alles aus";
+    const head = `<section class="card lwhead">
+      ${this._lwHouse(sorted)}
+      <div class="lwh-txt"><div class="lwh-big"><b>${on.length}</b><span>von ${lights.length} an</span>${this._admin ? `<button class="br-act lwh-add" data-action="pop-open" data-pop="lwadd" title="Licht hinzufügen"><ha-icon icon="mdi:plus"></ha-icon></button>` : ""}</div><small>${sub}</small></div>
+      ${this._lwTimeline(lights)}
+      ${on.length ? `<div class="lwh-moods">${this._lwMoodBar(on, LW_MOODS_HOUSE, true)}</div>` : ""}
+    </section>`;
+    const cols = on.length <= 2 ? 2 : on.length <= 6 ? 3 : 4;
+    let onHtml;
+    if (!on.length) onHtml = `<div class="lwall-off"><ha-icon icon="mdi:weather-night"></ha-icon><b>Alles aus</b><small>Lampe unten antippen zum Einschalten</small></div>`;
+    else if (on.length > 8) {
+      const g = new Map();
+      for (const l of on) { const a = areaOf(l); if (!g.has(a)) g.set(a, []); g.get(a).push(l); }
+      onHtml = [...g.entries()].map(([a, ls]) => `<div class="lwarea-h">${esc(a)}</div><div class="lwgrid" style="--cols:${cols}">${ls.map((l) => this._lwOnTile(l, "")).join("")}</div>`).join("");
+    } else onHtml = `<div class="lwgrid" style="--cols:${cols}">${on.map((l) => this._lwOnTile(l, areaOf(l))).join("")}</div>`;
+    const offHtml = rest.length ? `<div class="lwoffs"><div class="lwoffs-h"><ha-icon icon="mdi:lightbulb-outline"></ha-icon>Aus · ${rest.length}</div><div class="lwoffs-g">${rest.sort((a, b) => isBad(a) - isBad(b) || areaOf(a).localeCompare(areaOf(b), "de")).map((l) => this._lwOffChip(l, areaOf(l))).join("")}</div></div>` : "";
+    return `<div class="lwwall ${this._sunDark() ? "night" : ""}">${head}${onHtml}${offHtml}</div>`;
+  }
+
+  /** Wischen auf einer Licht-Kachel: hoch/runter dimmt (Pegel füllt sich), Tippen schaltet aus, lange drücken öffnet das Fenster. */
+  _lwDimStart(e) {
+    const tile = e.composedPath().find((n) => n.dataset?.lwdim !== undefined);
+    if (!tile || e.composedPath().some((n) => n.tagName === "BUTTON")) return;
+    const id = tile.dataset.lwdim, canDim = tile.dataset.dim === "1";
+    const rect = tile.getBoundingClientRect();
+    const y0 = e.clientY, x0 = e.clientX, t0 = Date.now();
+    const v0 = Number(getComputedStyle(tile).getPropertyValue("--lv")) || 100;
+    let v = v0, dragging = false, done = false;
+    const val = tile.querySelector("[data-lwval]");
+    const long = setTimeout(() => { if (!dragging) { done = true; cleanup(); this._openPop(`lwbri:${id}`); } }, 650);
+    const move = (ev) => {
+      const dy = ev.clientY - y0;
+      if (!dragging && canDim && Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(ev.clientX - x0)) { dragging = true; clearTimeout(long); tile.classList.add("dimming"); }
+      if (!dragging) { if (Math.abs(ev.clientX - x0) > 12 || Math.abs(dy) > 12) clearTimeout(long); return; }
+      ev.preventDefault?.();
+      v = Math.max(0, Math.min(100, Math.round(v0 - (dy / rect.height) * 110)));
+      tile.style.setProperty("--lv", Math.max(v, 1));
+      if (val) val.textContent = v ? v : "aus";
+    };
+    const cleanup = () => {
+      clearTimeout(long);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      tile.classList.remove("dimming");
+    };
+    const up = () => {
+      cleanup();
+      if (done) return;
+      done = true;
+      if (dragging) this._ws({ type: "hauswerk/lichtwerk/command", entity_ids: [id], action: v > 0 ? "on" : "off", ...(v > 0 ? { brightness: Math.max(1, v) } : {}) }).catch((err) => this._toast(`Das hat nicht geklappt: ${err.message || err}`));
+      else if (Date.now() - t0 < 650) this._ws({ type: "hauswerk/lichtwerk/command", entity_ids: [id], action: "off" }).catch((err) => this._toast(`Das hat nicht geklappt: ${err.message || err}`));
+    };
+    const cancel = () => { cleanup(); done = true; };
+    window.addEventListener("pointermove", move, { passive: false });
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+  }
+
   _lightAreaWall(area, list) {
     if (list.length === 1) return this._lightWall(list[0], area);
     const ok = list.filter((l) => l.st && !["unavailable", "unknown"].includes(l.st.state));
@@ -5125,7 +5330,7 @@ class HauswerkPanel extends HTMLElement {
         <button class="${view === "rooms" ? "on" : ""}" data-action="lw-view" data-v="rooms" title="Räume"><ha-icon icon="mdi:floor-plan"></ha-icon><span>Räume</span></button>
       </div></div>`;
     const sorted = [...groups.entries()].sort((a, b) => (a[0] === "Ohne Raum") - (b[0] === "Ohne Raum") || a[0].localeCompare(b[0], "de"));
-    if (this._wall()) return head + `<div class="wgrid">${sorted.map(([area, list]) => this._lightAreaWall(area, list)).join("")}</div>`;
+    if (this._wall()) return this._lwWallPage(lights, sorted);
     if (view === "rooms") return head + tog + `<div class="rw-grid ${this._tablet ? "tgrid" : ""}">${sorted.map(([area, list]) => this._lwRoomTile(area, list)).join("")}</div>`;
     if (this._tablet && !compact) return head + tog + `<div class="rw-grid tgrid">${sorted.map(([area, list]) => list.map((l) => tile(l, area)).join("")).join("")}</div>`;
     // meist nur ein Licht je Raum: ein gemeinsames Raster, der Raum steht in der Kachel (statt fast leerer Zeilen)
@@ -6021,7 +6226,7 @@ class HauswerkPanel extends HTMLElement {
       const area = id.slice(7);
       const list = this._lwLights().filter((l) => (l.ls.area || "Ohne Raum") === area);
       return { icon: "mdi:lightbulb-group-outline", c: "#6366f1", title: esc(area), sub: `${list.length} Lichter`,
-        body: this._lwAreaBars(list) + this._lwRoomTile(area, list), foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+        body: this._lwMoodBar(list, LW_MOODS_ALL) + this._lwAreaBars(list) + this._lwRoomTile(area, list), foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     }
     if (id.startsWith("lwroom:")) {
       const area = id.slice(7);
@@ -12974,6 +13179,23 @@ class HauswerkPanel extends HTMLElement {
         this._closePop();
         break;
       }
+      case "lw-mood": {
+        const m = LW_MOODS_ALL.find((x) => x.name === el.dataset.m);
+        const ids = el.dataset.ids.split(",").filter(Boolean);
+        if (!m) break;
+        const all = this._lwLights();
+        await Promise.all(ids.map((id) => {
+          const l = all.find((x) => x.id === id);
+          const c = this._lwCaps(l);
+          const msg = { type: "hauswerk/lichtwerk/command", entity_ids: [id], action: "on" };
+          if (c.dim) msg.brightness = m.b;
+          if (m.rgb && c.color) msg.rgb = m.rgb;
+          else if (c.temp) msg.kelvin = Math.max(c.kMin, Math.min(c.kMax, m.k || 2700));
+          return this._ws(msg);
+        }));
+        this._toast(`${m.name} · ${ids.length} ${ids.length === 1 ? "Licht" : "Lichter"}`);
+        break;
+      }
       case "lw-color": {
         const d = this._pop?.draft || {};
         const b = el.dataset.b ? Number(el.dataset.b) : d.v != null ? Number(d.v) : null;
@@ -15453,6 +15675,80 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .wt-ctl { display:flex; gap:10px; margin-top:4px; }
 .wbtn { all:unset; cursor:pointer; flex:1; height:48px; border-radius:14px; display:grid; place-items:center; background:color-mix(in srgb, var(--text) 8%, transparent); }
 .wbtn ha-icon { --mdc-icon-size:26px; } .wbtn:disabled { opacity:.4; }
+/* Lichtwerk im Tablet (Wand) */
+.lwwall { display:flex; flex-direction:column; gap:14px; }
+.lwhead { display:grid; grid-template-columns:auto minmax(150px, 0.6fr) 1.6fr; grid-template-areas:"house txt tl" "house moods moods"; gap:8px 22px; align-items:center; padding:14px 18px; }
+.lwhouse { grid-area:house; width:190px; height:auto; overflow:visible; }
+.lwh-roof { fill:none; stroke:color-mix(in srgb, var(--text) 35%, transparent); stroke-width:3; stroke-linejoin:round; stroke-linecap:round; }
+.lwh-body { fill:color-mix(in srgb, var(--text) 6%, transparent); stroke:color-mix(in srgb, var(--text) 18%, transparent); }
+.lwh-w { cursor:pointer; }
+.lwh-w rect { fill:color-mix(in srgb, var(--bg, #000) 70%, #000); stroke:color-mix(in srgb, var(--text) 25%, transparent); }
+.lwh-w line { stroke:color-mix(in srgb, var(--text) 18%, transparent); }
+.lwh-w text { font-size:10px; fill:var(--muted); text-anchor:middle; }
+.lwh-w.on rect { fill:var(--wc); fill-opacity:var(--wo); stroke:var(--wc); filter:drop-shadow(0 0 7px var(--wc)); }
+.lwh-w.on line { stroke:color-mix(in srgb, #000 35%, var(--wc)); }
+.lwh-w.on text { fill:var(--text); font-weight:600; }
+.lwh-txt { grid-area:txt; position:relative; min-width:0; }
+.lwh-big { display:flex; align-items:baseline; gap:6px; } .lwh-big b { font-size:46px; font-weight:300; line-height:1; } .lwh-big span { color:var(--muted); font-size:16px; }
+.lwh-txt > small { display:block; margin-top:4px; font-size:14px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lwh-big .lwh-add { margin-left:auto; align-self:center; }
+.lwh-moods { grid-area:moods; }
+.lwmoods { display:flex; flex-wrap:wrap; gap:8px; }
+.lwmood { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 16px 0 12px; border-radius:99px; font-weight:600; font-size:15px;
+  background:color-mix(in srgb, var(--sw) 16%, var(--card2)); border:1px solid color-mix(in srgb, var(--sw) 40%, transparent); }
+.lwmood ha-icon { color:var(--sw); --mdc-icon-size:20px; }
+.lwmood.off { --sw:var(--muted); background:var(--card2); border-color:var(--line, transparent); }
+.lwmood:active { transform:scale(0.97); }
+.pop .lwmoods { margin-bottom:12px; }
+.lwtl { grid-area:tl; min-width:0; padding-bottom:16px; }
+.lwtl-track { position:relative; height:74px; margin:0 26px 0 6px; border-bottom:2px solid color-mix(in srgb, var(--text) 18%, transparent); }
+.lwtl-dark { position:absolute; bottom:-2px; height:18px; background:linear-gradient(90deg, transparent, color-mix(in srgb, #6366f1 22%, transparent) 12%); border-radius:4px 4px 0 0; }
+.lwtl-now { position:absolute; bottom:-7px; width:12px; height:12px; margin-left:-6px; border-radius:50%; background:var(--accent, #14b8a6); box-shadow:0 0 0 4px color-mix(in srgb, var(--accent, #14b8a6) 25%, transparent); }
+.lwtl-now small { position:absolute; top:16px; left:50%; transform:translateX(-50%); font-size:11px; color:var(--muted); }
+.lwtl-sun { position:absolute; bottom:4px; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; color:#f59e0b; font-size:10px; opacity:.85; --mdc-icon-size:16px; }
+.lwtl-m { all:unset; cursor:pointer; position:absolute; bottom:0; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:1px; max-width:92px; padding:2px 4px 6px; }
+.lwtl-m::after { content:""; width:2px; height:8px; background:currentColor; margin-top:2px; }
+.lwtl-m.on { color:#facc15; } .lwtl-m.off { color:var(--muted); }
+.lwtl-m ha-icon { --mdc-icon-size:18px; } .lwtl-m b { font-size:14px; color:var(--text); } .lwtl-m small { font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:92px; }
+.lwtl-none { display:block; margin-top:8px; }
+.lwgrid { display:grid; grid-template-columns:repeat(var(--cols, 3), minmax(0, 1fr)); gap:14px; }
+.lwarea-h { font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-size:13px; margin:4px 2px -4px; }
+.lwt { position:relative; overflow:hidden; height:200px; padding:16px 18px; display:flex; flex-direction:column; cursor:pointer; touch-action:none; user-select:none; -webkit-user-select:none;
+  border:1px solid color-mix(in srgb, var(--lc) 45%, transparent);
+  background:radial-gradient(circle at 46px 46px, color-mix(in srgb, var(--lc) calc(14% + var(--lv) * 0.22%), transparent), transparent 70%), var(--card); }
+.lwt-fill { position:absolute; inset:auto 0 0 0; height:calc(var(--lv) * 1%); background:linear-gradient(to top, color-mix(in srgb, var(--lc) 26%, transparent), color-mix(in srgb, var(--lc) 8%, transparent)); transition:height .25s; pointer-events:none; }
+.lwt.dimming .lwt-fill { transition:none; }
+.lwt.dimming { outline:2px solid var(--lc); }
+.lwt > .lwt-top, .lwt > .lwt-n, .lwt > .lwt-s { position:relative; }
+.lwt-top { display:flex; justify-content:space-between; align-items:flex-start; }
+.lwt-lamp { position:relative; width:60px; height:60px; display:grid; place-items:center; color:var(--lc); --mdc-icon-size:36px; }
+.lwt-lamp ha-icon { filter:drop-shadow(0 0 calc(4px + var(--lv) * 0.14px) var(--lc)); }
+.lwt-glow { position:absolute; inset:-14px; border-radius:50%; background:radial-gradient(circle, var(--lc), transparent 65%); opacity:calc(0.15 + var(--lv) * 0.0045); filter:blur(6px); }
+.lwt-ring { position:absolute; inset:-4px; transform:rotate(-90deg); }
+.lwt-ring circle { fill:none; stroke:color-mix(in srgb, var(--lc) 18%, transparent); stroke-width:5; }
+.lwt-ring .rf { stroke:#22c55e; stroke-linecap:round; stroke-dasharray:var(--rf) 1; transition:stroke-dasharray 1s linear; }
+.lwt-more { all:unset; cursor:pointer; width:40px; height:40px; display:grid; place-items:center; border-radius:12px; color:var(--muted); background:color-mix(in srgb, var(--text) 6%, transparent); }
+.lwt-n { margin-top:auto; min-width:0; } .lwt-n small { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+.lwt-n b { display:block; font-size:19px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lwt > .lwt-v { position:absolute; right:70px; top:20px; display:flex; align-items:baseline; gap:2px; } .lwt-v b { font-size:44px; font-weight:300; line-height:1; } .lwt-v small { color:var(--muted); font-size:16px; }
+.lwt-s { display:flex; gap:10px; margin-top:4px; font-size:14px; color:var(--muted); min-height:20px; white-space:nowrap; overflow:hidden; }
+.lwt-s ha-icon { --mdc-icon-size:16px; margin-right:3px; vertical-align:-2px; } .lwt-tm { color:#22c55e; } .lwt-nx { opacity:.8; }
+.lwall-off { display:flex; flex-direction:column; align-items:center; gap:4px; padding:34px; color:var(--muted); --mdc-icon-size:44px; } .lwall-off b { font-size:22px; color:var(--text); }
+.lwoffs-h { display:flex; align-items:center; gap:6px; font-weight:700; color:var(--muted); font-size:14px; margin:0 2px 8px; --mdc-icon-size:18px; }
+.lwoffs-g { display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:10px; }
+.lwoff { display:flex; align-items:center; gap:10px; padding:8px 12px 8px 8px; border-radius:16px; background:var(--card); border:1px solid var(--line, transparent); min-width:0; }
+.lwoff-b { all:unset; cursor:pointer; position:relative; width:52px; height:52px; flex:none; display:grid; place-items:center; border-radius:14px; background:color-mix(in srgb, var(--text) 7%, transparent); color:var(--muted); --mdc-icon-size:26px; }
+.lwoff-b:active { background:color-mix(in srgb, #facc15 30%, transparent); color:#facc15; }
+.lwoff-n { all:unset; cursor:pointer; min-width:0; flex:1; } .lwoff-n b { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .lwoff-n small { display:block; font-size:13px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lwoff.bad { background:repeating-linear-gradient(-45deg, var(--card), var(--card) 8px, color-mix(in srgb, var(--text) 6%, var(--card)) 8px, color-mix(in srgb, var(--text) 6%, var(--card)) 16px); opacity:.8; }
+.lwoff.bad .lwoff-n small { color:#ef4444; }
+.lwoff-warn { position:absolute; right:-4px; bottom:-4px; width:20px; height:20px; border-radius:50%; display:grid; place-items:center; background:#ef4444; color:#fff; --mdc-icon-size:13px; }
+.lwoff-b .lw-mot { position:absolute; right:-4px; bottom:-4px; }
+/* nachts: Ausgeschaltetes tritt zurück, Licht leuchtet */
+.lwwall.night .lwoffs { opacity:.45; }
+.lwwall.night .lwt { box-shadow:0 0 34px -8px var(--lc); }
+.lwwall.night .lwhead { background:color-mix(in srgb, #000 30%, var(--card)); }
+@media (max-width:1000px) { .lwhead { grid-template-columns:auto 1fr; grid-template-areas:"house txt" "tl tl" "moods moods"; } .lwgrid { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
 .wt-bulb { all:unset; cursor:pointer; position:relative; width:64px; height:64px; border-radius:16px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--text) 8%, transparent); color:var(--muted); }
 .wt-bulb.on { background:color-mix(in srgb, var(--lc) 30%, transparent); color:var(--lc); box-shadow:0 0 22px color-mix(in srgb, var(--lc) 45%, transparent); }
 .wt-bulb ha-icon { --mdc-icon-size:36px; }

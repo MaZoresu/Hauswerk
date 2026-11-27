@@ -848,13 +848,13 @@ class Lichtwerk:
                 return {"while": dur, "src": "HmIP", "learned": learned is not None}
             last = max(st.last_changed.timestamp() for st in sts)
             return {"at": dt_util.utc_from_timestamp(max(last + dur, dt_util.utcnow().timestamp())).isoformat(), "src": "HmIP",
-                    "learned": learned is not None}
+                    "learned": learned is not None, "dur": dur}
         if x.get("motion") and x.get("auto") and str(x.get("cause") or "").startswith("Bewegung"):
             prof = self.profile(eid)
             off = float(prof.get("motion_off") or 3) * 60
             if any(self._on(m) for m in prof.get("motion") or []):
                 return {"while": off, "src": "Bewegung"}
-            return {"at": dt_util.utc_from_timestamp(float(rt.get("motion_last") or 0) + off).isoformat(), "src": "Bewegung"}
+            return {"at": dt_util.utc_from_timestamp(float(rt.get("motion_last") or 0) + off).isoformat(), "src": "Bewegung", "dur": off}
         return None
 
     def status(self) -> dict:

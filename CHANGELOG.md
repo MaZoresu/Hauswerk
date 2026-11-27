@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.99.0 – 2026-11-27
+
+### Neu – Lichtwerk im Tabletmodus
+- **Haus bei Nacht:** oben eine Hausgrafik mit einem Fenster je Raum – es leuchtet in der Lichtfarbe, wenn dort Licht an ist (heller je Helligkeit). Antippen öffnet den Raum bzw. die Leuchte. Daneben groß „3 von 4 an“ und was auffällt (von Hand, niemand zu Hause, nicht erreichbar).
+- **Zeitleiste des Abends:** von jetzt bis zum Sonnenaufgang bzw. der letzten Schaltung – geplante Schaltungen mit Uhrzeit und welche Lichter („23:00 · 2 Lichter“), Sonnenunter- und -aufgang, die Dunkelheit schattiert. Antippen öffnet die betroffenen Lichter.
+- **Stimmungen als Knöpfe:** Gemütlich, Fernsehen, Nachtlicht und Alles aus für alle Lichter, die gerade an sind; im Raum-Fenster alle Stimmungen für den ganzen Raum. Jede Leuchte bekommt nur, was sie kann (Farbe, Weißton, Helligkeit).
+- **Eingeschaltete Lichter groß:** Lampe mit Schein in der echten Lichtfarbe, Kachel leicht getönt, der Pegel von unten zeigt die Helligkeit. **Hoch/runter wischen dimmt**, Tippen schaltet aus, lange drücken öffnet Helligkeit und Farbe (auch über „…“).
+- **Ablauftimer als Ring** um die Lampe (Bewegung bzw. HmIP), dazu „aus in 1:40“.
+- **Ausgeschaltete Lichter klein** darunter als Knöpfe: Lampe schaltet ein, Name öffnet das Fenster; mit „an 16:30“ bzw. „von Hand aus“. Nicht erreichbare schraffiert mit Warnzeichen.
+- **Spalten nach Anzahl:** 2 bzw. 3 Spalten, ab 7 Lichtern 4; ab 9 eingeschalteten nach Raum gruppiert. Im Hochformat 2 Spalten. Die Seite scrollt, statt zu blättern.
+- **Nachts** (Sonne unter dem Horizont) treten ausgeschaltete Lichter zurück, eingeschaltete leuchten.
+
 ## 0.98.1 – 2026-11-27
 
 ### Behoben (Heizwerk › Lüften)

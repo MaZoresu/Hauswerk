@@ -811,7 +811,7 @@ def test_tablet_gleiche_leisten_und_kacheln(browser, server):
     p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
     p.js("localStorage.setItem('hauswerk.tablet.tview', 'wall')")
     heights = {}
-    for view in ("overview", "shutters", "kwflow", "lights"):
+    for view in ("overview", "shutters", "kwflow"):
         p.view(view)
         p.wait(300)
         heights[view] = p.js(f"Math.round({EL}.shadowRoot.querySelector('.brief').getBoundingClientRect().height)")
@@ -1755,8 +1755,8 @@ def test_tablet_wand_startseite_und_details(tablet):
     p.js(f"() => {{ for (const ls of Object.values({EL}._lwStatus.lights)) ls.area = 'Flur'; }}")
     p.view("lights")
     p.wait(300)
-    lw = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.wgrid > .wt[data-pop^=\"lwarea:\"] .wt-v small')].map((s) => s.textContent)")
-    assert lw and all(x.startswith("von ") and x.endswith(" an") for x in lw), lw
+    # Lichtwerk: eigene Wand-Seite – Haus mit einem Fenster je Raum
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.lwhouse .lwh-w').length") == 1
     p.view("overview")
     p.wait(300)
     st = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.wgrid > .wt')].map((t) => [t.querySelector('.wt-v b').textContent, t.querySelector('.wt-s')?.offsetHeight || 0])")
@@ -2311,3 +2311,47 @@ def test_wetter_details(panel):
     # groß: Regenbalken je Stunde, „jetzt“ mit dem gemessenen Wert
     html = p.js(f"{EL}._w_forecast({{ mode: 'hourly', entities: [] }}, 's', true)")
     assert "fcrb" in html and f">{p.js(f'Math.round({EL}._weather().temp)')}°<" in html
+
+
+def test_tablet_lichtwerk_wand(tablet):
+    """Lichtwerk im Tablet: Haus bei Nacht, Zeitleiste, Stimmungen; an = große Kachel (Wischen dimmt, Tippen aus), aus = Knopf."""
+    p = tablet
+    p.view("lights")
+    p.wait(600)
+    assert p.has(".lwwall .lwhead .lwhouse") and p.has(".lwhead .lwtl")
+    lights = p.js(f"{EL}._lwLights().map((l) => [l.id, l.st?.state])")
+    on = [i for i, s in lights if s == "on"]
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.lwt').length") == len(on)
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.lwoff').length") == len(lights) - len(on)
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.lwhouse .lwh-w.on').length") >= 1
+    assert p.has(".lwoff.bad .lwoff-warn")  # nicht erreichbar: schraffiert mit Warnzeichen
+    # Stimmung „Gemütlich“ für die eingeschalteten Lichter
+    n = len(p.sent())
+    p.click('.lwhead [data-action="lw-mood"][data-m="Gemütlich"]')
+    msg = [m for m in p.sent()[n:] if m.get("type") == "hauswerk/lichtwerk/command"]
+    assert {m["entity_ids"][0] for m in msg} == set(on) and all(m["brightness"] == 35 for m in msg), msg
+    # Wischen nach unten dimmt
+    tid = p.js(f"{EL}.shadowRoot.querySelector('.lwt[data-dim=\"1\"]').dataset.lwdim")
+    x, y, w, h = p.js(f"(() => {{ const r = {EL}.shadowRoot.querySelector('.lwt[data-dim=\"1\"]').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; }})()")
+    n = len(p.sent())
+    p.page.mouse.move(x + w / 2, y + h * 0.3)
+    p.page.mouse.down()
+    p.page.mouse.move(x + w / 2, y + h * 0.6, steps=5)
+    p.page.mouse.up()
+    p.wait(200)
+    msg = [m for m in p.sent()[n:] if m.get("entity_ids") == [tid]]
+    assert msg and msg[-1]["action"] == "on" and msg[-1]["brightness"] < 80, msg
+    # Tippen schaltet aus
+    n = len(p.sent())
+    p.page.mouse.click(x + w / 2, y + h * 0.5)
+    p.wait(200)
+    assert any(m.get("entity_ids") == [tid] and m.get("action") == "off" for m in p.sent()[n:])
+    # Knopf einer ausgeschalteten Lampe schaltet ein
+    oid = [i for i, s in lights if s == "off"][0]
+    n = len(p.sent())
+    p.click(f'.lwoff-b[data-ids="{oid}"]')
+    assert any(m.get("entity_ids") == [oid] and m.get("action") == "on" for m in p.sent()[n:])
+    # Raum-Fenster mit Stimmungen
+    p.js(f"{EL}._openPop('lwarea:Wohnzimmer')")
+    p.wait(300)
+    assert p.has('#pop [data-action="lw-mood"][data-m="Nachtlicht"]')
