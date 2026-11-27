@@ -325,7 +325,8 @@ const hass = {
       { type: "grid", flow_from: [{ stat_energy_from: "sensor.smartmeter_bezug", stat_cost: null, entity_energy_price: null, number_energy_price: 0.32 }],
         flow_to: [{ stat_energy_to: "sensor.smartmeter_einspeisung", number_energy_price: 0.082 }], cost_adjustment_day: 0 },
       { type: "solar", stat_energy_from: "sensor.wechselrichter_ertrag_heute" },
-      { type: "battery", stat_energy_from: "sensor.speicher_entladen", stat_energy_to: "sensor.speicher_geladen" } ], device_consumption: [] };
+      { type: "battery", stat_energy_from: "sensor.speicher_entladen", stat_energy_to: "sensor.speicher_geladen" } ],
+      device_consumption: [{ stat_consumption: "sensor.waermepumpe_energie", name: "Wärmepumpe", stat_rate: "sensor.waermepumpe_leistung" }, { stat_consumption: "sensor.kuehlschrank_energie" }] };
     if (msg.type === "energy/solar_forecast") {
       const wh = {}; const d0 = new Date(); d0.setHours(0, 0, 0, 0);
       for (let i = 0; i < 48; i++) { const t = new Date(d0.getTime() + i * 3600e3); const h = t.getHours(); wh[t.toISOString()] = Math.round(Math.max(0, Math.sin(((h - 7) / 10) * Math.PI)) * 2400); }
@@ -354,7 +355,8 @@ const hass = {
           const use = msg.period === "hour" ? (h >= 6 && h <= 22 ? 0.9 + (h === 12 || h === 19 ? 1.1 : 0) : 0.35) : msg.period === "day" ? 13 : 380;
           const self = Math.min(sun, use * 0.85);
           const v = { "sensor.wechselrichter_ertrag_heute": sun, "sensor.smartmeter_bezug": Math.max(0, use - self) * 0.8, "sensor.smartmeter_einspeisung": Math.max(0, sun - self) * 0.85,
-            "sensor.speicher_entladen": Math.max(0, use - self) * 0.2, "sensor.speicher_geladen": Math.max(0, sun - self) * 0.15 }[id] || 0;
+            "sensor.speicher_entladen": Math.max(0, use - self) * 0.2, "sensor.speicher_geladen": Math.max(0, sun - self) * 0.15,
+            "sensor.waermepumpe_energie": use * 0.35, "sensor.kuehlschrank_energie": use * 0.06 }[id] || 0;
           out[id].push({ start: t, end: t + step, change: v });
         }
       }

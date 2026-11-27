@@ -2398,3 +2398,35 @@ def test_lueften_uebersichtlich(panel, browser, server):
     n = t.js(f"{EL}._rooms().filter((r) => r.enabled !== false).length")
     assert t.js(f"{EL}.shadowRoot.querySelectorAll('.vwall .wgrid .wt').length") == n
     page.close()
+
+
+def test_kraftwerk_bericht_monat(panel):
+    """Kraftwerk › Bericht: Energie pro Tag (Monat blättern, Tag öffnen), Kosten und Vorteil, Geräte aus dem Energie-Dashboard, Sparschwein."""
+    p = panel
+    p.js(f"(kw) => Object.assign({EL}._data.settings, kw)", KW)
+    p.view("kwrep")
+    p.wait(2000)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    for w in ("Energie pro Tag", "Kosten und Vorteil", "Ohne Solar hättest du gezahlt", "Vorteil durch Solar", "Geräte ·", "Wärmepumpe", "Sparschwein"):
+        assert w in txt, (w, txt[-1500:])
+    assert p.js(f"{EL}.shadowRoot.querySelectorAll('.kwm-d .su').length") > 5
+    # Monat zurück
+    p.click('[data-action="kw-month"][data-d="-1"]')
+    p.wait(800)
+    assert p.js(f"{EL}._kwMon") != p.js("(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })()")
+    p.click('[data-action="kw-month"][data-d="0"]')
+    p.wait(800)
+    # Tag öffnen
+    p.click(".kwm-d[data-pop]")
+    p.wait(1200)
+    assert "Kraftwerk · Tag" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    p.js(f"{EL}._closePop()")
+    # Anschaffungskosten → wie viel bezahlt
+    p.js(f"{EL}._openPop('kwinvest')")
+    p.wait(300)
+    p.js(f"() => {{ const i = {EL}.shadowRoot.querySelector('#pop input[data-set=\"kw_invest\"]'); i.value = '15000'; i.dispatchEvent(new Event('input', {{ bubbles: true }})); i.dispatchEvent(new Event('change', {{ bubbles: true }})); }}")
+    if p.has('#pop [data-action="pop-save"]'):
+        p.click('#pop [data-action="pop-save"]')
+    p.wait(400)
+    saved = {k: v for m in p.sent() if m["type"].endswith("settings/save") for k, v in m.get("settings", {}).items()}
+    assert saved.get("kw_invest") == 15000, saved

@@ -349,6 +349,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("kw_home"): _opt(SENSOR),
         vol.Optional("kw_consumers"): vol.All([SENSOR], vol.Length(max=20)),
         vol.Optional("kw_names"): vol.All(dict, vol.Length(max=20), {SENSOR: vol.All(str, vol.Length(max=40))}),
+        vol.Optional("kw_invest"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=500000))),
         vol.Optional("kw_appliances"): vol.All([vol.Schema({
             vol.Required("id"): vol.All(str, vol.Match(r"^[a-z0-9_]{1,40}$")),
             vol.Required("name"): vol.All(str, vol.Length(min=1, max=40)),

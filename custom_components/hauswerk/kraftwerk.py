@@ -34,6 +34,7 @@ KW_DEFAULTS: dict[str, Any] = {
     "kw_home": None,             # Hausverbrauch, falls gemessen (sonst errechnet)
     "kw_consumers": [],          # einzelne Verbraucher (Wärmepumpe, Wallbox …)
     "kw_names": {},              # eigene Namen der Verbraucher: {sensor: "Wärmepumpe"}
+    "kw_invest": None,           # Anschaffungskosten der Solaranlage (€) fürs Sparschwein im Bericht
     # Geräte mit Fertigerkennung: [{id, name, type, power, door?, status?, status_done?, notify[], notify_ha, important}]
     "kw_appliances": [],
 }

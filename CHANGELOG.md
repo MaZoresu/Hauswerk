@@ -2,6 +2,17 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.101.0 – 2026-11-27
+
+### Neu – Kraftwerk › Bericht (bisher „Verlauf“)
+- **Energie pro Tag eines Monats:** je Tag nach oben Solar (selbst genutzt, eingespeist), nach unten Netzbezug; Stern am besten Solartag; Monate blättern (‹ ›, Kalender = dieser Monat). **Ein Tipp auf einen Balken öffnet den Tag** – je Stunde, mit Kennzahlen und Kosten.
+- **Kosten und Vorteil:** Netzbezug, Einspeisung, selbst genutzter Solarstrom und Bilanz als Säulen; „Ohne Solar hättest du gezahlt“ und „Vorteil durch Solar“. Preise aus dem Energie-Dashboard (fest oder Entität, sonst aus den Kosten-Zählern).
+- **Geräte aus dem Energie-Dashboard** („Einzelne Geräte“): Verbrauch im Monat, Kosten und Anteil am Hausverbrauch, dazu „Rest (ohne eigene Messung)“.
+- **Sparschwein:** Vorteil durch Solar seit Beginn der Aufzeichnung (mit heutigen Preisen). Mit den **Anschaffungskosten** (Kraftwerk › Einstellungen › Anschaffung der Solaranlage): wie viel schon bezahlt ist und wann sich die Anlage etwa bezahlt gemacht hat.
+
+### Geändert
+- **Verbraucher jetzt:** Die Geräte aus dem Energie-Dashboard erscheinen automatisch mit ihrem Namen unter dem Energiefluss – mit ihrer Leistung aus dem Dashboard bzw. dem Leistungs-Sensor am selben Gerät.
+
 ## 0.100.0 – 2026-11-27
 
 ### Geändert – Heizwerk › Lüften übersichtlich (Handy und Tablet)
