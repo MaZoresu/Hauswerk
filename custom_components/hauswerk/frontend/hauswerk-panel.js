@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.102.0";
+const VERSION = "0.102.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4826,7 +4826,7 @@ class HauswerkPanel extends HTMLElement {
       <div class="lwt-top"><span class="lwt-lamp">${ring}<i class="lwt-glow"></i><ha-icon icon="${this._lwIco(l, true)}"></ha-icon></span>
         <button class="lwt-more" data-action="pop-open" data-pop="lwbri:${esc(l.id)}" title="Helligkeit und Farbe"><ha-icon icon="mdi:dots-horizontal"></ha-icon></button></div>
       <div class="lwt-n">${area && area !== this._lwName(l) && area !== "Ohne Raum" ? `<small>${esc(area)}</small>` : ""}<b>${esc(this._lwName(l))}</b></div>
-      <div class="lwt-v"><b data-lwval>${c.dim && pct != null ? pct : "an"}</b>${c.dim && pct != null ? "<small>%</small>" : ""}</div>
+      ${c.dim && pct != null ? `<div class="lwt-v"><b data-lwval>${pct}</b><small>%</small></div>` : ""}
       <div class="lwt-s">${st}${nx}</div>
     </article>`;
   }
@@ -4861,7 +4861,7 @@ class HauswerkPanel extends HTMLElement {
       ${this._lwTimeline(lights)}
       ${on.length ? `<div class="lwh-moods">${this._lwMoodBar(on, LW_MOODS_HOUSE, true)}</div>` : ""}
     </section>`;
-    const cols = on.length <= 2 ? 2 : on.length <= 6 ? 3 : 4;
+    const cols = on.length <= 3 ? 3 : 4;
     let onHtml;
     if (!on.length) onHtml = `<div class="lwall-off"><ha-icon icon="mdi:weather-night"></ha-icon><b>Alles aus</b><small>Lampe unten antippen zum Einschalten</small></div>`;
     else if (on.length > 8) {
@@ -16322,7 +16322,7 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .lwh-big .lwh-add { margin-left:auto; align-self:center; }
 .lwh-moods { grid-area:moods; }
 .lwmoods { display:flex; flex-wrap:wrap; gap:8px; }
-.lwmood { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 16px 0 12px; border-radius:99px; font-weight:600; font-size:15px;
+.lwmood { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; min-height:38px; padding:0 14px 0 10px; border-radius:99px; font-weight:600; font-size:14px;
   background:color-mix(in srgb, var(--sw) 16%, var(--card2)); border:1px solid color-mix(in srgb, var(--sw) 40%, transparent); }
 .lwmood ha-icon { color:var(--sw); --mdc-icon-size:20px; }
 .lwmood.off { --sw:var(--muted); background:var(--card2); border-color:var(--line, transparent); }
@@ -16342,27 +16342,27 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .lwtl-c { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; padding:6px 12px 6px 8px; border-radius:12px; background:var(--card2); font-size:14px; max-width:260px; --mdc-icon-size:18px; }
 .lwtl-c.on ha-icon { color:#facc15; } .lwtl-c.off ha-icon { color:#94a3b8; }
 .lwtl-c b { white-space:nowrap; } .lwtl-c span { color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.lwgrid { display:grid; grid-template-columns:repeat(var(--cols, 3), minmax(0, 1fr)); gap:14px; }
+.lwgrid { display:grid; grid-template-columns:repeat(var(--cols, 3), minmax(0, 1fr)); gap:10px; }
 .lwarea-h { font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-size:13px; margin:4px 2px -4px; }
-.lwt { position:relative; overflow:hidden; height:200px; padding:16px 18px; display:flex; flex-direction:column; cursor:pointer; touch-action:none; user-select:none; -webkit-user-select:none;
+.lwt { position:relative; overflow:hidden; height:118px; padding:10px 12px; display:flex; flex-direction:column; cursor:pointer; touch-action:none; user-select:none; -webkit-user-select:none;
   border:1px solid color-mix(in srgb, var(--lc) 45%, transparent);
   background:radial-gradient(circle at 46px 46px, color-mix(in srgb, var(--lc) calc(14% + var(--lv) * 0.22%), transparent), transparent 70%), var(--card); }
-.lwt-fill { position:absolute; inset:auto 0 0 0; height:calc(var(--lv) * 1%); background:linear-gradient(to top, color-mix(in srgb, var(--lc) 26%, transparent), color-mix(in srgb, var(--lc) 8%, transparent)); transition:height .25s; pointer-events:none; }
+.lwt-fill { position:absolute; inset:auto 0 0 0; height:calc(var(--lv) * 1%); background:linear-gradient(to top, color-mix(in srgb, var(--lc) 18%, transparent), color-mix(in srgb, var(--lc) 5%, transparent)); transition:height .25s; pointer-events:none; }
 .lwt.dimming .lwt-fill { transition:none; }
 .lwt.dimming { outline:2px solid var(--lc); }
 .lwt > .lwt-top, .lwt > .lwt-n, .lwt > .lwt-s { position:relative; }
 .lwt-top { display:flex; justify-content:space-between; align-items:flex-start; }
-.lwt-lamp { position:relative; width:60px; height:60px; display:grid; place-items:center; color:var(--lc); --mdc-icon-size:36px; }
+.lwt-lamp { position:relative; width:40px; height:40px; display:grid; place-items:center; color:var(--lc); --mdc-icon-size:26px; }
 .lwt-lamp ha-icon { filter:drop-shadow(0 0 calc(4px + var(--lv) * 0.14px) var(--lc)); }
-.lwt-glow { position:absolute; inset:-14px; border-radius:50%; background:radial-gradient(circle, var(--lc), transparent 65%); opacity:calc(0.15 + var(--lv) * 0.0045); filter:blur(6px); }
-.lwt-ring { position:absolute; inset:-4px; transform:rotate(-90deg); }
+.lwt-glow { position:absolute; inset:-8px; border-radius:50%; background:radial-gradient(circle, var(--lc), transparent 65%); opacity:calc(0.1 + var(--lv) * 0.003); filter:blur(5px); }
+.lwt-ring { position:absolute; inset:-5px; transform:rotate(-90deg); }
 .lwt-ring circle { fill:none; stroke:color-mix(in srgb, var(--lc) 18%, transparent); stroke-width:5; }
 .lwt-ring .rf { stroke:#22c55e; stroke-linecap:round; stroke-dasharray:var(--rf) 1; transition:stroke-dasharray 1s linear; }
-.lwt-more { all:unset; cursor:pointer; width:40px; height:40px; display:grid; place-items:center; border-radius:12px; color:var(--muted); background:color-mix(in srgb, var(--text) 6%, transparent); }
-.lwt-n { margin-top:auto; min-width:0; } .lwt-n small { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
-.lwt-n b { display:block; font-size:19px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.lwt > .lwt-v { position:absolute; right:70px; top:20px; display:flex; align-items:baseline; gap:2px; } .lwt-v b { font-size:44px; font-weight:300; line-height:1; } .lwt-v small { color:var(--muted); font-size:16px; }
-.lwt-s { display:flex; gap:10px; margin-top:4px; font-size:14px; color:var(--muted); min-height:20px; white-space:nowrap; overflow:hidden; }
+.lwt-more { all:unset; cursor:pointer; width:34px; height:34px; display:grid; place-items:center; border-radius:12px; color:var(--muted); background:color-mix(in srgb, var(--text) 6%, transparent); }
+.lwt-n { margin-top:auto; min-width:0; } .lwt-n small { display:block; font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+.lwt-n b { display:block; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.lwt > .lwt-v { position:absolute; right:54px; top:12px; display:flex; align-items:baseline; gap:2px; } .lwt-v b { font-size:28px; font-weight:300; line-height:1; } .lwt-v small { color:var(--muted); font-size:13px; }
+.lwt-s { display:flex; gap:10px; margin-top:2px; font-size:12px; color:var(--muted); min-height:20px; white-space:nowrap; overflow:hidden; }
 .lwt-s ha-icon { --mdc-icon-size:16px; margin-right:3px; vertical-align:-2px; } .lwt-tm { color:#22c55e; } .lwt-nx { opacity:.8; }
 .lwall-off { display:flex; flex-direction:column; align-items:center; gap:4px; padding:34px; color:var(--muted); --mdc-icon-size:44px; } .lwall-off b { font-size:22px; color:var(--text); }
 .lwoffs-h { display:flex; align-items:center; gap:6px; font-weight:700; color:var(--muted); font-size:14px; margin:0 2px 8px; --mdc-icon-size:18px; }
@@ -16377,9 +16377,9 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .lwoff-b .lw-mot { position:absolute; right:-4px; bottom:-4px; }
 /* nachts: Ausgeschaltetes tritt zurück, Licht leuchtet */
 .lwwall.night .lwoffs { opacity:.45; }
-.lwwall.night .lwt { box-shadow:0 0 34px -8px var(--lc); }
+.lwwall.night .lwt { box-shadow:0 0 18px -10px var(--lc); }
 .lwwall.night .lwhead { background:color-mix(in srgb, #000 30%, var(--card)); }
-@media (max-width:1000px) { .lwhead { grid-template-columns:auto 1fr; grid-template-areas:"house txt" "tl tl" "moods moods"; } .lwgrid { grid-template-columns:repeat(2, minmax(0, 1fr)); } }
+@media (max-width:1000px) { .lwhead { grid-template-columns:auto 1fr; grid-template-areas:"house txt" "tl tl" "moods moods"; } .lwgrid { grid-template-columns:repeat(3, minmax(0, 1fr)); } }
 .wt-bulb { all:unset; cursor:pointer; position:relative; width:64px; height:64px; border-radius:16px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--text) 8%, transparent); color:var(--muted); }
 .wt-bulb.on { background:color-mix(in srgb, var(--lc) 30%, transparent); color:var(--lc); box-shadow:0 0 22px color-mix(in srgb, var(--lc) 45%, transparent); }
 .wt-bulb ha-icon { --mdc-icon-size:36px; }

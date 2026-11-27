@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.102.1 – 2026-11-27
+
+### Geändert – Lichtwerk im Tabletmodus
+- **Kleinere Licht-Kacheln:** Eingeschaltete Lichter stehen in flacheren Kacheln (etwa halb so hoch) zu dritt bzw. viert nebeneinander, mit kleinerer Lampe, Helligkeit in % und dezenterem Schein. Bei Leuchten, die nur an/aus können, entfällt das große „an“. Die Stimmungs-Knöpfe sind etwas kleiner.
+
 ## 0.102.0 – 2026-11-27
 
 ### Geändert – Lichtwerk im Tabletmodus
