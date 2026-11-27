@@ -74,8 +74,8 @@ BW_KEYS = frozenset(BW_DEFAULTS)
 RAINY = ("rainy", "pouring", "snowy", "snowy-rainy", "hail", "lightning-rainy")
 BAD = ("unavailable", "unknown", None)
 PAUSE_TEXT = {"rain": "es regnet", "soil": "Boden zu nass", "frost": "Frost", "water": "Bewässerung",
-              "guard": "jemand im Garten", "busy": "Garten belegt", "night": "Igelschutz – es ist dunkel", "heat": "Hitze"}
-WEATHER_REASONS = ("rain", "soil", "frost", "water", "heat")
+              "guard": "jemand im Garten", "busy": "Garten belegt", "night": "Igelschutz – es ist dunkel", "heat": "Hitze", "storm": "Unwetterwarnung"}
+WEATHER_REASONS = ("rain", "soil", "frost", "water", "heat", "storm")
 UNSAFE = ("mowing", "paused", "returning", "error")
 DAY_KEYS = ("mo", "tu", "we", "th", "fr", "sa", "su")
 
@@ -301,9 +301,17 @@ class Beetwerk:
             out.append("guard")
         if (self._persist.get("busy_until") or 0) > now:
             out.append("busy")
+        if getattr(self.haus, "severe", None) and self._ww_mower():
+            out.append("storm")
         if self.settings.get("bw_night", True) and self.is_night():
             out.append("night")
         return out
+
+    def _ww_mower(self) -> bool:
+        """Wachwerk › Wetter-Schutz: Mäher bei Unwetterwarnung in die Station?"""
+        from .const import DOMAIN, MODULE_SECURITY  # noqa: PLC0415 - vermeidet Ringimport
+        ww = (self.hass.data.get(DOMAIN) or {}).get(MODULE_SECURITY)
+        return bool(ww and ww.settings.get("ww_wx", True) and ww.settings.get("ww_wx_mower", True))
 
     # ------------------------------------------------------------ Garten frei, Igelschutz
     def guard_sensors(self) -> list[str]:

@@ -1148,7 +1148,9 @@ class Haus:
             prob = _float(h.get("precipitation_probability"))
             amount = _float(h.get("precipitation"))
             out.append({"ts": moment.timestamp(), "hour": local.hour, "temp": _float(h.get("temperature")), "rh": _float(h.get("humidity")),
-                        "rain": h.get("condition") in rainy or (prob is not None and prob >= 60) or (amount is not None and amount >= 0.3)})
+                        "rain": h.get("condition") in rainy or (prob is not None and prob >= 60) or (amount is not None and amount >= 0.3),
+                        "thunder": h.get("condition") in ("lightning", "lightning-rainy", "hail"),
+                        "gust": _float(h.get("wind_gust_speed"))})
         self.hourly = out
 
     # ------------------------------------------------------------ Für das Panel

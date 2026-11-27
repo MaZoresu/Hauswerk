@@ -303,6 +303,13 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("ww_fire_lights"): bool,
         vol.Optional("ww_leave_check"): bool,
         vol.Optional("ww_door_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
+        vol.Optional("ww_wx"): bool,
+        vol.Optional("ww_wx_awnings"): bool,
+        vol.Optional("ww_awnings"): vol.All([vol.All(str, vol.Match(r"^cover\.[a-z0-9_]+$"))], vol.Length(max=20)),
+        vol.Optional("ww_wx_covers"): bool,
+        vol.Optional("ww_wx_mower"): bool,
+        vol.Optional("ww_wx_windows"): bool,
+        vol.Optional("ww_wx_hours"): vol.All(vol.Coerce(int), vol.Range(min=1, max=12)),
         # Hausdienste
         vol.Optional("hd_modes"): {vol.In(["night", "morning", "leave", "home"]): vol.All([vol.In(list(MODE_ACTIONS))], vol.Length(max=12))},
         vol.Optional("hd_tasks"): vol.All([{vol.Optional("id"): vol.All(str, vol.Length(max=20)), vol.Required("name"): vol.All(str, vol.Length(min=1, max=80)),

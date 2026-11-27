@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.104.0 – 2026-11-27
+
+### Neu – Wachwerk › Wetter-Schutz
+- **Bei amtlicher Unwetterwarnung** (NINA, DWD – Sturm/Orkan ab Stufe 2, Gewitter, Hagel, Starkregen):
+  - **Markisen fahren ein** (Geräteklasse „Markise“ bzw. „Markise“ im Namen oder selbst gewählt),
+  - **Rollläden auf Sturmstellung** bei Sturm- bzw. Orkanwarnung – der Rollwerk-Sturmschutz greift schon mit der Warnung, nicht erst bei Böen über der Sturmgrenze; endet 30 Min. nach der Warnung,
+  - **Mähroboter in die Station** (Beetwerk-Pause „Unwetterwarnung“, danach mäht er weiter wie nach Regen),
+  - eine Nachricht „Unwetterschutz: STURMBÖEN – Markisen eingefahren · Rollläden auf Sturmstellung · Mäher fährt in die Station · noch offen: …“.
+- **Offene Fenster vor dem Unwetter:** Kommt laut Stunden-Vorhersage Gewitter oder Sturmböen über der Sturmgrenze (Standard: in den nächsten 3 Std.) oder gilt eine Warnung, meldet Wachwerk offene Fenster aus Heizwerk – z. B. „Gewitter ab 18:00 Uhr – 2 Fenster offen“ mit „In 30 Min.“ und „Gesehen“.
+- **DWD-Warnungen** (Sensor „Aktuelle Warnstufe“ der Integration „Deutscher Wetterdienst – Warnungen“) werden jetzt automatisch als Warnquelle erkannt.
+- Alles einstellbar unter Wachwerk › Einstellungen › Wetter-Schutz; die Seite Wachwerk zeigt „Unwetterschutz aktiv“ bzw. die Vorhersage.
+
 ## 0.103.0 – 2026-11-27
 
 ### Geändert – Heizwerk › Bericht › Heizleistung: Fußbodenheizung und Mischbetrieb richtig bewertet

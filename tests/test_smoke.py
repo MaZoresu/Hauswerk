@@ -2915,3 +2915,56 @@ def test_lueften_uebersteht_neustart(hw):
         assert ctl2.vent_log["wz"][-1]["min"] >= 10 and "binary_sensor.fenster" not in ctl2.win_open
 
     asyncio.run(run())
+
+
+def test_wachwerk_wetter_schutz(hw):
+    """Unwetter: Sturmwarnung (DWD) → Markise ein, Rollwerk-Sturmschutz, Mäher-Pause; Gewitter in der Vorhersage → offene Fenster melden."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 22, 13, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hass.set("sensor.dwd_current_warning_level", "0", {"warning_count": 0}, "DWD Warnstufe")
+        hass.set("cover.markise", "open", {"device_class": "awning"}, "Markise Terrasse")
+        hass.set("cover.wz", "open", {}, "Rollladen Wohnzimmer")
+        hass.set("binary_sensor.fenster_wz", "on", {"device_class": "window"}, "Fenster Wohnzimmer")
+        hass.set("climate.wz", "heat", {"current_temperature": 20.0, "temperature": 21.0}, "Thermostat Wohnzimmer")
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"notify_targets": ["mobile_app_pixel"], "notify_quiet": False})
+        await ctl.async_save_room({"id": "wz", "name": "Wohnzimmer", "type": "heizkoerper", "comfort": 21, "eco": 18,
+                                   "climates": ["climate.wz"], "windows": ["binary_sensor.fenster_wz"], "enabled": True, "schedule": []})
+        rw = hw.Rollwerk(hass, log, haus)
+        await rw.async_load()
+        rw.settings["rw_covers"] = ["cover.wz"]
+        ww = hw.Wachwerk(hass, log, haus)
+        await ww.async_load()
+        hass.data["hauswerk"] = {"heizen": ctl, "rollwerk": rw, "wachwerk": ww}
+        assert "sensor.dwd_current_warning_level" in ww.entities()["warn"] and ww.awnings() == ["cover.markise"]
+        # Gewitter in 2 Std. laut Vorhersage, Fenster offen
+        haus.hourly = [{"ts": NOW[0].timestamp() + 7200, "hour": 16, "temp": 10, "rh": 80, "rain": True, "thunder": True, "gust": 40}]
+        await ww.async_evaluate()
+        await asyncio.sleep(0)
+        assert any("Gewitter ab" in t and "1 Fenster offen" in t for t in hass.sent()), hass.sent()
+        assert haus.severe is None and not any(c[1] == "close_cover" for c in hass.calls)
+        # DWD: Sturmböen Stufe 2
+        hass.set("sensor.dwd_current_warning_level", "2", {"warning_count": 1, "warning_1_name": "STURMBÖEN", "warning_1_level": 2,
+                                                            "warning_1_description": "Böen bis 80 km/h"}, "DWD Warnstufe")
+        await ww.async_evaluate()
+        await asyncio.sleep(0)
+        assert haus.severe and haus.severe["kind"] == "wind"
+        assert ("cover", "close_cover", {"entity_id": ["cover.markise"]}) in hass.calls
+        assert any(t.startswith("Unwetterschutz: STURMBÖEN") for t in hass.sent())
+        assert rw._ww_covers()
+        # Beetwerk: Pause „storm“
+        bw = hw.Beetwerk(hass, log, haus)
+        await bw.async_load()
+        hass.data["hauswerk"]["beetwerk"] = bw
+        assert "storm" in bw._reasons({}, NOW[0].timestamp())
+        # Warnung vorbei
+        hass.set("sensor.dwd_current_warning_level", "0", {"warning_count": 0}, "DWD Warnstufe")
+        haus.hourly = []
+        await ww.async_evaluate()
+        assert haus.severe is None and ww.status()["wx"]["active"] is None
+        assert "storm" not in bw._reasons({}, NOW[0].timestamp())
+
+    asyncio.run(run())

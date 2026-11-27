@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.103.0";
+const VERSION = "0.104.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -246,6 +246,7 @@ const PICKERS = {
   ww_alarm: { scope: "settings", multi: false, domains: ["alarm_control_panel"] },
   ww_bell: { scope: "settings", multi: false, domains: ["event", "binary_sensor"] },
   ww_camera: { scope: "settings", multi: false, domains: ["camera"] },
+  ww_awnings: { scope: "settings", multi: true, domains: ["cover"] },
   hd_ai_entity: { scope: "settings", multi: false, domains: ["ai_task"] },
   bw_mower: { scope: "settings", multi: false, domains: ["lawn_mower"] },
   bw_soil: { scope: "settings", multi: false, domains: ["sensor"], deviceClass: "moisture" },
@@ -507,7 +508,7 @@ const WW_VIEWS = [
   { id: "security", slug: "sicherheit", name: "Sicherheit", icon: "mdi:shield-home-outline" },
   { id: "secset", slug: "einstellungen", name: "Einstellungen", icon: "mdi:tune-variant", hidden: true },
 ];
-const WW_POPS = ["wwdetect", "wwfire", "wwwarn", "wwdoors", "wwalarm"];
+const WW_POPS = ["wwdetect", "wwfire", "wwwarn", "wwwx", "wwdoors", "wwalarm"];
 const BW_POPS = ["bwmower", "bwplan", "bwwater", "bwpause", "bwcare", "bwguard", "bwwatch"];
 const LW_VIEWS = [
   { id: "lights", slug: "licht", name: "Licht", icon: "mdi:lightbulb-group-outline" },
@@ -5724,6 +5725,8 @@ class HauswerkPanel extends HTMLElement {
         ${this._data.settings.ww_fire_covers !== false || this._data.settings.ww_fire_lights !== false ? `<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Bei Rauch oder CO: ${[this._data.settings.ww_fire_covers !== false ? "alle Rollläden hoch" : "", this._data.settings.ww_fire_lights !== false ? "alle Lichter an" : ""].filter(Boolean).join(" und ")} – als Fluchtweg.</p>` : ""}</section>`);
     if ((ws.warnings || []).length || (ws.entities?.warn || []).length)
       cards.push(`<section class="card"><div class="shead"><ha-icon icon="mdi:alert-outline"></ha-icon><h3>Amtliche Warnungen</h3></div>
+        ${ws.wx?.active ? `<p class="hint warn"><ha-icon icon="mdi:weather-lightning-rainy"></ha-icon><span><b>Unwetterschutz aktiv</b> – ${esc((ws.wx.active.done || []).join(", ") || "nur Meldung")}</span></p>`
+          : ws.wx?.threat ? `<p class="muted small"><ha-icon icon="mdi:weather-lightning"></ha-icon>Vorhersage: ${esc(ws.wx.threat.what)} ab ${new Date(ws.wx.threat.ts * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} Uhr.</p>` : ""}
         ${(ws.warnings || []).length ? `<div class="evlist">${ws.warnings.map((w) => `<div class="ev live"><ha-icon icon="mdi:alert" style="color:#f59e0b"></ha-icon><span class="grow"><b>${esc(w.title)}</b>${w.text ? `<small>${esc(w.text)}</small>` : ""}</span></div>`).join("")}</div>`
           : `<p class="muted small"><ha-icon icon="mdi:check-circle-outline" style="color:${C.ok}"></ha-icon>Keine Warnung aktiv (${(ws.entities?.warn || []).length} Warnquellen).</p>`}</section>`);
     if ((ws.doors || []).length)
@@ -5781,6 +5784,9 @@ class HauswerkPanel extends HTMLElement {
       { g: "Melder", id: "wwdetect", t: "oft", icon: "mdi:smoke-detector-variant", c: C.alert, title: "Rauch-, CO- & Wassermelder", sum: `Rauch ${list("ww_smoke", E.smoke)} · CO ${list("ww_co", E.co)} · Wasser ${list("ww_water", E.water)}`, val: String(n(E.smoke) + n(E.co) + n(E.water)), words: "rauchmelder co gas wassermelder leck x-sense melder" },
       { g: "Melder", id: "wwfire", t: "oft", icon: "mdi:fire-alert", c: C.alert, title: "Bei Rauch oder CO", sum: [p.ww_fire_covers !== false ? "Rollläden hoch" : "", p.ww_fire_lights !== false ? "Licht an" : ""].filter(Boolean).join(" · ") || "nur Nachricht", words: "feuer brand fluchtweg rollläden licht" },
       { g: "Melder", id: "wwwarn", icon: "mdi:alert-outline", c: "#f59e0b", title: "Amtliche Warnungen", sum: list("ww_warn", E.warn), val: n(ws.warnings) ? `${n(ws.warnings)} aktiv` : "", words: "nina dwd warnung unwetter katwarn" },
+      { g: "Melder", id: "wwwx", t: "oft", icon: "mdi:weather-lightning-rainy", c: "#f59e0b", title: "Wetter-Schutz",
+        sum: p.ww_wx === false ? "aus" : [p.ww_wx_awnings !== false ? `Markisen ein${(ws.wx?.awnings || []).length ? ` (${ws.wx.awnings.length})` : ""}` : "", p.ww_wx_covers !== false ? "Rollläden bei Sturm" : "", p.ww_wx_mower !== false ? "Mäher heim" : "", p.ww_wx_windows !== false ? `offene Fenster ${p.ww_wx_hours ?? 3} Std. vorher` : ""].filter(Boolean).join(" · "),
+        val: ws.wx?.active ? "aktiv" : "", words: "unwetter sturm gewitter hagel markise markisen rollladen mäher fenster schutz" },
       { g: "Haus", id: "wwdoors", t: "oft", icon: "mdi:door", c: "#0ea5e9", title: "Türen & Tore", sum: `${list("ww_doors", E.doors)} · Hinweis nach ${p.ww_door_min ?? 30} Min.${p.ww_leave_check !== false ? " · Check beim Gehen" : ""}`, words: "haustür garage tor terrasse offen verlassen" },
       { g: "Haus", id: "wwalarm", icon: "mdi:shield-home-outline", c: "#6366f1", title: "Alarmanlage, Klingel & Kamera", sum: [E.alarm ? this._entityName(E.alarm) : "keine Alarmanlage", E.bell ? `Klingel ${this._entityName(E.bell)}` : "keine Klingel", E.camera ? `Kamera ${this._entityName(E.camera)}` : ""].filter(Boolean).join(" · "), words: "alarmo alarmanlage klingel türklingel kamera bild" },
       { g: "Allgemein", go: "log", icon: "mdi:text-box-search-outline", c: "#64748b", title: "Protokoll", sum: "Alarme, Klingel, Warnungen", words: "protokoll" },
@@ -5802,6 +5808,21 @@ class HauswerkPanel extends HTMLElement {
       case "wwwarn":
         return { icon: "mdi:alert-outline", c: "#f59e0b", title: "Amtliche Warnungen", sub: "Wachwerk",
           body: `${pk("ww_warn", "Warnquellen (NINA, DWD …)", "mdi:alert-outline", E.warn)}<p class="muted small"><ha-icon icon="mdi:information-outline"></ha-icon>Neue Warnungen kommen mit Überschrift und Text als Nachricht (Benachrichtigungen › Wachwerk › Warnung).</p>` };
+      case "wwwx": {
+        const wx = this._status?.wachwerk?.wx || {};
+        const off = p.ww_wx === false;
+        const hours = p.ww_wx_hours ?? 3;
+        return { icon: "mdi:weather-lightning-rainy", c: "#f59e0b", title: "Wetter-Schutz", sub: "Wachwerk · bei Unwetter",
+          body: `${wx.active ? `<p class="hint warn"><ha-icon icon="mdi:alert"></ha-icon>Aktiv: ${esc(wx.active.title)}${wx.active.done?.length ? ` – ${esc(wx.active.done.join(", "))}` : ""}</p>` : ""}
+            <div class="wxrows">${this._setRow("wwx", "Wetter-Schutz", "bei amtlicher Unwetterwarnung (NINA, DWD)", sw("ww_wx"), "Ausgelöst von Sturm- und Orkanwarnungen (ab Stufe 2) sowie Gewitter, Hagel und Starkregen aus den Warnquellen unter „Amtliche Warnungen“.")}
+            ${off ? "" : `${this._setRow("wwxa", "Markisen einfahren", (wx.awnings || []).length ? (wx.awnings || []).map((x) => this._entityName(x)).join(", ") : "keine Markise gefunden", sw("ww_wx_awnings"), "Bei jeder Unwetterwarnung (Sturm, Gewitter, Hagel).")}
+            ${this._setRow("wwxc", "Rollläden auf Sturmstellung", "nur bei Sturm- bzw. Orkanwarnung", sw("ww_wx_covers"), "Rollwerk-Sturmschutz schon mit der Warnung – nicht erst, wenn die Böen die Sturmgrenze erreichen. Endet 30 Min. nach der Warnung.")}
+            ${this._setRow("wwxm", "Mähroboter in die Station", "Pause „Unwetterwarnung“ in Beetwerk", sw("ww_wx_mower"), "Danach mäht er weiter wie nach Regen.")}
+            ${this._setRow("wwxw", "Offene Fenster melden", `bei Warnung bzw. Gewitter oder Sturmböen in den nächsten ${hours} Std. laut Vorhersage`, sw("ww_wx_windows"), "Fenster aus Heizwerk – z. B. „Gewitter ab 18:00 Uhr – 2 Fenster offen“.")}`}</div>
+            ${off ? "" : `<label class="field narrow"><span><ha-icon icon="mdi:clock-alert-outline"></ha-icon> Vorwarnzeit aus der Vorhersage</span><select data-set="ww_wx_hours">${[1, 2, 3, 4, 6].map((h) => `<option value="${h}" ${Number(hours) === h ? "selected" : ""}>${h} Std.</option>`).join("")}</select></label>
+            <div class="field"><span><ha-icon icon="mdi:storefront-outline"></ha-icon> Markisen (leer = automatisch: Geräteklasse „Markise“ bzw. „Markise“ im Namen)</span>${this._picker("ww_awnings", p.ww_awnings || [])}</div>`}
+            ${wx.threat ? `<p class="muted small"><ha-icon icon="mdi:weather-lightning"></ha-icon>Vorhersage: ${esc(wx.threat.what)} ab ${new Date(wx.threat.ts * 1000).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })} Uhr.</p>` : ""}` };
+      }
       case "wwdoors":
         return { icon: "mdi:door", c: "#0ea5e9", title: "Türen & Tore", sub: "Wachwerk",
           body: `${pk("ww_doors", "Türen und Tore", "mdi:door", E.doors)}
@@ -6056,7 +6077,7 @@ class HauswerkPanel extends HTMLElement {
     let badge = { mowing: "", returning: "mdi:home-import-outline", error: "mdi:alert", paused: "mdi:pause", charging: "mdi:lightning-bolt", docked: "", offline: "mdi:wifi-off", winter: "mdi:snowflake" }[k];
     if (["docked", "charging", "paused", "returning"].includes(k) && reasons.length) {
       const r = reasons[0];
-      badge = { rain: "mdi:weather-pouring", soil: "mdi:water-percent", frost: "mdi:snowflake", water: "mdi:sprinkler-variant", guard: "mdi:human-child", busy: "mdi:account-group", night: "mdi:weather-night", heat: "mdi:thermometer-high" }[r] || badge;
+      badge = { rain: "mdi:weather-pouring", soil: "mdi:water-percent", frost: "mdi:snowflake", water: "mdi:sprinkler-variant", guard: "mdi:human-child", busy: "mdi:account-group", night: "mdi:weather-night", heat: "mdi:thermometer-high", storm: "mdi:weather-lightning" }[r] || badge;
     } else if (k === "docked" && bs.night) badge = "mdi:weather-night";
     const c = { mowing: "#16a34a", returning: "#0ea5e9", error: C.alert, paused: "#f59e0b", charging: "#eab308", docked: "#64748b", offline: "#94a3b8", winter: "#38bdf8" }[k];
     const label = { mowing: "Mäht", returning: "Fährt zur Station", error: "Braucht Hilfe", paused: "Pausiert", charging: "Lädt", docked: "In der Station", offline: "Nicht erreichbar", winter: "Winterpause" }[k];

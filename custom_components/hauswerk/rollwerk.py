@@ -22,7 +22,7 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, MODULE_HEATING, SHUTTER_STORAGE_KEY, WINDOW_OPEN_STATES
+from .const import DOMAIN, MODULE_HEATING, MODULE_SECURITY, SHUTTER_STORAGE_KEY, WINDOW_OPEN_STATES
 from .core import Haus, async_calendar_events, parse_when
 from .log import Protokoll, log_settings
 from .logic import FACADES, _in_azimuth, parse_hm, predict_open_close, shade_conditions, shade_wanted
@@ -541,6 +541,11 @@ class Rollwerk:
         room = (getattr(ctl, "rooms", None) or {}).get(room_id) or {}
         return room.get("name") or room_id
 
+    def _ww_covers(self) -> bool:
+        """Wachwerk › Wetter-Schutz: Rollläden bei Sturmwarnung auf Sturmstellung?"""
+        ww = (self.hass.data.get(DOMAIN) or {}).get(MODULE_SECURITY)
+        return bool(ww and ww.settings.get("ww_wx", True) and ww.settings.get("ww_wx_covers", True))
+
     def _name(self, entity_id: str | None) -> str:
         state = self.hass.states.get(entity_id) if entity_id else None
         return state.name if state is not None else str(entity_id)
@@ -1056,18 +1061,24 @@ class Rollwerk:
         gust = self._wind()
         limit = float(self.haus.settings.get("storm_kmh") or 70)
         storm_before = self._storm
-        if self.settings.get("rw_storm", True) and gust is not None and gust >= limit:
+        sev = getattr(self.haus, "severe", None)
+        warn_storm = bool(sev and sev.get("kind") == "wind" and self._ww_covers())
+        if self.settings.get("rw_storm", True) and ((gust is not None and gust >= limit) or warn_storm):
             self._storm, self._storm_low_since = True, None
-        elif self._storm and (gust is None or gust < limit * 0.8):
+        elif self._storm and (gust is None or gust < limit * 0.8) and not warn_storm:
             self._storm_low_since = self._storm_low_since or now
             if now - self._storm_low_since >= STORM_RELEASE:
                 self._storm = False
         elif not self.settings.get("rw_storm", True):
             self._storm = False
         if self._storm != storm_before:
+            by_warn = warn_storm and not (gust is not None and gust >= limit)
             self._log("shutter", "Sturmschutz: Rollläden hoch" if self._storm else "Sturmschutz beendet",
-                         f"Böen {gust:.0f} km/h · Grenze {limit:.0f} km/h" if gust is not None else None)
-            if self._storm:
+                         f"Unwetterwarnung: {sev.get('title')}" if self._storm and by_warn
+                         else f"Böen {gust:.0f} km/h · Grenze {limit:.0f} km/h" if gust is not None else None)
+            if self._storm and by_warn:
+                pass  # meldet Wachwerk (Unwetterschutz)
+            elif self._storm:
                 self.haus.notify("rw_storm", "storm", "Sturm – Rollläden fahren hoch",
                                  f"Böen {gust:.0f} km/h (Grenze {limit:.0f} km/h)" if gust is not None else "Sturmgrenze erreicht")
             else:

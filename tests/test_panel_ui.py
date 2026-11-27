@@ -2448,3 +2448,16 @@ def test_tablet_lichtwerk_haus_anordnen(tablet):
     saved = [m["settings"]["lw_house"] for m in p.sent() if m["type"].endswith("settings/save") and "lw_house" in m.get("settings", {})]
     assert saved and saved[-1][area][0] == 2, saved
     assert "Dachgeschoss" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+
+
+def test_wachwerk_wetter_schutz_einstellungen(panel):
+    """Wachwerk › Wetter-Schutz: Fenster öffnet, Schalter speichert sofort, Vorwarnzeit wählbar."""
+    p = panel
+    p.js(f"{EL}._openPop('wwwx')")
+    p.wait(300)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    assert "Markisen einfahren" in txt and "Rollläden auf Sturmstellung" in txt and "Mähroboter in die Station" in txt
+    p.js(f"() => {{ const s = {EL}.shadowRoot.querySelector('#pop select[data-set=\"ww_wx_hours\"]'); s.value = '6'; s.dispatchEvent(new Event('change', {{ bubbles: true }})); }}")
+    p.wait(300)
+    saved = {k: v for m in p.sent() if m["type"].endswith("settings/save") for k, v in m.get("settings", {}).items()}
+    assert str(saved.get("ww_wx_hours")) == "6", saved
