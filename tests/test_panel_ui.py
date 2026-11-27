@@ -2430,3 +2430,21 @@ def test_kraftwerk_bericht_monat(panel):
     p.wait(400)
     saved = {k: v for m in p.sent() if m["type"].endswith("settings/save") for k, v in m.get("settings", {}).items()}
     assert saved.get("kw_invest") == 15000, saved
+
+
+def test_tablet_lichtwerk_haus_anordnen(tablet):
+    """Haus-Bild: Stockwerke als Reihen, Außen als Laterne; Räume im Haus anordnen (Stockwerk, Reihenfolge) wird gespeichert. Zeitleiste mit Knöpfen."""
+    p = tablet
+    p.view("lights")
+    p.wait(600)
+    assert p.has(".lwhouse .lwh-l")  # Vorgarten = außen
+    assert p.has(".lwtl .lwtl-c b")
+    p.js(f"{EL}._openPop('lwhouse')")
+    p.wait(300)
+    assert "Räume im Haus" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    area = p.js(f"{EL}.shadowRoot.querySelector('#pop [data-lwhfloor]').dataset.lwhfloor")
+    p.js(f"() => {{ const s = {EL}.shadowRoot.querySelector('#pop [data-lwhfloor]'); s.value = '2'; s.dispatchEvent(new Event('change', {{ bubbles: true }})); }}")
+    p.wait(300)
+    saved = [m["settings"]["lw_house"] for m in p.sent() if m["type"].endswith("settings/save") and "lw_house" in m.get("settings", {})]
+    assert saved and saved[-1][area][0] == 2, saved
+    assert "Dachgeschoss" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")

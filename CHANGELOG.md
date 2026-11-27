@@ -2,6 +2,13 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.102.0 – 2026-11-27
+
+### Geändert – Lichtwerk im Tabletmodus
+- **Zeitleiste lesbar:** schmale Leiste mit Punkten (jetzt, Schaltungen, Sonnenunter-/aufgang, Uhrzeiten alle 3 Std.) und darunter die nächsten Schaltungen als Knöpfe – z. B. „16:10 an · 7 Lichter“, „23:00–00:00 aus · MP3 Gong, Flur OG“. Schaltungen binnen 20 Min. werden zusammengefasst, nichts überlappt mehr. Antippen öffnet die Leuchte, den Raum bzw. die Liste der Lichter.
+- **Haus-Bild nach Stockwerken:** je Stockwerk eine Fensterreihe (oben DG/OG, unten EG/Keller), Außenbereiche wie der Vorgarten als Laterne neben dem Haus. Das Stockwerk kommt aus Home Assistant (Bereiche › Stockwerke), sonst aus dem Namen („Flur OG“, „Vorgarten“).
+- **Räume im Haus anordnen:** „⋯“ am Haus öffnet das Fenster – je Raum Stockwerk wählen und mit ‹ › die Reihenfolge von links nach rechts festlegen; „Automatisch anordnen“ setzt zurück.
+
 ## 0.101.0 – 2026-11-27
 
 ### Neu – Kraftwerk › Bericht (bisher „Verlauf“)

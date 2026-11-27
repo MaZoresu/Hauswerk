@@ -39,6 +39,7 @@ LW_DEFAULTS: dict[str, Any] = {
     "lw_lights": [],          # Leuchten, Gruppen und Schalter, die Lichtwerk schaltet
     "lw_lux_sensor": None,    # Helligkeit für alle Profile (leer = erster Lux-Sensor im Freien)
     "lw_away_min": 30,        # Benachrichtigung, wenn Licht so lange brennt, obwohl niemand zu Hause ist
+    "lw_house": {},           # Haus-Bild am Tablet: {Raum: [Stockwerk (-1 Keller … 2 DG, 9 außen), Position]}
 }
 LW_KEYS = frozenset(LW_DEFAULTS)
 

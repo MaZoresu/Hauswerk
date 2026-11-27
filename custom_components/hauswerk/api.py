@@ -320,6 +320,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("lw_lights"): vol.All([vol.All(str, vol.Match(r"^(light|switch|input_boolean)\.[a-z0-9_]+$"))], vol.Length(max=80)),
         vol.Optional("lw_lux_sensor"): _opt(SENSOR),
         vol.Optional("lw_away_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=720)),
+        vol.Optional("lw_house"): vol.All(dict, vol.Length(max=80), {vol.All(str, vol.Length(max=80)): vol.All([vol.All(vol.Coerce(int), vol.Range(min=-1, max=99))], vol.Length(min=2, max=2))}),
         vol.Optional("notify_window"): NOTIFY_MODE,
         vol.Optional("notify_window_min"): vol.All(vol.Coerce(int), vol.Range(min=5, max=720)),
         vol.Optional("notify_offline"): NOTIFY_MODE,

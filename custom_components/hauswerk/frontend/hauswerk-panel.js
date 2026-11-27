@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.101.0";
+const VERSION = "0.102.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -4630,74 +4630,182 @@ class HauswerkPanel extends HTMLElement {
       ${off ? `<button class="lwmood off" data-action="lw-cmd" data-ids="${esc(ok.filter((l) => l.st.state === "on").map((l) => l.id).join(","))}" data-a="off"><ha-icon icon="mdi:power"></ha-icon><span>Alles aus</span></button>` : ""}</div>`;
   }
 
-  /** Haus bei Nacht: je Raum ein Fenster, das in der Lichtfarbe leuchtet, wenn dort Licht an ist. */
+  /** Stockwerk und Reihenfolge je Raum fürs Haus-Bild: eigene Einstellung, sonst Stockwerk aus Home Assistant, sonst am Namen. */
+  _lwFloorOf(area) {
+    const own = this._data?.settings?.lw_house?.[area];
+    if (own) return { floor: own[0], pos: own[1] };
+    const ar = Object.values(this._hass?.areas || {}).find((a) => a.name === area);
+    const fl = ar?.floor_id ? this._hass?.floors?.[ar.floor_id] : null;
+    if (fl && fl.level != null) return { floor: Math.max(-1, Math.min(3, fl.level)), pos: 99 };
+    const n = String(area).toLowerCase();
+    if (/garten|terrasse|balkon|außen|aussen|hof|einfahrt|carport|eingang au|vorplatz|weg\b/.test(n)) return { floor: 9, pos: 99 };
+    if (/keller|heizungsraum|hobby/.test(n)) return { floor: -1, pos: 99 };
+    if (/\bdg\b|dach|spitzboden/.test(n)) return { floor: 2, pos: 99 };
+    if (/\bog\b|ober/.test(n)) return { floor: 1, pos: 99 };
+    return { floor: 0, pos: 99 };
+  }
+
+  _lwFloors(sorted) {
+    const rows = new Map();
+    sorted.forEach(([area, list], i) => {
+      const f = this._lwFloorOf(area);
+      if (!rows.has(f.floor)) rows.set(f.floor, []);
+      rows.get(f.floor).push({ area, list, pos: f.pos === 99 ? 100 + i : f.pos });
+    });
+    for (const r of rows.values()) r.sort((a, b) => a.pos - b.pos);
+    return rows;
+  }
+
+  /** Haus bei Nacht: je Stockwerk eine Fensterreihe (oben das oberste), Außenbereiche als Laternen neben dem Haus. */
   _lwHouse(sorted) {
-    const rooms = sorted.slice(0, 8);
-    const n = rooms.length || 1;
-    const cols = Math.min(4, Math.ceil(n / 2)), rowsN = Math.ceil(n / cols);
-    const W = 220, wx = 26, wy = 62, ww = (W - 2 * wx - (cols - 1) * 10) / cols, wh = rowsN > 1 ? 34 : 46;
-    const H = wy + rowsN * (wh + 22) + 6;
-    const win = rooms.map(([area, list], i) => {
+    const rows = this._lwFloors(sorted);
+    const floors = [...rows.keys()].filter((f) => f !== 9).sort((a, b) => b - a);
+    const outside = rows.get(9) || [];
+    const perRow = Math.max(2, ...floors.map((f) => rows.get(f).length));
+    const ww = 40, gap = 8, lab = 16, wh = 30;
+    const side = outside.length ? 38 : 8;
+    const bodyW = perRow * ww + (perRow - 1) * gap + 24;
+    const W = side * 2 + bodyW;
+    const roofH = 34, top = roofH + 6;
+    const H = top + floors.length * (wh + lab + 6) + 8;
+    const FL = { "-1": "KG", 0: "EG", 1: "OG", 2: "DG", 3: "DG" };
+    const win = (x, y, w, { area, list }) => {
       const on = list.filter((l) => l.st?.state === "on");
-      const x = wx + (i % cols) * (ww + 10), y = wy + Math.floor(i / cols) * (wh + 22);
       const c = on.length ? this._lwColor(on[0]) : "";
       const pct = on.length ? Math.max(...on.map((l) => this._lwPct(l) ?? 100)) : 0;
       const pop = list.length === 1 ? `lwbri:${list[0].id}` : `lwarea:${area}`;
+      const maxCh = Math.max(5, Math.floor(w / 5.6));
       return `<g class="lwh-w ${on.length ? "on" : ""}" data-action="pop-open" data-pop="${esc(pop)}" style="--wc:${c};--wo:${(0.45 + 0.55 * pct / 100).toFixed(2)}" role="button">
         <title>${esc(area)} – ${on.length ? `${on.length} an` : "aus"}</title>
-        <rect x="${x}" y="${y}" width="${ww}" height="${wh}" rx="4"></rect>
-        <line x1="${x + ww / 2}" y1="${y}" x2="${x + ww / 2}" y2="${y + wh}"></line><line x1="${x}" y1="${y + wh / 2}" x2="${x + ww}" y2="${y + wh / 2}"></line>
-        <text x="${x + ww / 2}" y="${y + wh + 14}">${esc(area.length > 11 ? `${area.slice(0, 10)}…` : area)}</text></g>`;
-    }).join("");
-    return `<svg class="lwhouse" viewBox="0 0 ${W} ${H}" aria-label="Haus">
-      <defs><filter id="lwglow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5"></feGaussianBlur></filter></defs>
-      <path class="lwh-roof" d="M8 ${wy - 10} L${W / 2} 6 L${W - 8} ${wy - 10}"></path>
-      <rect class="lwh-body" x="16" y="${wy - 14}" width="${W - 32}" height="${H - wy + 8}" rx="6"></rect>${win}</svg>`;
+        <rect x="${x}" y="${y}" width="${w}" height="${wh}" rx="4"></rect>
+        <line x1="${x + w / 2}" y1="${y}" x2="${x + w / 2}" y2="${y + wh}"></line><line x1="${x}" y1="${y + wh / 2}" x2="${x + w}" y2="${y + wh / 2}"></line>
+        <text x="${x + w / 2}" y="${y + wh + 12}">${esc(area.length > maxCh ? `${area.slice(0, maxCh - 1)}…` : area)}</text></g>`;
+    };
+    let out = "";
+    floors.forEach((f, r) => {
+      const list = rows.get(f);
+      const y = top + r * (wh + lab + 6);
+      const n = list.length;
+      const w = Math.min(ww * 1.6, (bodyW - 24 - (n - 1) * gap) / n);
+      const span = n * w + (n - 1) * gap;
+      const x0 = side + (bodyW - span) / 2;
+      out += `<text class="lwh-fl" x="${side + 4}" y="${y - 3}">${FL[f] ?? ""}</text>`;
+      list.forEach((it, k) => { out += win(x0 + k * (w + gap), y, w, it); });
+    });
+    const lamp = (x, { area, list }) => {
+      const on = list.filter((l) => l.st?.state === "on");
+      const c = on.length ? this._lwColor(on[0]) : "";
+      const pop = list.length === 1 ? `lwbri:${list[0].id}` : `lwarea:${area}`;
+      return `<g class="lwh-l ${on.length ? "on" : ""}" data-action="pop-open" data-pop="${esc(pop)}" style="--wc:${c}" role="button"><title>${esc(area)} – ${on.length ? `${on.length} an` : "aus"}</title>
+        <line x1="${x}" y1="${H - 4}" x2="${x}" y2="${H - 34}"></line><circle cx="${x}" cy="${H - 38}" r="7"></circle>
+        <text x="${x}" y="${H - 50}">${esc(area.length > 8 ? `${area.slice(0, 7)}…` : area)}</text></g>`;
+    };
+    outside.forEach((it, k) => { out += lamp(k % 2 === 0 ? side / 2 : W - side / 2, it); });
+    return `<svg class="lwhouse" viewBox="0 0 ${W} ${H}" aria-label="Haus" style="width:${Math.round(Math.min(360, W * 1.35))}px">
+      <path class="lwh-roof" d="M${side - 6} ${roofH} L${W / 2} 4 L${W - side + 6} ${roofH}"></path>
+      <rect class="lwh-body" x="${side}" y="${roofH - 2}" width="${bodyW}" height="${H - roofH - 2}" rx="6"></rect>${out}
+      ${this._admin ? `<g class="lwh-gear" data-action="pop-open" data-pop="lwhouse" role="button"><title>Räume im Haus anordnen</title><circle cx="${W - side - 12}" cy="${roofH + 10}" r="9"></circle><text x="${W - side - 12}" y="${roofH + 14}">⋯</text></g>` : ""}</svg>`;
   }
 
-  /** Zeitleiste des Abends: jetzt bis Mitternacht bzw. bis zum nächsten Wechsel – Schaltungen laut Plan, Sonnenunter-/aufgang. */
+  /** Fenster „Räume im Haus“: Stockwerk und Reihenfolge je Raum. */
+  _lwHousePop() {
+    const lights = this._lwLights();
+    const areas = [...new Set(lights.map((l) => l.ls.area || "Ohne Raum"))].sort((a, b) => a.localeCompare(b, "de"));
+    const rows = this._lwFloors(areas.map((a) => [a, []]));
+    const FL = [[2, "Dachgeschoss"], [1, "Obergeschoss"], [0, "Erdgeschoss"], [-1, "Keller"], [9, "Außen (Laterne neben dem Haus)"]];
+    const sel = (area, f) => `<select data-lwhfloor="${esc(area)}" ${this._admin ? "" : "disabled"}>${FL.map(([v, t]) => `<option value="${v}" ${v === f ? "selected" : ""}>${t}</option>`).join("")}</select>`;
+    const body = FL.filter(([f]) => rows.has(f)).map(([f, t]) => `<div class="lbl">${t}</div><div class="lwh-list">${rows.get(f).map((it, k, arr) => `
+      <div class="lwh-row"><b class="grow">${esc(it.area)}</b>${sel(it.area, f)}
+        <button class="icon" data-action="lwh-move" data-a="${esc(it.area)}" data-d="-1" ${k === 0 ? "disabled" : ""} title="weiter links"><ha-icon icon="mdi:chevron-left"></ha-icon></button>
+        <button class="icon" data-action="lwh-move" data-a="${esc(it.area)}" data-d="1" ${k === arr.length - 1 ? "disabled" : ""} title="weiter rechts"><ha-icon icon="mdi:chevron-right"></ha-icon></button></div>`).join("")}</div>`).join("");
+    return { icon: "mdi:home-floor-1", c: "#6366f1", title: "Räume im Haus", sub: "Lichtwerk · Haus-Bild am Tablet",
+      body: `<p class="muted small">Ohne Einstellung gilt das Stockwerk aus Home Assistant (Bereiche › Stockwerke), sonst wird es am Namen erraten. Pfeile ordnen die Fenster von links nach rechts.</p>${body}
+        ${this._admin && Object.keys(this._data.settings.lw_house || {}).length ? `<button class="link" data-action="lwh-reset"><ha-icon icon="mdi:restore"></ha-icon>Automatisch anordnen</button>` : ""}` };
+  }
+
+  /** Reihenfolge eines Stockwerks festschreiben (alle Räume dort bekommen ihre Position). */
+  _lwhSet(area, floor, move = 0) {
+    const lights = this._lwLights();
+    const areas = [...new Set(lights.map((l) => l.ls.area || "Ohne Raum"))].sort((a, b) => a.localeCompare(b, "de"));
+    const rows = this._lwFloors(areas.map((a) => [a, []]));
+    const cur = this._lwFloorOf(area).floor;
+    const house = { ...(this._data.settings.lw_house || {}) };
+    // alle Räume des alten Stockwerks festschreiben, damit die Reihenfolge stabil bleibt
+    const fix = (f) => (rows.get(f) || []).forEach((it, k) => { house[it.area] = [f, k]; });
+    fix(cur);
+    if (floor !== cur) {
+      fix(floor);
+      house[area] = [floor, (rows.get(floor) || []).length];
+    } else if (move) {
+      const list = (rows.get(cur) || []).map((it) => it.area);
+      const k = list.indexOf(area), j = k + move;
+      if (j >= 0 && j < list.length) { [list[k], list[j]] = [list[j], list[k]]; list.forEach((a, n) => { house[a] = [cur, n]; }); }
+    }
+    this._lwhSave(house);
+  }
+
+  async _lwhSave(house) {
+    if (this._settings) this._settings.lw_house = house;
+    this._data.settings.lw_house = house;
+    this._renderPop();
+    this._renderMain();
+    if (!this._admin) return;
+    try {
+      this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { lw_house: house } });
+      this._toast("Gespeichert");
+    } catch (e) { /* Fehler meldet _ws */ }
+  }
+
+  /** Zeitleiste des Abends: schmale Leiste mit Punkten (jetzt, Schaltungen, Sonne) und darunter die nächsten Schaltungen als Knöpfe. */
   _lwTimeline(lights) {
     const now = new Date();
     const nowM = now.getHours() * 60 + now.getMinutes();
-    const ev = new Map();
-    const add = (m, action, l, reason) => {
-      if (m <= nowM || m > nowM + 1440) return;
-      const k = `${m}:${action}`;
-      if (!ev.has(k)) ev.set(k, { m, action, ls: [], reason });
-      ev.get(k).ls.push(l);
-    };
+    const raw = [];
     for (const l of lights) {
       if (l.cfg.auto === false) continue;
       for (const p of l.ls.plan || []) {
-        add(p.start, "on", l, p.reason);
-        if (p.end < 1440 || p.end > nowM) add(Math.min(p.end, 1440 + 1439), "off", l, p.until);
+        if (p.start > nowM) raw.push({ m: p.start, action: "on", l });
+        if (p.end > nowM && p.end <= 1440 + 720) raw.push({ m: p.end, action: "off", l });
       }
       const nx = l.ls.next;
-      if (nx) add(nx.min + (nx.day ? 1440 : 0), nx.action, l, nx.reason);
+      if (nx) raw.push({ m: nx.min + (nx.day ? 1440 : 0), action: nx.action, l });
     }
-    // gleiche Leuchte, gleicher Wechsel doppelt (Plan und „als Nächstes“): einmal
-    for (const e of ev.values()) e.ls = [...new Map(e.ls.map((l) => [l.id, l])).values()];
-    const list = [...ev.values()].sort((a, b) => a.m - b.m);
+    // je Leuchte und Richtung nur der erste Wechsel; Wechsel derselben Richtung binnen 20 Min. zusammenfassen
+    const seen = new Set();
+    const evs = raw.sort((a, b) => a.m - b.m).filter((e) => { const k = `${e.l.id}:${e.action}:${e.m}`; if (seen.has(k)) return false; seen.add(k); return true; });
+    const groups = [];
+    for (const e of evs) {
+      const g = groups.find((x) => x.action === e.action && e.m - x.m <= 20 && e.m >= x.m);
+      if (g) { if (!g.ls.some((l) => l.id === e.l.id)) g.ls.push(e.l); g.m2 = e.m; }
+      else groups.push({ m: e.m, m2: e.m, action: e.action, ls: [e.l] });
+    }
     const S = this._hass.states[this._data?.settings?.sun_entity || "sun.sun"]?.attributes || {};
     const sunM = (iso) => { if (!iso) return null; const d = new Date(iso); let m = d.getHours() * 60 + d.getMinutes(); if (d.toDateString() !== now.toDateString()) m += 1440; return m; };
     const set = sunM(S.next_setting), rise = sunM(S.next_rising);
-    const endM = Math.max(nowM + 240, Math.min(nowM + 1080, Math.max(list[list.length - 1]?.m ?? 0, rise != null && rise < nowM + 1080 ? rise : 0) + 30));
+    const endM = Math.min(nowM + 1080, Math.max(nowM + 360, (rise != null && rise <= nowM + 1080 ? rise : 0), (groups[groups.length - 1]?.m2 ?? 0) + 30));
     const span = endM - nowM;
-    const X = (m) => `${(((m - nowM) / span) * 100).toFixed(2)}%`;
+    const pct = (m) => ((Math.min(endM, Math.max(nowM, m)) - nowM) / span) * 100;
     const tt = (m) => `${m >= 1440 ? "morgen " : ""}${t2(m % 1440)}`;
-    const shown = list.filter((e) => e.m <= endM).slice(0, 8);
-    const sun = [[set, "mdi:weather-sunset-down", "Sonnenuntergang"], [rise, "mdi:weather-sunset-up", "Sonnenaufgang"]]
-      .filter(([m]) => m != null && m > nowM && m <= endM)
-      .map(([m, i, t]) => `<span class="lwtl-sun" style="left:${X(m)}" title="${t} ${tt(m)}"><ha-icon icon="${i}"></ha-icon><small>${t2(m % 1440)}</small></span>`).join("");
-    const dark = set != null && set <= endM ? `<i class="lwtl-dark" style="left:${X(Math.max(set, nowM))};right:${rise != null && rise <= endM ? `${(100 - ((rise - nowM) / span) * 100).toFixed(2)}%` : "0"}"></i>` : this._sunDark() ? `<i class="lwtl-dark" style="left:0;right:${rise != null && rise <= endM ? `${(100 - ((rise - nowM) / span) * 100).toFixed(2)}%` : "0"}"></i>` : "";
-    const marks = shown.map((e) => {
-      const pop = e.ls.length === 1 ? `lwbri:${e.ls[0].id}` : `lwarea:${e.ls[0].ls.area || "Ohne Raum"}`;
-      const who = e.ls.length === 1 ? this._lwName(e.ls[0]) : `${e.ls.length} Lichter`;
-      return `<button class="lwtl-m ${e.action}" style="left:${X(e.m)}" data-action="pop-open" data-pop="${esc(pop)}" title="${esc(`${tt(e.m)} ${e.action === "on" ? "an" : "aus"} – ${e.ls.map((l) => this._lwNameRoom(l)).join(", ")}${e.reason ? ` (${e.reason})` : ""}`)}">
-        <ha-icon icon="${e.action === "on" ? "mdi:lightbulb-on" : "mdi:lightbulb-off-outline"}"></ha-icon><b>${t2(e.m % 1440)}</b><small>${esc(who)}</small></button>`;
+    const darkFrom = set != null && set <= endM ? set : this._sunDark() ? nowM : null;
+    const darkTo = rise != null && rise <= endM ? rise : endM;
+    const dark = darkFrom != null ? `<i class="lwtl-dark" style="left:${pct(darkFrom).toFixed(1)}%;width:${(pct(darkTo) - pct(darkFrom)).toFixed(1)}%"></i>` : "";
+    // Stunden-Marken alle 3 Std.
+    const ticks = [];
+    for (let m = Math.ceil((nowM + 30) / 180) * 180; m < endM - 20; m += 180) ticks.push(`<span class="lwtl-tick" style="left:${pct(m).toFixed(1)}%">${t2(m % 1440)}</span>`);
+    const sun = [[set, "mdi:weather-sunset-down"], [rise, "mdi:weather-sunset-up"]].filter(([m]) => m != null && m > nowM && m <= endM)
+      .map(([m, i]) => `<span class="lwtl-sun" style="left:${pct(m).toFixed(1)}%" title="${tt(m)}"><ha-icon icon="${i}"></ha-icon></span>`).join("");
+    const shown = groups.filter((g) => g.m <= endM);
+    const dots = shown.map((g) => `<i class="lwtl-dot ${g.action}" style="left:${pct(g.m).toFixed(1)}%"></i>`).join("");
+    const who = (g) => g.ls.length === 1 ? this._lwName(g.ls[0]) : g.ls.length <= 2 ? g.ls.map((l) => this._lwName(l)).join(", ") : `${g.ls.length} Lichter`;
+    const chips = shown.slice(0, 4).map((g) => {
+      const areas = [...new Set(g.ls.map((l) => l.ls.area || "Ohne Raum"))];
+      const pop = g.ls.length === 1 ? `lwbri:${g.ls[0].id}` : areas.length === 1 ? `lwarea:${areas[0]}` : `lwtl:${g.m}:${g.action}`;
+      return `<button class="lwtl-c ${g.action}" data-action="pop-open" data-pop="${esc(pop)}" title="${esc(g.ls.map((l) => this._lwNameRoom(l)).join(", "))}">
+        <ha-icon icon="${g.action === "on" ? "mdi:lightbulb-on" : "mdi:lightbulb-off-outline"}"></ha-icon><b>${tt(g.m)}${g.m2 > g.m ? `–${t2(g.m2 % 1440)}` : ""}</b><span>${g.action === "on" ? "an" : "aus"} · ${esc(who(g))}</span></button>`;
     }).join("");
-    return `<div class="lwtl"><div class="lwtl-track">${dark}<span class="lwtl-now" style="left:0"><small>jetzt</small></span>${sun}${marks}</div>
-      ${shown.length ? "" : `<small class="muted lwtl-none">Keine Schaltung geplant bis ${tt(endM)}</small>`}</div>`;
+    this._lwTlGroups = shown;
+    return `<div class="lwtl"><div class="lwtl-track">${dark}${ticks.join("")}${sun}${dots}<i class="lwtl-now"></i></div>
+      <div class="lwtl-cs">${chips || `<small class="muted">Keine Schaltung geplant bis ${tt(endM)}</small>`}${shown.length > 4 ? `<small class="muted">+${shown.length - 4}</small>` : ""}</div></div>`;
   }
 
   /** Kachel einer eingeschalteten Leuchte: Lampe mit Schein in Lichtfarbe, Pegel = Helligkeit, Wischen dimmt. */
@@ -10270,6 +10378,15 @@ class HauswerkPanel extends HTMLElement {
     if (RW_POPS.includes(id)) return this._rwPop(id);
     if (KW_POPS.includes(id)) return this._kwPop(id);
     if (id.startsWith("kwday:")) return this._kwDayPop(id.slice(6));
+    if (id === "lwhouse") return this._lwHousePop();
+    if (id.startsWith("lwtl:")) {
+      const [, m, a] = id.split(":");
+      const g = (this._lwTlGroups || []).find((x) => String(x.m) === m && x.action === a);
+      const ls = g?.ls || [];
+      return { icon: a === "on" ? "mdi:lightbulb-on" : "mdi:lightbulb-off-outline", c: "#6366f1", title: `${t2(Number(m) % 1440)} Uhr ${a === "on" ? "an" : "aus"}`, sub: "Lichtwerk · geplant",
+        body: `<div class="evlist">${ls.map((l) => `<button class="ev" data-action="pop-open" data-pop="lwbri:${esc(l.id)}"><ha-icon icon="${this._lwIco(l)}"></ha-icon><span class="grow"><b>${esc(this._lwName(l))}</b><small>${esc(l.ls.area || "")}${l.ls.prof ? ` · ${esc(l.ls.prof)}` : ""}</small></span><ha-icon icon="mdi:chevron-right"></ha-icon></button>`).join("")}</div>`,
+        foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+    }
     if (id === "setup") return this._setupPop();
     if (id === "absence") return this._popDef("vacation");
     if (id === "hm") {
@@ -12276,6 +12393,10 @@ class HauswerkPanel extends HTMLElement {
       } else if (t.value) this._planSoftUpdate(i);
       return;
     }
+    if (t.dataset.lwhfloor !== undefined) {
+      if (isChange) this._lwhSet(t.dataset.lwhfloor, Number(t.value));
+      return;
+    }
     if (t.dataset.lookColor !== undefined && this._settings) {
       this._settings.look_accent = t.value;
       if (isChange) this._renderPop();
@@ -13573,6 +13694,12 @@ class HauswerkPanel extends HTMLElement {
         this._closePop();
         break;
       }
+      case "lwh-move":
+        this._lwhSet(el.dataset.a, this._lwFloorOf(el.dataset.a).floor, Number(el.dataset.d));
+        break;
+      case "lwh-reset":
+        this._lwhSave({});
+        break;
       case "lw-mood": {
         const m = LW_MOODS_ALL.find((x) => x.name === el.dataset.m);
         const ids = el.dataset.ids.split(",").filter(Boolean);
@@ -16172,7 +16299,14 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 /* Lichtwerk im Tablet (Wand) */
 .lwwall { display:flex; flex-direction:column; gap:14px; }
 .lwhead { display:grid; grid-template-columns:auto minmax(150px, 0.6fr) 1.6fr; grid-template-areas:"house txt tl" "house moods moods"; gap:8px 22px; align-items:center; padding:14px 18px; }
-.lwhouse { grid-area:house; width:190px; height:auto; overflow:visible; }
+.lwhouse { grid-area:house; height:auto; overflow:visible; max-width:100%; }
+.lwh-fl { font-size:9px; fill:var(--muted); font-weight:700; }
+.lwh-l line { stroke:color-mix(in srgb, var(--text) 35%, transparent); stroke-width:3; }
+.lwh-l circle { fill:color-mix(in srgb, var(--bg, #000) 70%, #000); stroke:color-mix(in srgb, var(--text) 30%, transparent); }
+.lwh-l.on circle { fill:var(--wc); stroke:var(--wc); filter:drop-shadow(0 0 7px var(--wc)); }
+.lwh-l text { font-size:9px; fill:var(--muted); text-anchor:middle; } .lwh-l.on text { fill:var(--text); font-weight:600; } .lwh-l { cursor:pointer; }
+.lwh-gear { cursor:pointer; } .lwh-gear circle { fill:var(--card2); } .lwh-gear text { font-size:12px; text-anchor:middle; fill:var(--muted); font-weight:800; }
+.lwh-list { display:flex; flex-direction:column; gap:6px; } .lwh-row { display:flex; align-items:center; gap:8px; } .lwh-row select { max-width:180px; }
 .lwh-roof { fill:none; stroke:color-mix(in srgb, var(--text) 35%, transparent); stroke-width:3; stroke-linejoin:round; stroke-linecap:round; }
 .lwh-body { fill:color-mix(in srgb, var(--text) 6%, transparent); stroke:color-mix(in srgb, var(--text) 18%, transparent); }
 .lwh-w { cursor:pointer; }
@@ -16194,17 +16328,20 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .lwmood.off { --sw:var(--muted); background:var(--card2); border-color:var(--line, transparent); }
 .lwmood:active { transform:scale(0.97); }
 .pop .lwmoods { margin-bottom:12px; }
-.lwtl { grid-area:tl; min-width:0; padding-bottom:16px; }
-.lwtl-track { position:relative; height:74px; margin:0 26px 0 6px; border-bottom:2px solid color-mix(in srgb, var(--text) 18%, transparent); }
-.lwtl-dark { position:absolute; bottom:-2px; height:18px; background:linear-gradient(90deg, transparent, color-mix(in srgb, #6366f1 22%, transparent) 12%); border-radius:4px 4px 0 0; }
-.lwtl-now { position:absolute; bottom:-7px; width:12px; height:12px; margin-left:-6px; border-radius:50%; background:var(--accent, #14b8a6); box-shadow:0 0 0 4px color-mix(in srgb, var(--accent, #14b8a6) 25%, transparent); }
-.lwtl-now small { position:absolute; top:16px; left:50%; transform:translateX(-50%); font-size:11px; color:var(--muted); }
-.lwtl-sun { position:absolute; bottom:4px; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; color:#f59e0b; font-size:10px; opacity:.85; --mdc-icon-size:16px; }
-.lwtl-m { all:unset; cursor:pointer; position:absolute; bottom:0; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:1px; max-width:92px; padding:2px 4px 6px; }
-.lwtl-m::after { content:""; width:2px; height:8px; background:currentColor; margin-top:2px; }
-.lwtl-m.on { color:#facc15; } .lwtl-m.off { color:var(--muted); }
-.lwtl-m ha-icon { --mdc-icon-size:18px; } .lwtl-m b { font-size:14px; color:var(--text); } .lwtl-m small { font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:92px; }
-.lwtl-none { display:block; margin-top:8px; }
+.lwtl { grid-area:tl; min-width:0; display:flex; flex-direction:column; gap:10px; }
+.lwtl-track { position:relative; height:28px; margin:0 10px; }
+.lwtl-track::before { content:""; position:absolute; left:0; right:0; top:13px; height:3px; border-radius:2px; background:color-mix(in srgb, var(--text) 16%, transparent); }
+.lwtl-dark { position:absolute; top:11px; height:7px; border-radius:4px; background:color-mix(in srgb, #818cf8 35%, transparent); }
+.lwtl-now { position:absolute; left:0; top:8px; width:13px; height:13px; margin-left:-6px; border-radius:50%; background:var(--accent, #14b8a6); box-shadow:0 0 0 4px color-mix(in srgb, var(--accent, #14b8a6) 25%, transparent); }
+.lwtl-dot { position:absolute; top:9px; width:11px; height:11px; margin-left:-5px; border-radius:50%; border:2px solid var(--card); }
+.lwtl-dot.on { background:#facc15; } .lwtl-dot.off { background:#94a3b8; }
+.lwtl-tick { position:absolute; top:-6px; transform:translateX(-50%); font-size:11px; color:var(--muted); }
+.lwtl-tick::after { content:""; position:absolute; left:50%; top:16px; width:1px; height:8px; background:color-mix(in srgb, var(--text) 25%, transparent); }
+.lwtl-sun { position:absolute; top:-10px; transform:translateX(-50%); color:#f59e0b; --mdc-icon-size:16px; }
+.lwtl-cs { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.lwtl-c { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; padding:6px 12px 6px 8px; border-radius:12px; background:var(--card2); font-size:14px; max-width:260px; --mdc-icon-size:18px; }
+.lwtl-c.on ha-icon { color:#facc15; } .lwtl-c.off ha-icon { color:#94a3b8; }
+.lwtl-c b { white-space:nowrap; } .lwtl-c span { color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .lwgrid { display:grid; grid-template-columns:repeat(var(--cols, 3), minmax(0, 1fr)); gap:14px; }
 .lwarea-h { font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; font-size:13px; margin:4px 2px -4px; }
 .lwt { position:relative; overflow:hidden; height:200px; padding:16px 18px; display:flex; flex-direction:column; cursor:pointer; touch-action:none; user-select:none; -webkit-user-select:none;
