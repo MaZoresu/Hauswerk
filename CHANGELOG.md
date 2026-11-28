@@ -2,7 +2,7 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
-## 0.107.0
+## 0.107.0 – 2026-11-28
 
 ### Neu: Wartung im Haus
 - Eigener Bereich „Wartung“ (Seite, Start-Widget, Kachel unter „Mehr“, Link aus der Glocke): alle Aufgaben nach Fälligkeit – überfällig, bald fällig, später.
