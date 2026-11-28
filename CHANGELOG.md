@@ -2,6 +2,11 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.108.1 – 2026-11-28
+
+### Geändert – Tablet-Startseite
+- **Kachel „Wartung“ statt „Anwesenheit“:** zeigt, wie viele Aufgaben fällig sind (bzw. in den nächsten 14 Tagen anstehen) und welche – rot bei mehr als 14 Tagen überfällig, orange bei fällig, türkis wenn bald etwas ansteht, grün wenn alles erledigt ist. Antippen öffnet den Bereich Wartung. Die Anwesenheit steht oben in der Kopfzeile.
+
 ## 0.108.0 – 2026-11-28
 
 ### Neu – Wartung ausgebaut

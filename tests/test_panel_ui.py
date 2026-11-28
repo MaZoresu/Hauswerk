@@ -1732,7 +1732,7 @@ def test_tablet_wand_startseite_und_details(tablet):
     p.wait(300)
     assert p.has(".wstart .ws-time") and p.js(f"{EL}._tPages") == 1
     names = p.js(f"[...{EL}.shadowRoot.querySelectorAll('.ws-r .wt-n b')].map((b) => b.textContent)")
-    assert names[:4] == ["Heizwerk", "Rollwerk", "Kraftwerk", "Lichtwerk"] and "Termine" in names and "Anwesenheit" in names, names
+    assert names[:4] == ["Heizwerk", "Rollwerk", "Kraftwerk", "Lichtwerk"] and "Termine" in names and "Wartung" in names and "Anwesenheit" not in names, names
     p.page.locator("hauswerk-panel .ws-r .wt").first.click()
     p.wait(300)
     assert p.js(f"{EL}._tab") == "overview"

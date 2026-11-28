@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.108.0";
+const VERSION = "0.108.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -3034,17 +3034,22 @@ class HauswerkPanel extends HTMLElement {
       tiles.push(this._wallTile({ act: go("security"), color: lv.c, ic: logo("wachwerk"), name: "Wachwerk", value: lv.tone === "ok" ? "ruhig" : lv.tone === "warn" ? "ALARM" : "Hinweis",
         status: `<span class="${lv.tone === "ok" ? "wt-dim" : ""}">${esc(lv.title)}</span>`, cls: lv.tone === "warn" ? "bad" : "" }));
     }
-    // Termine (Müll zuerst) und Anwesenheit
+    // Termine (Müll zuerst)
     this._calLoad?.();
     const waste = this._status?.waste_due;
     const ev = this._calFetch(this._allCals(), 2).filter((e) => e.allDay || new Date(e.end || e.start) > now).slice(0, 2);
     tiles.push(this._wallTile({ act: `data-action="pop-open" data-pop="agenda"`, color: waste ? "#22c55e" : "#64748b", ic: `<span class="wt-ic"><ha-icon icon="${waste ? "mdi:trash-can-outline" : "mdi:calendar-month-outline"}"></ha-icon></span>`, name: "Termine",
       value: waste ? (waste.when === "heute" ? "Heute" : "Morgen") : String(ev.length), unit: waste ? "Müll" : "heute/morgen",
       status: waste ? `<span>${esc((waste.types || []).join(", "))}</span>` : ev.map((e) => `<span class="wt-dim">${esc(e.title)}</span>`).join("") }));
-    const home = (set.persons || []).filter((id) => ["home", "on"].includes(this._hass.states[id]?.state));
-    tiles.push(this._wallTile({ act: `data-action="pop-open" data-pop="presence"`, color: this._status?.away ? "#94a3b8" : C.ok, ic: `<span class="wt-ic"><ha-icon icon="${this._status?.away ? "mdi:home-export-outline" : "mdi:home-account"}"></ha-icon></span>`, name: "Anwesenheit",
-      value: this._status?.away ? "weg" : String(home.length), unit: this._status?.away ? "niemand da" : "zu Hause",
-      status: home.length ? `<span class="wt-dim">${esc(home.map((id) => this._entityName(id)).join(", "))}</span>` : "" }));
+    // Wartung (Anwesenheit steht oben in der Kopfzeile)
+    const mt = this._status?.dienste?.tasks || [];
+    const mdue = mt.filter((t) => t.left != null && t.left <= 0);
+    const msoon = mt.filter((t) => !mdue.includes(t) && ((t.left != null && t.left <= 14) || t.book));
+    const mc = mdue.some((t) => t.left < -14) ? "#ef4444" : mdue.length ? "#f59e0b" : msoon.length ? "#14b8a6" : C.ok;
+    tiles.push(this._wallTile({ act: go("maint"), color: mc, ic: `<span class="wt-ic"><ha-icon icon="${mdue.length ? "mdi:wrench-clock" : "mdi:wrench-check-outline"}"></ha-icon></span>`, name: "Wartung",
+      value: String(mdue.length || msoon.length), unit: mdue.length ? "fällig" : msoon.length ? "in 14 Tagen" : "fällig",
+      status: (mdue.length ? mdue : msoon).length ? `<span class="${mdue.length ? "" : "wt-dim"}">${esc((mdue.length ? mdue : msoon).slice(0, 2).map((t) => t.name).join(", "))}</span>`
+        : `<span class="wt-dim">${mt.length ? "Alles erledigt" : "Noch keine Aufgaben"}</span>` }));
     return `<div class="wstart">
       <div class="ws-l">
         <div class="ws-time" data-wsclock>${now.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" })}</div>
