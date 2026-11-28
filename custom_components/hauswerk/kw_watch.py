@@ -37,7 +37,12 @@ def _f(x) -> float | None:
 
 
 def device_jumps(days: dict[str, list[float]], names: dict[str, str]) -> list[dict[str, Any]]:
-    """Geräte, deren Verbrauch der letzten 5 Tage ≥ 30 % (und ≥ 0,15 kWh/Tag) über dem Median der Tage davor liegt."""
+    """Geräte, deren Verbrauch der letzten 5 Tage ≥ 30 % (und ≥ 0,15 kWh/Tag) über dem Median der Tage davor liegt.
+
+    Nur Dauerläufer (Kühlschrank, Gefriertruhe, Router, Pumpe …): Ihr Tagesverbrauch schwankt wenig. Geräte, die nur bei
+    Bedarf laufen (Waschmaschine, Trockner, Spülmaschine, Wasserkocher), schwanken von Tag zu Tag stark – dort sagt ein
+    Anstieg nur, dass mehr gewaschen wurde, und wird nicht gemeldet.
+    """
     out = []
     for sid, vals in days.items():
         if len(vals) < 15:
@@ -45,7 +50,10 @@ def device_jumps(days: dict[str, list[float]], names: dict[str, str]) -> list[di
         recent, before = vals[-5:], vals[:-5]
         base = median(before)
         now = sum(recent) / len(recent)
-        if base > 0.05 and now >= base * 1.3 and now - base >= 0.15:
+        mean = sum(before) / len(before)
+        sd = (sum((v - mean) ** 2 for v in before) / len(before)) ** 0.5
+        steady = mean > 0 and sd / mean <= 0.6 and min(before) >= 0.3 * base
+        if steady and base > 0.05 and now >= base * 1.3 and now - base >= 0.15:
             out.append({"id": sid, "name": names.get(sid) or sid, "now": round(now, 2), "base": round(base, 2),
                         "pct": round(100 * (now / base - 1))})
     return sorted(out, key=lambda x: -x["pct"])
@@ -182,8 +190,9 @@ class KwWatch:
         from homeassistant.components.recorder import get_instance  # noqa: PLC0415
         from homeassistant.components.recorder.statistics import statistics_during_period  # noqa: PLC0415
         end = dt_util.start_of_local_day()
+        # immer in kWh (Steckdosen melden oft Wh) – Ladestand (%) bleibt unverändert
         return await get_instance(self.hass).async_add_executor_job(
-            statistics_during_period, self.hass, start, end, ids, period, None, types)
+            statistics_during_period, self.hass, start, end, ids, period, {"energy": "kWh"}, types)
 
     async def _daily_items(self) -> list[dict[str, Any]]:
         from homeassistant.components.energy.data import async_get_manager  # noqa: PLC0415
@@ -200,7 +209,9 @@ class KwWatch:
                 items.append({"key": f"kw_dev:{j['id']}", "icon": "mdi:trending-up", "level": "warn",
                               "title": f"{j['name']} braucht mehr Strom",
                               "text": f"Seit 5 Tagen im Schnitt {str(j['now']).replace('.', ',')} kWh am Tag statt {str(j['base']).replace('.', ',')} kWh "
-                                      f"(+{j['pct']} %). Läuft es öfter oder länger als sonst? Beim Kühlschrank: Dichtung, Eis, Lüftungsgitter prüfen."})
+                                      f"(+{j['pct']} %). "
+                                      + ("Dichtung, Eis im Gefrierfach und Lüftungsgitter prüfen." if any(w in j["name"].lower() for w in ("kühl", "gefrier", "kuehl", "frost"))
+                                         else "Läuft es länger als sonst oder schaltet es nicht mehr richtig ab?")})
         # Grundlast nachts: Bezug + Solar − Einspeisung + Akku entladen − laden, 1–5 Uhr
         groups: dict[str, list[str]] = {"imp": [], "exp": [], "solar": [], "bin": [], "bout": []}
         for s in prefs.get("energy_sources") or []:

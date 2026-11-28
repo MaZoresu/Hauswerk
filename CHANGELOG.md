@@ -2,6 +2,13 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.106.2 – 2026-11-28
+
+### Behoben (Kraftwerk › Stromfresser)
+- **Falsche Meldung „Waschmaschine braucht mehr Strom … 98 kWh am Tag (+8093 %)“:** Messsteckdosen melden ihren Zähler oft in Wh – die Werte wurden als kWh gelesen. Jetzt rechnet der Wächter immer in kWh (auch Grundlast und Akku).
+- **Nur noch Dauerläufer:** Geräte, die nur bei Bedarf laufen (Waschmaschine, Trockner, Spülmaschine …), schwanken von Tag zu Tag stark – ein Anstieg heißt dort nur, dass mehr gewaschen wurde. Gemeldet werden nur Geräte mit gleichmäßigem Tagesverbrauch (Kühlschrank, Gefriertruhe, Router, Pumpe …). Der Tipp „Dichtung, Eis …“ steht nur noch bei Kühl- und Gefriergeräten.
+- Die falsche Meldung verschwindet bei der nächsten Prüfung (etwa 3 Min. nach dem Update).
+
 ## 0.106.1 – 2026-11-27
 
 ### Geändert – Heizwerk › Lüften im Tabletmodus

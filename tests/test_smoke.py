@@ -2978,6 +2978,10 @@ def test_kraftwerk_waechter(hw):
     days = {"sensor.kuehl": [0.8] * 25 + [1.3] * 5, "sensor.tv": [0.3] * 25 + [0.32] * 5}
     j = W.device_jumps(days, {"sensor.kuehl": "Kühlschrank"})
     assert [x["name"] for x in j] == ["Kühlschrank"] and j[0]["pct"] == 62
+    # Waschmaschine: läuft nur bei Bedarf (Tage mit 0,001 bzw. 1,8 kWh) – nie melden
+    wm = [0.0012, 1.47, 0.0012, 0.39, 0.0011, 0.0012, 0.6, 2.25, 0.41, 1.71, 1.9, 0.0012, 1.21, 0.0012, 1.78, 1.81, 0.0011, 0.81, 0.0012, 0.0012,
+          0.0012, 0.0012, 0.0012, 0.0012, 0.0012, 0.49, 0.0012, 0.0012, 0.0012, 0.0012]
+    assert W.device_jumps({"sensor.wm": wm[:25] + [1.9, 2.1, 0.0012, 1.8, 2.2]}, {"sensor.wm": "Waschmaschine"}) == []
     assert W.base_jump([180] * 25 + [260] * 5) == {"now": 260, "base": 180}
     assert W.base_jump([180] * 25 + [190] * 5) is None
     assert W.battery_not_full([(84, 3.0), (82, 2.0), (80, 4.1), (60, 0.2)]) == {"max": 84, "days": 3}
