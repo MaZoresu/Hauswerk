@@ -1,7 +1,7 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
 const HW_T_START = typeof performance !== "undefined" ? performance.now() : null; // Leistung: Skript geladen
-const VERSION = "0.110.0";
+const VERSION = "0.110.1";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -1951,7 +1951,7 @@ class HauswerkPanel extends HTMLElement {
     // Größe unter Darstellung (Kompakt · Normal · Groß) wirkt auch hier
     const f = { s: 0.85, m: 1, l: 1.2 }[this._lookSize()] || 1;
     // Einstellungen und der Heizwerk-Bericht: vollständig und scrollbar (zwei Spalten, keine Karte wird geteilt oder abgeschnitten)
-    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house", "report"].includes(tab) || (tab === "lights" && !!tin.querySelector(".lwwall")) || (tab === "kwflow" && !!tin.querySelector(".kwwall")) || (tab === "vent" && !!tin.querySelector(".vwall"));
+    const scroll = ["settings", "shutset", "kwset", "lightset", "gardenset", "secset", "house", "report", "maint"].includes(tab) || (tab === "lights" && !!tin.querySelector(".lwwall")) || (tab === "kwflow" && !!tin.querySelector(".kwwall")) || (tab === "vent" && !!tin.querySelector(".vwall"));
     box.classList.toggle("tscroll", scroll);
     if (scroll) {
       Object.assign(tin.style, { zoom: f, width: "", height: "", columnWidth: "", columnGap: "", transform: "", clipPath: "" });
@@ -3679,9 +3679,46 @@ class HauswerkPanel extends HTMLElement {
   }
 
   /** Bereich Wartung: fällig, demnächst, alle Aufgaben, Kosten, zuletzt erledigt – Aufgaben hinzufügen. */
+  /** Tablet: Wartung als Kacheln – groß, kontrastreich, eine Seite zum Scrollen. */
+  _maintWall(hd) {
+    const tasks = hd.tasks || [];
+    const due = tasks.filter((t) => t.left != null && t.left <= 0);
+    const soon = tasks.filter((t) => !due.includes(t) && ((t.left != null && t.left <= 30) || t.book));
+    const rest = tasks.filter((t) => !due.includes(t) && !soon.includes(t));
+    const tile = (t) => {
+      const isDue = t.left != null && t.left <= 0;
+      const c = isDue ? (t.left < -14 ? "#ef4444" : "#f59e0b") : t.book ? "#f59e0b" : t.left != null && t.left <= 14 ? "#14b8a6" : "#64748b";
+      const parts = String(t.name).split(": ");
+      const [title, sub] = parts.length > 1 ? (t.dev && !t.bat ? [parts.slice(1).join(": "), parts[0]] : [parts[0], parts.slice(1).join(": ")]) : [t.name, ""];
+      const when = t.dev || t.auto ? (t.left > 0 ? `in ${t.left} Tagen` : isDue ? (t.bat ? "wechseln" : "jetzt fällig") : "") : this._maintWhen(t);
+      const info = [t.room, (t.dev || t.auto) ? t.note : t.usage?.used != null ? `${fmt(t.usage.used, 0)} von ${fmt(t.usage.every, 0)} ${t.usage.unit || ""}` : t.person_name].filter(Boolean).join(" · ");
+      const u = t.usage;
+      const frac = t.dev && t.frac != null ? 1 - t.frac : u?.used != null ? u.used / u.every : !t.auto && t.days && t.left != null && !t.months?.length ? 1 - t.left / t.days : null;
+      const detail = !t.auto && (t.unit || t.pro);
+      const label = t.bat ? "Gewechselt" : t.dev && t.reset ? "Zurücksetzen" : t.auto && !t.dev ? "Quittieren" : "Erledigt";
+      return `<div class="mtile ${isDue ? "due" : ""}" style="--c:${c}">
+        <div class="mtile-h"><span class="mtile-ic"><ha-icon icon="${t.icon || "mdi:wrench-outline"}"></ha-icon></span>
+          <span class="grow"><b>${esc(title)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</span>${when ? `<span class="mtile-when">${esc(when)}</span>` : ""}</div>
+        ${info ? `<div class="mtile-info">${esc(info)}</div>` : ""}
+        ${frac != null ? `<i class="mtile-bar"><i style="width:${Math.max(0, Math.min(100, frac * 100)).toFixed(0)}%"></i></i>` : ""}
+        <div class="mtile-btns"><button class="${isDue ? "primary" : "secondary"}" data-action="${detail ? "pop-open" : "maint-done"}" ${detail ? `data-pop="mdone:${esc(t.id)}"` : ""} data-id="${esc(t.id)}"><ha-icon icon="${t.dev && t.reset ? "mdi:restore" : "mdi:check"}"></ha-icon>${label}</button>
+          ${t.book && t.phone ? `<a class="secondary btnlink mtile-call" href="tel:${esc(t.phone.replace(/[^0-9+]/g, ""))}"><ha-icon icon="mdi:phone"></ha-icon>Anrufen</a>` : ""}
+          ${!t.auto && isDue ? `<button class="secondary" data-action="maint-snooze" data-id="${esc(t.id)}" data-days="7">1 Woche</button>` : ""}
+          <button class="icon" data-action="pop-open" data-pop="mdone:${esc(t.id)}" title="Mit Notiz, Kosten oder Foto"><ha-icon icon="mdi:clipboard-text-outline"></ha-icon></button></div></div>`;
+    };
+    const grid = (title, list, n) => list.length ? `<div class="mw-sec"><b>${title}</b><span class="vsec-n">${list.length}</span></div><div class="mgrid">${list.slice(0, n).map(tile).join("")}</div>` : "";
+    const c = due.some((t) => t.left < -14) ? "#ef4444" : due.length ? "#f59e0b" : "#22c55e";
+    return `<div class="mwall">
+      <section class="card mhead mw-head" style="--c:${c}"><span class="vhead-ic" style="--c:${c}"><ha-icon icon="${due.length ? "mdi:wrench-clock" : "mdi:check-circle-outline"}"></ha-icon></span>
+        <span class="grow"><b>${due.length ? `${due.length} ${due.length === 1 ? "Aufgabe" : "Aufgaben"} fällig` : "Nichts fällig"}</b><small>${soon.length ? `${soon.length} in den nächsten 30 Tagen` : "In den nächsten 30 Tagen nichts"}</small></span>
+        ${this._admin ? `<button class="secondary" data-action="pop-open" data-pop="mset"><ha-icon icon="mdi:cog-outline"></ha-icon></button><button class="secondary" data-action="pop-open" data-pop="mtask:new"><ha-icon icon="mdi:plus"></ha-icon>Aufgabe</button>` : ""}</section>
+      ${grid("Fällig", due, 60)}${grid("Demnächst", soon, 30)}${grid("Später und aus den Geräten", rest, 60)}</div>`;
+  }
+
   _viewMaint() {
     const hd = this._status?.dienste;
     if (!hd) return `<section class="card"><div class="chart-empty"><div class="spinner"></div></div></section>`;
+    if (this._tablet) return this._maintWall(hd);
     const tasks = hd.tasks || [];
     const due = tasks.filter((t) => t.left != null && t.left <= 0);
     const soon = tasks.filter((t) => !due.includes(t) && ((t.left != null && t.left <= 30) || t.book));
@@ -17112,7 +17149,7 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .mrow-ic { width:36px; height:36px; flex:none; display:grid; place-items:center; border-radius:12px; color:var(--c); background:color-mix(in srgb, var(--c) 14%, transparent); --mdc-icon-size:20px; }
 .mrow.done .mrow-ic { --c:#22c55e; } .mrow .grow { min-width:0; }
 .mrow b { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .mrow small { display:block; color:var(--muted); font-size:13px; }
-.mrow.due small { color:var(--c); font-weight:600; }
+.mrow.due small { color:var(--text); opacity:.85; font-weight:600; }
 .mrow-bar { display:block; height:4px; margin-top:5px; border-radius:99px; background:var(--card2); max-width:240px; } .mrow-bar i { display:block; height:100%; border-radius:99px; background:var(--c); }
 .mrow button.sm { min-height:34px; padding:0 12px; font-size:13px; white-space:nowrap; }
 .mrow-act { display:flex; align-items:center; gap:6px; flex:none; } .mrow-act:empty { display:none; }
@@ -17120,6 +17157,21 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .pf-t { font-size:13px; margin:4px 0 10px; } .pf-h, .pf-r { display:grid; grid-template-columns:minmax(0,1fr) 44px 48px 48px 48px; gap:6px; padding:5px 0; border-bottom:1px solid var(--line); align-items:center; }
 .pf-h { color:var(--muted); font-size:12px; } .pf-r > span:not(:first-child), .pf-h > span:not(:first-child) { text-align:right; font-variant-numeric:tabular-nums; }
 .pf-r > span:first-child { overflow-wrap:anywhere; line-height:1.25; }
+.mwall { display:flex; flex-direction:column; gap:12px; }
+.mw-head { padding:12px 16px; } .mw-head b { font-size:22px; } .mw-head small { font-size:15px; } .mw-head button { min-height:48px; font-size:16px; }
+.mw-sec { display:flex; align-items:center; gap:8px; margin:6px 4px 0; font-size:18px; }
+.mgrid { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:12px; }
+.mtile { text-align:left; align-items:stretch; display:flex; flex-direction:column; gap:8px; padding:14px 16px; border-radius:18px; background:var(--card); border:1px solid var(--line, color-mix(in srgb, var(--text) 10%, transparent)); border-left:6px solid var(--c); color:var(--text); }
+.mtile-h { display:flex; align-items:flex-start; gap:12px; } .mtile-h .grow { min-width:0; }
+.mtile-h b { display:block; font-size:19px; line-height:1.25; color:var(--text); } .mtile-h small { display:block; font-size:15px; color:var(--text); opacity:.75; margin-top:2px; }
+.mtile-ic { width:44px; height:44px; flex:none; display:grid; place-items:center; border-radius:14px; color:var(--c); background:color-mix(in srgb, var(--c) 18%, transparent); --mdc-icon-size:26px; }
+.mtile-when { flex:none; padding:4px 10px; border-radius:99px; font-size:14px; font-weight:700; background:var(--c); color:#111; white-space:nowrap; }
+.mtile:not(.due) .mtile-when { background:var(--card2); color:var(--text); }
+.mtile-info { font-size:15px; line-height:1.35; color:var(--text); opacity:.85; }
+.mtile-bar { display:block; height:6px; border-radius:99px; background:var(--card2); } .mtile-bar > i { display:block; height:100%; border-radius:99px; background:var(--c); }
+.mtile-btns { display:flex; align-items:center; justify-content:flex-start; gap:8px; margin-top:auto; flex-wrap:wrap; }
+.mtile-btns > button:not(.icon), .mtile-call { min-height:48px; padding:0 16px; font-size:16px; border-radius:14px; }
+.mtile-btns > button.icon { margin-left:auto; width:48px; height:48px; }
 .mtags { display:flex; flex-wrap:wrap; gap:4px 6px; margin-top:5px; }
 .mtag { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:99px; font-size:12px; background:var(--card2); color:var(--muted); --mdc-icon-size:14px; white-space:nowrap; }
 .mtag.warn { background:color-mix(in srgb, #f59e0b 16%, transparent); color:#d97706; } .mtag.ok { background:color-mix(in srgb, #22c55e 15%, transparent); color:#16a34a; }

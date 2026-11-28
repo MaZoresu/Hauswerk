@@ -2,6 +2,13 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.110.1 – 2026-11-28
+
+### Geändert – Wartung im Tabletmodus lesbar
+- **Große Kacheln statt schmaler Listen:** je Aufgabe eine Kachel mit Name groß (19 px), darunter Gerät bzw. Raum, eine Zeile mit dem Stand („2× AAA · fast leer“, „seit 35 Std. überfällig“) und großen Knöpfen (Erledigt, Zurücksetzen, Gewechselt, 1 Woche, Anrufen). Wann es fällig ist, steht als farbiges Schild rechts oben; die Farbe des Zustands zeigt der Rand links.
+- Abschnitte Fällig, Demnächst und „Später und aus den Geräten“ über die ganze Breite; die Seite scrollt statt zu blättern.
+- **Mehr Kontrast überall:** Texte stehen in der Schriftfarbe statt in Orange auf farbigem Grund – auch auf Handy und PC.
+
 ## 0.110.0 – 2026-11-28
 
 ### Neu – Leistung messen (Einstellungen › System › Leistung)

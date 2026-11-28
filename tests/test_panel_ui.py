@@ -2634,3 +2634,17 @@ def test_leistung(panel):
     p.wait(300)
     assert any(m["type"] == "hauswerk/perf" for m in p.sent())
     assert "Tablet · Android · Fully" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+
+
+def test_wartung_tablet(tablet):
+    """Tablet: Wartung als große Kacheln (lesbar aus Abstand), scrollt statt zu blättern; Erledigt in der Kachel."""
+    p = tablet
+    p.view("maint")
+    p.wait(500)
+    assert p.has(".mwall .mtile") and not p.has(".msec")
+    fs = p.js(f"parseFloat(getComputedStyle({EL}.shadowRoot.querySelector('.mtile-h b')).fontSize)")
+    assert fs >= 18, fs
+    n = p.js(f"{EL}.shadowRoot.querySelectorAll('.mtile').length")
+    p.click('.mtile [data-action="maint-done"]')
+    p.wait(300)
+    assert any(m["type"] == "hauswerk/dienste/task_done" for m in p.sent()) and n >= 1
