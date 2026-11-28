@@ -16,6 +16,7 @@ from homeassistant.helpers.event import async_track_state_change_event, async_tr
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import perf
 from .const import DOMAIN, MODULE_GARDEN, MODULE_HEATING, MODULE_LIGHT, MODULE_SHUTTER, SECURITY_STORAGE_KEY
 from .core import Haus
 from .log import Protokoll, log_settings
@@ -175,6 +176,7 @@ class Wachwerk:
         self._state_unsub = async_track_state_change_event(self.hass, ids, self._on_state) if ids else None
 
     @callback
+    @perf.timed("wachwerk.zustand")
     def _on_state(self, event) -> None:
         new = event.data.get("new_state")
         old = event.data.get("old_state")
@@ -191,6 +193,7 @@ class Wachwerk:
             self.leave_check(notify=True)
         self._was_away = away
 
+    @perf.timed("wachwerk.minute")
     async def _async_tick(self, _now=None) -> None:
         await self.async_evaluate()
 

@@ -317,6 +317,13 @@ const hass = {
     }
     if (msg.type === "hauswerk/haus/mode") { status.dienste.last_mode = { mode: msg.mode, at: new Date().toISOString() }; return { mode: msg.mode, name: status.dienste.modes[msg.mode].name, done: ["3 Lichter aus", "Rollläden zu"], open: status.wachwerk.leave }; }
     if (msg.type === "hauswerk/dienste/get") return status.dienste;
+    if (msg.type === "hauswerk/perf" || msg.type === "hauswerk/perf/reset") return { since: Date.now() / 1000 - 3600, window: 900,
+      points: { "heizwerk.berechnen": { per_min: 4.2, avg: 38.5, p95: 92, max: 240, load: 0.27 }, "heizwerk.zustand": { per_min: 52, avg: 0.4, p95: 1.2, max: 6, load: 0.03 },
+        "status.gesamt": { per_min: 4.2, avg: 21, p95: 44, max: 120, load: 0.15 }, "status.dienste": { per_min: 4.2, avg: 14, p95: 30, max: 80, load: 0.1 },
+        "meldung.heizwerk": { per_min: 4.2, avg: 0, p95: 0, max: 0, load: 0 }, "ha.verzug": { per_min: 12, avg: 3.1, p95: 12, max: 85, load: 0.06 } },
+      sizes: { "meldung.heizwerk": 186000, "meldung.rollwerk": 42000 },
+      panels: { "Tablet · Android · Fully": { at: Date.now() / 1000 - 40, device: "Tablet · Android · Fully", load: { script_ms: 2400, script_kb: 0, cached: true, start_ms: 5200 },
+        long: { n: 30, ms: 4100, per_min: 2 }, heap_mb: 62, dom: 2400, sizes: { "meldung.heizwerk": 186000 }, pts: { "zeichnen.seite": { per_min: 6, avg: 120, p95: 260, max: 400, load: 1.2 } } } } };
     if (msg.type === "hauswerk/dienste/photo") return { data: "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#14b8a6"/><text x="200" y="160" font-size="40" text-anchor="middle" fill="#fff">1,6 bar</text></svg>') };
     if (msg.type === "hauswerk/dienste/task_done") { const t = status.dienste.tasks.find((x) => x.id === msg.task); if (t) t.left = t.days; return { status: status.dienste }; }
     if (msg.type === "hauswerk/dienste/weekly") return { title: "Wochenbericht", text: "", lines: ["🔥 Heizwerk: 84 Std. geheizt, Ø 20.6 °C, 23× Fenster geöffnet", "⚡ Kraftwerk: 41 kWh Solar, 96 kWh Netzbezug", "💡 Lichtwerk: 46 Std. Licht", "🛡️ Wachwerk: 4× geklingelt", "🔧 Wartung: Rauchmelder testen"],

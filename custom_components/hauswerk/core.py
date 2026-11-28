@@ -23,6 +23,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import perf
 from .const import STATIC_URL
 from .const import (
     CALENDAR_REFRESH,
@@ -213,7 +214,9 @@ class Haus:
 
     # ------------------------------------------------------------ Lebenszyklus
     async def async_start(self) -> None:
+        self._stopped_lag = False
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
+        self._lag_probe()
         bus = getattr(self.hass, "bus", None)
         if bus is not None and hasattr(bus, "async_listen"):
             self._unsubs.append(bus.async_listen("mobile_app_notification_action", self._on_notify_action))
@@ -228,6 +231,9 @@ class Haus:
         self.update()
 
     async def async_stop(self) -> None:
+        self._stopped_lag = True
+        if getattr(self, "_lag_handle", None):
+            self._lag_handle.cancel()
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
@@ -260,6 +266,7 @@ class Haus:
     async def _async_later(self, _now=None) -> None:
         self._notify()
 
+    @perf.timed("haus.minute")
     async def _async_tick(self, _now=None) -> None:
         before = (self.away, self.approaching, self.vacation)
         await self._async_refresh_calendar()
@@ -1302,9 +1309,28 @@ class Haus:
         if level is not None and (not self._radio_trend or now - self._radio_trend[-1][0] >= 290):
             self._radio_trend = [x for x in self._radio_trend if now - x[0] < 86400] + [(now, level)]
 
+    def _lag_probe(self) -> None:
+        """Verzug der Ereignisschleife von Home Assistant messen (alle 5 s): wie spät ein geplanter Aufruf drankommt."""
+        loop = getattr(self.hass, "loop", None)
+        if loop is None or not hasattr(loop, "call_later"):
+            return
+        due = loop.time() + 5
+
+        def fire() -> None:
+            if self._stopped_lag:
+                return
+            perf.record("ha.verzug", max(0.0, (loop.time() - due) * 1000))
+            self._lag_probe()
+
+        self._lag_handle = loop.call_later(5, fire)
+
+    def _timed_status(self, k: str, fn) -> Any:
+        with perf.timer(f"status.{k}"):
+            return fn()
+
     def status(self) -> dict[str, Any]:
         return {
-            **{k: fn() for k, fn in self.extra_status.items()},
+            **{k: self._timed_status(k, fn) for k, fn in self.extra_status.items()},
             "away": self.away,
             "notify": self.notify_summary(),
             "approaching": self.approaching,

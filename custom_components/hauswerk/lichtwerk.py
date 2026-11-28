@@ -23,6 +23,7 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import perf
 from .const import LIGHT_STORAGE_KEY
 from .core import Haus
 from .hmlinks import HmLinks, sensor_kind, split_peer
@@ -139,6 +140,7 @@ class Lichtwerk:
             self._state_unsub = async_track_state_change_event(self.hass, sorted(ids), self._on_change)
 
     @callback
+    @perf.timed("lichtwerk.zustand")
     def _on_change(self, event: Event) -> None:
         eid = event.data.get("entity_id")
         new, old = event.data.get("new_state"), event.data.get("old_state")
@@ -385,6 +387,7 @@ class Lichtwerk:
         return {"days": days, "lights": lights, "suggestions": sugg,
                 "health": {eid: h for eid in self.settings.get("lw_lights") or [] if (h := self._health(eid))}}
 
+    @perf.timed("lichtwerk.minute")
     async def _async_tick(self, _now=None) -> None:
         self._count_usage()
         if dt_util.utcnow().timestamp() >= self._links_next:
@@ -580,6 +583,7 @@ class Lichtwerk:
         return day_events(prof, self._sun_fn(offset), allowed, shift)
 
     # ------------------------------------------------------------ Auswerten
+    @perf.timed("lichtwerk.berechnen")
     async def async_evaluate(self) -> None:
         now = dt_util.utcnow().timestamp()
         local = dt_util.now()
@@ -595,7 +599,11 @@ class Lichtwerk:
                 _LOGGER.warning("Lichtwerk: %s nicht auswertbar: %s", eid, err)
         self._last_min, self._last_day = now_min, today
         self._notify(now, lights)
-        self._status = self._build_status(now_min, elev)
+        with perf.timer("status.lichtwerk"):
+            self._status = self._build_status(now_min, elev)
+        if self._subscribers:
+            perf.count("meldung.lichtwerk")
+            perf.size("meldung.lichtwerk", self._status)
         for cb in list(self._subscribers):
             cb(self._status)
 

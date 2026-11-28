@@ -13,6 +13,7 @@ from homeassistant.helpers.event import async_track_state_change_event, async_tr
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import perf
 from .appliance_logic import KEEP_RUNS, TYPES, Detector, to_watt
 
 _LOGGER = logging.getLogger(__name__)
@@ -91,6 +92,7 @@ class Appliances:
         return next((c for c in self._config() if c["id"] == dev_id), None)
 
     @callback
+    @perf.timed("kraftwerk.geraete_zustand")
     def _on_state(self, event: Event) -> None:
         entity_id = event.data["entity_id"]
         new: State | None = event.data.get("new_state")

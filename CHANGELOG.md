@@ -2,6 +2,15 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.110.0 – 2026-11-28
+
+### Neu – Leistung messen (Einstellungen › System › Leistung)
+- **Server:** je Messpunkt der letzten 15 Minuten, wie oft er läuft (je Minute), wie lange er braucht (Ø, 95 %, Höchstwert) – Berechnen von Heizwerk, Rollwerk und Lichtwerk, die Minuten-Durchläufe aller Module, Zustandsänderungen, das Zusammenstellen des Status je Modul (Hausdienste, Wachwerk, Beetwerk, Kraftwerk …), Geräte durchsuchen, Fertigerkennung. Dazu die Größe der Meldungen ans Panel und der **Verzug der Ereignisschleife** von Home Assistant (wie ausgelastet HA insgesamt ist).
+- **Jedes Gerät:** Ladezeit des Panels (aus dem Zwischenspeicher oder neu), Zeit bis zur ersten Seite, Zeichnen je Seite, Kopf und Fenster, Meldungen je Minute und ihre Größe, lange Aufgaben im Browser, Speicher und Anzahl der Elemente. Jedes Gerät schickt seine Werte jede Minute – so sind die Werte des Wand-Tablets auch am Handy zu sehen.
+- **Entität „Hauswerk Leistung“** (Diagnose): Rechenlast von Hauswerk in %, alle Einzelwerte als Attribute (werden nicht aufgezeichnet). Auch in der Diagnose-Datei.
+- „Kopieren“ legt alle Werte als Text in die Zwischenablage, „Zurücksetzen“ beginnt neu.
+- Die Messung selbst verändert nichts am Verhalten und kostet kaum Rechenzeit.
+
 ## 0.109.0 – 2026-11-28
 
 ### Neu – Wartung aus den Geräten

@@ -19,6 +19,7 @@ from homeassistant.helpers.event import async_call_later, async_track_time_inter
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import perf
 from .const import GARDEN_STORAGE_KEY
 from .logic import MOW_DAYS, plan_mowing
 from .core import Haus
@@ -411,6 +412,7 @@ class Beetwerk:
         v = self.hass.states.get(ent["valve"]) if ent.get("valve") else None
         return v is not None and v.state in ("open", "opening", "on")
 
+    @perf.timed("beetwerk.minute")
     async def _async_tick(self, _now=None) -> None:
         try:
             await self.async_evaluate()

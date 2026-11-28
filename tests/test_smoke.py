@@ -96,7 +96,7 @@ def hw(tmp_path_factory):
     pkg = root / "hw"
     pkg.mkdir()
     _mod("homeassistant.config_entries", ConfigEntry=object)
-    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py", "hmlinks.py", "beetwerk.py", "wachwerk.py", "dienste.py", "kw_watch.py", "devmaint.py"):
+    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py", "hmlinks.py", "beetwerk.py", "wachwerk.py", "dienste.py", "kw_watch.py", "devmaint.py", "perf.py"):
         shutil.copy(SRC / name, pkg / name)
     (pkg / "__init__.py").write_text("")
     sys.path.insert(0, str(root))
@@ -112,6 +112,7 @@ def hw(tmp_path_factory):
         Wachwerk=importlib.import_module("hw.wachwerk").Wachwerk,
         Dienste=importlib.import_module("hw.dienste").Dienste,
         kw_watch=importlib.import_module("hw.kw_watch"),
+        perf=importlib.import_module("hw.perf"),
         light=importlib.import_module("hw.light_logic"),
         const=importlib.import_module("hw.const"),
     )
@@ -2826,6 +2827,32 @@ def test_wartung_ausbau(hw):
         await hd.async_task_done(one["id"], by="Assist")
         assert not any(t["id"] == one["id"] for t in hd.tasks())
         await hd.async_stop()
+    asyncio.run(run())
+
+
+def test_leistung_messen(hw):
+    """Leistung: Berechnen, Status je Modul und Meldungsgröße werden gemessen; Panels melden ihre Werte; Zurücksetzen."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 28, 8, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        hw.perf.reset()
+        log, haus, ctl = await _setup(hw, hass)
+        got = []
+        ctl.subscribe(got.append)
+        await ctl.async_evaluate()
+        s = hw.perf.summary()
+        assert "heizwerk.berechnen" in s["points"] and "status.gesamt" in s["points"] and s["points"]["meldung.heizwerk"]["total_n"] >= 1
+        assert s["sizes"]["meldung.heizwerk"] > 100 and got
+        @hw.perf.timed("test.sync")
+        def f(x):
+            return x * 2
+        assert f(2) == 4 and hw.perf.summary()["points"]["test.sync"]["total_n"] == 1
+        hw.perf.panel_report("Tablet · Android · Fully", {"pts": {"zeichnen.seite": {"avg": 120}}})
+        assert "Tablet · Android · Fully" in hw.perf.summary()["panels"]
+        hw.perf.reset()
+        assert not hw.perf.summary()["points"]
     asyncio.run(run())
 
 

@@ -17,6 +17,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import perf
 from .const import (DOMAIN, MODE_ACTIONS, MODULE_GARDEN, MODULE_HEATING, MODULE_LIGHT, MODULE_POWER, MODULE_SECURITY, MODULE_SHUTTER,
                     SERVICES_STORAGE_KEY)
 from . import devmaint
@@ -169,6 +170,7 @@ class Dienste:
     def _mod(self, key: str):
         return (self.hass.data.get(DOMAIN) or {}).get(key)
 
+    @perf.timed("dienste.minute")
     async def _async_tick(self, _now=None) -> None:
         self._scan_devices()
         self._track_use()
@@ -466,6 +468,7 @@ class Dienste:
         self._save()
 
     # ---- Wartung aus den Geräten
+    @perf.timed("dienste.geraete_suchen")
     def _scan_devices(self, force: bool = False) -> None:
         """Alle 10 Min.: Geräte nach Verschleiß, Verbrauchsmaterial und Batterien durchsuchen; Restwerte für die Prognose merken."""
         now = dt_util.utcnow().timestamp()

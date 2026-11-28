@@ -1300,6 +1300,33 @@ def ws_log_subscribe(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"])
 
 
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/perf"})
+@websocket_api.async_response
+async def ws_perf(hass: HomeAssistant, connection, msg) -> None:
+    """Leistung: Messwerte von Hauswerk (Server) und die Berichte der Panels."""
+    from . import perf  # noqa: PLC0415
+    connection.send_result(msg["id"], perf.summary())
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/perf/report", vol.Required("device"): vol.All(str, vol.Length(max=60)),
+                                  vol.Required("report"): vol.All(dict, vol.Length(max=60))})
+@websocket_api.async_response
+async def ws_perf_report(hass: HomeAssistant, connection, msg) -> None:
+    """Ein Panel meldet seine Messwerte (Laden, Zeichnen, Meldungen) – je Gerät der letzte Bericht."""
+    from . import perf  # noqa: PLC0415
+    perf.panel_report(msg["device"], msg["report"])
+    connection.send_result(msg["id"], {})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/perf/reset"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_perf_reset(hass: HomeAssistant, connection, msg) -> None:
+    from . import perf  # noqa: PLC0415
+    perf.reset()
+    connection.send_result(msg["id"], perf.summary())
+
+
 COMMANDS = (
     ws_get,
     ws_subscribe,
@@ -1342,6 +1369,9 @@ COMMANDS = (
     ws_rw_profile_delete,
     ws_log_get,
     ws_log_subscribe,
+    ws_perf,
+    ws_perf_report,
+    ws_perf_reset,
     ws_appliance_action,
 )
 

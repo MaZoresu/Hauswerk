@@ -2616,3 +2616,21 @@ def test_kopfzeile_anwesenheit(panel):
     p.js(f"{EL}._closePop()")
     p.js(f"() => {{ {EL}._data.settings.look_header_people = false; {EL}._renderChrome(); }}")
     assert not p.has(".top .hpeople")
+
+
+def test_leistung(panel):
+    """System › Leistung: Server-Messpunkte, dieses Gerät (Zeichnen, Meldungen); Bericht an Home Assistant."""
+    p = panel
+    p.view("start")
+    p.wait(300)
+    p.js(f"{EL}._renderMain()")
+    s = p.js(f"{EL}._perfSummary()")
+    assert "zeichnen.seite" in s["pts"] and s["device"]
+    p.js(f"{EL}._openPop('perf')")
+    p.wait(400)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    assert "Server (Home Assistant)" in txt and "Dieses Gerät" in txt and "Zeichnen" in txt, txt[:400]
+    p.click('#pop [data-action="perf-refresh"]')
+    p.wait(300)
+    assert any(m["type"] == "hauswerk/perf" for m in p.sent())
+    assert "Tablet · Android · Fully" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")

@@ -23,6 +23,7 @@ from homeassistant.helpers.event import (
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import perf
 from .const import (
     CALENDAR_REFRESH,
     HEAT_DEFAULTS,
@@ -1067,6 +1068,7 @@ class Heizen:
         return out
 
     @callback
+    @perf.timed("heizwerk.zustand")
     def _on_state_change(self, event: Event) -> None:
         entity_id = event.data["entity_id"]
         new = event.data.get("new_state")
@@ -1171,6 +1173,7 @@ class Heizen:
         self._pending_eval = None
         await self.async_evaluate()
 
+    @perf.timed("heizwerk.minute")
     async def _async_tick(self, _now=None) -> None:
         if dt_util.utcnow().timestamp() >= self._links_next:
             await self.async_refresh_links()
@@ -1396,6 +1399,7 @@ class Heizen:
         ]
 
     # ------------------------------------------------------------ Regelung
+    @perf.timed("heizwerk.berechnen")
     async def async_evaluate(self) -> None:
         now_local = dt_util.now()
         now = dt_util.utcnow().timestamp()
@@ -1630,9 +1634,13 @@ class Heizen:
             await self._demand(now)
         except Exception:  # noqa: BLE001 - Wärmeerzeuger nicht erreichbar: Räume trotzdem weiter regeln
             _LOGGER.exception("Fehler bei der Wärmeanforderung")
-        status = self.status()
-        for cb in list(self._subscribers):
-            cb(status)
+        with perf.timer("status.gesamt"):
+            status = self.status()
+        if self._subscribers:
+            perf.count("meldung.heizwerk")
+            perf.size("meldung.heizwerk", status)
+            for cb in list(self._subscribers):
+                cb(status)
         async_dispatcher_send(self.hass, SIGNAL_UPDATE)
 
     # ------------------------------------------------------------ Verläufe, Erkennung, Nachrichten

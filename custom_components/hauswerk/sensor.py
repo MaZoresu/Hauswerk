@@ -5,10 +5,14 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature, UnitOfTime
+from datetime import timedelta
+
+from homeassistant.const import MATCH_ALL, EntityCategory, UnitOfTemperature, UnitOfTime
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import perf
 from .entity import RoomEntity, setup_room_entities
 
 
@@ -21,6 +25,40 @@ async def async_setup_entry(
         async_add_entities,
         lambda ctl, room_id: [TargetSensor(ctl, room_id), HeatTimeSensor(ctl, room_id)],
     )
+    async_add_entities([PerfSensor()])
+
+
+class PerfSensor(SensorEntity):
+    """Rechenlast von Hauswerk in % (Anteil der Zeit, die Hauswerk rechnet) – Einzelwerte als Attribute (nicht aufgezeichnet)."""
+
+    _attr_should_poll = False
+    _attr_has_entity_name = False
+    _attr_name = "Hauswerk Leistung"
+    _attr_unique_id = "hauswerk_leistung"
+    _attr_icon = "mdi:speedometer"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _unrecorded_attributes = frozenset({MATCH_ALL})
+
+    async def async_added_to_hass(self) -> None:
+        self.async_on_remove(async_track_time_interval(self.hass, self._tick, timedelta(minutes=1)))
+
+    async def _tick(self, _now=None) -> None:
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> float:
+        pts = perf.summary()["points"]
+        # „minute“ enthält bei Heizwerk, Rollwerk und Lichtwerk das Berechnen – nicht doppelt zählen
+        calc = {k.split(".")[0] for k in pts if k.endswith(".berechnen")}
+        return round(sum(v["load"] for k, v in pts.items()
+                         if not k.startswith(("status.", "ha.", "meldung.")) and not (k.endswith(".minute") and k.split(".")[0] in calc)), 3)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        s = perf.summary()
+        return {"punkte": s["points"], "meldungen_bytes": s["sizes"], "panels": s["panels"]}
 
 
 class TargetSensor(RoomEntity, SensorEntity):

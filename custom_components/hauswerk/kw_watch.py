@@ -20,6 +20,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.event import async_call_later, async_track_time_change, async_track_time_interval
 from homeassistant.util import dt as dt_util
 
+from . import perf
 from .core import Haus
 from .log import Protokoll
 
@@ -139,6 +140,7 @@ class KwWatch:
         self._since.setdefault(key, now)
         return now - self._since[key] >= minutes * 60
 
+    @perf.timed("kraftwerk.waechter")
     async def _async_live(self, _now=None) -> None:
         p = self._settings()
         now = dt_util.utcnow().timestamp()

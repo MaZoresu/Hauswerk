@@ -44,6 +44,12 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     except Exception:  # noqa: BLE001
         pass
 
+    try:
+        from . import perf
+
+        out["leistung"] = perf.summary()
+    except Exception:  # noqa: BLE001
+        pass
     found: set[str] = set()
     if haus is not None:
         out["haus"] = {"settings": haus.settings, "status": haus.status()}

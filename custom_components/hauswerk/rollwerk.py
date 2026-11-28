@@ -22,6 +22,7 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from . import perf
 from .const import DOMAIN, MODULE_HEATING, MODULE_SECURITY, SHUTTER_STORAGE_KEY, WINDOW_OPEN_STATES
 from .core import Haus, async_calendar_events, parse_when
 from .log import Protokoll, log_settings
@@ -387,6 +388,7 @@ class Rollwerk:
             self._state_unsub = async_track_state_change_event(self.hass, sorted(ids), self._on_change)
 
     @callback
+    @perf.timed("rollwerk.zustand")
     def _on_change(self, _event: Event) -> None:
         if self._pending is None:
             self._pending = async_call_later(self.hass, 2, self._async_later)
@@ -399,6 +401,7 @@ class Rollwerk:
     def _on_house(self) -> None:
         self.hass.async_create_task(self.async_evaluate())
 
+    @perf.timed("rollwerk.minute")
     async def _async_tick(self, _now=None) -> None:
         self._track()  # Fenster der Heizwerk-Räume können sich geändert haben
         await self._async_refresh()
@@ -1050,6 +1053,7 @@ class Rollwerk:
             return floor, f"{self._name(open_now[0])} offen – nicht herunterfahren (trotz Erzwingen)", "ventilation"
         return target, reason, cat
 
+    @perf.timed("rollwerk.berechnen")
     async def async_evaluate(self, initial: bool = False) -> None:
         now = dt_util.utcnow().timestamp()
         local = dt_util.now()
@@ -1166,9 +1170,13 @@ class Rollwerk:
                                 for e in self.settings.get("rw_covers") or [] if (self._rt.get(e) or {}).get("opened_on") in (today, None)}
         self._persist["day_date"] = today
         self._save(30)
-        status = self.status()
-        for cb in list(self._subscribers):
-            cb(status)
+        if self._subscribers:
+            with perf.timer("status.rollwerk"):
+                status = self.status()
+            perf.count("meldung.rollwerk")
+            perf.size("meldung.rollwerk", status)
+            for cb in list(self._subscribers):
+                cb(status)
 
     def _manual_reset(self, entity_id: str, prof: dict, rt: dict, now: float, local, pos: float | None) -> None:
         """Manuelle Übersteuerung zurücksetzen: feste Uhrzeit, nach Minuten oder in einer Stellung."""

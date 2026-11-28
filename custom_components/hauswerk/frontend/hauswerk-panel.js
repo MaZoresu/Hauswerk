@@ -1,6 +1,7 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.109.0";
+const HW_T_START = typeof performance !== "undefined" ? performance.now() : null; // Leistung: Skript geladen
+const VERSION = "0.110.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -939,6 +940,8 @@ class HauswerkPanel extends HTMLElement {
       this._status = this._data.status;
       this._renderShell();
       this._renderMain();
+      if (this._perfFirst == null) this._perfFirst = performance.now();
+      this._perfStart();
       this._subscribe();
       this._scrollRestore();
     } catch (err) {
@@ -947,9 +950,124 @@ class HauswerkPanel extends HTMLElement {
     }
   }
 
+  // ------------------------------------------------------------ Leistung messen (System › Leistung)
+  /** Messwert merken (ms); je Name die letzten 15 Min., höchstens 1000 Werte. */
+  _perfRec(name, ms) {
+    const p = (this._perf ||= { t0: Date.now(), pts: {}, sizes: {}, long: { n: 0, ms: 0 } });
+    const now = Date.now();
+    const a = (p.pts[name] ||= []);
+    a.push([now, ms]);
+    if (a.length > 1000 || (a.length > 50 && now - a[0][0] > 900000)) {
+      while (a.length && (a.length > 1000 || now - a[0][0] > 900000)) a.shift();
+    }
+  }
+
+  /** Meldung vom Server: zählen und (höchstens alle 30 s) die Größe messen. */
+  _perfMsg(name, msg) {
+    this._perfRec(name, 0);
+    const p = this._perf;
+    const last = p.sizes[name];
+    if (!last || Date.now() - last.at > 30000) {
+      try { p.sizes[name] = { at: Date.now(), bytes: JSON.stringify(msg).length }; } catch (e) { /* zu groß o. Ä. */ }
+    }
+  }
+
+  /** Zusammenfassung der Messwerte dieses Geräts. */
+  _perfSummary() {
+    const p = this._perf || { t0: Date.now(), pts: {}, sizes: {}, long: { n: 0, ms: 0 } };
+    const now = Date.now();
+    const span = Math.max(1, Math.min(900000, now - p.t0)) / 1000;
+    const pts = {};
+    for (const [k, a] of Object.entries(p.pts)) {
+      const v = a.filter((x) => now - x[0] <= 900000).map((x) => x[1]);
+      if (!v.length) continue;
+      const srt = [...v].sort((x, y) => x - y);
+      pts[k] = { per_min: +(v.length / span * 60).toFixed(2), avg: +(v.reduce((x, y) => x + y, 0) / v.length).toFixed(1),
+        p95: +srt[Math.min(srt.length - 1, Math.round(0.95 * (srt.length - 1)))].toFixed(1), max: +srt[srt.length - 1].toFixed(1),
+        load: +(v.reduce((x, y) => x + y, 0) / span / 10).toFixed(3) };
+    }
+    const res = performance.getEntriesByType?.("resource")?.find((r) => /hauswerk-panel\.js/.test(r.name));
+    const ua = navigator.userAgent;
+    return {
+      device: this._perfDevice(), ua: ua.slice(0, 160), tablet: !!this._tablet, tab: this._tab, version: VERSION,
+      load: { script_ms: res ? Math.round(res.duration) : null, script_kb: res?.transferSize ? Math.round(res.transferSize / 1024) : null, cached: res ? res.transferSize === 0 : null,
+        start_ms: HW_T_START != null && this._perfFirst != null ? Math.round(this._perfFirst - HW_T_START) : null },
+      heap_mb: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
+      dom: this.shadowRoot ? this.shadowRoot.querySelectorAll("*").length : null,
+      long: { n: p.long.n, ms: Math.round(p.long.ms), per_min: +(p.long.n / span * 60).toFixed(2) },
+      sizes: Object.fromEntries(Object.entries(p.sizes).map(([k, v]) => [k, v.bytes])),
+      pts,
+    };
+  }
+
+  _perfDevice() {
+    const ua = navigator.userAgent;
+    const os = /iPhone/.test(ua) ? "iPhone" : /iPad|Macintosh.*Mobile/.test(ua) ? "iPad" : /Android/.test(ua) ? "Android" : /Windows/.test(ua) ? "Windows" : /Mac OS/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "Gerät";
+    const app = /Fully/i.test(ua) ? "Fully" : /Home ?Assistant/i.test(ua) ? "App" : /Firefox/.test(ua) ? "Firefox" : /Edg\//.test(ua) ? "Edge" : /Chrome/.test(ua) ? "Chrome" : /Safari/.test(ua) ? "Safari" : "Browser";
+    return `${this._tablet ? "Tablet" : /iPhone|Android.*Mobile/.test(ua) ? "Handy" : "PC"} · ${os} · ${app}`;
+  }
+
+  /** Messen starten: lange Aufgaben im Browser beobachten, jede Minute den Bericht an Home Assistant schicken. */
+  _perfStart() {
+    if (this._perfTimer) return;
+    this._perf ||= { t0: Date.now(), pts: {}, sizes: {}, long: { n: 0, ms: 0 } };
+    try {
+      this._perfObs = new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) { this._perf.long.n++; this._perf.long.ms += e.duration; }
+      });
+      this._perfObs.observe({ type: "longtask", buffered: true });
+    } catch (e) { /* Browser ohne longtask (z. B. Safari) */ }
+    const send = () => {
+      if (!this._hass || !this.isConnected) return;
+      const r = this._perfSummary();
+      this._hass.callWS({ type: "hauswerk/perf/report", device: r.device.slice(0, 60), report: r }).catch(() => null);
+    };
+    setTimeout(send, 20000);
+    this._perfTimer = setInterval(send, 60000);
+  }
+
+  /** Fenster: Leistung – Server (je Messpunkt) und Geräte (Laden, Zeichnen, Meldungen). */
+  _perfPop() {
+    const srv = this._perfSrv;
+    if (srv === undefined) {
+      this._perfSrv = null;
+      this._hass.callWS({ type: "hauswerk/perf" }).then((r) => { this._perfSrv = r; this._renderPop(); }).catch(() => { this._perfSrv = false; this._renderPop(); });
+    }
+    const me = this._perfSummary();
+    const NAMES = { berechnen: "berechnen", minute: "jede Minute", zustand: "Zustandsänderung", geraete_suchen: "Geräte durchsuchen", waechter: "Wächter",
+      geraete_zustand: "Fertigerkennung", gesamt: "gesamt", verzug: "Verzug der Ereignisschleife", seite: "Seite", rahmen: "Kopf und Leisten", fenster: "Fenster",
+      dienste: "Hausdienste", appliances: "Fertigerkennung", kw_watch: "Kraftwerk-Wächter", beetwerk: "Beetwerk", wachwerk: "Wachwerk", heizwerk: "Heizwerk", rollwerk: "Rollwerk", lichtwerk: "Lichtwerk" };
+    const label = (k) => { const [m, w] = k.split("."); return `${({ heizwerk: "Heizwerk", rollwerk: "Rollwerk", lichtwerk: "Lichtwerk", beetwerk: "Beetwerk", wachwerk: "Wachwerk", dienste: "Hausdienste", haus: "Hauswerk", kraftwerk: "Kraftwerk", status: "Status", meldung: "Meldung", ha: "Home Assistant", zeichnen: "Zeichnen" })[m] || m} · ${NAMES[w] || w || ""}`; };
+    const ms = (v) => (v >= 100 ? fmt(v, 0) : v >= 10 ? fmt(v, 1) : fmt(v, 2));
+    const col = (v, warn, bad) => (v >= bad ? "#ef4444" : v >= warn ? "#f59e0b" : "var(--text)");
+    const table = (pts, isMsg) => {
+      const rows = Object.entries(pts || {}).sort((a, b) => (b[1].load - a[1].load) || (b[1].per_min - a[1].per_min));
+      return rows.length ? `<div class="pf-t"><div class="pf-h"><span>Messpunkt</span><span>je Min.</span><span>Ø ms</span><span>95 %</span><span>max</span></div>
+        ${rows.map(([k, v]) => { const m = k.startsWith("meldung."); return `<div class="pf-r"><span>${esc(label(k))}</span><span>${fmt(v.per_min, v.per_min < 10 ? 1 : 0)}</span>
+          <span>${m ? "–" : `<b style="color:${col(v.avg, 50, 200)}">${ms(v.avg)}</b>`}</span><span>${m ? "–" : ms(v.p95)}</span><span>${m ? "–" : `<span style="color:${col(v.max, 200, 1000)}">${ms(v.max)}</span>`}</span></div>`; }).join("")}</div>` : `<p class="muted">Noch keine Messwerte.</p>`;
+    };
+    const kb = (b) => (b == null ? "–" : b >= 1024 * 1024 ? `${fmt(b / 1048576, 1)} MB` : `${fmt(b / 1024, b < 10240 ? 1 : 0)} KB`);
+    const sizes = (sz) => Object.entries(sz || {}).map(([k, v]) => `<div class="kv"><span>${esc(label(k))}</span><b>${kb(v)}</b></div>`).join("");
+    const dev = (r) => `<div class="kv"><span>Panel laden</span><b>${r.load?.script_ms != null ? `${fmt(r.load.script_ms, 0)} ms${r.load.cached ? " (Zwischenspeicher)" : r.load.script_kb ? ` · ${r.load.script_kb} KB` : ""}` : "–"}</b></div>
+      <div class="kv"><span>Bis zur ersten Seite</span><b>${r.load?.start_ms != null ? `${fmt(r.load.start_ms, 0)} ms` : "–"}</b></div>
+      <div class="kv"><span>Lange Aufgaben (über 50 ms)</span><b>${r.long ? `${fmt(r.long.per_min, 1)}/Min. · ${fmt(r.long.ms, 0)} ms gesamt` : "–"}</b></div>
+      <div class="kv"><span>Speicher · Elemente</span><b>${r.heap_mb != null ? `${r.heap_mb} MB` : "–"} · ${r.dom ?? "–"}</b></div>${sizes(r.sizes)}${table(r.pts)}`;
+    const since = srv?.since ? Math.round((Date.now() / 1000 - srv.since) / 60) : null;
+    const panels = srv?.panels ? Object.entries(srv.panels).filter(([k]) => k !== me.device) : [];
+    return { icon: "mdi:speedometer", c: "#64748b", title: "Leistung", sub: "Letzte 15 Minuten", wide: true, open: true,
+      body: `<div class="lbl">Server (Home Assistant)${since != null ? ` · gemessen seit ${since < 120 ? `${since} Min.` : `${Math.round(since / 60)} Std.`}` : ""}</div>
+        ${srv === null || srv === undefined ? `<div class="chart-empty"><div class="spinner"></div></div>` : srv === false ? `<p class="muted">Nicht abrufbar.</p>` : `${table(srv.points)}${sizes(srv.sizes)}`}
+        <div class="lbl">Dieses Gerät · ${esc(me.device)}</div>${dev(me)}
+        ${panels.map(([k, r]) => `<details class="mt-sec"><summary><ha-icon icon="mdi:monitor-cellphone"></ha-icon><b>${esc(k)}</b><span class="grow"></span><small class="muted">vor ${Math.max(0, Math.round((Date.now() / 1000 - r.at) / 60))} Min.</small><ha-icon icon="mdi:chevron-down"></ha-icon></summary><div class="mt-body">${dev(r)}</div></details>`).join("")}
+        <small class="muted">Ø unter 50 ms ist unkritisch; Werte über 200 ms machen sich als Ruckeln bemerkbar. „Verzug der Ereignisschleife“ zeigt, wie sehr Home Assistant insgesamt ausgelastet ist. Jedes Gerät schickt seine Werte jede Minute; die Entität „Hauswerk Leistung“ zeigt die Rechenlast in %.</small>`,
+      foot: `${this._admin ? `<button class="link" data-action="perf-reset"><ha-icon icon="mdi:restart"></ha-icon>Zurücksetzen</button>` : ""}<span class="grow"></span>
+        <button class="secondary" data-action="perf-copy"><ha-icon icon="mdi:content-copy"></ha-icon>Kopieren</button><button class="secondary" data-action="perf-refresh"><ha-icon icon="mdi:refresh"></ha-icon>Aktualisieren</button>` };
+  }
+
   _subscribe() {
     this._unsub = this._hass.connection.subscribeMessage(
       (status) => {
+        this._perfMsg("meldung.heizwerk", status);
         this._status = status;
         if (["start", "overview", "security"].includes(this._tab) && !this._busy) this._renderMain();
         else this._renderChrome();
@@ -961,6 +1079,7 @@ class HauswerkPanel extends HTMLElement {
       this._rwStatus = this._data.rollwerk.status;
       this._rwUnsub = this._hass.connection.subscribeMessage(
         (status) => {
+          this._perfMsg("meldung.rollwerk", status);
           this._rwStatus = status;
           if (["shutters", "start"].includes(this._tab) && !this._busy && !this._pop) this._renderMain();
         },
@@ -971,6 +1090,7 @@ class HauswerkPanel extends HTMLElement {
       this._lwStatus = this._data.lichtwerk.status;
       this._lwUnsub = this._hass.connection.subscribeMessage(
         (status) => {
+          this._perfMsg("meldung.lichtwerk", status);
           this._lwStatus = status;
           if (["lights", "start"].includes(this._tab) && !this._busy && !this._pop) this._renderMain();
         },
@@ -10218,6 +10338,8 @@ class HauswerkPanel extends HTMLElement {
               : (rd.entities || []).length ? "Sensor gerade ohne Wert" : "Kein Duty-Cycle-Sensor gefunden",
             warn: !!rd.busy, words: "funk duty cycle homematic ccu auslastung befehle drosseln" };
         })(),
+        { g: "System", id: "perf", icon: "mdi:speedometer", c: "#64748b", title: "Leistung",
+          sum: "Wie lange Hauswerk rechnet und zeichnet, wie oft Meldungen kommen – Server und jedes Gerät", words: "leistung performance schnell langsam ladezeit rechenzeit diagnose messen" },
         { g: "System", id: "access", val: p.allow_users ? "alle" : "Admins", icon: "mdi:shield-account-outline", c: "#94a3b8", title: "Berechtigungen",
           sum: p.allow_users ? "Alle Benutzer dürfen ändern" : "Nur Administratoren dürfen ändern", words: "admin benutzer rechte tablet speichern" },
       ];
@@ -10793,6 +10915,7 @@ class HauswerkPanel extends HTMLElement {
     const was = this._pop?.id;
     this._mtDraft = null;
     this._mdDraft = null;
+    this._perfSrv = undefined;
     this.removeAttribute("setdock");
     this._pop = null;
     this._settings = null;
@@ -10979,6 +11102,7 @@ class HauswerkPanel extends HTMLElement {
     if (id.startsWith("mdone:")) return this._maintDonePop(id.slice(6)) || { title: "Aufgabe nicht gefunden", body: "", foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     if (id.startsWith("mphoto:")) return this._maintPhotoPop(id.slice(7));
     if (id === "mset") return this._maintSetPop();
+    if (id === "perf") return this._perfPop();
     if (id.startsWith("mtask:")) return this._maintTaskPop(id.slice(6)) || { title: "Aufgabe nicht gefunden", body: "", foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     if (id === "presq") return { icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit", sub: "Hauswerk",
       gear: this._admin ? `data-action="settings-go" data-sub="presence"` : null, body: `<div class="presq">${this._presenceCompact("m")}</div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
@@ -14385,6 +14509,20 @@ class HauswerkPanel extends HTMLElement {
         await this._maintReload();
         break;
       }
+      case "perf-refresh":
+        this._perfSrv = undefined;
+        this._renderPop();
+        break;
+      case "perf-reset":
+        this._perfSrv = await this._ws({ type: "hauswerk/perf/reset" });
+        this._perf = null;
+        this._renderPop();
+        break;
+      case "perf-copy": {
+        const txt = JSON.stringify({ server: this._perfSrv || null, geraet: this._perfSummary() }, null, 1);
+        try { await navigator.clipboard.writeText(txt); this._toast("Kopiert"); } catch (e) { this._toast("Kopieren nicht möglich – bitte Diagnose herunterladen"); }
+        break;
+      }
       case "mt-ignore":
       case "mt-unignore": {
         const cur = this._data.settings.hd_dev_ignore || [];
@@ -16979,6 +17117,9 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .mrow button.sm { min-height:34px; padding:0 12px; font-size:13px; white-space:nowrap; }
 .mrow-act { display:flex; align-items:center; gap:6px; flex:none; } .mrow-act:empty { display:none; }
 @media (max-width:600px) { .msec .mrow { flex-wrap:wrap; } .msec .mrow-act { width:100%; padding-left:46px; } }
+.pf-t { font-size:13px; margin:4px 0 10px; } .pf-h, .pf-r { display:grid; grid-template-columns:minmax(0,1fr) 44px 48px 48px 48px; gap:6px; padding:5px 0; border-bottom:1px solid var(--line); align-items:center; }
+.pf-h { color:var(--muted); font-size:12px; } .pf-r > span:not(:first-child), .pf-h > span:not(:first-child) { text-align:right; font-variant-numeric:tabular-nums; }
+.pf-r > span:first-child { overflow-wrap:anywhere; line-height:1.25; }
 .mtags { display:flex; flex-wrap:wrap; gap:4px 6px; margin-top:5px; }
 .mtag { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:99px; font-size:12px; background:var(--card2); color:var(--muted); --mdc-icon-size:14px; white-space:nowrap; }
 .mtag.warn { background:color-mix(in srgb, #f59e0b 16%, transparent); color:#d97706; } .mtag.ok { background:color-mix(in srgb, #22c55e 15%, transparent); color:#16a34a; }
@@ -17851,4 +17992,17 @@ button.we:hover { background:color-mix(in srgb, var(--text) 5%, transparent); }
 
 `;
 
+// Leistung: Zeichnen messen (Seite je Ansicht, Rahmen, Fenster)
+for (const [m, n] of [["_renderMain", "zeichnen.seite"], ["_renderChrome", "zeichnen.rahmen"], ["_renderPop", "zeichnen.fenster"]]) {
+  const orig = HauswerkPanel.prototype[m];
+  if (typeof orig !== "function") continue;
+  HauswerkPanel.prototype[m] = function (...a) {
+    const t0 = performance.now();
+    try { return orig.apply(this, a); } finally {
+      const d = performance.now() - t0;
+      this._perfRec(n, d);
+      if (m === "_renderMain" && this._tab) this._perfRec(`zeichnen.${this._tab}`, d);
+    }
+  };
+}
 customElements.get("hauswerk-panel") || customElements.define("hauswerk-panel", HauswerkPanel);
