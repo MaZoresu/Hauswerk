@@ -2,6 +2,19 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.109.0 – 2026-11-28
+
+### Neu – Wartung aus den Geräten
+- **Hauswerk durchsucht Home Assistant** (alle 10 Min.) nach Verschleißteilen und Verbrauchsmaterial in den Geräten und legt je Gerät und Teil eine Aufgabe an:
+  - **Saugroboter** (z. B. Roborock): Restzeit von Haupt- und Seitenbürste, Filter, Sensoren, Wischtuch – „Robiboter: Filter · seit 35 Std. überfällig“.
+  - **Mähroboter:** Messerqualität bzw. Restzeit, dazu die Betriebsstunden der Messer.
+  - **Geschirrspüler, Kaffeemaschine, Luftreiniger …:** Salz, Klarspüler, Entkalken, Filter, Staubbeutel.
+  - **Batterien je Gerät:** „Batterie fast leer“ (Battery Notes) bzw. Ladestand unter der Grenze – mit Batterie-Typ, z. B. „Batterie wechseln: S_Klingeltaster · 2× AAA“. Handys, Tablets, Akku-Geräte (Saug-/Mähroboter) und Stromspeicher sind ausgenommen.
+- **Erledigt setzt im Gerät zurück:** Gibt es einen Knopf (z. B. „Messer zurücksetzen“, „Batterie ersetzt“ von Battery Notes), drückt Hauswerk ihn. Ohne Knopf (z. B. Roborock – dort in der App zurücksetzen) bleibt die Aufgabe ausgeblendet, bis das Gerät den neuen Wert meldet.
+- **Prognose:** Aus dem Verlauf der Restzeit schätzt Hauswerk, wann es so weit ist („noch 130 Std. · etwa in 12 Tagen“); Teile, die in 30 Tagen fällig werden, stehen unter „Demnächst“, alle übrigen unter „Aus den Geräten“ mit Balken.
+- Fällige Geräte-Wartung kommt als „Wartung fällig“ mit Knopf „Erledigt“.
+- **Einstellbar** unter Wartung › Zahnrad: an/aus, fällig ab 5–25 % bzw. ab einer Restzeit, was gefunden wurde, ausgeblendete Funde wieder anzeigen. Einzelne Funde lassen sich in der Zeile ausblenden (Auge).
+
 ## 0.108.1 – 2026-11-28
 
 ### Geändert – Tablet-Startseite

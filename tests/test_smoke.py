@@ -64,7 +64,7 @@ def _stub_homeassistant():
     helpers.device_registry = _mod("homeassistant.helpers.device_registry",
                                    async_get=lambda hass: types.SimpleNamespace(async_get=DEVS.get, devices=DEVS))
     helpers.entity_registry = _mod("homeassistant.helpers.entity_registry",
-         async_get=lambda hass: types.SimpleNamespace(async_get=REG.get), EVENT_ENTITY_REGISTRY_UPDATED="entity_registry_updated",
+         async_get=lambda hass: types.SimpleNamespace(async_get=REG.get, entities=REG), EVENT_ENTITY_REGISTRY_UPDATED="entity_registry_updated",
          async_entries_for_device=lambda r, d: [e for e in REG.values() if e.device_id == d],
          async_entries_for_config_entry=lambda r, c: [e for e in REG.values() if getattr(e, "config_entry_id", None) == c])
     helpers.area_registry = _mod("homeassistant.helpers.area_registry",
@@ -96,7 +96,7 @@ def hw(tmp_path_factory):
     pkg = root / "hw"
     pkg.mkdir()
     _mod("homeassistant.config_entries", ConfigEntry=object)
-    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py", "hmlinks.py", "beetwerk.py", "wachwerk.py", "dienste.py", "kw_watch.py"):
+    for name in ("controller.py", "core.py", "logic.py", "const.py", "log.py", "rollwerk.py", "kraftwerk.py", "rename.py", "appliance.py", "appliance_logic.py", "light_logic.py", "lichtwerk.py", "hmlinks.py", "beetwerk.py", "wachwerk.py", "dienste.py", "kw_watch.py", "devmaint.py"):
         shutil.copy(SRC / name, pkg / name)
     (pkg / "__init__.py").write_text("")
     sys.path.insert(0, str(root))
@@ -2825,6 +2825,92 @@ def test_wartung_ausbau(hw):
         assert next(t for t in hd.tasks() if t["id"] == one["id"])["left"] == 0
         await hd.async_task_done(one["id"], by="Assist")
         assert not any(t["id"] == one["id"] for t in hd.tasks())
+        await hd.async_stop()
+    asyncio.run(run())
+
+
+def test_wartung_aus_geraeten(hw):
+    """Geräte durchsuchen: Saugroboter (Restzeit Filter/Bürste), Mähroboter (Messer mit Knopf), Geschirrspüler (Salz),
+    Batterien (Battery Notes mit „Batterie ersetzt“); Handy, Akku-Geräte und Speicher nicht. Erledigt drückt den Knopf."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        DEVS.clear()
+        NOW[0] = datetime(2026, 11, 28, 8, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        log, haus, ctl = await _setup(hw, hass)
+
+        def ent(eid, dev, state, attrs=None, name=None, platform="x"):
+            hass.set(eid, state, attrs or {}, name)
+            REG[eid] = types.SimpleNamespace(entity_id=eid, device_id=dev, platform=platform, disabled_by=None, original_name=None)
+        for d, n, m in [("vac", "Robiboter", "roborock.vacuum.a15"), ("mow", "Automower", "Sileno"), ("dw", "Geschirrspüler", "SN75"),
+                        ("kt", "S_Klingeltaster", "HM-Sen-DB-PCB"), ("ipad", "iPad", "iPad7,11"), ("sb", "Solarbank", "Solarbank 3 E2700")]:
+            DEVS[d] = types.SimpleNamespace(name=n, name_by_user=None, model=m, area_id=None, config_entries=set())
+        ent("vacuum.s7", "vac", "docked", {}, "Robiboter")
+        ent("sensor.s7_verbleibende_filterzeit", "vac", "-35.3", {"device_class": "duration", "unit_of_measurement": "h"}, "Robiboter Verbleibende Filterzeit")
+        ent("sensor.s7_verbleibende_zeit_der_hauptburste", "vac", "218.7", {"device_class": "duration", "unit_of_measurement": "h"}, "Robiboter Restzeit für Hauptbürste")
+        ent("sensor.s7_gesamtreinigungszeit", "vac", "185", {"device_class": "duration", "unit_of_measurement": "h"}, "Robiboter Gesamtreinigungszeit")
+        ent("sensor.s7_batterie", "vac", "100", {"device_class": "battery", "unit_of_measurement": "%"}, "Robiboter Batterie")
+        ent("lawn_mower.automower", "mow", "docked", {}, "Automower")
+        ent("sensor.automower_mower_blades_quality", "mow", "0", {"unit_of_measurement": "%"}, "Automower Messerqualität")
+        ent("sensor.automower_mower_blades_hours", "mow", "70", {"device_class": "duration", "unit_of_measurement": "h"}, "Automower Betriebsstunden der Messer")
+        ent("button.automower_blades_reset", "mow", "unknown", {}, "Automower Messer zurücksetzen")
+        ent("button.automower_error_reset", "mow", "unknown", {}, "Automower Fehler zurücksetzen")
+        ent("sensor.geschirrspuler_salz_fast_leer", "dw", "present", {"device_class": "enum"}, "Geschirrspüler Salz fast leer")
+        ent("sensor.geschirrspuler_klarspuler_fast_leer", "dw", "off", {"device_class": "enum"}, "Geschirrspüler Klarspüler fast leer")
+        ent("binary_sensor.s_klingeltaster_battery_plus_low", "kt", "on", {"device_class": "battery"}, "S_Klingeltaster Batterie fast leer", "battery_notes")
+        ent("button.s_klingeltaster_battery_replaced", "kt", "unknown", {}, "S_Klingeltaster Batterie ersetzt", "battery_notes")
+        ent("sensor.s_klingeltaster_battery_type", "kt", "2× AAA", {}, "S_Klingeltaster Batterie-Typ", "battery_notes")
+        ent("binary_sensor.s_klingeltaster_batterie", "kt", "on", {"device_class": "battery"}, "S_Klingeltaster Batterie")
+        ent("sensor.ipad_battery_level", "ipad", "1", {"device_class": "battery", "unit_of_measurement": "%"}, "iPad Batterie", "mobile_app")
+        ent("sensor.solarbank_ladestand", "sb", "9", {"device_class": "battery", "unit_of_measurement": "%"}, "Solarbank Ladestand")
+        ent("sensor.solarbank_leistung", "sb", "120", {"device_class": "power", "unit_of_measurement": "W"}, "Solarbank Leistung")
+        hd = hw.Dienste(hass, log, haus)
+        await hd.async_load()
+        hass.data.setdefault("hauswerk", {}).update({"dienste": hd, "heizen": ctl})
+        hd._scan_devices(force=True)
+        by = {t["name"]: t for t in hd.tasks()}
+        assert by["Robiboter: Filter"]["left"] == 0 and "überfällig" in by["Robiboter: Filter"]["note"]
+        assert by["Robiboter: Hauptbürste"]["left"] is None and "noch 219 Std." in by["Robiboter: Hauptbürste"]["note"]
+        m = by["Automower: Messer"]
+        assert m["left"] == 0 and m["reset"] and "70 Std. in Gebrauch" in m["note"]
+        assert by["Geschirrspüler: Salz nachfüllen"]["left"] == 0 and "Geschirrspüler: Klarspüler nachfüllen" in by
+        bat = by["Batterie wechseln: S_Klingeltaster"]
+        assert bat["reset"] and "2× AAA" in bat["note"]
+        assert not any("iPad" in n or "Solarbank" in n or "Robiboter: Batterie" in n for n in by), list(by)
+        assert sum(1 for n in by if "Klingeltaster" in n) == 1  # nicht noch einmal über den Batterie-Melder
+        assert not any("Gesamt" in n for n in by)
+        # Erledigt: Mäher → Knopf „Messer zurücksetzen“; Batterie → „Batterie ersetzt“
+        await hd.async_task_done(m["id"], by="Test")
+        assert ("button", "press", {"entity_id": "button.automower_blades_reset"}) in hass.calls
+        await hd.async_task_done(bat["id"], by="Test")
+        assert ("button", "press", {"entity_id": "button.s_klingeltaster_battery_replaced"}) in hass.calls
+        assert hd.status()["history"][0]["what"].startswith("Batterie gewechselt")
+        # Saugroboter ohne Knopf: quittiert → ausgeblendet, bis im Gerät zurückgesetzt; danach wieder normal
+        f = by["Robiboter: Filter"]
+        await hd.async_task_done(f["id"], by="Test")
+        assert "Robiboter: Filter" not in [t["name"] for t in hd.tasks()]
+        hass.set("sensor.s7_verbleibende_filterzeit", "150", {"device_class": "duration", "unit_of_measurement": "h"}, "Robiboter Verbleibende Filterzeit")
+        t = next(t for t in hd.tasks() if t["name"] == "Robiboter: Filter")
+        assert t["left"] is None and not hd._persist["devack"].get(f["id"])
+        # Prognose: 2 Tage später 20 Std. weniger → noch ca. 14 Tage bis 10 Std.
+        hd._scan_devices(force=True)
+        NOW[0] += timedelta(days=2)
+        hass.set("sensor.s7_verbleibende_filterzeit", "130", {"device_class": "duration", "unit_of_measurement": "h"}, "Robiboter Verbleibende Filterzeit")
+        hd._scan_devices(force=True)
+        t = next(t for t in hd.tasks() if t["name"] == "Robiboter: Filter")
+        assert t["left"] == 12 and 0.8 < t["frac"] < 0.9, t
+        # fällige Geräte-Wartung → Nachricht
+        await haus.async_save_settings({"notify_targets": ["mobile_app_pixel"], "notify_quiet": False, "notify_maint": "normal"})
+        hd._check_tasks()
+        await asyncio.sleep(0)
+        assert "Wartung fällig" in hass.sent()
+        # ausblenden und abschalten
+        await hd.async_save_settings({"hd_dev_ignore": ["auto:dev:sensor.geschirrspuler_salz_fast_leer"]}, by="Test")
+        assert "Geschirrspüler: Salz nachfüllen" not in [t["name"] for t in hd.tasks()]
+        assert any(x["label"] == "Filter" for x in hd.status()["dev_found"])
+        await hd.async_save_settings({"hd_dev": False}, by="Test")
+        assert not any(t.get("dev") for t in hd.tasks())
         await hd.async_stop()
     asyncio.run(run())
 

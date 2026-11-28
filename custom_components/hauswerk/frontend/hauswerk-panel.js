@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.108.1";
+const VERSION = "0.109.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -3504,12 +3504,13 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _maintWhen(t) {
+    if (t.dev && t.left > 0) return `${t.note || ""} · etwa in ${t.left} Tagen`.replace(/^ · /, "");
     if (t.auto) return t.note || "jetzt";
     if (t.left == null) return t.months?.length ? "Saison" : "ohne Termin";
     if (t.left < 0) return `${-t.left} ${-t.left === 1 ? "Tag" : "Tage"} überfällig`;
     if (t.left === 0) return t.usage?.used != null && t.usage.used >= t.usage.every ? "jetzt fällig" : "heute fällig";
     if (t.left === 1) return "morgen";
-    return t.left <= 45 ? `${t.usage?.rate && !t.days ? "etwa " : ""}in ${t.left} Tagen` : `ab ${new Date(`${t.due}T12:00`).toLocaleDateString("de-DE", { day: "numeric", month: "long", year: t.left > 300 ? "numeric" : undefined })}`;
+    return t.left <= 45 || !t.due ? `${t.usage?.rate && !t.days ? "etwa " : ""}in ${t.left} Tagen` : `ab ${new Date(`${t.due}T12:00`).toLocaleDateString("de-DE", { day: "numeric", month: "long", year: t.left > 300 ? "numeric" : undefined })}`;
   }
 
   /** Kurzer Text, wie oft: „alle 3 Monate“, „Okt–Nov“, „alle 30 Durchläufe“. */
@@ -3532,7 +3533,7 @@ class HauswerkPanel extends HTMLElement {
     const due = t.left != null && t.left <= 0;
     const c = due ? (t.left < -14 ? "#ef4444" : "#f59e0b") : t.book ? "#f59e0b" : t.left != null && t.left <= 14 ? "#14b8a6" : "var(--muted)";
     const u = t.usage;
-    const frac = u?.used != null ? Math.max(0, Math.min(1, u.used / u.every)) : !t.auto && t.days && t.left != null && !t.months?.length ? Math.max(0, Math.min(1, 1 - t.left / t.days)) : null;
+    const frac = t.dev && t.frac != null ? Math.max(0, Math.min(1, 1 - t.frac)) : u?.used != null ? Math.max(0, Math.min(1, u.used / u.every)) : !t.auto && t.days && t.left != null && !t.months?.length ? Math.max(0, Math.min(1, 1 - t.left / t.days)) : null;
     const appt = t.appt_next ? new Date(t.appt_next.length > 10 ? t.appt_next : `${t.appt_next}T12:00`) : null;
     const tags = [
       t.person_name ? `<span class="mtag"><ha-icon icon="mdi:account"></ha-icon>${esc(t.person_name)}</span>` : "",
@@ -3540,6 +3541,7 @@ class HauswerkPanel extends HTMLElement {
       appt ? `<span class="mtag ok"><ha-icon icon="mdi:calendar-check"></ha-icon>Termin ${appt.toLocaleDateString("de-DE", { day: "numeric", month: "short" })}${t.appt_next.length > 10 ? ` ${t.appt_next.slice(11, 16)}` : ""}${t.pro_name ? ` · ${esc(t.pro_name)}` : ""}</span>` : "",
       t.book ? `<span class="mtag warn"><ha-icon icon="mdi:phone-outline"></ha-icon>Termin vereinbaren${t.pro_name ? ` · ${esc(t.pro_name)}` : ""}</span>` : "",
       t.derived ? `<span class="mtag"><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon>aus Meldung</span>` : "",
+      t.dev && t.reset ? `<span class="mtag"><ha-icon icon="mdi:restore"></ha-icon>${t.bat ? "setzt „Batterie ersetzt“" : "wird im Gerät zurückgesetzt"}</span>` : "",
     ].filter(Boolean).join("");
     const detail = !t.auto && (t.unit || t.pro);
     return `<div class="mrow ${due ? "due" : ""}" style="--c:${c}">
@@ -3548,9 +3550,10 @@ class HauswerkPanel extends HTMLElement {
         ${tags && !small ? `<span class="mtags">${tags}</span>` : ""}
         ${frac != null && !small ? `<i class="mrow-bar"><i style="width:${(frac * 100).toFixed(0)}%"></i></i>` : ""}</span>
       <span class="mrow-act">${t.book && t.phone && !small ? `<a class="secondary sm btnlink" href="tel:${esc(t.phone.replace(/[^0-9+]/g, ""))}" title="${esc(t.pro_name || "Anrufen")}"><ha-icon icon="mdi:phone"></ha-icon></a>` : ""}
-      ${due || !small ? `<button class="${due ? "primary" : "secondary"} sm" data-action="${detail ? "pop-open" : "maint-done"}" ${detail ? `data-pop="mdone:${esc(t.id)}"` : ""} data-id="${esc(t.id)}" title="${t.auto ? "Quittieren" : "Als erledigt markieren"}"><ha-icon icon="mdi:check"></ha-icon>${small ? "" : t.auto ? "Quittieren" : "Erledigt"}</button>` : ""}
+      ${due || !small ? `<button class="${due ? "primary" : "secondary"} sm" data-action="${detail ? "pop-open" : "maint-done"}" ${detail ? `data-pop="mdone:${esc(t.id)}"` : ""} data-id="${esc(t.id)}" title="${t.auto ? "Quittieren" : "Als erledigt markieren"}"><ha-icon icon="${t.dev && t.reset ? "mdi:restore" : "mdi:check"}"></ha-icon>${small ? "" : t.bat ? "Gewechselt" : t.dev && t.reset ? "Zurücksetzen" : t.dev ? "Erledigt" : t.auto ? "Quittieren" : "Erledigt"}</button>` : ""}
       ${!small && !detail ? `<button class="icon" data-action="pop-open" data-pop="mdone:${esc(t.id)}" title="${t.auto ? "Quittieren" : "Erledigt"} mit Notiz, Kosten oder Foto"><ha-icon icon="mdi:clipboard-text-outline"></ha-icon></button>` : ""}
       ${!t.auto && due && !small ? `<button class="secondary sm" data-action="maint-snooze" data-id="${esc(t.id)}" data-days="7" title="In 1 Woche erinnern">1 Woche</button>` : ""}
+      ${t.dev && !small && this._admin ? `<button class="icon" data-action="mt-ignore" data-id="${esc(t.id)}" title="Nicht mehr anzeigen"><ha-icon icon="mdi:eye-off-outline"></ha-icon></button>` : ""}
       ${!t.auto && !small && this._admin ? `<button class="icon" data-action="pop-open" data-pop="mtask:${esc(t.id)}" title="Bearbeiten"><ha-icon icon="mdi:pencil-outline"></ha-icon></button>` : ""}</span>
     </div>`;
   }
@@ -3562,7 +3565,8 @@ class HauswerkPanel extends HTMLElement {
     const tasks = hd.tasks || [];
     const due = tasks.filter((t) => t.left != null && t.left <= 0);
     const soon = tasks.filter((t) => !due.includes(t) && ((t.left != null && t.left <= 30) || t.book));
-    const later = tasks.filter((t) => !due.includes(t) && !soon.includes(t));
+    const devs = tasks.filter((t) => t.dev && !due.includes(t) && !soon.includes(t));
+    const later = tasks.filter((t) => !due.includes(t) && !soon.includes(t) && !devs.includes(t));
     const hist = hd.history || [];
     const c = due.some((t) => t.left < -14) ? "#ef4444" : due.length ? "#f59e0b" : "#22c55e";
     const yr = String(new Date().getFullYear());
@@ -3582,7 +3586,7 @@ class HauswerkPanel extends HTMLElement {
     const empty = !tasks.length ? `<section class="card empty"><ha-icon icon="mdi:wrench-clock" style="--mdc-icon-size:44px;color:#14b8a6"></ha-icon><h2>Wartung im Haus</h2>
       <p>Hier laufen Aufgaben auf, die regelmäßig anfallen – nach Zeit, nach Saison oder nach Nutzung (z. B. Waschmaschine nach 30 Durchläufen). Batterien, Melder, Mähermesser und was aus Meldungen folgt (Heizkörper blieb kalt → entlüften) erscheinen automatisch.</p>
       ${this._admin ? `<button class="primary" data-action="pop-open" data-pop="mtask:new"><ha-icon icon="mdi:plus"></ha-icon>Erste Aufgabe anlegen</button>` : ""}</section>` : "";
-    return head + empty + sec("Fällig", due) + sec("Demnächst", soon) + sec("Alle weiteren Aufgaben", later, !due.length && !soon.length) + cHtml + hHtml;
+    return head + empty + sec("Fällig", due) + sec("Demnächst", soon) + sec("Alle weiteren Aufgaben", later, !due.length && !soon.length) + sec("Aus den Geräten", devs, false) + cHtml + hHtml;
   }
 
   _maintHistRow(h) {
@@ -3635,12 +3639,27 @@ class HauswerkPanel extends HTMLElement {
 
   /** Fenster: Einstellungen der Wartung – Kalender für Termine, Hinweis auf Aufgabenliste und Kalender in Home Assistant. */
   _maintSetPop() {
-    const p = this._data.settings;
+    const p = this._settings || this._data.settings;
     const st = this._hass?.states || {};
     const cals = Object.keys(st).filter((e) => e.startsWith("calendar.") && !e.includes("hauswerk_wartung") && (st[e].attributes.supported_features & 1)).sort();
     return { icon: "mdi:cog-outline", c: "#14b8a6", title: "Wartung einstellen", sub: "Hauswerk · Wartung", foot: null,
       body: `<label class="field"><span>Termine beim Fachbetrieb eintragen in</span><select data-set="hd_calendar"><option value="">– nicht eintragen –</option>${cals.map((e) => `<option value="${e}" ${p.hd_calendar === e ? "selected" : ""}>${esc(st[e].attributes.friendly_name || e)}</option>`).join("")}</select>
           <small>Ein Termin, den du bei einer Aufgabe einträgst (z. B. Thermenwartung), landet einmal in diesem Kalender.</small></label>
+        <div class="lbl">Wartung aus den Geräten</div>
+        <label class="check"><span><b>Geräte durchsuchen</b><small>Saug- und Mähroboter (Bürsten, Filter, Sensoren, Messer), Geschirrspüler (Salz, Klarspüler), Filter und Entkalken, Batterien – je Gerät eine Aufgabe; „Erledigt“ drückt den Knopf zum Zurücksetzen im Gerät, wenn es einen gibt.</small></span>
+          <input type="checkbox" data-set="hd_dev" ${p.hd_dev !== false ? "checked" : ""}></label>
+        ${p.hd_dev !== false ? `<label class="field narrow"><span>Fällig ab Rest</span><select data-set="hd_dev_pct">${[5, 10, 15, 20, 25].map((v) => `<option value="${v}" ${Number(p.hd_dev_pct ?? 10) === v ? "selected" : ""}>${v} %</option>`).join("")}</select></label>
+          <label class="field narrow"><span>bzw. Restzeit</span><select data-set="hd_dev_hours">${[0, 5, 10, 20, 50].map((v) => `<option value="${v}" ${Number(p.hd_dev_hours ?? 10) === v ? "selected" : ""}>${v ? `${v} Std.` : "verbraucht"}</option>`).join("")}</select></label>
+          <small class="muted">Batterien: ab der Grenze unter Einstellungen › Batterie bzw. „Batterie fast leer“ (Battery Notes – dann drückt „Gewechselt“ auch „Batterie ersetzt“).</small>
+          ${(() => {
+            const found = this._status?.dienste?.dev_found || [];
+            const ign = p.hd_dev_ignore || [];
+            const byDev = {};
+            for (const f of found) (byDev[f.device || "Gerät"] ||= []).push(f.label);
+            return `<details class="mt-sec"><summary><ha-icon icon="mdi:magnify"></ha-icon><b>Gefunden: ${found.length}</b><span class="grow"></span><ha-icon icon="mdi:chevron-down"></ha-icon></summary><div class="mt-body">
+              ${Object.entries(byDev).map(([d, l]) => `<div class="kv"><span>${esc(d)}</span><b>${esc([...new Set(l)].join(", "))}</b></div>`).join("") || `<p class="muted">Nichts gefunden.</p>`}</div></details>
+              ${ign.length ? `<div class="lbl">Ausgeblendet</div>${ign.map((id) => `<div class="kv"><span>${esc(id.replace(/^auto:(dev|bat):/, "").replace(/^sensor\.|^binary_sensor\./, ""))}</span><button class="link" data-action="mt-unignore" data-id="${esc(id)}">wieder anzeigen</button></div>`).join("")}` : ""}`;
+          })()}` : ""}
         <div class="lbl">In Home Assistant</div>
         <div class="kv"><span><ha-icon icon="mdi:format-list-checks"></ha-icon> Aufgabenliste „Hauswerk Wartung“</span><b>${st["todo.hauswerk_wartung"] ? `${st["todo.hauswerk_wartung"].state} offen` : "–"}</b></div>
         <small class="muted">Was in den nächsten 30 Tagen fällig ist. Abhaken = erledigt, neue Einträge werden einmalige Aufgaben. Mit Assist: „Was steht auf Hauswerk Wartung?“ oder „Füge Glühbirne tauschen zu Hauswerk Wartung hinzu“.</small>
@@ -14363,6 +14382,16 @@ class HauswerkPanel extends HTMLElement {
         this._mtDraft = null;
         this._closePop();
         this._toast("Gespeichert");
+        await this._maintReload();
+        break;
+      }
+      case "mt-ignore":
+      case "mt-unignore": {
+        const cur = this._data.settings.hd_dev_ignore || [];
+        const list = el.dataset.action === "mt-ignore" ? [...new Set([...cur, el.dataset.id])] : cur.filter((x) => x !== el.dataset.id);
+        this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { hd_dev_ignore: list } });
+        if (this._settings) this._settings.hd_dev_ignore = list;
+        this._toast(el.dataset.action === "mt-ignore" ? "Ausgeblendet – wieder anzeigen unter Wartung › Zahnrad" : "Wird wieder angezeigt");
         await this._maintReload();
         break;
       }

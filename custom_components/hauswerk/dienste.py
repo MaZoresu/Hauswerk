@@ -19,6 +19,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (DOMAIN, MODE_ACTIONS, MODULE_GARDEN, MODULE_HEATING, MODULE_LIGHT, MODULE_POWER, MODULE_SECURITY, MODULE_SHUTTER,
                     SERVICES_STORAGE_KEY)
+from . import devmaint
 from .core import Haus
 from .log import Protokoll, log_settings
 
@@ -82,7 +83,11 @@ Fakten der letzten 7 Tage:
 HD_DEFAULTS: dict[str, Any] = {
     "hd_modes": {k: list(v["default"]) for k, v in MODES.items()},
     "hd_tasks": [],               # [{id, name, icon, days, last, months, use, person, pro, …}]
-    "hd_calendar": None,          # Kalender, in den Termine beim Fachbetrieb eingetragen werden (calendar.…)
+    "hd_calendar": None,
+    "hd_dev": True,               # Home Assistant nach Wartung in Geräten durchsuchen (Saugroboter, Mäher, Filter, Batterien …)
+    "hd_dev_pct": 10,             # fällig ab so viel % Rest
+    "hd_dev_hours": 10,           # fällig ab so vielen Stunden Rest
+    "hd_dev_ignore": [],          # ausgeblendete Funde (auto:dev:…, auto:bat:…)          # Kalender, in den Termine beim Fachbetrieb eingetragen werden (calendar.…)
     "hd_modes_show": False,       # Knöpfe der Hausmodi auf der Startseite (Standard aus)
     "hd_weekly": True,
     "hd_weekly_day": 6,           # 0 = Montag … 6 = Sonntag
@@ -110,6 +115,8 @@ class Dienste:
         self._photo_store: Store = Store(hass, 1, f"{SERVICES_STORAGE_KEY}_fotos")
         self._photos: dict[str, str] = {}
         self._snap: str = ""
+        self._devcands: list[dict] = []
+        self._devscan_at: float = 0
         haus.extra_status["dienste"] = self.status
 
     async def async_load(self) -> None:
@@ -119,6 +126,7 @@ class Dienste:
         self._photos = ((await self._photo_store.async_load()) or {}).get("photos") or {}
 
     async def async_start(self) -> None:
+        self._scan_devices(force=True)
         self.haus.action_handlers["hd_done"] = lambda d, by: self.async_task_done(str(d.get("id")), by=by)
         self._unsubs.append(async_track_time_interval(self.hass, self._async_tick, timedelta(minutes=1)))
 
@@ -153,6 +161,8 @@ class Dienste:
         self._save()
         self._check_tasks()
         self._changed()
+        if {"hd_dev", "hd_dev_ignore"} & set(settings):
+            self._scan_devices(force=True)
         if "hd_tasks" in settings or "hd_calendar" in settings:
             self.hass.async_create_task(self._async_export_appts())
 
@@ -160,6 +170,7 @@ class Dienste:
         return (self.hass.data.get(DOMAIN) or {}).get(key)
 
     async def _async_tick(self, _now=None) -> None:
+        self._scan_devices()
         self._track_use()
         self._derive()
         self._check_tasks()
@@ -364,11 +375,15 @@ class Dienste:
                 st = self.hass.states.get(t["person"])
                 rec["person_name"] = getattr(st, "name", None) if st is not None else None
             out.append(rec)
-        # automatisch: Batterien (binary_sensor Geräteklasse battery an)
+        # aus den Geräten: Verschleiß, Verbrauchsmaterial, Batterien (je Gerät)
+        dev_items, covered = self._dev_items() if self.settings.get("hd_dev", True) else ([], set())
+        out += dev_items
+        blades_dev = any(t.get("group") == "blades" for t in dev_items)
+        # automatisch: Batterien (binary_sensor Geräteklasse battery an) – soweit nicht schon über das Gerät erfasst
         ids = getattr(self.hass.states, "async_entity_ids", None)
         for eid in sorted(ids("binary_sensor")) if ids else []:
             st = self.hass.states.get(eid)
-            if st is None or st.state != "on":
+            if st is None or st.state != "on" or eid in covered:
                 continue
             dc = st.attributes.get("device_class")
             name = getattr(st, "name", eid) or eid
@@ -384,7 +399,7 @@ class Dienste:
                 ent = bw.entities()
                 st = self.hass.states.get(ent.get("blades_days") or "")
                 lim = float(bw.settings.get("bw_blades_days") or 0)
-                if st is not None and lim and float(st.state) >= lim:
+                if st is not None and lim and float(st.state) >= lim and not blades_dev:
                     out.append({"id": "auto:blades", "name": "Mähroboter: Messer wechseln", "icon": "mdi:saw-blade", "auto": True, "left": 0})
             except (TypeError, ValueError):
                 pass
@@ -392,7 +407,7 @@ class Dienste:
             try:
                 icons = {"blades": "mdi:saw-blade", "battery": "mdi:battery-heart-variant", "wire": "mdi:vector-polyline", "wlan": "mdi:wifi-strength-1-alert", "humid": "mdi:water-alert-outline"}
                 for k, txt in (bw.wear(bw.entities()) or {}).items():
-                    if txt and not (k == "blades" and any(x["id"] == "auto:blades" for x in out)):
+                    if txt and not (k == "blades" and (blades_dev or any(x["id"] == "auto:blades" for x in out))):
                         out.append({"id": f"auto:bw_{k}", "name": f"Mähroboter: {txt.split(' – ')[-1] if ' – ' in txt else txt}", "note": txt,
                                     "icon": icons.get(k, "mdi:robot-mower-outline"), "auto": True, "left": 0, "room": "Garten"})
             except Exception:  # noqa: BLE001 - Beetwerk ohne Mäher
@@ -407,7 +422,7 @@ class Dienste:
                 except Exception:  # noqa: BLE001
                     low = []
                 for b in low:
-                    if b["id"] in seen:
+                    if b["id"] in seen or b["id"] in covered:
                         continue
                     seen.add(b["id"])
                     out.append({"id": f"auto:{b['id']}", "name": f"Batterie wechseln: {b['name']}", "note": f"noch {round(b['level'])} %",
@@ -449,6 +464,100 @@ class Dienste:
         self.log.add("settings", f"Wartung verschoben: {t.get('name') if t else task_id}", f"bis {until} · {by or ''}".strip(" ·"), module="haus")
         self.haus.clear(f"maint:{task_id}")
         self._save()
+
+    # ---- Wartung aus den Geräten
+    def _scan_devices(self, force: bool = False) -> None:
+        """Alle 10 Min.: Geräte nach Verschleiß, Verbrauchsmaterial und Batterien durchsuchen; Restwerte für die Prognose merken."""
+        now = dt_util.utcnow().timestamp()
+        if not self.settings.get("hd_dev", True):
+            self._devcands = []
+            return
+        if force or now - self._devscan_at >= 600:
+            self._devscan_at = now
+            try:
+                self._devcands = devmaint.scan(self.hass, set(self.settings.get("hd_dev_ignore") or []))
+            except Exception:  # noqa: BLE001 - die Suche darf nichts anderes stören
+                _LOGGER.debug("Wartung: Geräte durchsuchen fehlgeschlagen", exc_info=True)
+            life = self._persist.setdefault("devlife", {})
+            for c in self._devcands:
+                if c["type"] != "dev" or c["kind"] not in ("pct", "dur") or c["mode"] != "remain":
+                    continue
+                ev = devmaint.evaluate(c, self.hass, 0, 0, 0)
+                if not ev or not isinstance(ev.get("value"), (int, float)):
+                    continue
+                v = float(ev["value"])
+                rec = life.get(c["eid"])
+                if rec is None or v > float(rec.get("v", v)) + max(0.5, 0.01 * float(rec.get("max") or 0)):
+                    rec = life[c["eid"]] = {"t0": now, "v0": v, "max": max(v, float((rec or {}).get("max") or 0))}
+                rec["v"] = v
+                rec["max"] = max(float(rec.get("max") or 0), v)
+
+    def _dev_items(self) -> tuple[list[dict[str, Any]], set[str]]:
+        """Funde aus den Geräten als Aufgaben: je Gerät und Teil eine (Rest, fällig, Knopf zum Zurücksetzen); Batterien nur, wenn schwach."""
+        pct = float(self.settings.get("hd_dev_pct") or 10)
+        hours = float(self.settings.get("hd_dev_hours") or 10)
+        bat_pct = float(self.haus.settings.get("battery_low") or 20)
+        life = self._persist.get("devlife") or {}
+        devack = self._persist.setdefault("devack", {})
+        now = dt_util.utcnow().timestamp()
+        out: list[dict[str, Any]] = []
+        covered: set[str] = set()
+        groups: dict[tuple, list] = {}
+        for c in self._devcands:
+            if c["type"] == "bat":
+                covered.update(c.get("entities") or [])
+                ev = devmaint.evaluate(c, self.hass, pct, hours, bat_pct)
+                if not ev or not ev["due"]:
+                    continue
+                note = " · ".join(x for x in (c.get("battery_type"), ev["text"]) if x and x != "ok")
+                out.append({"id": c["id"], "name": f"Batterie wechseln: {c['device']}", "icon": "mdi:battery-alert-variant-outline", "auto": True,
+                            "dev": True, "bat": True, "left": 0, "room": c.get("area"), "note": note, "reset": bool(c.get("button")), "frac": ev.get("frac")})
+            else:
+                groups.setdefault((c["device"], c["group"]), []).append(c)
+        for (_dev, _g), cs in groups.items():
+            evs = [(c, devmaint.evaluate(c, self.hass, pct, hours, bat_pct)) for c in cs]
+            evs = [(c, e) for c, e in evs if e]
+            if not evs:
+                continue
+            main = next(((c, e) for c, e in evs if not e.get("info")), evs[0])
+            c, ev = main
+            btn = next((x["button"] for x, _e in evs if x.get("button")), None)
+            extra = [e["text"] for x, e in evs if x is not c and e.get("info")]
+            ack = devack.get(c["id"])
+            if ack:
+                cur = ev.get("value")
+                if isinstance(cur, (int, float)) and isinstance(ack.get("v"), (int, float)):
+                    reset = cur > float(ack["v"]) + 0.5
+                else:
+                    reset = cur != ack.get("v")
+                if reset or now - float(ack.get("at") or 0) > 30 * 86400:
+                    devack.pop(c["id"], None)
+                elif ev["due"]:
+                    continue  # quittiert, im Gerät noch nicht zurückgesetzt
+            left = 0 if ev["due"] else None
+            frac = ev.get("frac")
+            rec = life.get(c.get("eid"))
+            if rec and not ev["due"] and isinstance(ev.get("value"), (int, float)):
+                days = (now - float(rec["t0"])) / 86400
+                drop = float(rec["v0"]) - float(ev["value"])
+                thr = pct if c["kind"] == "pct" else hours
+                if days >= 1 and drop > 0:
+                    left = max(1, int((float(ev["value"]) - thr) / (drop / days) + 0.999))
+                if frac is None and rec.get("max"):
+                    frac = max(0.0, min(1.0, float(ev["value"]) / float(rec["max"])))
+            if frac is None and c["kind"] == "dur" and isinstance(ev.get("value"), (int, float)) and ev["value"] <= 0:
+                frac = 0.0
+            name = f"{c['device']}: {c['label']}" if c["device"] else c["label"]
+            out.append({"id": c["id"], "name": name, "icon": c["icon"], "auto": True, "dev": True, "left": left, "room": c.get("area"),
+                        "note": " · ".join([ev["text"], *extra]), "frac": frac, "reset": bool(btn), "info": bool(ev.get("info")) and not ev["due"],
+                        "group": c["group"]})
+        return out, covered
+
+    def dev_found(self) -> list[dict[str, Any]]:
+        """Für die Einstellungen: alles, was in den Geräten gefunden wurde (auch ausgeblendet)."""
+        return [{"id": c["id"], "device": c["device"], "label": "Batterie" if c["type"] == "bat" else c["label"],
+                 "entity": c.get("eid") or c.get("low") or c.get("level"), "button": c.get("button"), "area": c.get("area")}
+                for c in self._devcands]
 
     def _track_use(self) -> None:
         """Nutzung je Aufgabe mitzählen: Durchläufe der Fertigerkennung, Betriebsminuten, Zählerstand beim Erledigen."""
@@ -538,6 +647,14 @@ class Dienste:
         today = dt_util.now().date()
         local = dt_util.now()
         for t in self.tasks():
+            if t.get("dev") and not t.get("bat"):
+                key = f"maint:{t['id']}"
+                if t.get("left") == 0:
+                    self.haus.notify(key, "maint", "Wartung fällig", f"{t['name']} – {t.get('note') or ''}".strip(" –"),
+                                     actions=[{"title": "Erledigt", "do": "hd_done", "data": {"id": t["id"]}}])
+                else:
+                    self.haus.clear(key)
+                continue
             if t.get("auto"):
                 continue
             tid = t.get("id")
@@ -576,6 +693,33 @@ class Dienste:
             for old in list(self._photos)[:-PHOTO_KEEP]:
                 self._photos.pop(old, None)
             self._photo_store.async_delay_save(lambda: {"photos": self._photos}, 5)
+        if task_id.startswith(("auto:dev:", "auto:bat:")):
+            item = next((t for t in self.tasks() if t["id"] == task_id), None)
+            c = next((x for x in self._devcands if x["id"] == task_id), None)
+            pressed = None
+            group = [x for x in self._devcands if c is not None and x["type"] == "dev" and x.get("device") == c.get("device") and x.get("group") == c.get("group")]
+            btn = (c or {}).get("button") or next((x["button"] for x in group if x.get("button")), None)
+            if btn:
+                try:
+                    await self.hass.services.async_call("button", "press", {"entity_id": btn}, blocking=True, context=self._ctx)
+                    pressed = btn
+                except Exception as err:  # noqa: BLE001
+                    self.log.add("settings", f"Zurücksetzen fehlgeschlagen: {btn}", str(err), module="haus")
+            if c is not None and c["type"] == "dev":
+                ev = devmaint.evaluate(c, self.hass, 0, 0, 0) or {}
+                self._persist.setdefault("devack", {})[task_id] = {"v": ev.get("value"), "at": dt_util.utcnow().timestamp()}
+                (self._persist.get("devlife") or {}).pop(c.get("eid"), None)
+            else:
+                self._persist.setdefault("acks", {})[task_id] = dt_util.now().date().isoformat()
+            what = ("Batterie gewechselt" if task_id.startswith("auto:bat:") else "erledigt") + (" · im Gerät zurückgesetzt" if pressed else "")
+            name = item["name"] if item else task_id
+            self._hist(name, (item or {}).get("icon"), by, what + (f" – {note}" if note else ""), task=task_id, cost=cost, photo=pid,
+                       room=(item or {}).get("room"))
+            self.log.add("settings", f"Wartung erledigt: {name}", (by or "") + (f" · {pressed} gedrückt" if pressed else ""), module="haus")
+            self.haus.clear(f"maint:{task_id}")
+            self._save()
+            self._changed()
+            return
         if task_id.startswith("auto:"):
             item = next((t for t in self.tasks() if t["id"] == task_id), None)
             self._persist.setdefault("acks", {})[task_id] = dt_util.now().date().isoformat()
@@ -896,6 +1040,7 @@ class Dienste:
             "tasks": self.tasks(),
             "history": (self._persist.get("history") or [])[:60],
             "costs": self.costs(),
+            "dev_found": self.dev_found(),
             "templates": TASK_TEMPLATES,
             "weekly_sent": self._persist.get("weekly_sent"),
             "ai_entity": self.ai_entity(),

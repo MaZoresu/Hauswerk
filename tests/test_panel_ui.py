@@ -2588,6 +2588,17 @@ def test_wartung_bereich(panel):
     p.wait(300)
     assert p.has('#pop [data-set="hd_calendar"]') and "Hauswerk Wartung" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
     p.js(f"{EL}._closePop()")
+    # Wartung aus den Geräten: Schalter, Funde; Zeile ausblenden
+    p.js(f"{EL}._openPop('mset')")
+    p.wait(300)
+    assert p.has('#pop [data-set="hd_dev"]') and "Robiboter" in p.js(f"{EL}.shadowRoot.querySelector('#pop').textContent")
+    p.js(f"{EL}._closePop()")
+    p.view("maint")
+    p.wait(300)
+    if p.has('[data-action="mt-ignore"]'):
+        p.click('[data-action="mt-ignore"]')
+        p.wait(300)
+        assert any(m["type"].endswith("settings/save") and m.get("settings", {}).get("hd_dev_ignore") for m in p.sent())
     # Widget
     html = p.js(f"{EL}._w_maint({{}}, 'm')")
     assert "mrow" in html or "Nichts fällig" in html
