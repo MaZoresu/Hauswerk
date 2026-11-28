@@ -150,7 +150,7 @@ ROOM_SCHEMA = vol.Schema(
 )
 
 WIDGET_TYPES = ["vent", "light", "heat", "presence", "weather", "rooms", "shortcuts", "windows", "schedule", "report", "values", "forecast",
-                "hints", "power", "shutters", "rwnext", "energy", "lage", "events", "calendar", "mower"]
+                "hints", "power", "shutters", "rwnext", "energy", "lage", "events", "calendar", "mower", "maint"]
 WIDGET_SCHEMA = vol.Schema(
     {
         vol.Required("id"): vol.All(str, vol.Length(min=1, max=20)),
@@ -223,6 +223,7 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("look_accent"): _opt(vol.Match(r"^#[0-9a-fA-F]{6}$")),
         vol.Optional("look_background"): vol.In(["pattern", "daytime", "plain"]),
         vol.Optional("look_header_weather"): bool,
+        vol.Optional("look_header_people"): bool,
         vol.Optional("look_header_clock"): bool,
         # Wetter-Hinweise
         vol.Optional("cold_snap_temp"): vol.All(vol.Coerce(float), vol.Range(min=-30, max=25)),
@@ -316,7 +317,9 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("hd_tasks"): vol.All([{vol.Optional("id"): vol.All(str, vol.Length(max=20)), vol.Required("name"): vol.All(str, vol.Length(min=1, max=80)),
                                             vol.Optional("icon"): _opt(vol.All(str, vol.Length(max=60))),
                                             vol.Required("days"): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
-                                            vol.Optional("last"): _opt(vol.All(str, vol.Match(r"^\d{4}-\d{2}-\d{2}$")))}], vol.Length(max=50)),
+                                            vol.Optional("last"): _opt(vol.All(str, vol.Match(r"^\d{4}-\d{2}-\d{2}$"))),
+                                            vol.Optional("room"): _opt(vol.All(str, vol.Length(max=60))),
+                                            vol.Optional("note"): _opt(vol.All(str, vol.Length(max=200)))}], vol.Length(max=80)),
         vol.Optional("hd_weekly"): bool,
         vol.Optional("hd_modes_show"): bool,
         vol.Optional("hd_weekly_day"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
@@ -577,13 +580,25 @@ async def ws_hd_get(hass: HomeAssistant, connection, msg) -> None:
     connection.send_result(msg["id"], hd.status())
 
 
-@websocket_api.websocket_command({vol.Required("type"): "hauswerk/dienste/task_done", vol.Required("task"): vol.All(str, vol.Length(max=20))})
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/dienste/task_done", vol.Required("task"): vol.All(str, vol.Length(max=120)),
+                                  vol.Optional("note"): vol.All(str, vol.Length(max=200))})
 @websocket_api.async_response
 async def ws_task_done(hass: HomeAssistant, connection, msg) -> None:
     hd = _hd(hass)
     if hd is None:
         return _not_ready(connection, msg)
-    await hd.async_task_done(msg["task"], by=_who(connection))
+    await hd.async_task_done(msg["task"], by=_who(connection), note=msg.get("note"))
+    connection.send_result(msg["id"], {"status": hd.status()})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/dienste/task_snooze", vol.Required("task"): vol.All(str, vol.Length(max=20)),
+                                  vol.Required("days"): vol.All(vol.Coerce(int), vol.Range(min=1, max=365))})
+@websocket_api.async_response
+async def ws_task_snooze(hass: HomeAssistant, connection, msg) -> None:
+    hd = _hd(hass)
+    if hd is None:
+        return _not_ready(connection, msg)
+    await hd.async_task_snooze(msg["task"], msg["days"], by=_who(connection))
     connection.send_result(msg["id"], {"status": hd.status()})
 
 
@@ -1282,6 +1297,7 @@ COMMANDS = (
     ws_boiler_history,
     ws_hd_get,
     ws_task_done,
+    ws_task_snooze,
     ws_weekly,
     ws_ww_alarm,
     ws_rw_profile_save,

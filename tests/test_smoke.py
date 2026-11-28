@@ -2693,6 +2693,18 @@ def test_wachwerk_und_hausdienste(hw):
         await hd.async_task_done(own["id"], by="Test")
         own = [t for t in hd.tasks() if not t["auto"]][0]
         assert own["left"] == 365
+        assert hd.status()["history"][0]["name"] == "Rauchmelder testen" and hd.status()["history"][0]["by"] == "Test"
+        # automatische Aufgabe quittieren: 3 Tage ausgeblendet, steht in „zuletzt erledigt“
+        bat = next(t for t in hd.tasks() if t["name"].startswith("Batterie wechseln: Fenster Bad"))
+        await hd.async_task_done(bat["id"], by="Test")
+        assert not any(t["id"] == bat["id"] for t in hd.tasks()) and hd.status()["history"][0]["what"] == "quittiert"
+        # verschieben: fällige Aufgabe 7 Tage später
+        await hd.async_save_settings({"hd_tasks": [*hd.settings["hd_tasks"], {"name": "Filter", "days": 30, "room": "Küche"}]}, by="Test")
+        f = next(t for t in hd.tasks() if t["name"] == "Filter")
+        assert f["left"] == 0 and f["room"] == "Küche"
+        await hd.async_task_snooze(f["id"], 7, by="Test")
+        f = next(t for t in hd.tasks() if t["name"] == "Filter")
+        assert f["left"] == 7 and f["snoozed"]
         # Wochenbericht: Sonntag 18:00 vorbei → einmal
         rep = await hd.async_weekly_report()
         assert rep["title"] == "Wochenbericht" and any(l.startswith("🛡️ Wachwerk: 1× geklingelt") for l in rep["lines"]), rep

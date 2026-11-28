@@ -2525,3 +2525,45 @@ def test_kraftwerk_abschlag_standby_wand(panel, browser, server):
     t.wait(1500)
     assert t.has(".kwwall .kwwall-now") and t.has(".kwwall .kw-flow")
     page.close()
+
+
+def test_wartung_bereich(panel):
+    """Bereich Wartung: fällig mit Erledigt/Quittieren/1 Woche, Aufgabe anlegen mit Raum, Widget, Zugang über „Mehr“ und Glocke."""
+    p = panel
+    p.view("maint")
+    p.wait(400)
+    txt = p.js(f"{EL}.shadowRoot.querySelector('#main').innerText")
+    assert "fällig" in txt and p.has('.mrow [data-action="maint-done"]')
+    tid = p.js(f"{EL}.shadowRoot.querySelector('.mrow [data-action=\"maint-done\"]').dataset.id")
+    p.click(f'.mrow [data-action="maint-done"][data-id="{tid}"]')
+    p.wait(300)
+    assert any(m["type"] == "hauswerk/dienste/task_done" and m["task"] == tid for m in p.sent())
+    if p.has('[data-action="maint-snooze"]'):
+        p.click('[data-action="maint-snooze"]')
+        p.wait(200)
+        assert any(m["type"] == "hauswerk/dienste/task_snooze" and m["days"] == 7 for m in p.sent())
+    p.js(f"{EL}._openPop('mtask:new')")
+    p.wait(300)
+    p.js(f"""() => {{ const r = {EL}.shadowRoot; r.getElementById('mt-name').value = 'Pelletlager prüfen'; r.getElementById('mt-days').value = '30';
+        const s = r.getElementById('mt-room'); s.value = s.options[1]?.value || ''; }}""")
+    p.click('#pop [data-action="mt-save"]')
+    p.wait(400)
+    saved = [m["settings"]["hd_tasks"] for m in p.sent() if m["type"].endswith("settings/save") and "hd_tasks" in m.get("settings", {})]
+    assert saved and saved[-1][-1]["name"] == "Pelletlager prüfen" and saved[-1][-1]["days"] == 30 and saved[-1][-1].get("room"), saved
+    # Widget
+    html = p.js(f"{EL}._w_maint({{}}, 'm')")
+    assert "mrow" in html or "Nichts fällig" in html
+
+
+def test_kopfzeile_anwesenheit(panel):
+    """Kopfzeile: Anwesenheit mit Personen (Punkt zu Hause/unterwegs); Antippen öffnet die Auswahl; abschaltbar."""
+    p = panel
+    p.view("start")
+    p.wait(300)
+    assert p.has(".top .hpeople .hp")
+    p.click(".top .hpeople")
+    p.wait(300)
+    assert p.has('#pop [data-action="presence"]')
+    p.js(f"{EL}._closePop()")
+    p.js(f"() => {{ {EL}._data.settings.look_header_people = false; {EL}._renderChrome(); }}")
+    assert not p.has(".top .hpeople")

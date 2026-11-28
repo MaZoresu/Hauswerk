@@ -2,6 +2,18 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.107.0
+
+### Neu: Wartung im Haus
+- Eigener Bereich „Wartung“ (Seite, Start-Widget, Kachel unter „Mehr“, Link aus der Glocke): alle Aufgaben nach Fälligkeit – überfällig, bald fällig, später.
+- Aufgaben mit einem Tipp quittieren, um eine Woche verschieben, Raum und Notiz hinterlegen; Verlauf der letzten Erledigungen.
+- Neue Vorlagen (u. a. Rauchmelder testen, Filter wechseln, Dachrinne, Heizung entlüften).
+- Automatische Aufgaben: Verschleißteile aus Beetwerk und schwache Batterien der Heizwerk-Thermostate (mit Raum) – quittierbar.
+
+### Kopfzeile: Anwesenheit
+- Oben rechts zeigen Bilder bzw. Anfangsbuchstaben, wer zu Hause ist (grüner Punkt) und wer unterwegs; dazu Urlaub/Abwesend sowie Gäste, Party und Eco. Antippen öffnet die Anwesenheitsauswahl.
+- Auf dem Handy kompakt als Zähler. Abschaltbar unter Darstellung.
+
 ## 0.106.2 – 2026-11-28
 
 ### Behoben (Kraftwerk › Stromfresser)

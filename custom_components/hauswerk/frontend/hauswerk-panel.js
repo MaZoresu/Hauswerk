@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.106.2";
+const VERSION = "0.107.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -233,6 +233,7 @@ Object.assign(WIDGETS, {
   calendar: { name: "Termine", icon: "mdi:calendar-month-outline", c: "#f472b6", text: "Termine heute und morgen, z. B. Müllabfuhr – mit Symbol je Müllart", config: true, cal: true , open: "agenda" },
   vent: { name: "Lüften", icon: "mdi:weather-windy", c: "#22d3ee", text: "Wo jetzt gelüftet werden sollte (mit Dauer), laufende Lüftungen mit Countdown, Schimmelgefahr", go: "vent" },
   mower: { name: "Mähroboter", icon: "mdi:robot-mower-outline", c: "#16a34a", text: "Zustand mit Bild, Akku, Mähen und Zur Station; groß mit Mähstunden der Woche und nächstem Start", go: "garden" },
+  maint: { name: "Wartung", icon: "mdi:wrench-clock", c: "#14b8a6", text: "Was im Haus fällig ist – Batterien, Filter, Rauchmelder, Mähermesser – mit Erledigt", go: "maint" },
   light: { name: "Licht", icon: "mdi:lightbulb-outline", c: "#6366f1", text: "Wie viele Lichter an sind, nächste Schaltung, Alle aus; groß mit allen Lichtern zum Schalten", go: "lights" },
 });
 const DEFAULT_WIDGETS = [{ type: "heat", size: "m" }, { type: "weather", size: "s" }, { type: "windows", size: "s" }, { type: "presence", size: "l" }, { type: "rooms", size: "l" }];
@@ -602,7 +603,7 @@ const APP_STATE = { idle: ["Bereit", "#64748b", "mdi:power-sleep"], running: ["L
 const KW_POPS = ["kwdetect", "kwsolar", "kwgrid", "kwbatt", "kwhome", "kwcons", "kwinvest", "kwbill"];
 // Geplante Module: nur ausgegraut angezeigt, noch ohne Funktion.
 const COMING = [];
-const SLUGS = { start: "start", house: "einstellungen", log: "protokoll", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])),
+const SLUGS = { start: "start", house: "einstellungen", log: "protokoll", maint: "wartung", ...Object.fromEntries(HEAT_VIEWS.map((v) => [v.id, `heizen/${v.slug}`])),
   ...Object.fromEntries(SHUT_VIEWS.map((v) => [v.id, `rollwerk/${v.slug}`])), ...Object.fromEntries(KW_VIEWS.map((v) => [v.id, `kraftwerk/${v.slug}`])),
   ...Object.fromEntries(LW_VIEWS.map((v) => [v.id, `lichtwerk/${v.slug}`])), ...Object.fromEntries(BW_VIEWS.map((v) => [v.id, `beetwerk/${v.slug}`])),
   ...Object.fromEntries(WW_VIEWS.map((v) => [v.id, `wachwerk/${v.slug}`])) };
@@ -846,7 +847,26 @@ class HauswerkPanel extends HTMLElement {
       const w = this._weather();
       if (w) parts.push(`<span class="hwx" title="${esc(w.name)}: ${esc(w.label)}"><ha-icon icon="${w.icon}"></ha-icon>${fmt(w.temp)}°</span>`);
     }
-    return parts.length ? `<div class="hinfo">${parts.join("")}</div>` : "";
+    return (p.look_header_people !== false ? this._headPeople() : "") + (parts.length ? `<div class="hinfo">${parts.join("")}</div>` : "");
+  }
+
+  /** Anwesenheit oben rechts: je Person Bild bzw. Anfangsbuchstabe mit Punkt (zu Hause / unterwegs), dazu Urlaub/Abwesend/Gäste. */
+  _headPeople() {
+    let people;
+    try { people = this._people(); } catch (e) { return ""; }
+    if (!people.length) return "";
+    const s = this._status || {};
+    const set = this._data.settings;
+    const mode = s.vacation ? ["mdi:palm-tree", "Urlaub", "#f59e0b"] : s.away ? ["mdi:home-export-outline", "Abwesend", "#94a3b8"] : null;
+    const extra = [["guest", "mdi:account-group-outline", "Gäste"], ["party", "mdi:party-popper", "Party"], ["eco_force", "mdi:leaf", "Eco"]].filter(([k]) => set[k]);
+    const av = (p) => `<span class="hp ${p.home ? "home" : "away"}" title="${esc(p.name)}: ${esc(p.home ? "zu Hause" : `${p.where}${p.distTxt ? ` (${p.distTxt})` : ""}`)}">
+      ${p.pic ? `<img src="${esc(p.pic)}" alt="">` : `<b>${esc(p.name.slice(0, 1).toUpperCase())}</b>`}<i></i></span>`;
+    const home = people.filter((p) => p.home).length;
+    return `<button class="hinfo hpeople" data-action="pop-open" data-pop="presq" title="Anwesenheit: ${home} von ${people.length} zu Hause" aria-label="Anwesenheit">
+      ${mode ? `<ha-icon class="hp-mode" icon="${mode[0]}" style="color:${mode[2]}" title="${mode[1]}"></ha-icon>` : ""}
+      <span class="hp-c"><ha-icon icon="${mode ? mode[0] : home ? "mdi:home-account" : "mdi:home-export-outline"}"></ha-icon><b>${home}</b></span>
+      <span class="hps">${people.slice(0, 4).map(av).join("")}${people.length > 4 ? `<span class="hp more"><b>+${people.length - 4}</b></span>` : ""}</span>
+      ${extra.map(([, i, l]) => `<ha-icon class="hp-x" icon="${i}" title="${l}"></ha-icon>`).join("")}</button>`;
   }
   set narrow(value) {
     this._narrow = value;
@@ -1153,6 +1173,7 @@ class HauswerkPanel extends HTMLElement {
     // /hauswerk/einstellungen = zentrale Hauswerk-Einstellungen
     if (parts[1] === "einstellungen") return "house";
     if (parts[1] === "protokoll") return "log";
+    if (parts[1] === "wartung") return "maint";
     // alte Adressen (/hauswerk/raeume …) weiter verstehen
     const old = HEAT_VIEWS.find((v) => v.slug === parts[1]);
     return old ? old.id : DEFAULT_VIEW;
@@ -1299,8 +1320,8 @@ class HauswerkPanel extends HTMLElement {
       `<button class="bn ${on(ids)}" data-action="${act}" data-tab="${tab}"><span class="bi">${modIcon(icon)}${badge}</span><span>${label}</span></button>`;
     const badge = (m) => (m.id === "heizen" && f && (f.open || f.heating) ? `<em class="${f.open ? "warn" : ""}">${f.open || f.heating}</em>` : "");
     const { top, more } = this._bnavMods();
-    const moreOn = [...more.flatMap((m) => m.views), ...SET_VIEWS, "log"].includes(this._tab);
-    const moreBadge = more.some((m) => badge(m)) ? `<em class="dot"></em>` : "";
+    const moreOn = [...more.flatMap((m) => m.views), ...SET_VIEWS, "log", "maint"].includes(this._tab);
+    const moreBadge = more.some((m) => badge(m)) || (this._status?.dienste?.tasks || []).some((t) => t.left != null && t.left <= 0) ? `<em class="dot"></em>` : "";
     return [
       item("start", ["start"], "mdi:view-dashboard-outline", "Start"),
       ...top.map((m) => item(m.views.includes(this._tab) ? this._tab : m.views[0], m.views, m.logo ? `logo:${m.logo}` : m.icon, m.name, badge(m), "bn-mod")),
@@ -1318,7 +1339,7 @@ class HauswerkPanel extends HTMLElement {
     const tile = (tab, icon, name, sub = "") => `<button class="bnm" data-action="bn-go" data-tab="${tab}"><span class="bi">${modIcon(icon)}</span><b>${esc(name)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</button>`;
     return { icon: "mdi:dots-grid", c: "var(--accent)", title: "Mehr", sub: "Module und Einstellungen",
       body: `<div class="bnm-grid">${more.map((m) => tile(m.views[0], m.logo ? `logo:${m.logo}` : m.icon, m.name, m.id === "heizen" && (f.open || f.heating) ? `${f.heating} heizen${f.open ? ` · ${f.open} offen` : ""}` : "")).join("")}
-        ${tile("house", "mdi:cog-outline", "Einstellungen")}${tile("log", "mdi:text-box-search-outline", "Protokoll")}</div>
+        ${tile("maint", "mdi:wrench-clock", "Wartung", (() => { const n = (this._status?.dienste?.tasks || []).filter((t) => t.left != null && t.left <= 0).length; return n ? `${n} fällig` : ""; })())}${tile("house", "mdi:cog-outline", "Einstellungen")}${tile("log", "mdi:text-box-search-outline", "Protokoll")}</div>
         <p class="muted small">Die untere Leiste zeigt die vier Module, die du auf diesem Gerät am häufigsten öffnest.</p>`,
       foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
   }
@@ -1357,7 +1378,7 @@ class HauswerkPanel extends HTMLElement {
       for (const x of [...(ww.smoke || []), ...(ww.co || []), ...(ww.water || [])]) if (["unavailable", "unknown", null].includes(x.state)) add("info", "mdi:smoke-detector-variant-off", "Melder nicht erreichbar", x.name, "tab", { tab: "security" });
       if (ww.alarm?.state === "triggered") add("warn", "mdi:alarm-light", "Alarmanlage ausgelöst", this._entityName(ww.alarm.entity), "tab", { tab: "security" });
     }
-    for (const t of s.dienste?.tasks || []) if (t.left != null && t.left <= 0) add("info", t.icon || "mdi:wrench-clock", t.auto ? t.name : `Wartung fällig: ${t.name}`, t.auto ? "Wartung" : t.left < 0 ? `${-t.left} Tage überfällig` : "heute fällig", "settings-go", { sub: "maint" });
+    for (const t of s.dienste?.tasks || []) if (t.left != null && t.left <= 0) add("info", t.icon || "mdi:wrench-clock", t.auto ? t.name : `Wartung fällig: ${t.name}`, t.auto ? "Wartung" : t.left < 0 ? `${-t.left} Tage überfällig` : "heute fällig", "tab", { tab: "maint" });
     if (s.waste_due) add("info", this._calIcon(s.waste_due.types[0])[0], `${s.waste_due.when === "morgen" ? "Morgen" : "Heute"} Müllabfuhr`, s.waste_due.types.join(" · "), "settings-go", { sub: "calendars" });
     for (const r of this._rooms()) {
       const rs = s.rooms?.[r.id] || {};
@@ -1430,7 +1451,7 @@ class HauswerkPanel extends HTMLElement {
     const mod = MODULES.find((m) => m.views.includes(this._tab));
     const sub = SUB_VIEWS.find((v) => v.id === this._tab);
     const roomName = this._tab === "room" ? this._data?.rooms?.[this._roomId]?.name : null;
-    const title = mod ? `${mod.name}${roomName ? ` · ${roomName}` : sub ? ` · ${sub.name}` : ""}` : SET_VIEWS.includes(this._tab) ? "Einstellungen" : this._tab === "log" ? "Protokoll" : "Start";
+    const title = mod ? `${mod.name}${roomName ? ` · ${roomName}` : sub ? ` · ${sub.name}` : ""}` : SET_VIEWS.includes(this._tab) ? "Einstellungen" : this._tab === "log" ? "Protokoll" : this._tab === "maint" ? "Wartung" : "Start";
     const f = this._data ? this._facts() : null;
     const badge = (id) => {
       if (!f || id !== "heizen") return "";
@@ -1523,7 +1544,7 @@ class HauswerkPanel extends HTMLElement {
     // Hintergrund passend zum Bereich: Startseite oder Heizen
     this.setAttribute("view", MODULES[0].views.includes(this._tab) ? "heat" : "start");
     if (!this._data) return;
-    const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, overview: this._viewOverview, vent: this._viewVent, plans: this._viewPlans, report: this._viewReport, boiler: this._viewBoiler, settings: this._viewSettings, room: this._viewRoom,
+    const view = { start: this._viewStart, house: this._viewHouse, log: this._viewLog, maint: this._viewMaint, overview: this._viewOverview, vent: this._viewVent, plans: this._viewPlans, report: this._viewReport, boiler: this._viewBoiler, settings: this._viewSettings, room: this._viewRoom,
       shutters: this._viewShutters, shutset: () => this._settingsPage("rw"),
       kwflow: this._viewKwFlow, kwdev: this._viewKwDev, kwrep: this._viewKwRep, kwset: () => this._settingsPage("kw"),
       lights: this._viewLights, lwrep: this._viewLwRep, lightset: () => this._settingsPage("lw"),
@@ -3461,6 +3482,101 @@ class HauswerkPanel extends HTMLElement {
       <span class="sr-ic"><ha-icon icon="${x.icon}"></ha-icon></span>
       <span class="sr-t"><b>${esc(x.text)}</b>${x.sub ? `<small class="wrap">${esc(x.sub)}</small>` : ""}</span>
       ${can ? `<ha-icon class="sr-go" icon="mdi:chevron-right"></ha-icon>` : ""}</button>`;
+  }
+
+  /** Widget „Wartung“: fällig zuerst, mit Erledigt. */
+  _w_maint(w, z) {
+    const tasks = this._status?.dienste?.tasks || [];
+    const due = tasks.filter((t) => t.left != null && t.left <= 0);
+    const soon = tasks.filter((t) => t.left != null && t.left > 0 && t.left <= 14);
+    if (z === "s")
+      return `<div class="wbig"><span style="color:${due.length ? tint("#f59e0b") : "inherit"}">${due.length}<small>fällig</small></span></div>
+        <div class="wline" style="--c:#14b8a6"><ha-icon icon="mdi:calendar-clock"></ha-icon>${soon.length ? `${soon.length} in den nächsten 14 Tagen` : "nichts in Sicht"}</div>`;
+    if (!due.length && !soon.length) return `<div class="wok"><ha-icon icon="mdi:check-circle-outline"></ha-icon>Nichts fällig${tasks.length ? ` · nächste: ${esc(tasks.find((t) => t.left != null)?.name || "")}` : ""}</div>`;
+    const max = z === "l" ? 8 : 3;
+    return `<div class="mlist">${[...due, ...soon].slice(0, max).map((t) => this._maintRow(t, true)).join("")}</div>
+      ${due.length + soon.length > max ? `<button class="link tiny wmore" data-action="tab" data-tab="maint">Alle ${due.length + soon.length}<ha-icon icon="mdi:chevron-right"></ha-icon></button>` : ""}`;
+  }
+
+  _maintWhen(t) {
+    if (t.left == null) return "ohne Intervall";
+    if (t.auto) return t.note || "jetzt";
+    if (t.left < 0) return `${-t.left} ${-t.left === 1 ? "Tag" : "Tage"} überfällig`;
+    if (t.left === 0) return "heute fällig";
+    if (t.left === 1) return "morgen";
+    return t.left <= 45 ? `in ${t.left} Tagen` : `ab ${new Date(`${t.due}T12:00`).toLocaleDateString("de-DE", { day: "numeric", month: "long", year: t.left > 300 ? "numeric" : undefined })}`;
+  }
+
+  /** Eine Aufgabe: Symbol, Name, Raum, wann; Erledigt bzw. Quittieren und Später. */
+  _maintRow(t, small = false) {
+    const due = t.left != null && t.left <= 0;
+    const c = due ? (t.left < -14 ? "#ef4444" : "#f59e0b") : t.left != null && t.left <= 14 ? "#14b8a6" : "var(--muted)";
+    const frac = !t.auto && t.days && t.left != null ? Math.max(0, Math.min(1, 1 - t.left / t.days)) : null;
+    return `<div class="mrow ${due ? "due" : ""}" style="--c:${c}">
+      <span class="mrow-ic"><ha-icon icon="${t.icon || "mdi:wrench-outline"}"></ha-icon></span>
+      <span class="grow"><b>${esc(t.name)}</b><small>${esc([t.room, this._maintWhen(t), t.snoozed ? "verschoben" : "", !small && !t.auto && t.days ? `alle ${t.days >= 365 && t.days % 365 === 0 ? `${t.days / 365} ${t.days === 365 ? "Jahr" : "Jahre"}` : `${t.days} Tage`}` : ""].filter(Boolean).join(" · "))}</small>
+        ${frac != null && !small ? `<i class="mrow-bar"><i style="width:${(frac * 100).toFixed(0)}%"></i></i>` : ""}</span>
+      <span class="mrow-act">${due || !small ? `<button class="${due ? "primary" : "secondary"} sm" data-action="maint-done" data-id="${esc(t.id)}" title="${t.auto ? "Quittieren" : "Als erledigt markieren"}"><ha-icon icon="mdi:check"></ha-icon>${small ? "" : t.auto ? "Quittieren" : "Erledigt"}</button>` : ""}
+      ${!t.auto && due && !small ? `<button class="secondary sm" data-action="maint-snooze" data-id="${esc(t.id)}" data-days="7" title="In 1 Woche erinnern">1 Woche</button>` : ""}
+      ${!t.auto && !small && this._admin ? `<button class="icon" data-action="pop-open" data-pop="mtask:${esc(t.id)}" title="Bearbeiten"><ha-icon icon="mdi:pencil-outline"></ha-icon></button>` : ""}</span>
+    </div>`;
+  }
+
+  /** Bereich Wartung: fällig, demnächst, alle Aufgaben, zuletzt erledigt – Aufgaben hinzufügen. */
+  _viewMaint() {
+    const hd = this._status?.dienste;
+    if (!hd) return `<section class="card"><div class="chart-empty"><div class="spinner"></div></div></section>`;
+    const tasks = hd.tasks || [];
+    const due = tasks.filter((t) => t.left != null && t.left <= 0);
+    const soon = tasks.filter((t) => t.left != null && t.left > 0 && t.left <= 30);
+    const later = tasks.filter((t) => !due.includes(t) && !soon.includes(t));
+    const hist = hd.history || [];
+    const c = due.some((t) => t.left < -14) ? "#ef4444" : due.length ? "#f59e0b" : "#22c55e";
+    const head = `<section class="card mhead" style="--c:${c}"><span class="vhead-ic" style="--c:${c}"><ha-icon icon="${due.length ? "mdi:wrench-clock" : "mdi:check-circle-outline"}"></ha-icon></span>
+      <span class="grow"><b>${due.length ? `${due.length} ${due.length === 1 ? "Aufgabe" : "Aufgaben"} fällig` : "Nichts fällig"}</b>
+        <small>${soon.length ? `${soon.length} in den nächsten 30 Tagen` : "in den nächsten 30 Tagen nichts"} · ${tasks.filter((t) => !t.auto).length} eigene Aufgaben</small></span>
+      ${this._admin ? `<button class="secondary" data-action="pop-open" data-pop="mtask:new"><ha-icon icon="mdi:plus"></ha-icon>Aufgabe</button>` : ""}</section>`;
+    const sec = (t, list, open = true, extra = "") => list.length ? `<section class="card msec"><details ${open ? "open" : ""}><summary><b>${t}</b><span class="vsec-n">${list.length}</span><span class="grow"></span><ha-icon icon="mdi:chevron-down"></ha-icon></summary>${list.map((x) => this._maintRow(x)).join("")}${extra}</details></section>` : "";
+    const hHtml = hist.length ? `<section class="card msec"><details><summary><b>Zuletzt erledigt</b><span class="vsec-n">${hist.length}</span><span class="grow"></span><ha-icon icon="mdi:chevron-down"></ha-icon></summary>
+      ${hist.slice(0, 15).map((h) => `<div class="mrow done"><span class="mrow-ic"><ha-icon icon="${h.icon || "mdi:check"}"></ha-icon></span><span class="grow"><b>${esc(h.name)}</b><small>${esc(h.what || "erledigt")} · ${new Date(h.at).toLocaleDateString("de-DE", { day: "numeric", month: "short", year: "numeric" })}${h.by ? ` · ${esc(h.by)}` : ""}</small></span></div>`).join("")}</details></section>` : "";
+    const empty = !tasks.length ? `<section class="card empty"><ha-icon icon="mdi:wrench-clock" style="--mdc-icon-size:44px;color:#14b8a6"></ha-icon><h2>Wartung im Haus</h2>
+      <p>Hier laufen Aufgaben auf, die regelmäßig anfallen – Filter wechseln, Heizkörper entlüften, Rauchmelder testen. Batterien, Melder am Lebensende und die Mähermesser erscheinen automatisch.</p>
+      ${this._admin ? `<button class="primary" data-action="pop-open" data-pop="mtask:new"><ha-icon icon="mdi:plus"></ha-icon>Erste Aufgabe anlegen</button>` : ""}</section>` : "";
+    return head + empty + sec("Fällig", due) + sec("Demnächst", soon) + sec("Alle weiteren Aufgaben", later, !due.length && !soon.length) + hHtml;
+  }
+
+  /** Fenster: Aufgabe anlegen bzw. bearbeiten – Vorlage, Name, Intervall, Raum, Notiz, zuletzt erledigt. */
+  _maintTaskPop(id) {
+    const p = this._settings || this._data.settings;
+    const isNew = id === "new";
+    const t = isNew ? (this._mtDraft || { name: "", icon: "mdi:wrench-outline", days: 90, last: new Date().toISOString().slice(0, 10) }) : (p.hd_tasks || []).find((x) => x.id === id);
+    if (!t) return null;
+    this._mtDraft = { ...t };
+    const own = new Set((p.hd_tasks || []).map((x) => x.name));
+    const tpl = isNew ? (this._status?.dienste?.templates || []).filter((x) => !own.has(x.name)) : [];
+    const rooms = [...new Set([...this._rooms().map((r) => r.name), ...Object.values(this._hass?.areas || {}).map((a) => a.name)])].sort((a, b) => a.localeCompare(b, "de"));
+    const iv = [[7, "1 Woche"], [14, "2 Wochen"], [30, "1 Monat"], [60, "2 Monate"], [90, "3 Monate"], [180, "6 Monate"], [365, "1 Jahr"], [730, "2 Jahre"]];
+    return { icon: t.icon || "mdi:wrench-outline", c: "#14b8a6", title: isNew ? "Aufgabe anlegen" : "Aufgabe bearbeiten", sub: "Hauswerk · Wartung",
+      body: `${tpl.length ? `<div class="lbl">Vorlagen</div><div class="rq-quick">${tpl.map((x, i) => `<button class="pill" data-action="mt-tpl" data-i="${i}"><ha-icon icon="${x.icon}"></ha-icon>${esc(x.name)}</button>`).join("")}</div>` : ""}
+        <label class="field"><span>Aufgabe</span><input type="text" id="mt-name" maxlength="80" value="${esc(t.name || "")}" placeholder="z. B. Pelletlager prüfen"></label>
+        <label class="field narrow"><span>Wie oft</span><select id="mt-days">${iv.map(([d, l]) => `<option value="${d}" ${Number(t.days) === d ? "selected" : ""}>${l}</option>`).join("")}${iv.some(([d]) => d === Number(t.days)) ? "" : `<option value="${t.days}" selected>${t.days} Tage</option>`}</select></label>
+        <label class="field narrow"><span>Raum (optional)</span><select id="mt-room"><option value="">–</option>${rooms.map((r) => `<option ${t.room === r ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></label>
+        <label class="field narrow"><span>Zuletzt erledigt</span><input type="date" id="mt-last" value="${esc(t.last || "")}"></label>
+        <label class="field"><span>Notiz (optional)</span><input type="text" id="mt-note" maxlength="200" value="${esc(t.note || "")}" placeholder="z. B. Filtertyp, Link zur Anleitung"></label>`,
+      foot: `${isNew ? "" : `<button class="link danger" data-action="mt-del" data-id="${esc(id)}"><ha-icon icon="mdi:delete-outline"></ha-icon>Löschen</button>`}<span class="grow"></span>
+        <button class="secondary" data-action="pop-close">Abbrechen</button><button class="primary" data-action="mt-save" data-id="${esc(id)}">Speichern</button>` };
+  }
+
+  async _maintReload(status) {
+    if (status && this._status) this._status.dienste = status;
+    else {
+      try {
+        const st = await this._hass.callWS({ type: "hauswerk/dienste/get" });
+        if (this._status) this._status.dienste = st;
+      } catch (e) { /* später */ }
+    }
+    this._renderMain();
+    if (this._pop) this._renderPop();
   }
 
   _w_hints(w, z) {
@@ -6030,7 +6146,7 @@ class HauswerkPanel extends HTMLElement {
         const own = new Set((p.hd_tasks || []).map((t) => t.name));
         const tpl = (hd.templates || []).filter((t) => !own.has(t.name));
         return { icon: "mdi:wrench-clock", c: "#14b8a6", title: "Wartung", sub: "Hauswerk · was im Haus fällig ist", foot: null,
-          body: `${tasks.length ? `<div class="evlist">${tasks.map((t) => this._hdTaskRow(t)).join("")}</div>` : `<p class="muted">Noch keine Aufgaben.</p>`}
+          body: `<button class="link" data-action="maint-open"><ha-icon icon="mdi:open-in-app"></ha-icon>Bereich Wartung öffnen</button>${tasks.length ? `<div class="evlist">${tasks.map((t) => this._hdTaskRow(t)).join("")}</div>` : `<p class="muted">Noch keine Aufgaben.</p>`}
             ${this._admin ? `${head("mdi:plus", "Aufgabe hinzufügen")}
             ${tpl.length ? `<div class="rq-quick">${tpl.map((t, i) => `<button class="pill" data-action="task-add" data-i="${i}"><ha-icon icon="${t.icon}"></ha-icon>${esc(t.name)}</button>`).join("")}</div>` : ""}
             <div class="hd-add"><input type="text" id="hd-new-name" placeholder="Eigene Aufgabe, z. B. Pelletlager prüfen" maxlength="80"><div class="unit"><input type="number" id="hd-new-days" min="1" max="3650" value="90"><i>Tage</i></div>
@@ -10679,6 +10795,7 @@ class HauswerkPanel extends HTMLElement {
     if (id.startsWith("kwday:")) return this._kwDayPop(id.slice(6));
     if (id === "lwhouse") return this._lwHousePop();
     if (id === "bnmore") return this._bnMorePop();
+    if (id.startsWith("mtask:")) return this._maintTaskPop(id.slice(6)) || { title: "Aufgabe nicht gefunden", body: "", foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     if (id === "presq") return { icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit", sub: "Hauswerk",
       gear: this._admin ? `data-action="settings-go" data-sub="presence"` : null, body: `<div class="presq">${this._presenceCompact("m")}</div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     if (id.startsWith("lwtl:")) {
@@ -11491,6 +11608,7 @@ class HauswerkPanel extends HTMLElement {
             <p class="muted small">${bgText}</p>
             ${bg === "daytime" ? `<div class="skies">${SKIES.map(([k, l]) => `<div class="skyc"><div class="sky ${k === now ? "on" : ""}" style="background:var(--sky-${k})">${k === now ? "<em>jetzt</em>" : ""}</div><small>${l}</small></div>`).join("")}</div>` : ""}
             ${head("mdi:page-layout-header", "Kopfzeile")}
+            <label class="check"><span><b>Anwesenheit anzeigen</b><small>Wer zu Hause ist – Bild bzw. Anfangsbuchstabe mit grünem Punkt, dazu Urlaub, Abwesend, Gäste, Party und Eco. Antippen öffnet die Auswahl.</small></span>${sw("look_header_people")}</label>
             <label class="check"><span><b>Wetter anzeigen</b><small>Außentemperatur und Wetterlage oben rechts. Die Quelle stellst du unter Hauswerk › Wetter ein.</small></span>${sw("look_header_weather")}</label>
             <label class="check"><span><b>Uhrzeit anzeigen</b><small>Praktisch für Wand-Tablets. Auf dem Handy ausgeblendet.</small></span>${sw("look_header_clock")}</label>
             ${head("mdi:cellphone-cog", "Auf diesem Gerät")}
@@ -13996,6 +14114,56 @@ class HauswerkPanel extends HTMLElement {
         this._closePop();
         break;
       }
+      case "maint-open":
+        this._closePop();
+        this._setView("maint");
+        break;
+      case "maint-done": {
+        const res = await this._ws({ type: "hauswerk/dienste/task_done", task: el.dataset.id });
+        const t = (this._data.settings.hd_tasks || []).find((x) => x.id === el.dataset.id);
+        if (t) t.last = new Date().toISOString().slice(0, 10);
+        this._toast(el.dataset.id.startsWith("auto:") ? "Quittiert" : "Erledigt");
+        await this._maintReload(res.status);
+        break;
+      }
+      case "maint-snooze": {
+        const res = await this._ws({ type: "hauswerk/dienste/task_snooze", task: el.dataset.id, days: Number(el.dataset.days) || 7 });
+        this._toast("Verschoben");
+        await this._maintReload(res.status);
+        break;
+      }
+      case "mt-tpl": {
+        const p = this._data.settings;
+        const own = new Set((p.hd_tasks || []).map((x) => x.name));
+        const x = (this._status?.dienste?.templates || []).filter((y) => !own.has(y.name))[Number(el.dataset.i)];
+        if (x) { this._mtDraft = { ...this._mtDraft, name: x.name, icon: x.icon, days: x.days }; this._renderPop(); }
+        break;
+      }
+      case "mt-save": {
+        const g = (k) => this.shadowRoot.getElementById(k)?.value;
+        const name = (g("mt-name") || "").trim();
+        if (!name) return this._toast("Bitte einen Namen eingeben");
+        const id = el.dataset.id;
+        const list = JSON.parse(JSON.stringify(this._data.settings.hd_tasks || []));
+        const rec = { ...(this._mtDraft || {}), name, days: Number(g("mt-days")) || 90, room: g("mt-room") || null, note: (g("mt-note") || "").trim() || null, last: g("mt-last") || null };
+        if (id === "new") list.push(rec);
+        else { const i = list.findIndex((x) => x.id === id); if (i >= 0) list[i] = { ...list[i], ...rec, id }; }
+        for (const x of list) for (const k of Object.keys(x)) if (!["id", "name", "icon", "days", "last", "room", "note"].includes(k)) delete x[k];
+        this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { hd_tasks: list } });
+        this._mtDraft = null;
+        this._closePop();
+        this._toast("Gespeichert");
+        await this._maintReload();
+        break;
+      }
+      case "mt-del": {
+        const list = (this._data.settings.hd_tasks || []).filter((x) => x.id !== el.dataset.id);
+        this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { hd_tasks: list } });
+        this._closePop();
+        this._toast("Gelöscht");
+        await this._maintReload();
+        break;
+      }
       case "bn-mod": {
         const m = MODULES.find((x) => x.views.includes(el.dataset.tab));
         if (m) this._modUse(m.id);
@@ -16286,6 +16454,17 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 :host([size="l"]) .top, :host([size="l"]) .app, :host([size="l"]) .bnav, :host([size="l"]) .sheet, :host([size="l"]) .toast { zoom:1.15; }
 .hinfo { display:flex; align-items:center; gap:10px; padding:0 12px; height:42px; box-sizing:border-box; border-radius:14px; background:var(--card); border:1px solid var(--line); font-weight:700; font-size:15px; white-space:nowrap; }
 .hwx { display:inline-flex; align-items:center; gap:5px; }
+.hpeople { all:unset; box-sizing:border-box; cursor:pointer; display:flex; align-items:center; gap:6px; padding:0 10px; height:42px; border-radius:14px; background:var(--card); border:1px solid var(--line); }
+.top.slim .hpeople { height:36px; border-radius:12px; }
+.hps { display:flex; } .hp { position:relative; width:28px; height:28px; border-radius:50%; display:grid; place-items:center; background:var(--card2); border:2px solid var(--card); margin-left:-6px; font-size:13px; }
+.hp:first-child { margin-left:0; } .hp img { width:100%; height:100%; border-radius:50%; object-fit:cover; }
+.hp.away img, .hp.away b { opacity:.45; filter:grayscale(1); }
+.hp i { position:absolute; right:-2px; bottom:-2px; width:10px; height:10px; border-radius:50%; border:2px solid var(--card); background:#94a3b8; }
+.hp.home i { background:#22c55e; }
+.hp-mode, .hp-x { --mdc-icon-size:18px; } .hp-x { color:var(--muted); }
+.hp-c { display:none; align-items:center; gap:2px; font-weight:700; --mdc-icon-size:20px; } .hp-c ha-icon { color:#22c55e; }
+@media (max-width:600px) { .hpeople { padding:0 8px; height:38px; } .hps, .hp-x, .hpeople > .hp-mode { display:none; } .hp-c { display:flex; }
+  .ttl { min-width:0; overflow:hidden; } .ttl b, .ttl small { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } }
 .hwx ha-icon { --mdc-icon-size:20px; color:#f59e0b; }
 .hclock { font-variant-numeric:tabular-nums; }
 .hclock + .hwx { padding-left:10px; border-left:1px solid var(--line2); }
@@ -16524,6 +16703,21 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .wt-ctl { display:flex; gap:10px; margin-top:4px; }
 .wbtn { all:unset; cursor:pointer; flex:1; height:48px; border-radius:14px; display:grid; place-items:center; background:color-mix(in srgb, var(--text) 8%, transparent); }
 .wbtn ha-icon { --mdc-icon-size:26px; } .wbtn:disabled { opacity:.4; }
+/* Wartung */
+.mhead { display:flex; align-items:center; gap:12px; padding:14px 16px; border-left:4px solid var(--c); }
+.mhead b { display:block; font-size:18px; } .mhead small { color:var(--muted); }
+.msec { padding:0; } .msec summary { list-style:none; display:flex; align-items:center; gap:8px; padding:14px 16px; cursor:pointer; } .msec summary::-webkit-details-marker { display:none; }
+.msec details[open] summary > ha-icon { transform:rotate(180deg); } .vsec-n { background:var(--card2); border-radius:99px; padding:0 8px; font-weight:700; font-size:13px; }
+.mrow { display:flex; align-items:center; gap:10px; padding:10px 16px; border-top:1px solid var(--line, color-mix(in srgb, var(--text) 8%, transparent)); }
+.mlist .mrow { padding:8px 0; } .mlist .mrow:first-child { border-top:0; }
+.mrow-ic { width:36px; height:36px; flex:none; display:grid; place-items:center; border-radius:12px; color:var(--c); background:color-mix(in srgb, var(--c) 14%, transparent); --mdc-icon-size:20px; }
+.mrow.done .mrow-ic { --c:#22c55e; } .mrow .grow { min-width:0; }
+.mrow b { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .mrow small { display:block; color:var(--muted); font-size:13px; }
+.mrow.due small { color:var(--c); font-weight:600; }
+.mrow-bar { display:block; height:4px; margin-top:5px; border-radius:99px; background:var(--card2); max-width:240px; } .mrow-bar i { display:block; height:100%; border-radius:99px; background:var(--c); }
+.mrow button.sm { min-height:34px; padding:0 12px; font-size:13px; white-space:nowrap; }
+.mrow-act { display:flex; align-items:center; gap:6px; flex:none; } .mrow-act:empty { display:none; }
+@media (max-width:600px) { .msec .mrow { flex-wrap:wrap; } .msec .mrow-act { width:100%; padding-left:46px; } }
 /* Kraftwerk: Wand, Auffälliges, Abschlag */
 .kwwall { display:grid; grid-template-columns:1.25fr 1fr; gap:14px; align-items:start; }
 .kwwall-l .kw-flow { min-height:100%; } .kwwall-l .kw-flow svg { width:100%; height:auto; max-height:520px; }

@@ -38,7 +38,15 @@ TASK_TEMPLATES = [
     {"name": "Waschmaschine reinigen (Kochwäsche, Flusensieb)", "icon": "mdi:washing-machine", "days": 60},
     {"name": "Geschirrspüler: Sieb reinigen", "icon": "mdi:dishwasher", "days": 30},
     {"name": "Dachrinne reinigen", "icon": "mdi:home-roof", "days": 365},
+    {"name": "Heizungswartung (Therme)", "icon": "mdi:water-boiler", "days": 365},
+    {"name": "Kühlschrank abtauen und reinigen", "icon": "mdi:fridge-outline", "days": 180},
+    {"name": "Trockner: Flusensieb und Wärmetauscher", "icon": "mdi:tumble-dryer", "days": 30},
+    {"name": "Kaffeevollautomat entkalken", "icon": "mdi:coffee-maker-outline", "days": 60},
+    {"name": "Gartenwasser abstellen (Frost)", "icon": "mdi:water-off-outline", "days": 365},
+    {"name": "Fenster und Türen ölen", "icon": "mdi:door", "days": 365},
+    {"name": "Feuerlöscher prüfen lassen", "icon": "mdi:fire-extinguisher", "days": 730},
 ]
+SNOOZE_DAYS = (1, 7, 30)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -200,7 +208,11 @@ class Dienste:
         out = []
         for t in self.settings.get("hd_tasks") or []:
             due, left = self._due(t, today)
-            out.append({**t, "auto": False, "due": due.isoformat() if due else None, "left": left})
+            snooze = (self._persist.get("snooze") or {}).get(t.get("id"))
+            if snooze and due is not None and snooze > due.isoformat():
+                due = date.fromisoformat(snooze)
+                left = (due - today).days
+            out.append({**t, "auto": False, "due": due.isoformat() if due else None, "left": left, "snoozed": bool(snooze and snooze > today.isoformat())})
         # automatisch: Batterien (binary_sensor Geräteklasse battery an)
         ids = getattr(self.hass.states, "async_entity_ids", None)
         for eid in sorted(ids("binary_sensor")) if ids else []:
@@ -225,7 +237,48 @@ class Dienste:
                     out.append({"id": "auto:blades", "name": "Mähroboter: Messer wechseln", "icon": "mdi:saw-blade", "auto": True, "left": 0})
             except (TypeError, ValueError):
                 pass
+            # Verschleiß aus Beetwerk (Messer stumpf, Akku altert, Draht/WLAN, Feuchte)
+            try:
+                icons = {"blades": "mdi:saw-blade", "battery": "mdi:battery-heart-variant", "wire": "mdi:vector-polyline", "wlan": "mdi:wifi-strength-1-alert", "humid": "mdi:water-alert-outline"}
+                for k, txt in (bw.wear(bw.entities()) or {}).items():
+                    if txt and not (k == "blades" and any(x["id"] == "auto:blades" for x in out)):
+                        out.append({"id": f"auto:bw_{k}", "name": f"Mähroboter: {txt.split(' – ')[-1] if ' – ' in txt else txt}", "note": txt,
+                                    "icon": icons.get(k, "mdi:robot-mower-outline"), "auto": True, "left": 0, "room": "Garten"})
+            except Exception:  # noqa: BLE001 - Beetwerk ohne Mäher
+                pass
+        # Batterien unter der Grenze (Heizwerk: Thermostate, Fensterkontakte, Raumsensoren) – mit Raum
+        ctl = self._mod(MODULE_HEATING)
+        if ctl is not None:
+            seen = {t.get("entity") for t in out}
+            for room_id, room in (getattr(ctl, "rooms", None) or {}).items():
+                try:
+                    low = ctl._battery_low(room_id)
+                except Exception:  # noqa: BLE001
+                    low = []
+                for b in low:
+                    if b["id"] in seen:
+                        continue
+                    seen.add(b["id"])
+                    out.append({"id": f"auto:{b['id']}", "name": f"Batterie wechseln: {b['name']}", "note": f"noch {round(b['level'])} %",
+                                "icon": "mdi:battery-alert-variant-outline", "auto": True, "left": 0, "entity": b["id"], "room": room.get("name")})
+        # quittierte automatische Aufgaben 3 Tage ausblenden (z. B. Batterie gerade gewechselt, Wert noch nicht neu gemeldet)
+        acks = self._persist.get("acks") or {}
+        out = [t for t in out if not (t.get("auto") and acks.get(t["id"]) and acks[t["id"]] > (today - timedelta(days=3)).isoformat())]
         return sorted(out, key=lambda t: (t["left"] is None, t["left"] if t["left"] is not None else 0, t["name"]))
+
+    def _hist(self, name: str, icon: str | None, by: str | None, what: str = "erledigt") -> None:
+        h = self._persist.setdefault("history", [])
+        h.insert(0, {"name": name, "icon": icon, "at": dt_util.utcnow().isoformat(), "by": by or "", "what": what})
+        del h[60:]
+
+    async def async_task_snooze(self, task_id: str, days: int, by: str | None = None) -> None:
+        """Aufgabe verschieben (später erinnern)."""
+        until = (dt_util.now().date() + timedelta(days=int(days))).isoformat()
+        self._persist.setdefault("snooze", {})[task_id] = until
+        t = next((x for x in self.settings.get("hd_tasks") or [] if x.get("id") == task_id), None)
+        self.log.add("settings", f"Wartung verschoben: {t.get('name') if t else task_id}", f"bis {until} · {by or ''}".strip(" ·"), module="haus")
+        self.haus.clear(f"maint:{task_id}")
+        self._save()
 
     def _check_tasks(self) -> None:
         """Fällige eigene Aufgaben melden (Benachrichtigungen › Hauswerk › Wartung)."""
@@ -240,12 +293,22 @@ class Dienste:
             else:
                 self.haus.clear(key)
 
-    async def async_task_done(self, task_id: str, by: str | None = None) -> None:
+    async def async_task_done(self, task_id: str, by: str | None = None, note: str | None = None) -> None:
+        if task_id.startswith("auto:"):
+            item = next((t for t in self.tasks() if t["id"] == task_id), None)
+            self._persist.setdefault("acks", {})[task_id] = dt_util.now().date().isoformat()
+            if item:
+                self._hist(item["name"], item.get("icon"), by, "quittiert")
+                self.log.add("settings", f"Wartung quittiert: {item['name']}", by or "", module="haus")
+            self._save()
+            return
         tasks = self.settings.get("hd_tasks") or []
         for t in tasks:
             if t.get("id") == task_id:
                 t["last"] = dt_util.now().date().isoformat()
-                self.log.add("settings", f"Wartung erledigt: {t.get('name')}", by or "", module="haus")
+                (self._persist.get("snooze") or {}).pop(task_id, None)
+                self._hist(t.get("name") or "Aufgabe", t.get("icon"), by, f"erledigt{' – ' + note if note else ''}")
+                self.log.add("settings", f"Wartung erledigt: {t.get('name')}", (by or "") + (f" – {note}" if note else ""), module="haus")
         self.settings["hd_tasks"] = tasks
         self._save()
         self._check_tasks()
@@ -444,6 +507,7 @@ class Dienste:
             "actions": MODE_ACTIONS,
             "last_mode": self._persist.get("last_mode"),
             "tasks": self.tasks(),
+            "history": (self._persist.get("history") or [])[:30],
             "templates": TASK_TEMPLATES,
             "weekly_sent": self._persist.get("weekly_sent"),
             "ai_entity": self.ai_entity(),

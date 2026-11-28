@@ -60,7 +60,7 @@ SETTING_LABELS = {
     "calibration_interval": "Kalibrierung", "allow_users": "Berechtigungen", "start_widgets": "Widgets", "start_widgets_tablet": "Widgets (Tablet)",
     "tablet_wake": "Tablet aufwecken", "calendars": "Termin-Kalender", "main_calendar": "Standard-Kalender", "waste_calendars": "Müllabholung", "waste_hidden": "Müllabholung", "waste_remind": "Müllabholung", "notify_waste": "Benachrichtigungen", "workday_calendar": "Arbeitstage-Kalender",
     "look_theme": "Darstellung", "look_accent": "Darstellung", "look_background": "Darstellung",
-    "look_header_weather": "Darstellung", "look_header_clock": "Darstellung",
+    "look_header_weather": "Darstellung", "look_header_clock": "Darstellung", "look_header_people": "Darstellung",
     "notify_targets": "Benachrichtigungen an", "notify_window": "Benachrichtigungen", "notify_window_min": "Benachrichtigungen",
     "notify_offline": "Benachrichtigungen", "notify_offline_min": "Benachrichtigungen", "notify_frost": "Benachrichtigungen",
     "notify_battery": "Benachrichtigungen", "notify_quiet": "Ruhezeit", "notify_quiet_from": "Ruhezeit", "notify_quiet_to": "Ruhezeit",
@@ -138,6 +138,7 @@ HOUSE_DEFAULTS = {
     "look_accent": None,          # "#rrggbb" oder None = Türkis
     "look_background": "pattern", # pattern = Muster | daytime = Kopfzeile nach Tageszeit | plain = schlicht
     "look_header_weather": True,  # Außentemperatur und Wetter oben rechts
+    "look_header_people": True,   # Anwesenheit (Personen) oben rechts
     "look_header_clock": False,   # Uhrzeit oben rechts (z. B. für Wand-Tablets)
     "allow_users": False,         # auch Nicht-Admins dürfen Einstellungen, Räume und Pläne ändern
     # Benachrichtigungen aufs Handy (Home-Assistant-App: notify.mobile_app_…)
