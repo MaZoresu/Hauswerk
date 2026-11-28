@@ -2544,12 +2544,50 @@ def test_wartung_bereich(panel):
         assert any(m["type"] == "hauswerk/dienste/task_snooze" and m["days"] == 7 for m in p.sent())
     p.js(f"{EL}._openPop('mtask:new')")
     p.wait(300)
-    p.js(f"""() => {{ const r = {EL}.shadowRoot; r.getElementById('mt-name').value = 'Pelletlager prüfen'; r.getElementById('mt-days').value = '30';
-        const s = r.getElementById('mt-room'); s.value = s.options[1]?.value || ''; }}""")
+    p.js(f"""() => {{ const r = {EL}.shadowRoot; r.querySelector('#pop [data-mt="name"]').value = 'Pelletlager prüfen'; r.querySelector('#pop [data-mt="days"]').value = '30';
+        const s = r.querySelector('#pop [data-mt="room"]'); s.value = s.options[1]?.value || ''; }}""")
+    # Saison Okt + Nov, nach Nutzung (Betriebsstunden), Fachbetrieb mit Termin, Messwert
+    p.click('#pop [data-action="mt-month"][data-m="10"]')
+    p.click('#pop [data-action="mt-month"][data-m="11"]')
+    p.click('#pop [data-action="mt-use"][data-k="counter"]')
+    p.wait(200)
+    p.js(f"""() => {{ const r = {EL}.shadowRoot; const s = r.querySelector('#pop [data-mtu="src"]'); s.value = s.options[1]?.value || '';
+        r.querySelector('#pop [data-mtu="every"]').value = '250'; const c = r.querySelector('#pop [data-mt="pro"]'); c.checked = true; c.dispatchEvent(new Event('change', {{bubbles: true}})); }}""")
+    p.wait(200)
+    p.js(f"""() => {{ const r = {EL}.shadowRoot; r.querySelector('#pop [data-mt="pro_name"]').value = 'Heizung Müller'; r.querySelector('#pop [data-mt="phone"]').value = '0341 1234';
+        r.querySelector('#pop [data-mt="appt"]').value = '2026-12-10T09:00'; r.querySelector('#pop [data-mt="warranty"]').value = '2027-05-01';
+        r.querySelector('#pop [data-mt="unit"]').value = 'bar'; }}""")
     p.click('#pop [data-action="mt-save"]')
     p.wait(400)
     saved = [m["settings"]["hd_tasks"] for m in p.sent() if m["type"].endswith("settings/save") and "hd_tasks" in m.get("settings", {})]
-    assert saved and saved[-1][-1]["name"] == "Pelletlager prüfen" and saved[-1][-1]["days"] == 30 and saved[-1][-1].get("room"), saved
+    t = saved[-1][-1] if saved else {}
+    assert t.get("name") == "Pelletlager prüfen" and t["days"] == 30 and t.get("room") and t["months"] == [10, 11], saved
+    assert t["use"]["kind"] == "counter" and t["use"]["every"] == 250 and t["pro"] and t["pro_name"] == "Heizung Müller"
+    assert t["appt"] == "2026-12-10T09:00" and t["warranty"] == "2027-05-01" and t["unit"] == "bar"
+    # Vorlage nach Nutzung (Waschmaschine → Gerät der Fertigerkennung)
+    p.js(f"{EL}._openPop('mtask:new')")
+    p.wait(300)
+    i = p.js(f"({EL}._status.dienste.templates || []).filter((x) => !({EL}._data.settings.hd_tasks || []).some((y) => y.name === x.name)).findIndex((x) => x.use?.kind === 'runs')")
+    if i >= 0:
+        p.click(f'#pop [data-action="mt-tpl"][data-i="{i}"]')
+        p.wait(200)
+        assert p.has('#pop [data-mtu="every"]')
+    p.js(f"{EL}._closePop()")
+    # Erledigt mit Kosten und Notiz
+    tid = p.js(f"({EL}._status.dienste.tasks || []).find((x) => !x.auto)?.id")
+    if tid:
+        p.js(f"{EL}._openPop('mdone:{tid}')")
+        p.wait(300)
+        p.js(f"""() => {{ const r = {EL}.shadowRoot; r.getElementById('md-cost').value = '49.90'; r.getElementById('md-note').value = 'neuer Filter'; }}""")
+        p.click('#pop [data-action="md-save"]')
+        p.wait(300)
+        m = [m for m in p.sent() if m["type"] == "hauswerk/dienste/task_done" and m.get("cost")]
+        assert m and m[-1]["cost"] == 49.9 and m[-1]["note"] == "neuer Filter", m
+    # Einstellungen: Kalender
+    p.js(f"{EL}._openPop('mset')")
+    p.wait(300)
+    assert p.has('#pop [data-set="hd_calendar"]') and "Hauswerk Wartung" in p.js(f"{EL}.shadowRoot.querySelector('#pop').innerText")
+    p.js(f"{EL}._closePop()")
     # Widget
     html = p.js(f"{EL}._w_maint({{}}, 'm')")
     assert "mrow" in html or "Nichts fällig" in html

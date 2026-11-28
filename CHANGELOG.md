@@ -2,6 +2,20 @@
 
 Neueste Version oben. Der Abschnitt einer Version erscheint automatisch als Release-Text auf GitHub und damit im Update-Dialog von Home Assistant (HACS).
 
+## 0.108.0 – 2026-11-28
+
+### Neu – Wartung ausgebaut
+- **Nach Saison:** Aufgaben nur in bestimmten Monaten, z. B. „Gartenwasser abstellen“ (Okt–Nov), „Bewässerung in Betrieb nehmen“ (April), „Dachrinne reinigen“ (November) – fällig zu Beginn der Saison, einmal je Saison. Mit Intervall: frühestens nach dem Intervall, aber nur in der Saison.
+- **Nach Nutzung:** fällig nach Durchläufen eines Geräts der Fertigerkennung (z. B. Waschmaschine reinigen nach 30 Wäschen), nach Betriebsstunden (z. B. Lüftungsfilter nach 2000 Std. Lüftung an) oder nach einem Zähler (z. B. Mähermesser nach 300 Betriebsstunden). Die Zeile zeigt „24 von 30 Durchläufe“ und schätzt, wann es so weit ist.
+- **Aus Meldungen abgeleitet:** „Heizkörper bleibt kalt“ wird zur Aufgabe „Heizkörper entlüften: Bad“, „Kühlschrank braucht mehr Strom“ zu „abtauen, Dichtung prüfen“ – bis quittiert.
+- **Zuständige Person:** Die Erinnerung geht dann nur an das Handy dieser Person (Home-Assistant-App).
+- **Gerätedaten:** Modell, Kaufdatum, Garantie bis, Ersatzteil/Nummer und Link zur Anleitung. 30 Tage vor Ende der Garantie erscheint ein Hinweis.
+- **Fachbetrieb und Termin:** Firma und Telefon; rechtzeitig vor der Fälligkeit (2 Wochen bis 3 Monate) „Termin vereinbaren“ mit Anruf-Knopf. Der Termin steht an der Aufgabe, kommt auf Wunsch einmal in einen Kalender (Wartung › Zahnrad) und am Tag gibt es eine Erinnerung.
+- **Beim Erledigen:** optional Notiz, Kosten, Messwert (z. B. Anlagendruck in bar oder Zählerstand – frühere Werte werden angezeigt) und ein Foto (wird verkleinert gespeichert, die letzten 40). Alles steht im Verlauf.
+- **Kosten:** je Jahr und je Aufgabe im laufenden Jahr.
+- **In Home Assistant:** Aufgabenliste „Hauswerk Wartung“ (`todo.hauswerk_wartung`) mit allem, was in 30 Tagen fällig ist – abhaken = erledigt, neue Einträge werden einmalige Aufgaben, auch per Assist. Kalender „Hauswerk Wartung“ (`calendar.hauswerk_wartung`) mit allen Fälligkeiten und Terminen.
+- **Neue Vorlagen:** Schornsteinfeger, Zähler ablesen (Wasser, Gas, Strom), Anlagendruck prüfen, Mähroboter einwintern, Regentonne entleeren, Klimagerät reinigen u. a.
+
 ## 0.107.0 – 2026-11-28
 
 ### Neu: Wartung im Haus

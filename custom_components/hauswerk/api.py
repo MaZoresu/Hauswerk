@@ -316,10 +316,29 @@ SETTINGS_SCHEMA = vol.Schema(
         vol.Optional("hd_modes"): {vol.In(["night", "morning", "leave", "home"]): vol.All([vol.In(list(MODE_ACTIONS))], vol.Length(max=12))},
         vol.Optional("hd_tasks"): vol.All([{vol.Optional("id"): vol.All(str, vol.Length(max=20)), vol.Required("name"): vol.All(str, vol.Length(min=1, max=80)),
                                             vol.Optional("icon"): _opt(vol.All(str, vol.Length(max=60))),
-                                            vol.Required("days"): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
+                                            vol.Required("days"): vol.All(vol.Coerce(int), vol.Range(min=0, max=3650)),
                                             vol.Optional("last"): _opt(vol.All(str, vol.Match(r"^\d{4}-\d{2}-\d{2}$"))),
                                             vol.Optional("room"): _opt(vol.All(str, vol.Length(max=60))),
-                                            vol.Optional("note"): _opt(vol.All(str, vol.Length(max=200)))}], vol.Length(max=80)),
+                                            vol.Optional("note"): _opt(vol.All(str, vol.Length(max=200))),
+                                            vol.Optional("months"): _opt(vol.All([vol.All(vol.Coerce(int), vol.Range(min=1, max=12))], vol.Length(max=12))),
+                                            vol.Optional("once"): bool,
+                                            vol.Optional("due_on"): _opt(vol.All(str, vol.Match(r"^\d{4}-\d{2}-\d{2}$"))),
+                                            vol.Optional("use"): _opt({vol.Required("kind"): vol.In(["runs", "on", "counter"]),
+                                                                       vol.Optional("src"): _opt(vol.All(str, vol.Length(max=120))),
+                                                                       vol.Required("every"): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=1e7))}),
+                                            vol.Optional("person"): _opt(vol.All(str, vol.Match(r"^person\.[a-z0-9_]+$"))),
+                                            vol.Optional("device"): _opt(vol.All(str, vol.Length(max=80))),
+                                            vol.Optional("bought"): _opt(vol.All(str, vol.Match(r"^\d{4}-\d{2}-\d{2}$"))),
+                                            vol.Optional("warranty"): _opt(vol.All(str, vol.Match(r"^\d{4}-\d{2}-\d{2}$"))),
+                                            vol.Optional("manual"): _opt(vol.All(str, vol.Length(max=300), vol.Match(r"^(https?://|/)"))),
+                                            vol.Optional("part"): _opt(vol.All(str, vol.Length(max=120))),
+                                            vol.Optional("unit"): _opt(vol.All(str, vol.Length(max=12))),
+                                            vol.Optional("pro"): bool,
+                                            vol.Optional("pro_name"): _opt(vol.All(str, vol.Length(max=80))),
+                                            vol.Optional("phone"): _opt(vol.All(str, vol.Length(max=40))),
+                                            vol.Optional("lead"): _opt(vol.All(vol.Coerce(int), vol.Range(min=1, max=180))),
+                                            vol.Optional("appt"): _opt(vol.All(str, vol.Match(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$")))}], vol.Length(max=120)),
+        vol.Optional("hd_calendar"): _opt(vol.All(str, vol.Match(r"^calendar\.[a-z0-9_]+$"))),
         vol.Optional("hd_weekly"): bool,
         vol.Optional("hd_modes_show"): bool,
         vol.Optional("hd_weekly_day"): vol.All(vol.Coerce(int), vol.Range(min=0, max=6)),
@@ -581,14 +600,28 @@ async def ws_hd_get(hass: HomeAssistant, connection, msg) -> None:
 
 
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/dienste/task_done", vol.Required("task"): vol.All(str, vol.Length(max=120)),
-                                  vol.Optional("note"): vol.All(str, vol.Length(max=200))})
+                                  vol.Optional("note"): vol.All(str, vol.Length(max=200)),
+                                  vol.Optional("cost"): vol.All(vol.Coerce(float), vol.Range(min=0, max=1e6)),
+                                  vol.Optional("reading"): vol.All(vol.Coerce(float), vol.Range(min=-1e9, max=1e9)),
+                                  vol.Optional("photo"): vol.All(str, vol.Length(max=600_000), vol.Match(r"^data:image/(jpeg|png|webp);base64,"))})
 @websocket_api.async_response
 async def ws_task_done(hass: HomeAssistant, connection, msg) -> None:
     hd = _hd(hass)
     if hd is None:
         return _not_ready(connection, msg)
-    await hd.async_task_done(msg["task"], by=_who(connection), note=msg.get("note"))
+    await hd.async_task_done(msg["task"], by=_who(connection), note=msg.get("note"), cost=msg.get("cost"),
+                             reading=msg.get("reading"), photo=msg.get("photo"))
     connection.send_result(msg["id"], {"status": hd.status()})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hauswerk/dienste/photo", vol.Required("photo"): vol.All(str, vol.Length(max=20))})
+@websocket_api.async_response
+async def ws_task_photo(hass: HomeAssistant, connection, msg) -> None:
+    """Foto einer Erledigung (Wartung)."""
+    hd = _hd(hass)
+    if hd is None:
+        return _not_ready(connection, msg)
+    connection.send_result(msg["id"], {"data": hd.photo(msg["photo"])})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "hauswerk/dienste/task_snooze", vol.Required("task"): vol.All(str, vol.Length(max=20)),
@@ -1298,6 +1331,7 @@ COMMANDS = (
     ws_hd_get,
     ws_task_done,
     ws_task_snooze,
+    ws_task_photo,
     ws_weekly,
     ws_ww_alarm,
     ws_rw_profile_save,

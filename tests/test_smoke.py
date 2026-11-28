@@ -2731,6 +2731,104 @@ def test_wachwerk_und_hausdienste(hw):
     asyncio.run(run())
 
 
+def test_wartung_ausbau(hw):
+    """Wartung: Saison, Nutzung (Durchläufe, Betriebsstunden, Zähler), aus Meldungen, Person, Fachbetrieb mit Termin und Kalender,
+    Garantie, Kosten/Zählerstand/Foto, einmalige Aufgaben, Kalender-Einträge."""
+    async def run():
+        STORES.clear()
+        REG.clear()
+        NOW[0] = datetime(2026, 11, 28, 8, 0, tzinfo=timezone.utc)
+        hass = Hass()
+        log, haus, ctl = await _setup(hw, hass)
+        await haus.async_save_settings({"notify_targets": ["mobile_app_pixel"], "notify_quiet": False, "notify_maint": "normal"})
+        hd = hw.Dienste(hass, log, haus)
+        await hd.async_load()
+        det = types.SimpleNamespace(runs=[{"id": "r1", "start": NOW[0].timestamp() - 86400}])
+        kw = types.SimpleNamespace(appliances=types.SimpleNamespace(det={"wm": det}),
+                                   watch=types.SimpleNamespace(status=lambda: {"findings": [{"key": "kw_dev:sensor.kuehl", "title": "Kühlschrank braucht mehr Strom", "text": "+40 %"}]}))
+        hass.data.setdefault("hauswerk", {}).update({"dienste": hd, "kraftwerk": kw, "heizen": ctl})
+        hass.set("fan.lueftung", "on", {}, "Lüftung")
+        hass.set("sensor.maeher_stunden", "100", {"unit_of_measurement": "h"}, "Mäher Betriebsstunden")
+        hass.set("person.jens", "home", {"device_trackers": []}, "Jens")
+        tasks = [
+            {"name": "Gartenwasser abstellen", "days": 0, "months": [10, 11]},
+            {"name": "Rasen düngen", "days": 0, "months": [4]},
+            {"name": "Waschmaschine reinigen", "days": 0, "use": {"kind": "runs", "src": "wm", "every": 2}},
+            {"name": "Lüftungsfilter", "days": 0, "use": {"kind": "on", "src": "fan.lueftung", "every": 0.05}},
+            {"name": "Messer", "days": 0, "use": {"kind": "counter", "src": "sensor.maeher_stunden", "every": 50}},
+            {"name": "Therme", "days": 365, "last": "2025-12-20", "pro": True, "pro_name": "Heizung Müller", "phone": "0341 1234",
+             "person": "person.jens", "unit": "bar", "device": "Vaillant ecoTEC", "warranty": "2026-12-15"},
+        ]
+        await hd.async_save_settings({"hd_tasks": tasks, "hd_calendar": "calendar.familie"}, by="Test")
+        by = {t["name"]: t for t in hd.tasks()}
+        assert by["Gartenwasser abstellen"]["left"] < 0 and by["Gartenwasser abstellen"]["season"][0] == "2026-10-01"
+        assert by["Rasen düngen"]["due"] == "2027-04-01"
+        assert by["Waschmaschine reinigen"]["usage"]["used"] == 0  # alte Durchläufe zählen nicht
+        # zwei neue Durchläufe → fällig
+        det.runs += [{"id": "r2", "start": NOW[0].timestamp() + 60}, {"id": "r3", "start": NOW[0].timestamp() + 7200}]
+        for _ in range(3):
+            hd._track_use()
+        by = {t["name"]: t for t in hd.tasks()}
+        assert by["Waschmaschine reinigen"]["usage"]["used"] == 2 and by["Waschmaschine reinigen"]["left"] == 0
+        assert by["Lüftungsfilter"]["usage"]["used"] == 0.1 and by["Lüftungsfilter"]["left"] == 0  # 3 Min. an ≥ 0,05 Std.
+        hass.set("sensor.maeher_stunden", "130", {"unit_of_measurement": "h"}, "Mäher Betriebsstunden")
+        NOW[0] += timedelta(days=3)
+        by = {t["name"]: t for t in hd.tasks()}
+        u = by["Messer"]["usage"]
+        assert u["used"] == 30 and u["unit"] == "h" and by["Messer"]["left"] == 2  # 10 h am Tag → noch 20 h ≈ 2 Tage
+        # Fachbetrieb: 3 Wochen vor Fälligkeit „Termin vereinbaren“, an die Person
+        therme = by["Therme"]
+        assert therme["book"] and therme["person_name"] == "Jens"
+        hd._check_tasks()
+        await asyncio.sleep(0)
+        assert "Termin vereinbaren" in hass.sent()
+        # Person → ihr Handy (Geräte-Tracker der Home-Assistant-App)
+        hass.set("person.jens", "home", {"device_trackers": ["device_tracker.pixel_jens"]}, "Jens")
+        REG["device_tracker.pixel_jens"] = types.SimpleNamespace(entity_id="device_tracker.pixel_jens", device_id="dj")
+        DEVS["dj"] = types.SimpleNamespace(config_entries={"e1"})
+        hass.config_entries = types.SimpleNamespace(async_get_entry=lambda i: types.SimpleNamespace(domain="mobile_app", data={"device_name": "Pixel Jens"}))
+        assert haus.person_channels("person.jens") == ["svc:mobile_app_pixel_jens"]
+        # Garantie endet in 14 Tagen
+        assert any(t["id"].startswith("auto:warranty:") for t in hd.tasks())
+        # Termin eintragen → in den Kalender, Erinnerung am Tag
+        tl = [dict(x) for x in hd.settings["hd_tasks"]]
+        next(x for x in tl if x["name"] == "Therme")["appt"] = "2026-12-10T09:00"
+        await hd.async_save_settings({"hd_tasks": tl}, by="Test")
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        ev = [c for c in hass.calls if c[:2] == ("calendar", "create_event")]
+        assert len(ev) == 1 and ev[0][2]["start_date_time"] == "2026-12-10 09:00:00" and "Heizung Müller" in ev[0][2]["description"]
+        therme = next(t for t in hd.tasks() if t["name"] == "Therme")
+        assert therme["appt_next"] and not therme.get("book")
+        evs = hd.calendar_events(date(2026, 12, 1), date(2027, 12, 31))
+        assert any(e["summary"] == "Wartung: Therme" and e["timed"] for e in evs)
+        assert any(e["summary"] == "Fällig: Rasen düngen" and e["start"] == "2027-04-01" for e in evs)
+        # aus Meldungen: Heizkörper blieb kalt, Kühlschrank braucht mehr Strom
+        ctl._flags["cold:r1"] = True
+        ctl.rooms["r1"] = {"id": "r1", "name": "Bad"}
+        hd._derive()
+        names = [t["name"] for t in hd.tasks()]
+        assert "Heizkörper entlüften: Bad" in names and any(n.startswith("Kühlschrank: abtauen") for n in names)
+        await hd.async_task_done("auto:bleed:r1", by="Test")
+        hd._derive()
+        assert "Heizkörper entlüften: Bad" not in [t["name"] for t in hd.tasks()]  # bleibt weg, solange die Meldung nur weiterbesteht
+        # erledigen mit Kosten, Zählerstand, Foto
+        await hd.async_task_done(therme["id"], by="Test", cost=189.5, reading=1.6, photo="data:image/jpeg;base64,AAAA")
+        h = hd.status()["history"][0]
+        assert h["cost"] == 189.5 and h["reading"] == 1.6 and h["unit"] == "bar" and hd.photo(h["photo"]).startswith("data:image")
+        assert "1,6 bar" in h["what"] and hd.costs()["years"]["2026"] == 189.5
+        w = next(t for t in hd.tasks() if t["name"] == "Waschmaschine reinigen")
+        await hd.async_task_done(w["id"], by="Test")
+        assert next(t for t in hd.tasks() if t["name"] == "Waschmaschine reinigen")["usage"]["used"] == 0
+        # einmalige Aufgabe (z. B. über die Aufgabenliste): erledigt → weg
+        one = await hd.async_add_task("Glühbirne Flur tauschen", by="Assist")
+        assert next(t for t in hd.tasks() if t["id"] == one["id"])["left"] == 0
+        await hd.async_task_done(one["id"], by="Assist")
+        assert not any(t["id"] == one["id"] for t in hd.tasks())
+        await hd.async_stop()
+    asyncio.run(run())
+
+
 def test_beetwerk_maehplan(hw):
     """Mähplan: Wochenziel auf die erlaubten Tage verteilt, Regenstunden ausgelassen, in die Robonect-Zeitpläne
     geschrieben (je Wochentag zwei); beim Abschalten kommen die alten Zeitpläne zurück; Pause endet mit „Auto“."""

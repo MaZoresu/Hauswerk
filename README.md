@@ -16,7 +16,7 @@ Haussteuerung für Home Assistant mit eigenem Seitenmenü-Panel. Die Startseite 
 | <img src="docs/icons/beetwerk.svg" height="20"> **Beetwerk** | Garten: Mähroboter (Start, Pause, Station, Feierabend, Winterpause) mit Mähpause bei Regen, nassem Boden, Frost und Bewässerung; Bewässerung (Ventil, Bodenfeuchte, Smart Irrigation); Fehler- und Wartungs-Hinweise |
 | **Wachwerk** | Sicherheit: Rauch-, CO- und Wassermelder (bei Rauch Rollläden hoch, Licht an), amtliche Warnungen (NINA, DWD), Türen und Tore, Alarmanlage (z. B. Alarmo), Klingel mit Kamerabild, Check beim Verlassen |
 
-Dazu kommen **Hausdienste** im Kern – ohne eigenes Modul: **Hausmodi** („Gute Nacht“, „Guten Morgen“, „Wir gehen“, „Wir sind da“) als Knöpfe auf der Startseite, **Wartung** (eigene Aufgaben mit Intervall plus schwache Batterien, Melder am Lebensende, Mähermesser – unter der Glocke) und der **Wochenbericht** als Nachricht.
+Dazu kommen **Hausdienste** im Kern – ohne eigenes Modul: **Hausmodi** („Gute Nacht“, „Guten Morgen“, „Wir gehen“, „Wir sind da“) als Knöpfe auf der Startseite, **Wartung** (eigener Bereich: Aufgaben nach Zeit, Saison oder Nutzung, Fachbetrieb mit Termin, Kosten und Verlauf, dazu automatische Aufgaben – auch als Aufgabenliste und Kalender in Home Assistant) und der **Wochenbericht** als Nachricht.
 
 ## Installation
 
@@ -262,7 +262,8 @@ Wachwerk findet die Sicherheitsgeräte selbst (Einstellungen › Wachwerk, dort 
 # Hausdienste
 
 - **Hausmodi:** ein Tipp, alle Module. Je Modus wählbar: Lichter aus, Rollläden zu/auf, Heizung Eco/nach Plan, Anwesenheit, Mähroboter in die Station, Alarmanlage, Check „was ist noch offen“.
-- **Wartung** (Einstellungen › Haus › Wartung): Aufgaben mit Intervall aus Vorlagen (Rauchmelder testen, Heizkörper entlüften, Filter …) oder eigene; „Erledigt“ setzt das Datum. Automatisch dabei: schwache Batterien, Melder am Lebensende, Mähermesser.
+- **Wartung** (eigener Bereich, Widget, unter „Mehr“): Aufgaben aus Vorlagen oder eigene – fällig nach **Intervall**, nach **Saison** (z. B. Gartenwasser abstellen im Okt/Nov) oder nach **Nutzung** (Durchläufe der Fertigerkennung, Betriebsstunden, Zählerstand). Je Aufgabe Raum, **zuständige Person** (Erinnerung nur an ihr Handy), **Gerät** (Modell, Kaufdatum, Garantie, Ersatzteil, Anleitung) und **Fachbetrieb** („Termin vereinbaren“ mit Telefonnummer, Termin landet im gewählten Kalender, Erinnerung am Tag). Beim Erledigen optional Notiz, Kosten, Messwert (z. B. Anlagendruck) und Foto; Kosten je Jahr. Automatisch dabei: schwache Batterien, Melder am Lebensende, Verschleiß des Mähers, **aus Meldungen** (Heizkörper blieb kalt → entlüften, Kühlschrank braucht mehr Strom → abtauen) und auslaufende Garantien.
+- **In Home Assistant:** Aufgabenliste `todo.hauswerk_wartung` (fällig in 30 Tagen; abhaken = erledigt, neue Einträge = einmalige Aufgaben, auch mit Assist) und Kalender `calendar.hauswerk_wartung` mit allen Fälligkeiten und Terminen.
 - **Wochenbericht:** einmal pro Woche (Standard Sonntag 18:00) je Modul eine Zeile – Heizstunden und Lüften, Energie aus dem Energie-Dashboard, Licht, Mähen, Klingel und Warnungen, fällige Wartung. Vorschau und „Jetzt senden“ im Fenster.
 
 # Aufbau des Projekts

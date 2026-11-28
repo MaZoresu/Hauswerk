@@ -1,6 +1,6 @@
 /* Hauswerk – Panel für Home Assistant (Module: Heizwerk, Rollwerk, Kraftwerk; Licht, Garten geplant). Eigenständige Web-Komponente, kein Build nötig. */
 
-const VERSION = "0.107.0";
+const VERSION = "0.108.0";
 const DAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
 const TYPES = {
   heizkoerper: {
@@ -3499,72 +3499,227 @@ class HauswerkPanel extends HTMLElement {
   }
 
   _maintWhen(t) {
-    if (t.left == null) return "ohne Intervall";
     if (t.auto) return t.note || "jetzt";
+    if (t.left == null) return t.months?.length ? "Saison" : "ohne Termin";
     if (t.left < 0) return `${-t.left} ${-t.left === 1 ? "Tag" : "Tage"} überfällig`;
-    if (t.left === 0) return "heute fällig";
+    if (t.left === 0) return t.usage?.used != null && t.usage.used >= t.usage.every ? "jetzt fällig" : "heute fällig";
     if (t.left === 1) return "morgen";
-    return t.left <= 45 ? `in ${t.left} Tagen` : `ab ${new Date(`${t.due}T12:00`).toLocaleDateString("de-DE", { day: "numeric", month: "long", year: t.left > 300 ? "numeric" : undefined })}`;
+    return t.left <= 45 ? `${t.usage?.rate && !t.days ? "etwa " : ""}in ${t.left} Tagen` : `ab ${new Date(`${t.due}T12:00`).toLocaleDateString("de-DE", { day: "numeric", month: "long", year: t.left > 300 ? "numeric" : undefined })}`;
+  }
+
+  /** Kurzer Text, wie oft: „alle 3 Monate“, „Okt–Nov“, „alle 30 Durchläufe“. */
+  _maintEvery(t) {
+    const out = [];
+    const d = Number(t.days) || 0;
+    if (d) out.push(d === 7 ? "wöchentlich" : d === 30 ? "monatlich" : d === 365 ? "jährlich" : d % 365 === 0 ? `alle ${d / 365} Jahre` : d % 30 === 0 && d < 365 ? `alle ${d / 30} Monate` : d % 7 === 0 && d < 60 ? `alle ${d / 7} Wochen` : `alle ${d} Tage`);
+    if (t.months?.length) {
+      const M = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+      const m = [...t.months].sort((a, b) => a - b);
+      out.push(m.length > 1 && m[m.length - 1] - m[0] === m.length - 1 ? `${M[m[0] - 1]}–${M[m[m.length - 1] - 1]}` : m.map((x) => M[x - 1]).join(", "));
+    }
+    if (t.use?.every) out.push(`alle ${fmt(t.use.every, t.use.every % 1 ? 1 : 0)} ${t.usage?.unit || (t.use.kind === "runs" ? "Durchläufe" : t.use.kind === "on" ? "Std." : "")}`.trim());
+    if (t.once) out.push("einmalig");
+    return out.join(" · ");
   }
 
   /** Eine Aufgabe: Symbol, Name, Raum, wann; Erledigt bzw. Quittieren und Später. */
   _maintRow(t, small = false) {
     const due = t.left != null && t.left <= 0;
-    const c = due ? (t.left < -14 ? "#ef4444" : "#f59e0b") : t.left != null && t.left <= 14 ? "#14b8a6" : "var(--muted)";
-    const frac = !t.auto && t.days && t.left != null ? Math.max(0, Math.min(1, 1 - t.left / t.days)) : null;
+    const c = due ? (t.left < -14 ? "#ef4444" : "#f59e0b") : t.book ? "#f59e0b" : t.left != null && t.left <= 14 ? "#14b8a6" : "var(--muted)";
+    const u = t.usage;
+    const frac = u?.used != null ? Math.max(0, Math.min(1, u.used / u.every)) : !t.auto && t.days && t.left != null && !t.months?.length ? Math.max(0, Math.min(1, 1 - t.left / t.days)) : null;
+    const appt = t.appt_next ? new Date(t.appt_next.length > 10 ? t.appt_next : `${t.appt_next}T12:00`) : null;
+    const tags = [
+      t.person_name ? `<span class="mtag"><ha-icon icon="mdi:account"></ha-icon>${esc(t.person_name)}</span>` : "",
+      u?.used != null ? `<span class="mtag"><ha-icon icon="mdi:counter"></ha-icon>${fmt(u.used, u.used % 1 ? 1 : 0)} von ${fmt(u.every, u.every % 1 ? 1 : 0)} ${esc(u.unit || "")}</span>` : u && !t.auto ? `<span class="mtag warn"><ha-icon icon="mdi:alert-outline"></ha-icon>Zähler fehlt</span>` : "",
+      appt ? `<span class="mtag ok"><ha-icon icon="mdi:calendar-check"></ha-icon>Termin ${appt.toLocaleDateString("de-DE", { day: "numeric", month: "short" })}${t.appt_next.length > 10 ? ` ${t.appt_next.slice(11, 16)}` : ""}${t.pro_name ? ` · ${esc(t.pro_name)}` : ""}</span>` : "",
+      t.book ? `<span class="mtag warn"><ha-icon icon="mdi:phone-outline"></ha-icon>Termin vereinbaren${t.pro_name ? ` · ${esc(t.pro_name)}` : ""}</span>` : "",
+      t.derived ? `<span class="mtag"><ha-icon icon="mdi:lightbulb-on-outline"></ha-icon>aus Meldung</span>` : "",
+    ].filter(Boolean).join("");
+    const detail = !t.auto && (t.unit || t.pro);
     return `<div class="mrow ${due ? "due" : ""}" style="--c:${c}">
       <span class="mrow-ic"><ha-icon icon="${t.icon || "mdi:wrench-outline"}"></ha-icon></span>
-      <span class="grow"><b>${esc(t.name)}</b><small>${esc([t.room, this._maintWhen(t), t.snoozed ? "verschoben" : "", !small && !t.auto && t.days ? `alle ${t.days >= 365 && t.days % 365 === 0 ? `${t.days / 365} ${t.days === 365 ? "Jahr" : "Jahre"}` : `${t.days} Tage`}` : ""].filter(Boolean).join(" · "))}</small>
+      <span class="grow"><b>${esc(t.name)}</b><small>${esc([t.room, this._maintWhen(t), t.snoozed ? "verschoben" : "", !small && !t.auto ? this._maintEvery(t) : ""].filter(Boolean).join(" · "))}</small>
+        ${tags && !small ? `<span class="mtags">${tags}</span>` : ""}
         ${frac != null && !small ? `<i class="mrow-bar"><i style="width:${(frac * 100).toFixed(0)}%"></i></i>` : ""}</span>
-      <span class="mrow-act">${due || !small ? `<button class="${due ? "primary" : "secondary"} sm" data-action="maint-done" data-id="${esc(t.id)}" title="${t.auto ? "Quittieren" : "Als erledigt markieren"}"><ha-icon icon="mdi:check"></ha-icon>${small ? "" : t.auto ? "Quittieren" : "Erledigt"}</button>` : ""}
+      <span class="mrow-act">${t.book && t.phone && !small ? `<a class="secondary sm btnlink" href="tel:${esc(t.phone.replace(/[^0-9+]/g, ""))}" title="${esc(t.pro_name || "Anrufen")}"><ha-icon icon="mdi:phone"></ha-icon></a>` : ""}
+      ${due || !small ? `<button class="${due ? "primary" : "secondary"} sm" data-action="${detail ? "pop-open" : "maint-done"}" ${detail ? `data-pop="mdone:${esc(t.id)}"` : ""} data-id="${esc(t.id)}" title="${t.auto ? "Quittieren" : "Als erledigt markieren"}"><ha-icon icon="mdi:check"></ha-icon>${small ? "" : t.auto ? "Quittieren" : "Erledigt"}</button>` : ""}
+      ${!small && !detail ? `<button class="icon" data-action="pop-open" data-pop="mdone:${esc(t.id)}" title="${t.auto ? "Quittieren" : "Erledigt"} mit Notiz, Kosten oder Foto"><ha-icon icon="mdi:clipboard-text-outline"></ha-icon></button>` : ""}
       ${!t.auto && due && !small ? `<button class="secondary sm" data-action="maint-snooze" data-id="${esc(t.id)}" data-days="7" title="In 1 Woche erinnern">1 Woche</button>` : ""}
       ${!t.auto && !small && this._admin ? `<button class="icon" data-action="pop-open" data-pop="mtask:${esc(t.id)}" title="Bearbeiten"><ha-icon icon="mdi:pencil-outline"></ha-icon></button>` : ""}</span>
     </div>`;
   }
 
-  /** Bereich Wartung: fällig, demnächst, alle Aufgaben, zuletzt erledigt – Aufgaben hinzufügen. */
+  /** Bereich Wartung: fällig, demnächst, alle Aufgaben, Kosten, zuletzt erledigt – Aufgaben hinzufügen. */
   _viewMaint() {
     const hd = this._status?.dienste;
     if (!hd) return `<section class="card"><div class="chart-empty"><div class="spinner"></div></div></section>`;
     const tasks = hd.tasks || [];
     const due = tasks.filter((t) => t.left != null && t.left <= 0);
-    const soon = tasks.filter((t) => t.left != null && t.left > 0 && t.left <= 30);
+    const soon = tasks.filter((t) => !due.includes(t) && ((t.left != null && t.left <= 30) || t.book));
     const later = tasks.filter((t) => !due.includes(t) && !soon.includes(t));
     const hist = hd.history || [];
     const c = due.some((t) => t.left < -14) ? "#ef4444" : due.length ? "#f59e0b" : "#22c55e";
+    const yr = String(new Date().getFullYear());
+    const costs = hd.costs || {};
     const head = `<section class="card mhead" style="--c:${c}"><span class="vhead-ic" style="--c:${c}"><ha-icon icon="${due.length ? "mdi:wrench-clock" : "mdi:check-circle-outline"}"></ha-icon></span>
       <span class="grow"><b>${due.length ? `${due.length} ${due.length === 1 ? "Aufgabe" : "Aufgaben"} fällig` : "Nichts fällig"}</b>
-        <small>${soon.length ? `${soon.length} in den nächsten 30 Tagen` : "in den nächsten 30 Tagen nichts"} · ${tasks.filter((t) => !t.auto).length} eigene Aufgaben</small></span>
-      ${this._admin ? `<button class="secondary" data-action="pop-open" data-pop="mtask:new"><ha-icon icon="mdi:plus"></ha-icon>Aufgabe</button>` : ""}</section>`;
+        <small>${soon.length ? `${soon.length} in den nächsten 30 Tagen` : "in den nächsten 30 Tagen nichts"} · ${tasks.filter((t) => !t.auto).length} eigene Aufgaben${costs.years?.[yr] ? ` · ${fmt(costs.years[yr], 0)} € in ${yr}` : ""}</small></span>
+      ${this._admin ? `<button class="icon" data-action="pop-open" data-pop="mset" title="Einstellungen"><ha-icon icon="mdi:cog-outline"></ha-icon></button>
+        <button class="secondary" data-action="pop-open" data-pop="mtask:new"><ha-icon icon="mdi:plus"></ha-icon>Aufgabe</button>` : ""}</section>`;
     const sec = (t, list, open = true, extra = "") => list.length ? `<section class="card msec"><details ${open ? "open" : ""}><summary><b>${t}</b><span class="vsec-n">${list.length}</span><span class="grow"></span><ha-icon icon="mdi:chevron-down"></ha-icon></summary>${list.map((x) => this._maintRow(x)).join("")}${extra}</details></section>` : "";
     const hHtml = hist.length ? `<section class="card msec"><details><summary><b>Zuletzt erledigt</b><span class="vsec-n">${hist.length}</span><span class="grow"></span><ha-icon icon="mdi:chevron-down"></ha-icon></summary>
-      ${hist.slice(0, 15).map((h) => `<div class="mrow done"><span class="mrow-ic"><ha-icon icon="${h.icon || "mdi:check"}"></ha-icon></span><span class="grow"><b>${esc(h.name)}</b><small>${esc(h.what || "erledigt")} · ${new Date(h.at).toLocaleDateString("de-DE", { day: "numeric", month: "short", year: "numeric" })}${h.by ? ` · ${esc(h.by)}` : ""}</small></span></div>`).join("")}</details></section>` : "";
+      ${hist.slice(0, 20).map((h) => this._maintHistRow(h)).join("")}</details></section>` : "";
+    const years = Object.entries(costs.years || {}).sort((a, b) => b[0].localeCompare(a[0]));
+    const cHtml = years.length ? `<section class="card msec"><details><summary><b>Kosten</b><span class="vsec-n">${fmt(costs.years[yr] || 0, 0)} €</span><span class="grow"></span><ha-icon icon="mdi:chevron-down"></ha-icon></summary>
+      <div class="mcost">${years.slice(0, 5).map(([y, v]) => `<div class="mcost-y"><span>${y}</span><i><i style="width:${(v / Math.max(...years.map((x) => x[1])) * 100).toFixed(0)}%"></i></i><b>${fmt(v, 0)} €</b></div>`).join("")}</div>
+      ${Object.keys(costs.tasks || {}).length ? `<div class="lbl">${yr} je Aufgabe</div>${Object.entries(costs.tasks).map(([n, v]) => `<div class="kv"><span>${esc(n)}</span><b>${fmt(v, 2)} €</b></div>`).join("")}` : ""}</details></section>` : "";
     const empty = !tasks.length ? `<section class="card empty"><ha-icon icon="mdi:wrench-clock" style="--mdc-icon-size:44px;color:#14b8a6"></ha-icon><h2>Wartung im Haus</h2>
-      <p>Hier laufen Aufgaben auf, die regelmäßig anfallen – Filter wechseln, Heizkörper entlüften, Rauchmelder testen. Batterien, Melder am Lebensende und die Mähermesser erscheinen automatisch.</p>
+      <p>Hier laufen Aufgaben auf, die regelmäßig anfallen – nach Zeit, nach Saison oder nach Nutzung (z. B. Waschmaschine nach 30 Durchläufen). Batterien, Melder, Mähermesser und was aus Meldungen folgt (Heizkörper blieb kalt → entlüften) erscheinen automatisch.</p>
       ${this._admin ? `<button class="primary" data-action="pop-open" data-pop="mtask:new"><ha-icon icon="mdi:plus"></ha-icon>Erste Aufgabe anlegen</button>` : ""}</section>` : "";
-    return head + empty + sec("Fällig", due) + sec("Demnächst", soon) + sec("Alle weiteren Aufgaben", later, !due.length && !soon.length) + hHtml;
+    return head + empty + sec("Fällig", due) + sec("Demnächst", soon) + sec("Alle weiteren Aufgaben", later, !due.length && !soon.length) + cHtml + hHtml;
   }
 
-  /** Fenster: Aufgabe anlegen bzw. bearbeiten – Vorlage, Name, Intervall, Raum, Notiz, zuletzt erledigt. */
+  _maintHistRow(h) {
+    return `<div class="mrow done"><span class="mrow-ic"><ha-icon icon="${h.icon || "mdi:check"}"></ha-icon></span><span class="grow"><b>${esc(h.name)}</b>
+      <small>${esc(h.what || "erledigt")} · ${new Date(h.at).toLocaleDateString("de-DE", { day: "numeric", month: "short", year: "numeric" })}${h.by ? ` · ${esc(h.by)}` : ""}</small></span>
+      ${h.photo ? `<button class="icon" data-action="pop-open" data-pop="mphoto:${esc(h.photo)}" title="Foto ansehen"><ha-icon icon="mdi:image-outline"></ha-icon></button>` : ""}</div>`;
+  }
+
+  /** Fenster: erledigt bzw. quittiert – mit Notiz, Kosten, Messwert und Foto. */
+  _maintDonePop(id) {
+    const t = (this._status?.dienste?.tasks || []).find((x) => x.id === id);
+    if (!t) return null;
+    const d = this._mdDraft?.id === id ? this._mdDraft : (this._mdDraft = { id, photo: null });
+    const hist = (this._status?.dienste?.history || []).filter((h) => h.task === id && h.reading != null).slice(0, 4);
+    return { icon: t.icon || "mdi:check", c: "#22c55e", title: t.auto ? "Quittieren" : "Erledigt", sub: t.name, open: true,
+      body: `${t.unit ? `<label class="field narrow"><span>Messwert (${esc(t.unit)})</span><input type="number" step="any" id="md-reading" inputmode="decimal" placeholder="z. B. ${t.unit === "bar" ? "1,6" : "1234"}"></label>
+          ${hist.length ? `<small class="muted">Zuletzt: ${hist.map((h) => `${fmt(h.reading, h.reading % 1 ? 2 : 0)} ${esc(h.unit || "")} (${new Date(h.at).toLocaleDateString("de-DE", { day: "numeric", month: "short", year: "2-digit" })})`).join(" · ")}</small>` : ""}` : ""}
+        <label class="field narrow"><span>Kosten in € (optional)</span><input type="number" step="0.01" min="0" id="md-cost" inputmode="decimal" placeholder="0,00"></label>
+        <label class="field"><span>Notiz (optional)</span><input type="text" id="md-note" maxlength="200" placeholder="z. B. Filter Typ F7, Firma war da"></label>
+        <div class="lbl">Foto (optional)</div>
+        <div class="mphoto-row">${d.photo ? `<img class="mphoto-th" src="${d.photo}" alt=""><button class="link" data-action="md-photo-del"><ha-icon icon="mdi:close"></ha-icon>Entfernen</button>`
+          : `<label class="secondary btnlink"><ha-icon icon="mdi:camera-outline"></ha-icon>Foto aufnehmen oder wählen<input type="file" accept="image/*" capture="environment" id="md-photo" hidden></label>`}</div>`,
+      foot: `<span class="grow"></span><button class="secondary" data-action="pop-close">Abbrechen</button><button class="primary" data-action="md-save" data-id="${esc(id)}"><ha-icon icon="mdi:check"></ha-icon>${t.auto ? "Quittieren" : "Erledigt"}</button>` };
+  }
+
+  /** Foto verkleinern (längste Seite 1024 px, JPEG) – passt in die Verbindung zu Home Assistant. */
+  async _maintPhoto(file) {
+    const url = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const k = Math.min(1, 1024 / Math.max(img.width, img.height));
+    const cv = document.createElement("canvas");
+    cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+    cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+    let q = 0.75, out = cv.toDataURL("image/jpeg", q);
+    while (out.length > 550000 && q > 0.3) { q -= 0.15; out = cv.toDataURL("image/jpeg", q); }
+    return out;
+  }
+
+  _maintPhotoPop(pid) {
+    const cache = (this._mphoto ||= {});
+    if (!(pid in cache)) {
+      cache[pid] = null;
+      this._hass.callWS({ type: "hauswerk/dienste/photo", photo: pid }).then((r) => { cache[pid] = r.data || ""; this._renderPop(); }).catch(() => { cache[pid] = ""; this._renderPop(); });
+    }
+    const h = (this._status?.dienste?.history || []).find((x) => x.photo === pid);
+    return { icon: "mdi:image-outline", c: "#14b8a6", open: true, title: h?.name || "Foto", sub: h ? new Date(h.at).toLocaleString("de-DE", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "", wide: true,
+      body: cache[pid] ? `<img class="mphoto-big" src="${cache[pid]}" alt="">` : cache[pid] === "" ? `<p class="muted">Das Foto ist nicht mehr gespeichert (es bleiben die letzten 40).</p>` : `<div class="chart-empty"><div class="spinner"></div></div>`,
+      foot: `<span class="grow"></span><button class="secondary" data-action="pop-close">Schließen</button>` };
+  }
+
+  /** Fenster: Einstellungen der Wartung – Kalender für Termine, Hinweis auf Aufgabenliste und Kalender in Home Assistant. */
+  _maintSetPop() {
+    const p = this._data.settings;
+    const st = this._hass?.states || {};
+    const cals = Object.keys(st).filter((e) => e.startsWith("calendar.") && !e.includes("hauswerk_wartung") && (st[e].attributes.supported_features & 1)).sort();
+    return { icon: "mdi:cog-outline", c: "#14b8a6", title: "Wartung einstellen", sub: "Hauswerk · Wartung", foot: null,
+      body: `<label class="field"><span>Termine beim Fachbetrieb eintragen in</span><select data-set="hd_calendar"><option value="">– nicht eintragen –</option>${cals.map((e) => `<option value="${e}" ${p.hd_calendar === e ? "selected" : ""}>${esc(st[e].attributes.friendly_name || e)}</option>`).join("")}</select>
+          <small>Ein Termin, den du bei einer Aufgabe einträgst (z. B. Thermenwartung), landet einmal in diesem Kalender.</small></label>
+        <div class="lbl">In Home Assistant</div>
+        <div class="kv"><span><ha-icon icon="mdi:format-list-checks"></ha-icon> Aufgabenliste „Hauswerk Wartung“</span><b>${st["todo.hauswerk_wartung"] ? `${st["todo.hauswerk_wartung"].state} offen` : "–"}</b></div>
+        <small class="muted">Was in den nächsten 30 Tagen fällig ist. Abhaken = erledigt, neue Einträge werden einmalige Aufgaben. Mit Assist: „Was steht auf Hauswerk Wartung?“ oder „Füge Glühbirne tauschen zu Hauswerk Wartung hinzu“.</small>
+        <div class="kv"><span><ha-icon icon="mdi:calendar-wrench"></ha-icon> Kalender „Hauswerk Wartung“</span><b>${st["calendar.hauswerk_wartung"] ? "aktiv" : "–"}</b></div>
+        <small class="muted">Alle Fälligkeiten und Termine – im Kalender von Home Assistant und im Widget „Termine“.</small>
+        <div class="lbl">Benachrichtigung</div><button class="link" data-action="pop-open" data-pop="notify"><ha-icon icon="mdi:bell-outline"></ha-icon>Anlass „Wartung fällig“ einstellen</button>` };
+  }
+
+  /** Fenster: Aufgabe anlegen bzw. bearbeiten – Vorlage, Wann (Intervall, Saison, Nutzung), Raum, Person, Gerät, Fachbetrieb, Messwert. */
   _maintTaskPop(id) {
     const p = this._settings || this._data.settings;
     const isNew = id === "new";
-    const t = isNew ? (this._mtDraft || { name: "", icon: "mdi:wrench-outline", days: 90, last: new Date().toISOString().slice(0, 10) }) : (p.hd_tasks || []).find((x) => x.id === id);
+    const t = this._mtDraft?._id === id ? this._mtDraft : (isNew ? { name: "", icon: "mdi:wrench-outline", days: 90, last: new Date().toISOString().slice(0, 10) } : (p.hd_tasks || []).find((x) => x.id === id));
     if (!t) return null;
-    this._mtDraft = { ...t };
+    if (this._mtDraft?._id !== id) this._mtDraft = { ...JSON.parse(JSON.stringify(t)), _id: id };
+    const d = this._mtDraft;
+    const st = this._hass?.states || {};
+    const fn = (e) => st[e]?.attributes?.friendly_name || e;
     const own = new Set((p.hd_tasks || []).map((x) => x.name));
     const tpl = isNew ? (this._status?.dienste?.templates || []).filter((x) => !own.has(x.name)) : [];
     const rooms = [...new Set([...this._rooms().map((r) => r.name), ...Object.values(this._hass?.areas || {}).map((a) => a.name)])].sort((a, b) => a.localeCompare(b, "de"));
-    const iv = [[7, "1 Woche"], [14, "2 Wochen"], [30, "1 Monat"], [60, "2 Monate"], [90, "3 Monate"], [180, "6 Monate"], [365, "1 Jahr"], [730, "2 Jahre"]];
-    return { icon: t.icon || "mdi:wrench-outline", c: "#14b8a6", title: isNew ? "Aufgabe anlegen" : "Aufgabe bearbeiten", sub: "Hauswerk · Wartung",
+    const iv = [[0, "ohne festes Intervall"], [7, "1 Woche"], [14, "2 Wochen"], [30, "1 Monat"], [60, "2 Monate"], [90, "3 Monate"], [180, "6 Monate"], [365, "1 Jahr"], [730, "2 Jahre"], [1825, "5 Jahre"]];
+    const M = ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"];
+    const months = new Set(d.months || []);
+    const use = d.use || null;
+    const apps = this._data.settings.kw_appliances || [];
+    const srcOpts = !use ? "" : use.kind === "runs" ? apps.map((a) => [a.id, a.name])
+      : use.kind === "on" ? Object.keys(st).filter((e) => /^(fan|switch|climate|humidifier|water_heater|input_boolean|binary_sensor|vacuum|lawn_mower)\./.test(e) && (!e.startsWith("binary_sensor.") || ["running", "power", "plug"].includes(st[e].attributes.device_class))).map((e) => [e, fn(e)])
+      : Object.keys(st).filter((e) => e.startsWith("sensor.") && (["total", "total_increasing"].includes(st[e].attributes.state_class) || ["h", "min", "d"].includes(st[e].attributes.unit_of_measurement)) && !isNaN(parseFloat(st[e].state))).map((e) => [e, `${fn(e)} (${st[e].state} ${st[e].attributes.unit_of_measurement || ""})`]);
+    srcOpts && srcOpts.sort((a, b) => a[1].localeCompare(b[1], "de"));
+    const persons = Object.keys(st).filter((e) => e.startsWith("person.")).sort();
+    const sec = (title, icon, open, body) => `<details class="mt-sec" ${open ? "open" : ""}><summary><ha-icon icon="${icon}"></ha-icon><b>${title}</b><span class="grow"></span><ha-icon icon="mdi:chevron-down"></ha-icon></summary><div class="mt-body">${body}</div></details>`;
+    const inp = (k, label, type = "text", extra = "", cls = "narrow") => `<label class="field ${cls}"><span>${label}</span><input type="${type}" data-mt="${k}" value="${esc(d[k] ?? "")}" ${extra}></label>`;
+    return { icon: d.icon || "mdi:wrench-outline", c: "#14b8a6", title: isNew ? "Aufgabe anlegen" : "Aufgabe bearbeiten", sub: "Hauswerk · Wartung",
       body: `${tpl.length ? `<div class="lbl">Vorlagen</div><div class="rq-quick">${tpl.map((x, i) => `<button class="pill" data-action="mt-tpl" data-i="${i}"><ha-icon icon="${x.icon}"></ha-icon>${esc(x.name)}</button>`).join("")}</div>` : ""}
-        <label class="field"><span>Aufgabe</span><input type="text" id="mt-name" maxlength="80" value="${esc(t.name || "")}" placeholder="z. B. Pelletlager prüfen"></label>
-        <label class="field narrow"><span>Wie oft</span><select id="mt-days">${iv.map(([d, l]) => `<option value="${d}" ${Number(t.days) === d ? "selected" : ""}>${l}</option>`).join("")}${iv.some(([d]) => d === Number(t.days)) ? "" : `<option value="${t.days}" selected>${t.days} Tage</option>`}</select></label>
-        <label class="field narrow"><span>Raum (optional)</span><select id="mt-room"><option value="">–</option>${rooms.map((r) => `<option ${t.room === r ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></label>
-        <label class="field narrow"><span>Zuletzt erledigt</span><input type="date" id="mt-last" value="${esc(t.last || "")}"></label>
-        <label class="field"><span>Notiz (optional)</span><input type="text" id="mt-note" maxlength="200" value="${esc(t.note || "")}" placeholder="z. B. Filtertyp, Link zur Anleitung"></label>`,
+        ${inp("name", "Aufgabe", "text", `maxlength="80" placeholder="z. B. Pelletlager prüfen"`, "")}
+        ${sec("Wann", "mdi:calendar-clock", true, `
+          <label class="field narrow"><span>Wie oft</span><select data-mt="days">${iv.map(([v, l]) => `<option value="${v}" ${Number(d.days || 0) === v ? "selected" : ""}>${l}</option>`).join("")}${iv.some(([v]) => v === Number(d.days || 0)) ? "" : `<option value="${d.days}" selected>${d.days} Tage</option>`}</select></label>
+          ${inp("last", "Zuletzt erledigt", "date")}
+          <div class="lbl">Nur in diesen Monaten (Saison)</div>
+          <div class="mt-months">${M.map((m, i) => `<button class="pill ${months.has(i + 1) ? "on" : ""}" data-action="mt-month" data-m="${i + 1}">${m}</button>`).join("")}</div>
+          <small class="muted">Fällig zu Beginn der Saison, einmal je Saison. Mit Intervall: frühestens nach dem Intervall, aber nur in der Saison.</small>
+          <div class="lbl">Nach Nutzung</div>
+          <div class="rq-quick">${[["", "Aus"], ["runs", "Durchläufe"], ["on", "Betriebsstunden"], ["counter", "Zählerstand"]].map(([k, l]) => `<button class="pill ${(use?.kind || "") === k ? "on" : ""}" data-action="mt-use" data-k="${k}">${l}</button>`).join("")}</div>
+          ${use ? `<label class="field"><span>${use.kind === "runs" ? "Gerät (Kraftwerk › Geräte)" : use.kind === "on" ? "Gerät, das läuft (an = zählt)" : "Zähler (z. B. Betriebsstunden des Mähers)"}</span>
+              <select data-mtu="src"><option value="">– wählen –</option>${srcOpts.map(([v, l]) => `<option value="${esc(v)}" ${use.src === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
+            <label class="field narrow"><span>Fällig nach (${use.kind === "runs" ? "Durchläufen" : use.kind === "on" ? "Stunden" : "Einheiten des Zählers"})</span><input type="number" min="0.1" step="any" data-mtu="every" value="${esc(use.every ?? "")}"></label>
+            ${use.kind === "runs" && !apps.length ? `<small class="muted">Noch keine Geräte unter Kraftwerk › Geräte (Fertigerkennung).</small>` : ""}` : ""}`)}
+        ${sec("Wo und wer", "mdi:account-outline", !!(d.room || d.person), `
+          <label class="field narrow"><span>Raum</span><select data-mt="room"><option value="">–</option>${rooms.map((r) => `<option ${d.room === r ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></label>
+          <label class="field narrow"><span>Zuständig</span><select data-mt="person"><option value="">alle (wie unter Benachrichtigungen)</option>${persons.map((e) => `<option value="${e}" ${d.person === e ? "selected" : ""}>${esc(fn(e))}</option>`).join("")}</select></label>
+          <small class="muted">Die Erinnerung geht dann nur an das Handy dieser Person (Home-Assistant-App).</small>
+          ${inp("note", "Notiz", "text", `maxlength="200" placeholder="z. B. Filtertyp, wo das Werkzeug liegt"`, "")}`)}
+        ${sec("Gerät", "mdi:information-outline", !!(d.device || d.bought || d.warranty || d.manual || d.part), `
+          ${inp("device", "Gerät / Modell", "text", `maxlength="80" placeholder="z. B. Vaillant ecoTEC plus"`, "")}
+          ${inp("bought", "Gekauft am", "date")}${inp("warranty", "Garantie bis", "date")}
+          ${inp("part", "Ersatzteil / Nummer", "text", `maxlength="120" placeholder="z. B. Filter F7 · 0020214450"`, "")}
+          ${inp("manual", "Anleitung (Link)", "url", `maxlength="300" placeholder="https://…"`, "")}
+          ${d.manual ? `<a class="link" href="${esc(d.manual)}" target="_blank" rel="noopener"><ha-icon icon="mdi:open-in-new"></ha-icon>Anleitung öffnen</a>` : ""}
+          <small class="muted">30 Tage vor Ende der Garantie erscheint ein Hinweis.</small>`)}
+        ${sec("Fachbetrieb und Termin", "mdi:account-hard-hat-outline", !!d.pro, `
+          <label class="check"><span><b>Macht ein Fachbetrieb</b><small>Rechtzeitig vor der Fälligkeit „Termin vereinbaren“ – mit Telefonnummer zum Antippen.</small></span>
+            <input type="checkbox" data-mt="pro" ${d.pro ? "checked" : ""}></label>
+          ${d.pro ? `${inp("pro_name", "Firma", "text", `maxlength="80"`, "")}${inp("phone", "Telefon", "tel", `maxlength="40"`)}
+            <label class="field narrow"><span>Erinnern vorher</span><select data-mt="lead">${[[14, "2 Wochen"], [28, "4 Wochen"], [42, "6 Wochen"], [60, "2 Monate"], [90, "3 Monate"]].map(([v, l]) => `<option value="${v}" ${Number(d.lead || 42) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
+          ${inp("appt", "Termin", "datetime-local")}
+          <small class="muted">${p.hd_calendar ? `Wird in „${esc(fn(p.hd_calendar))}“ eingetragen.` : "Unter Wartung › Zahnrad lässt sich ein Kalender wählen, in den Termine eingetragen werden."} Am Tag des Termins kommt eine Erinnerung.</small>`)}
+        ${sec("Beim Erledigen", "mdi:clipboard-check-outline", !!d.unit, `
+          <label class="field narrow"><span>Messwert abfragen</span><select data-mt="unit"><option value="">nein</option>${["bar", "m³", "kWh", "l", "°C", "%", "km", "h"].map((u) => `<option ${d.unit === u ? "selected" : ""}>${u}</option>`).join("")}${d.unit && !["bar", "m³", "kWh", "l", "°C", "%", "km", "h"].includes(d.unit) ? `<option selected>${esc(d.unit)}</option>` : ""}</select></label>
+          <small class="muted">z. B. Anlagendruck der Heizung oder Zählerstand – steht im Verlauf. Kosten, Notiz und Foto lassen sich immer mitgeben.</small>`)}`,
       foot: `${isNew ? "" : `<button class="link danger" data-action="mt-del" data-id="${esc(id)}"><ha-icon icon="mdi:delete-outline"></ha-icon>Löschen</button>`}<span class="grow"></span>
         <button class="secondary" data-action="pop-close">Abbrechen</button><button class="primary" data-action="mt-save" data-id="${esc(id)}">Speichern</button>` };
+  }
+
+  /** Eingaben im Aufgaben-Fenster in den Entwurf übernehmen (vor dem Neuzeichnen und Speichern). */
+  _mtCollect() {
+    const d = this._mtDraft;
+    if (!d || !this.shadowRoot) return d;
+    for (const el of this.shadowRoot.querySelectorAll("#pop [data-mt]")) {
+      const k = el.dataset.mt;
+      d[k] = el.type === "checkbox" ? el.checked : el.value;
+    }
+    for (const el of this.shadowRoot.querySelectorAll("#pop [data-mtu]")) if (d.use) d.use[el.dataset.mtu] = el.value;
+    return d;
   }
 
   async _maintReload(status) {
@@ -6122,7 +6277,7 @@ class HauswerkPanel extends HTMLElement {
     const left = t.left;
     const c = left == null ? "#94a3b8" : left <= 0 ? C.alert : left <= 14 ? "#f59e0b" : C.ok;
     const when = left == null ? "" : left < 0 ? `${-left} Tage überfällig` : left === 0 ? "fällig" : `in ${left} Tagen`;
-    return `<div class="ev ${left != null && left <= 0 ? "live" : ""}"><ha-icon icon="${esc(t.icon || "mdi:wrench-outline")}" style="color:${c}"></ha-icon><span class="grow"><b>${esc(t.name)}</b><small>${t.auto ? "automatisch erkannt" : `alle ${t.days} Tage${t.last ? ` · zuletzt ${new Date(t.last).toLocaleDateString("de-DE")}` : ""}`}${when ? ` · ${when}` : ""}</small></span>
+    return `<div class="ev ${left != null && left <= 0 ? "live" : ""}"><ha-icon icon="${esc(t.icon || "mdi:wrench-outline")}" style="color:${c}"></ha-icon><span class="grow"><b>${esc(t.name)}</b><small>${t.auto ? "automatisch erkannt" : `${this._maintEvery(t) || "ohne Intervall"}${t.last ? ` · zuletzt ${new Date(t.last).toLocaleDateString("de-DE")}` : ""}`}${when ? ` · ${when}` : ""}</small></span>
       ${!t.auto && done ? `<button class="sbtn" data-action="task-done" data-id="${esc(t.id)}" title="Erledigt"><ha-icon icon="mdi:check"></ha-icon></button>${this._admin ? `<button class="sbtn" data-action="task-del" data-id="${esc(t.id)}" title="Löschen"><ha-icon icon="mdi:delete-outline"></ha-icon></button>` : ""}` : ""}</div>`;
   }
 
@@ -10612,6 +10767,8 @@ class HauswerkPanel extends HTMLElement {
 
   _closePop() {
     const was = this._pop?.id;
+    this._mtDraft = null;
+    this._mdDraft = null;
     this.removeAttribute("setdock");
     this._pop = null;
     this._settings = null;
@@ -10795,6 +10952,9 @@ class HauswerkPanel extends HTMLElement {
     if (id.startsWith("kwday:")) return this._kwDayPop(id.slice(6));
     if (id === "lwhouse") return this._lwHousePop();
     if (id === "bnmore") return this._bnMorePop();
+    if (id.startsWith("mdone:")) return this._maintDonePop(id.slice(6)) || { title: "Aufgabe nicht gefunden", body: "", foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
+    if (id.startsWith("mphoto:")) return this._maintPhotoPop(id.slice(7));
+    if (id === "mset") return this._maintSetPop();
     if (id.startsWith("mtask:")) return this._maintTaskPop(id.slice(6)) || { title: "Aufgabe nicht gefunden", body: "", foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
     if (id === "presq") return { icon: "mdi:home-account", c: "#34d399", title: "Anwesenheit", sub: "Hauswerk",
       gear: this._admin ? `data-action="settings-go" data-sub="presence"` : null, body: `<div class="presq">${this._presenceCompact("m")}</div>`, foot: `<button class="secondary" data-action="pop-close">Schließen</button>` };
@@ -12569,6 +12729,16 @@ class HauswerkPanel extends HTMLElement {
   // ------------------------------------------------------------ Ereignisse
   _onInput(e, isChange = false) {
     const t = e.target;
+    if (t.id === "md-photo" && isChange) {
+      const file = t.files?.[0];
+      if (file && this._mdDraft) this._maintPhoto(file).then((url) => { if (this._mdDraft) { this._mdDraft.photo = url; this._renderPop(); } }).catch(() => this._toast("Foto ließ sich nicht lesen"));
+      return;
+    }
+    if (t.dataset.mt !== undefined && t.type === "checkbox" && isChange && this._mtDraft) {
+      this._mtCollect();
+      this._renderPop();
+      return;
+    }
     if (t.dataset.nkHours !== undefined && this._settings) {
       const h = { ...(this._settings.notify_hours || {}) };
       const cur = [...(h[t.dataset.nkHours] || ["08:00", "21:00"])];
@@ -14136,24 +14306,81 @@ class HauswerkPanel extends HTMLElement {
         const p = this._data.settings;
         const own = new Set((p.hd_tasks || []).map((x) => x.name));
         const x = (this._status?.dienste?.templates || []).filter((y) => !own.has(y.name))[Number(el.dataset.i)];
-        if (x) { this._mtDraft = { ...this._mtDraft, name: x.name, icon: x.icon, days: x.days }; this._renderPop(); }
+        if (x) {
+          const d = this._mtCollect();
+          Object.assign(d, { name: x.name, icon: x.icon, days: x.days ?? 0, months: x.months || null, unit: x.unit || null, pro: !!x.pro });
+          if (x.months && !x.days) d.last = ""; // Saison: noch nicht erledigt
+          if (x.use) {
+            const kind = x.use.kind;
+            const words = /wasch/i.test(x.name) ? ["waschmaschine"] : /geschirr/i.test(x.name) ? ["geschirrspueler"] : /trockner/i.test(x.name) ? ["trockner"] : [];
+            const app = kind === "runs" ? (p.kw_appliances || []).find((a) => words.includes(a.type)) : null;
+            const st = this._hass?.states || {};
+            const src = app?.id || (kind === "counter" ? Object.keys(st).find((e) => e.startsWith("sensor.") && /m(ä|ae)her|mower|robonect/i.test(e + (st[e].attributes.friendly_name || "")) && /stunden|hours|betrieb/i.test(e + (st[e].attributes.friendly_name || ""))) : null) || "";
+            d.use = { kind, every: x.use.every, src };
+          } else d.use = null;
+          this._renderPop();
+        }
+        break;
+      }
+      case "mt-month": {
+        const d = this._mtCollect();
+        const m = Number(el.dataset.m);
+        const set = new Set(d.months || []);
+        set.has(m) ? set.delete(m) : set.add(m);
+        d.months = set.size ? [...set].sort((a, b) => a - b) : null;
+        this._renderPop();
+        break;
+      }
+      case "mt-use": {
+        const d = this._mtCollect();
+        d.use = el.dataset.k ? { kind: el.dataset.k, src: d.use?.kind === el.dataset.k ? d.use.src : "", every: d.use?.every || (el.dataset.k === "runs" ? 30 : el.dataset.k === "on" ? 1000 : 100) } : null;
+        this._renderPop();
         break;
       }
       case "mt-save": {
-        const g = (k) => this.shadowRoot.getElementById(k)?.value;
-        const name = (g("mt-name") || "").trim();
+        const d = { ...this._mtCollect() };
+        const name = (d.name || "").trim();
         if (!name) return this._toast("Bitte einen Namen eingeben");
         const id = el.dataset.id;
+        const str = (v, n) => (v == null ? "" : String(v)).trim().slice(0, n) || null;
+        const rec = { name, icon: d.icon || "mdi:wrench-outline", days: Number(d.days) || 0, last: str(d.last, 10), room: str(d.room, 60), note: str(d.note, 200),
+          months: d.months?.length ? d.months : null, person: str(d.person, 80), device: str(d.device, 80), bought: str(d.bought, 10), warranty: str(d.warranty, 10),
+          part: str(d.part, 120), manual: /^(https?:\/\/|\/)/.test(d.manual || "") ? str(d.manual, 300) : null, unit: str(d.unit, 12), pro: !!d.pro,
+          pro_name: d.pro ? str(d.pro_name, 80) : null, phone: d.pro ? str(d.phone, 40) : null, lead: d.pro ? Number(d.lead) || 42 : null,
+          appt: str(d.appt, 16), once: d.once || undefined, due_on: d.due_on || undefined,
+          use: d.use?.kind ? { kind: d.use.kind, src: str(d.use.src, 120), every: Math.max(0.1, Number(String(d.use.every).replace(",", ".")) || 1) } : null };
+        if (!rec.days && !rec.months && !rec.use && !rec.once) return this._toast("Bitte ein Intervall, eine Saison oder eine Nutzung wählen");
+        for (const k of Object.keys(rec)) if (rec[k] === undefined) delete rec[k];
         const list = JSON.parse(JSON.stringify(this._data.settings.hd_tasks || []));
-        const rec = { ...(this._mtDraft || {}), name, days: Number(g("mt-days")) || 90, room: g("mt-room") || null, note: (g("mt-note") || "").trim() || null, last: g("mt-last") || null };
         if (id === "new") list.push(rec);
-        else { const i = list.findIndex((x) => x.id === id); if (i >= 0) list[i] = { ...list[i], ...rec, id }; }
-        for (const x of list) for (const k of Object.keys(x)) if (!["id", "name", "icon", "days", "last", "room", "note"].includes(k)) delete x[k];
+        else { const i = list.findIndex((x) => x.id === id); if (i >= 0) list[i] = { ...rec, id }; }
         this._data.settings = await this._ws({ type: "hauswerk/heizen/settings/save", settings: { hd_tasks: list } });
         this._mtDraft = null;
         this._closePop();
         this._toast("Gespeichert");
         await this._maintReload();
+        break;
+      }
+      case "md-photo-del":
+        if (this._mdDraft) this._mdDraft.photo = null;
+        this._renderPop();
+        break;
+      case "md-save": {
+        const g = (k) => this.shadowRoot.getElementById(k)?.value;
+        const num = (v) => (v == null || String(v).trim() === "" ? undefined : Number(String(v).replace(",", ".")));
+        const msg = { type: "hauswerk/dienste/task_done", task: el.dataset.id };
+        const note = (g("md-note") || "").trim();
+        if (note) msg.note = note;
+        const cost = num(g("md-cost"));
+        if (cost != null && !isNaN(cost)) msg.cost = cost;
+        const reading = num(g("md-reading"));
+        if (reading != null && !isNaN(reading)) msg.reading = reading;
+        if (this._mdDraft?.id === el.dataset.id && this._mdDraft.photo) msg.photo = this._mdDraft.photo;
+        const res = await this._ws(msg);
+        this._mdDraft = null;
+        this._closePop();
+        this._toast(el.dataset.id.startsWith("auto:") ? "Quittiert" : "Erledigt");
+        await this._maintReload(res.status);
         break;
       }
       case "mt-del": {
@@ -16718,6 +16945,23 @@ pre.code { margin:6px 0 10px; padding:10px 14px; border-radius:10px; background:
 .mrow button.sm { min-height:34px; padding:0 12px; font-size:13px; white-space:nowrap; }
 .mrow-act { display:flex; align-items:center; gap:6px; flex:none; } .mrow-act:empty { display:none; }
 @media (max-width:600px) { .msec .mrow { flex-wrap:wrap; } .msec .mrow-act { width:100%; padding-left:46px; } }
+.mtags { display:flex; flex-wrap:wrap; gap:4px 6px; margin-top:5px; }
+.mtag { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:99px; font-size:12px; background:var(--card2); color:var(--muted); --mdc-icon-size:14px; white-space:nowrap; }
+.mtag.warn { background:color-mix(in srgb, #f59e0b 16%, transparent); color:#d97706; } .mtag.ok { background:color-mix(in srgb, #22c55e 15%, transparent); color:#16a34a; }
+.btnlink { display:inline-flex; align-items:center; justify-content:center; gap:6px; text-decoration:none; cursor:pointer; }
+a.secondary.sm.btnlink { min-height:34px; padding:0 10px; border-radius:10px; border:1px solid var(--line); color:var(--text); }
+.mt-sec { border:1px solid var(--line); border-radius:14px; margin:10px 0; }
+.mt-sec > summary { display:flex; align-items:center; gap:8px; padding:11px 14px; cursor:pointer; list-style:none; --mdc-icon-size:20px; }
+.mt-sec > summary::-webkit-details-marker { display:none; } .mt-sec > summary > ha-icon:first-child { color:#14b8a6; }
+.mt-sec[open] > summary > ha-icon:last-child { transform:rotate(180deg); }
+.mt-body { padding:0 14px 12px; display:flex; flex-wrap:wrap; gap:0 12px; } .mt-body > * { flex:1 1 100%; } .mt-body > .field.narrow { flex:1 1 180px; }
+.mt-months { display:flex; flex-wrap:wrap; gap:6px; } .mt-months .pill { min-width:46px; justify-content:center; }
+.pill.on { background:color-mix(in srgb, #14b8a6 20%, var(--card)); border-color:#14b8a6; color:var(--text); font-weight:600; }
+.mphoto-row { display:flex; align-items:center; gap:12px; margin:6px 0; } .mphoto-row label.secondary { padding:10px 14px; border:1px solid var(--line); border-radius:12px; }
+.mphoto-th { width:84px; height:84px; object-fit:cover; border-radius:12px; } .mphoto-big { display:block; max-width:100%; max-height:70vh; margin:0 auto; border-radius:12px; }
+.mcost { padding:4px 16px 10px; } .mcost-y { display:grid; grid-template-columns:44px 1fr auto; align-items:center; gap:10px; padding:4px 0; }
+.mcost-y > i { display:block; height:8px; border-radius:99px; background:var(--card2); } .mcost-y > i > i { display:block; height:100%; border-radius:99px; background:#14b8a6; }
+.msec .lbl, .msec > details > .kv { margin-left:16px; margin-right:16px; }
 /* Kraftwerk: Wand, Auffälliges, Abschlag */
 .kwwall { display:grid; grid-template-columns:1.25fr 1fr; gap:14px; align-items:start; }
 .kwwall-l .kw-flow { min-height:100%; } .kwwall-l .kw-flow svg { width:100%; height:auto; max-height:520px; }

@@ -761,6 +761,31 @@ class Haus:
             b["timer"] = async_call_later(self.hass, max(1, 300 - (now - b["last"])), flush)
         return True
 
+    def person_channels(self, person: str) -> list[str]:
+        """Handys (Home-Assistant-App) einer Person: über ihre Geräte-Tracker und die mobile_app-Einrichtung."""
+        out: list[str] = []
+        try:
+            from homeassistant.helpers import device_registry as dr, entity_registry as er  # noqa: PLC0415
+            try:
+                from homeassistant.util import slugify  # noqa: PLC0415
+            except ImportError:
+                import re  # noqa: PLC0415
+                slugify = lambda t: re.sub(r"[^a-z0-9]+", "_", t.lower()).strip("_")  # noqa: E731
+            st = self.hass.states.get(person)
+            ents, devs = er.async_get(self.hass), dr.async_get(self.hass)
+            for tr in (st.attributes.get("device_trackers") or []) if st is not None else []:
+                e = ents.async_get(tr)
+                d = devs.async_get(e.device_id) if e is not None and getattr(e, "device_id", None) else None
+                for entry_id in getattr(d, "config_entries", None) or []:
+                    entry = self.hass.config_entries.async_get_entry(entry_id)
+                    if entry is not None and entry.domain == "mobile_app":
+                        svc = f"mobile_app_{slugify(entry.data.get('device_name') or '')}"
+                        if self.hass.services.has_service("notify", svc) and f"svc:{svc}" not in out:
+                            out.append(f"svc:{svc}")
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("Kanäle für %s nicht ermittelbar", person, exc_info=True)
+        return out
+
     def _app_os(self, service: str) -> str | None:
         """Betriebssystem eines Handys der Home-Assistant-App („ios“/„android“) aus der mobile_app-Einrichtung."""
         try:
@@ -850,7 +875,7 @@ class Haus:
     @callback
     def notify(self, key: str, kind: str, title: str, message: str,
                room: str | None = None, room_name: str | None = None, quiet_why: str | None = None,
-               image: str | None = None, actions: list[dict] | None = None) -> None:
+               image: str | None = None, actions: list[dict] | None = None, channels: list[str] | None = None) -> None:
         """Nachricht je nach Art: aufs Handy (normal oder wichtig), nur ins Protokoll oder gar nicht.
 
         Dieselbe Nachricht (key) kommt erst wieder, wenn sie mit clear() erledigt ist oder
@@ -870,7 +895,7 @@ class Haus:
             return
         self._sent[key] = now
         important = mode == "important"
-        chosen = self.channels_for(kind)
+        chosen = list(channels) if channels else self.channels_for(kind)  # z. B. nur an die zuständige Person
         targets = [c for c in chosen if c not in set(self.settings.get("notify_off") or [])]
         if quiet_why:
             how = f"nur Glocke – {quiet_why}"
@@ -881,7 +906,7 @@ class Haus:
         elif not targets:
             how = "nur hier – kein Kanal unter Benachrichtigungen gewählt"
         elif self._quiet() and not important:
-            self._queued[key] = (title, message, room, room_name, kind, actions)
+            self._queued[key] = (title, message, room, room_name, kind, actions, channels)
             how = f"Ruhezeit – wird um {self.settings.get('notify_quiet_to')} gesendet, falls noch aktuell"
         else:
             sent = self.send(targets, title, message, important, key, image=image, kind=kind, actions=self._tokens(key, actions))
@@ -928,7 +953,8 @@ class Haus:
             if key in self._active:
                 kind = rest[0] if rest else None
                 acts = rest[1] if len(rest) > 1 else None
-                sent = self.send(self.channels_for(kind), title, message, False, key, kind=kind, actions=self._tokens(key, acts))
+                chans = rest[2] if len(rest) > 2 and rest[2] else self.channels_for(kind)
+                sent = self.send(chans, title, message, False, key, kind=kind, actions=self._tokens(key, acts))
                 self._hist(title, message, kind, "sent", "nach der Ruhezeit gesendet")
                 self.log.add("notify", title, f"{message} · nach der Ruhezeit gesendet an {', '.join(self.channel_name(c) for c in sent)}", room, room_name)
 

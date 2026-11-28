@@ -182,8 +182,17 @@ const status = {
     last_mode: null, ai_entity: "ai_task.openai_ai_task",
     tasks: [{ id: "t1", name: "Rauchmelder testen", icon: "mdi:smoke-detector-variant", days: 365, last: "2025-11-01", auto: false, left: -21 },
       { id: "auto:x", name: "Batterie wechseln: Fenster Bad", icon: "mdi:battery-alert-variant-outline", auto: true, left: 0 },
-      { id: "t2", name: "Filter Dunstabzug reinigen", icon: "mdi:stove", days: 90, last: "2026-10-01", auto: false, left: 59 }],
-    templates: [{ name: "Heizkörper entlüften", icon: "mdi:radiator", days: 365 }, { name: "Wasserfilter wechseln", icon: "mdi:water-check-outline", days: 180 }] },
+      { id: "t2", name: "Filter Dunstabzug reinigen", icon: "mdi:stove", days: 90, last: "2026-10-01", auto: false, left: 59 },
+      { id: "t3", name: "Waschmaschine reinigen", icon: "mdi:washing-machine", days: 90, use: { kind: "runs", src: "wm", every: 30 }, usage: { used: 24, every: 30, unit: "Durchläufe", rate: 0.8 }, auto: false, left: 8, due: "2026-12-06", room: "HWR", person: "person.jens", person_name: "Jens" },
+      { id: "t4", name: "Heizungswartung (Therme)", icon: "mdi:water-boiler", days: 365, last: "2025-12-20", pro: true, pro_name: "Heizung Müller", phone: "0341 1234", unit: "bar", auto: false, left: 22, due: "2026-12-20", book: true },
+      { id: "auto:bleed:r1", name: "Heizkörper entlüften: Bad", icon: "mdi:radiator", auto: true, left: 0, room: "Bad", derived: true, note: "Heizkörper blieb trotz offenem Ventil kalt" },
+      { id: "t5", name: "Gartenwasser und Bewässerung in Betrieb nehmen", icon: "mdi:sprinkler-variant", days: 0, months: [4], auto: false, left: 124, due: "2027-04-01", season: ["2027-04-01", "2027-04-30"] }],
+    history: [{ name: "Wasserfilter wechseln", icon: "mdi:water-check-outline", at: "2026-11-02T10:00:00Z", by: "Jens", what: "erledigt – 24,90 €", cost: 24.9, task: "t9" },
+      { name: "Anlagendruck Heizung prüfen", icon: "mdi:gauge", at: "2026-10-12T10:00:00Z", by: "Jens", what: "erledigt – 1,6 bar", reading: 1.6, unit: "bar", task: "t8", photo: "p1" }],
+    costs: { years: { "2026": 213.9, "2025": 340 }, tasks: { "Heizungswartung (Therme)": 189, "Wasserfilter wechseln": 24.9 } },
+    templates: [{ name: "Heizkörper entlüften", icon: "mdi:radiator", days: 365, months: [9, 10] }, { name: "Wasserfilter wechseln", icon: "mdi:water-check-outline", days: 180 },
+      { name: "Waschmaschine reinigen (Kochwäsche, Flusensieb)", icon: "mdi:washing-machine", days: 90, use: { kind: "runs", every: 30 } },
+      { name: "Heizungswartung (Therme)", icon: "mdi:water-boiler", days: 365, pro: true, unit: "bar" }] },
   boiler: { found: true, entities: { climate: "climate.gauch_zone_zone_1_circuit_0_climate", flow_set: "sensor.gauch_circuit_0_flow_temperature_setpoint", curve: "number.gauch_circuit_0_heating_curve",
     min_flow: "number.gauch_circuit_0_min_flow_temperature_setpoint", limit_out: "number.gauch_circuit_0_heat_demand_limited_by_outside_temperature", outside: "sensor.gauch_outdoor_temperature",
     pressure: "sensor.gauch_system_water_pressure", state: "sensor.gauch_circuit_0_state", burner: "sensor.gauch_energy_manager_state", room_set: "sensor.gauch_zone_zone_1_circuit_0_desired_heating_temperature",
@@ -302,6 +311,7 @@ const hass = {
     }
     if (msg.type === "hauswerk/haus/mode") { status.dienste.last_mode = { mode: msg.mode, at: new Date().toISOString() }; return { mode: msg.mode, name: status.dienste.modes[msg.mode].name, done: ["3 Lichter aus", "Rollläden zu"], open: status.wachwerk.leave }; }
     if (msg.type === "hauswerk/dienste/get") return status.dienste;
+    if (msg.type === "hauswerk/dienste/photo") return { data: "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="#14b8a6"/><text x="200" y="160" font-size="40" text-anchor="middle" fill="#fff">1,6 bar</text></svg>') };
     if (msg.type === "hauswerk/dienste/task_done") { const t = status.dienste.tasks.find((x) => x.id === msg.task); if (t) t.left = t.days; return { status: status.dienste }; }
     if (msg.type === "hauswerk/dienste/weekly") return { title: "Wochenbericht", text: "", lines: ["🔥 Heizwerk: 84 Std. geheizt, Ø 20.6 °C, 23× Fenster geöffnet", "⚡ Kraftwerk: 41 kWh Solar, 96 kWh Netzbezug", "💡 Lichtwerk: 46 Std. Licht", "🛡️ Wachwerk: 4× geklingelt", "🔧 Wartung: Rauchmelder testen"],
       ...(msg.ai ? { ai_text: "Das Kinderzimmer war diese Woche 23× offen und hat dadurch gut 20 % mehr geheizt als in der Vorwoche 🪟. Sonst lief alles ruhig – 4× hat es geklingelt. Tipp: Im Kinderzimmer lieber 5 Min. stoßlüften statt kippen." } : {}) };
